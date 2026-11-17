@@ -1,5 +1,5 @@
 """The store index's native twins beyond the interface suite: the part of
-sprint 1a's harness (tools/moy_index_spike.py) CI runs.
+native checks (tools/native_check.py) CI runs.
 
   * tests/test_moy_index.py itself, run on the boards' VM -- the desktop
     MicroPython, both object models -- over the native module, under a
@@ -18,13 +18,14 @@ import random
 import pytest
 
 from runtime import moy_index
-from tools import moy_index_spike
+from runtime import native_parts
+from tools import native_check
 import vm_suite
 from unix_mp import find_unix_mp, require_unix_mp
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-NATIVE = moy_index_spike.host_bindings()
+NATIVE = native_parts.host_bindings()
 
 
 def _vm_suite(exe, tmp_path, native):
@@ -100,7 +101,7 @@ def test_a_random_walk_agrees_with_the_python_twin(name):
 def test_the_api_fuzz_runs_clean_under_the_sanitizers(impl):
     """fuzz_index's seeded programs over each native twin, built with ASan and
     UBSan: every answer checked against its model, every byte returned."""
-    got = moy_index_spike.fuzz_seeded(impl, seed=1, runs=300)
+    got = native_check.fuzz_seeded(impl, seed=1, runs=300)
     if got is None:
         if os.environ.get("CI"):
             pytest.fail("no C compiler with AddressSanitizer here")

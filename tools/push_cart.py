@@ -186,7 +186,7 @@ def serial_cfg(board):
 
 # The only device-side helpers left: the already-current check, the mkdir, the
 # store's room and the rename -- each one round trip, and each inside the
-# console's storage gate (`ws._with_sd`), because on the T-Deck the card shares
+# console's storage gate (`ws.with_sd`), because on the T-Deck the card shares
 # the panel's SPI host and a store op that overlaps a panel transfer hangs the
 # board. `_sha` reads the file back rather than trusting what was written,
 # which is what the board does at the end of a `recv` too -- item 2 above --
@@ -199,7 +199,7 @@ def serial_cfg(board):
 HELPERS = """
 import hashlib, os
 def _gated(fn):
-    g = getattr(ws, '_with_sd', None)
+    g = getattr(ws, 'with_sd', None)
     return fn() if g is None else g(fn)
 def _size(p):
     try: return os.stat(p)[6]
@@ -257,11 +257,13 @@ def _drop(p):
 """
 
 # A pushed folder taken back off the store, the way the console removes a
-# cart: `pkg.removed` (runtime/carts/pkg.py) over the install role, the steps
+# cart: `pkg.removed` (runtime/shell/pkg.py) over the install role, the steps
 # Get Carts' Remove and `pkg remove` take -- the shelf record's entry, the
 # folder, the files the cart wrote (`apps/<id>`), its consent and its keys,
 # then the shelf re-read there. A folder that is no cart (the modules a suite
-# loads by path) goes the same way. `_folders(mark)` is the carts folder's
+# loads by path) goes the same way, and a built-in's removal record is not
+# left behind: a tool's cleanup is no kid's removal, so the seed brings the
+# cart back at the next boot. `_folders(mark)` is the carts folder's
 # names, each with whether it holds the file `mark`; `_mark(p)` writes one.
 STORE = """
 def _folders(mark=None):
@@ -278,13 +280,18 @@ def _mark(p):
     return _gated(go)
 def _remove(folders):
     try:
-        import pkg, shell_servers
+        import pkg, shell_servers, moy_carts
     except ImportError:
-        from runtime import pkg, shell_servers
+        from runtime import pkg, shell_servers, moy_carts
     inst = shell_servers.ShellInstall(ws)
+    r = str(ws.carts_root).rstrip('/')
+    rec = getattr(moy_carts, 'load_removed', None)
+    had = _gated(lambda: rec(r)) if rec else []
     for f in folders:
         for _ in pkg.through(pkg.removed(inst, f)):
             pass
+    if rec:
+        _gated(lambda: moy_carts.unremove(r, [f for f in folders if f not in had]))
     return 1
 """
 
@@ -919,7 +926,7 @@ def _push(a, cart, names, local, work):
         # new cart is not on the shelf -- and `run <title>` does not find it --
         # until the store is scanned again.
         if not a.no_rescan:
-            n = b.pyval("len(ws.rescan_carts() or ())", timeout=60)
+            n = b.pyval("len(ws.carts.synced() or ())", timeout=60)
             print("store rescanned" if n is not None else
                   "the rescan did not answer -- reset the board to rescan")
         # A cart that arrived as files is asked on its first run, and the

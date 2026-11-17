@@ -19,12 +19,8 @@ the verbs take the taps. A tag is typed in a popover, whose keys are its own
 while it is open. Every change is the core's (`SceneEditor`), synced to the
 running game as the tab's taps are."""
 
-try:
-    import ui
-    from editor_map import checker
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui
-    from runtime.editor_map import checker
+import ui
+from editor_map import checker
 
 ACTOR_VERBS = ("Tag", "Flip", "Front", "Back", "Remove")
 ACTOR_ICONS = ("notes", "flip", "arrow_up", "arrow_down", "del")
@@ -229,10 +225,10 @@ class ScenePage:
 
     def open_tag(self, which, text):
         """Type the picked actor's tag (`which` "tag") or the stamp's
-        ("stamp") in a popover, the keyboard in text mode while it is."""
+        ("stamp") in a popover, the keyboard in text mode while its field has
+        focus."""
         self.pop = which
         self.text = str(text)
-        self.su.ws._set_text_mode(True)
         self.host.focus("Tag text")
 
     def commit(self):
@@ -249,7 +245,6 @@ class ScenePage:
 
     def close(self):
         self.pop = None
-        self.su.ws._set_text_mode(False)
 
     # -- input ------------------------------------------------------------------------
 

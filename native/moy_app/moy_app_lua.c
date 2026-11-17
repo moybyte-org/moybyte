@@ -9,6 +9,8 @@
 
 #if MOY_APP_LUA
 
+#include "moy_kmem.h"
+
 #include <errno.h>
 #include <math.h>
 #include <stdio.h>
@@ -113,18 +115,6 @@ static void buf_field(buf_t *b, const void *d, size_t n) {
     buf_put(b, d, n);
 }
 
-static void field_arg(lua_State *L, buf_t *b, int i) {
-    size_t n;
-    const char *s = luaL_checklstring(L, i, &n);
-    buf_field(b, s, n);
-}
-
-static void field_opt(lua_State *L, buf_t *b, int i) {
-    size_t n = 0;
-    const char *s = lua_isnoneornil(L, i) ? "" : luaL_checklstring(L, i, &n);
-    buf_field(b, s, n);
-}
-
 static void field_kind(lua_State *L, buf_t *b) {
     lrun_t *u = lrun(L);
     const char *k = u != NULL ? u->kind : "";
@@ -151,7 +141,8 @@ typedef struct {
 
 // The VM's queue (native/moy_kernel/moy_vmq.h): weak, for an image whose
 // Lua runs on the VM's task alone.
-bool moy_vmq_defer(void) __attribute__((weak));
+#include "moy_vmq.h"
+#pragma weak moy_vmq_defer
 
 // On the VM's task: the row called through the ROLE door, its errno kept. A
 // row the door serves, hopped while no VM runs, waits for the VM.
@@ -169,18 +160,6 @@ static void role_run(void *p) {
     c->why = moy_app_why(c->run->a);
 }
 
-// Whether row `k` runs where it is called (moy_app_lua_rows.h's HERE).
-static int row_here(int k) {
-    switch (k) {
-#define HERE(row) case row:
-        MOY_APP_LUA_HERE(HERE)
-#undef HERE
-        return 1;
-        default:
-            return 0;
-    }
-}
-
 // A row that runs where it is called, on the state's own task: its answer,
 // or NEEDS_VM where only the VM's task can serve it.
 static void role_here(void *arg) {
@@ -195,9 +174,9 @@ static void role_here(void *arg) {
 }
 
 // Row `k` into an answer of `cap` bytes, grown eightfold while it answers FULL
-// where `grow`.
-static int32_t row_call_cap(lua_State *L, int k, const buf_t *b, size_t cap, int grow,
-                            const uint8_t **ans) {
+// where `grow`; run where it is called first where `here` (how "here").
+static int32_t row_call_cap(lua_State *L, int k, int here, const buf_t *b, size_t cap,
+                            int grow, const uint8_t **ans) {
     lrun_t *u = lrun(L);
     int row = k;
     if (u == NULL || row < 0) {
@@ -209,7 +188,7 @@ static int32_t row_call_cap(lua_State *L, int k, const buf_t *b, size_t cap, int
         uint8_t *p = lua_newuserdatauv(L, cap, 0);
         role_t c = { &u->run, (uint32_t)row, b != NULL ? b->p : NULL, b != NULL ? b->n : 0u,
                      p, cap, -MOY_APP_NEEDS_VM, EIO };
-        if (u->hop != NULL && row_here(row)) {
+        if (u->hop != NULL && here) {
             u->hop(L, role_here, &c, 1);
         }
         if (c.r == -MOY_APP_NEEDS_VM) {
@@ -225,153 +204,37 @@ static int32_t row_call_cap(lua_State *L, int k, const buf_t *b, size_t cap, int
     }
 }
 
+
+// A files row (how "here") into an answer of 1024 bytes and up: io's and os's.
 static int32_t row_call(lua_State *L, int k, const buf_t *b, const uint8_t **ans) {
-    return row_call_cap(L, k, b, 1024u, 1, ans);
+    return row_call_cap(L, k, 1, b, 1024u, 1, ans);
 }
 
 // A grant problem is an error, as the Python face raises it.
 static int raise_rc(lua_State *L, int rc) {
     switch (rc) {
-        case MOY_APP_STALE:
-            return luaL_error(L, "a grant that ended");
-        case MOY_APP_DENIED:
-            return luaL_error(L, "a role the grant does not hold");
-        case MOY_APP_NOMEM:
-            return luaL_error(L, "not enough memory");
-        case MOY_APP_FULL:
-            return luaL_error(L, "the answer is too long");
-        case MOY_APP_NEEDS_VM:
-            return luaL_error(L, "no console to serve it");
+#define X(code, exc, eno, msg, lua) case MOY_APP_##code: return luaL_error(L, "%s", lua);
+        MOY_APP_ERRORS(X)
+#undef X
         default:
-            return luaL_error(L, "an argument the role refuses");
+            return raise_rc(L, MOY_APP_FALLBACK);
     }
 }
 
 // The `err` of a storage row's code, as the Python face's: the text pushed.
 static void push_err(lua_State *L, int rc) {
+    if (rc == MOY_APP_IO) {
+        int e = run_why(L);
+        lua_pushfstring(L, MOY_APP_ERR_IO, e, strerror(e));
+        return;
+    }
     switch (rc) {
-        case MOY_APP_NOSTORE:
-            lua_pushliteral(L, "NO STORAGE");
-            return;
-        case MOY_APP_IO: {
-            int e = run_why(L);
-            lua_pushfstring(L, "[Errno %d] %s", e, strerror(e));
-            return;
-        }
-        case MOY_APP_BAD:
-            lua_pushliteral(L, "a refused argument");
-            return;
-        case MOY_APP_NOMEM:
-            lua_pushliteral(L, "memory allocation failed");
-            return;
+#define X(code) case MOY_APP_##code: lua_pushliteral(L, MOY_APP_ERR_##code); return;
+        MOY_APP_ERR_TEXTS(X)
+#undef X
         default:
             raise_rc(L, rc);
     }
-}
-
-// -- files ------------------------------------------------------------------------------
-
-// (value, err): a name or a blob answered, nil and the err, or nil, nil where
-// the row found nothing (`absent_nil`).
-static int ret_text(lua_State *L, int32_t r, const uint8_t *ans, int absent_nil) {
-    if (r >= 0) {
-        lua_pushlstring(L, (const char *)ans, (size_t)r);
-        lua_pushnil(L);
-        return 2;
-    }
-    lua_pushnil(L);
-    if (absent_nil && -r == MOY_APP_ABSENT) {
-        lua_pushnil(L);
-    } else {
-        push_err(L, -r);
-    }
-    return 2;
-}
-
-static int l_files_ready(lua_State *L) {
-    const uint8_t *ans;
-    int32_t r = row_call(L, MOY_T_FILES_READY, NULL, &ans);
-    if (r < 0) {
-        return raise_rc(L, -r);
-    }
-    lua_pushboolean(L, r != 0);
-    return 1;
-}
-
-static int l_files_list(lua_State *L) {
-    buf_t b;
-    buf_init(L, &b, 64u);
-    field_kind(L, &b);
-    const uint8_t *ans;
-    int32_t r = row_call(L, MOY_T_FILES_LIST, &b, &ans);
-    if (r < 0) {
-        return ret_text(L, r, ans, 0);
-    }
-    lua_newtable(L);
-    lua_Integer i = 0;
-    for (int32_t at = 0; at < r;) {
-        const uint8_t *z = memchr(ans + at, 0, (size_t)(r - at));
-        size_t n = z != NULL ? (size_t)(z - (ans + at)) : (size_t)(r - at);
-        lua_pushlstring(L, (const char *)ans + at, n);
-        lua_rawseti(L, -2, ++i);
-        at += (int32_t)n + 1;
-    }
-    lua_pushnil(L);
-    return 2;
-}
-
-static int named(lua_State *L, int k, int nargs, int absent_nil) {
-    lua_settop(L, nargs);
-    buf_t b;
-    buf_init(L, &b, 128u);
-    field_kind(L, &b);
-    for (int i = 1; i <= nargs; i++) {
-        field_arg(L, &b, i);
-    }
-    const uint8_t *ans;
-    int32_t r = row_call(L, k, &b, &ans);
-    return ret_text(L, r, ans, absent_nil);
-}
-
-static int l_files_load(lua_State *L) {
-    return named(L, MOY_T_FILES_LOAD, 1, 1);
-}
-
-static int l_files_save(lua_State *L) {
-    return named(L, MOY_T_FILES_SAVE, 2, 0);
-}
-
-static int l_files_delete(lua_State *L) {
-    return named(L, MOY_T_FILES_DELETE, 1, 0);
-}
-
-static int l_files_duplicate(lua_State *L) {
-    return named(L, MOY_T_FILES_DUPLICATE, 1, 0);
-}
-
-static int l_files_rename(lua_State *L) {
-    return named(L, MOY_T_FILES_RENAME, 2, 0);
-}
-
-static int l_files_new_name(lua_State *L) {
-    lua_settop(L, 1);
-    buf_t b;
-    buf_init(L, &b, 128u);
-    field_kind(L, &b);
-    field_opt(L, &b, 1);
-    const uint8_t *ans;
-    int32_t r = row_call(L, MOY_T_FILES_NEW_NAME, &b, &ans);
-    return ret_text(L, r, ans, 0);
-}
-
-// A document is its own text: ("", err) where it cannot be read, "" for none.
-static int l_files_load_text(lua_State *L) {
-    named(L, MOY_T_FILES_LOAD, 1, 1);
-    if (lua_isnil(L, -2)) {
-        lua_pushliteral(L, "");
-        lua_replace(L, -3);
-    }
-    return 2;
 }
 
 // -- prefs: each value JSON in its settings row ----------------------------------------
@@ -592,190 +455,207 @@ const char *moy_app_lua_json_dump(lua_State *L, int idx, size_t *n) {
     return lua_tolstring(L, -1, n);
 }
 
-static int l_prefs_get(lua_State *L) {
-    lua_settop(L, 2);
+// -- the role binding's names (moy_app_lua_rows.h) -----------------------------------
+
+typedef struct {
+    int16_t row;
+    uint8_t here, ret;
+    char shape;
+    const char *in;
+    int32_t def[2];
+    const char *names;
+} lrow_t;
+
+static const char *const CODE_NAMES[] = {
+#define X(code, exc, eno, msg, lua) [MOY_APP_##code] = #code,
+    MOY_APP_ERRORS(X)
+#undef X
+};
+
+static void field_int(buf_t *b, int32_t v) {
+    uint8_t q[4] = { (uint8_t)v, (uint8_t)(v >> 8), (uint8_t)(v >> 16), (uint8_t)(v >> 24) };
+    buf_field(b, q, 4);
+}
+
+// An out's answer of `r` bytes at `ans`: a string, or a table of its
+// NUL-separated names.
+static void push_out(lua_State *L, char shape, int32_t r, const uint8_t *ans) {
+    if (shape != 'n') {
+        lua_pushlstring(L, (const char *)ans, (size_t)r);
+        return;
+    }
+    lua_newtable(L);
+    lua_Integer i = 0;
+    for (int32_t at = 0; at < r;) {
+        const uint8_t *z = memchr(ans + at, 0, (size_t)(r - at));
+        size_t n = z != NULL ? (size_t)(z - (ans + at)) : (size_t)(r - at);
+        lua_pushlstring(L, (const char *)ans + at, n);
+        lua_rawseti(L, -2, ++i);
+        at += (int32_t)n + 1;
+    }
+}
+
+// The answer `r` (an out's bytes at `ans`) as the name's lua_ret says.
+static int answer(lua_State *L, const lrow_t *d, int32_t r, const uint8_t *ans, int nargs) {
+    int code = r < 0 ? (int)-r : MOY_APP_OK;
+    switch (d->ret) {
+        case LR_RAW:
+            lua_pushinteger(L, r);
+            return 1;
+        case LR_VALUE_NAME:
+            if (code == MOY_APP_OK) {
+                break;
+            }
+            lua_pushnil(L);
+            if (code < (int)(sizeof CODE_NAMES / sizeof CODE_NAMES[0]) && CODE_NAMES[code]) {
+                lua_pushstring(L, CODE_NAMES[code]);
+            } else {
+                lua_pushinteger(L, r);
+            }
+            return 2;
+        case LR_VALUE_ERR: case LR_VALUE_ERR_ABSENT_NIL: case LR_TEXT_ERR:
+            if (code == MOY_APP_OK) {
+                push_out(L, d->shape, r, ans);
+                lua_pushnil(L);
+                return 2;
+            }
+            if (d->ret == LR_TEXT_ERR) {
+                lua_pushliteral(L, "");
+            } else {
+                lua_pushnil(L);
+            }
+            if (code == MOY_APP_ABSENT && d->ret != LR_VALUE_ERR) {
+                lua_pushnil(L);
+            } else {
+                push_err(L, code);
+            }
+            return 2;
+        case LR_TAKEN:
+            if (code == MOY_APP_BAD) {
+                lua_pushboolean(L, 0);
+                return 1;
+            }
+            break;
+        case LR_VALUE_NIL: case LR_NIL_ABSENT:
+            if (code == MOY_APP_ABSENT) {
+                lua_pushnil(L);
+                return 1;
+            }
+            break;
+        case LR_JSON_OR:
+            if (code == MOY_APP_ABSENT) {
+                lua_pushvalue(L, nargs + 1);
+                return 1;
+            }
+            break;
+        default:
+            break;
+    }
+    if (code != MOY_APP_OK) {
+        return raise_rc(L, code);
+    }
+    switch (d->ret) {
+        case LR_BOOL:
+            lua_pushboolean(L, r != 0);
+            return 1;
+        case LR_TAKEN:
+            lua_pushboolean(L, 1);
+            return 1;
+        case LR_NIL: case LR_NIL_ABSENT:
+            lua_pushnil(L);
+            return 1;
+        case LR_ENUM: {
+            const char *nm = d->names;
+            for (int32_t i = 0; i < r && nm != NULL; i++) {
+                nm = strchr(nm, '|');
+                nm = nm != NULL ? nm + 1 : NULL;
+            }
+            size_t n = nm != NULL ? strcspn(nm, "|") : 0u;
+            if (n) {
+                lua_pushlstring(L, nm, n);
+            } else {
+                lua_pushnil(L);
+            }
+            return 1;
+        }
+        case LR_JSON_OR: {
+            const char *v = (const char *)ans, *end = v + r;
+            v = moy_json_ws(v, end);
+            const char *past = moy_json_value(v, end, 0u);
+            if (past == NULL) {
+                return luaL_error(L, "a setting that is not JSON");
+            }
+            json_push(L, v, past);
+            return 1;
+        }
+        default:
+            if (d->shape == 'i') {
+                lua_pushinteger(L, r);
+            } else {
+                push_out(L, d->shape, r, ans);
+            }
+            return 1;
+    }
+}
+
+// A name of the role binding: its arguments packed as its row's fields, the
+// row called, and its answer shaped (moy_app_lua_rows.h).
+static int l_row(lua_State *L) {
+    const lrow_t *d = lua_touserdata(L, lua_upvalueindex(1));
+    int nargs = 0;
+    for (const char *c = d->in; *c; c++) {
+        nargs += *c != 'k';
+    }
+    lua_settop(L, nargs + (d->ret == LR_JSON_OR));
     buf_t b;
     buf_init(L, &b, 128u);
-    field_arg(L, &b, 1);
+    size_t cap = d->shape == 'i' ? 16u : 1024u;
+    int grow = d->shape != 'i', arg = 0, def = 0;
+    for (const char *c = d->in; *c; c++) {
+        lua_Integer v;
+        size_t n = 0;
+        switch (*c) {
+            case 'k':
+                field_kind(L, &b);
+                continue;
+            case 'o':
+                if (lua_isnil(L, ++arg)) {
+                    buf_field(&b, "", 0);
+                    continue;
+                }
+                // fallthrough
+            case 's': case 'b': {
+                const char *p = luaL_checklstring(L, *c == 'o' ? arg : ++arg, &n);
+                buf_field(&b, p, n);
+                continue;
+            }
+            case 'j': {
+                buf_t j;
+                buf_init(L, &j, 128u);
+                json_put(L, &j, ++arg, 0);
+                buf_field(&b, j.p, j.n);
+                continue;
+            }
+            case 'i':
+                v = luaL_checkinteger(L, ++arg);
+                break;
+            case 'd':
+                v = luaL_optinteger(L, ++arg, d->def[def++]);
+                break;
+            default:                    // 'c', an out's capacity
+                v = luaL_optinteger(L, ++arg, d->def[def++]);
+                if (v < 0 || v > (64 << 20)) {
+                    return luaL_argerror(L, arg, "a capacity the row refuses");
+                }
+                cap = v ? (size_t)v : 1u;
+                grow = 0;
+                break;
+        }
+        field_int(&b, (int32_t)v);
+    }
     const uint8_t *ans;
-    int32_t r = row_call(L, MOY_T_PREFS_GET, &b, &ans);
-    if (r == -MOY_APP_ABSENT) {
-        lua_pushvalue(L, 2);
-        return 1;
-    }
-    if (r < 0) {
-        return raise_rc(L, -r);
-    }
-    const char *v = (const char *)ans, *end = v + r;
-    v = moy_json_ws(v, end);
-    const char *past = moy_json_value(v, end, 0u);
-    if (past == NULL) {
-        return luaL_error(L, "a setting that is not JSON");
-    }
-    json_push(L, v, past);
-    return 1;
-}
-
-static int l_prefs_set(lua_State *L) {
-    luaL_checkany(L, 1);
-    lua_settop(L, 2);
-    buf_t j;
-    buf_init(L, &j, 128u);
-    json_put(L, &j, 2, 0);
-    buf_t b;
-    buf_init(L, &b, j.n + 128u);
-    field_arg(L, &b, 1);
-    buf_field(&b, j.p, j.n);
-    const uint8_t *ans;
-    int32_t r = row_call(L, MOY_T_PREFS_SET, &b, &ans);
-    if (r < 0 && r != -MOY_APP_ABSENT) {
-        return raise_rc(L, -r);
-    }
-    lua_pushnil(L);
-    return 1;
-}
-
-static int l_prefs_clear(lua_State *L) {
-    lua_settop(L, 1);
-    buf_t b;
-    buf_init(L, &b, 128u);
-    field_arg(L, &b, 1);
-    const uint8_t *ans;
-    int32_t r = row_call(L, MOY_T_PREFS_CLEAR, &b, &ans);
-    if (r < 0 && r != -MOY_APP_ABSENT) {
-        return raise_rc(L, -r);
-    }
-    lua_pushnil(L);
-    return 1;
-}
-
-// -- the shell's rows -------------------------------------------------------------------
-
-static int l_set_theme(lua_State *L) {
-    lua_settop(L, 2);
-    buf_t b;
-    buf_init(L, &b, 64u);
-    field_arg(L, &b, 1);
-    field_opt(L, &b, 2);
-    const uint8_t *ans;
-    int32_t r = row_call(L, MOY_T_THEME_SET, &b, &ans);
-    if (r < 0) {
-        return raise_rc(L, -r);
-    }
-    lua_pushnil(L);
-    return 1;
-}
-
-static int l_open_app(lua_State *L) {
-    lua_settop(L, 1);
-    buf_t b;
-    buf_init(L, &b, 64u);
-    field_arg(L, &b, 1);
-    const uint8_t *ans;
-    int32_t r = row_call(L, MOY_T_NAV_OPEN_APP, &b, &ans);
-    if (r < 0) {
-        return raise_rc(L, -r);
-    }
-    lua_pushboolean(L, r > 0);
-    return 1;
-}
-
-// -- the theme's reads and the clipboard, as the Python face's ----------------------------
-
-// A row that takes nothing and answers a number: the number, or the grant's error.
-static int32_t scalar_row(lua_State *L, int k) {
-    const uint8_t *ans;
-    int32_t r = row_call(L, k, NULL, &ans);
-    if (r < 0) {
-        raise_rc(L, -r);
-    }
-    return r;
-}
-
-// A row that takes nothing and answers text.
-static int text_row(lua_State *L, int k) {
-    const uint8_t *ans;
-    int32_t r = row_call(L, k, NULL, &ans);
-    if (r < 0) {
-        return raise_rc(L, -r);
-    }
-    lua_pushlstring(L, (const char *)ans, (size_t)r);
-    return 1;
-}
-
-// theme.token(role): a token's value by its role id, nil where the look has none.
-static int l_theme_token(lua_State *L) {
-    lua_Integer role = luaL_checkinteger(L, 1);
-    uint8_t q[4] = { (uint8_t)role, (uint8_t)(role >> 8), (uint8_t)(role >> 16),
-                     (uint8_t)(role >> 24) };
-    buf_t b;
-    buf_init(L, &b, 16u);
-    buf_field(&b, q, 4);
-    const uint8_t *ans;
-    int32_t r = row_call(L, MOY_T_THEME_TOKEN, &b, &ans);
-    if (r == -MOY_APP_ABSENT) {
-        lua_pushnil(L);
-        return 1;
-    }
-    if (r < 0) {
-        return raise_rc(L, -r);
-    }
-    lua_pushinteger(L, (lua_Integer)r);
-    return 1;
-}
-
-static int l_theme_gen(lua_State *L) {
-    lua_pushinteger(L, (lua_Integer)scalar_row(L, MOY_T_THEME_GEN));
-    return 1;
-}
-
-static int l_theme_light(lua_State *L) {
-    lua_pushboolean(L, scalar_row(L, MOY_T_THEME_LIGHT) != 0);
-    return 1;
-}
-
-static int l_theme_name(lua_State *L) {
-    return text_row(L, MOY_T_THEME_NAME);
-}
-
-static int l_theme_variant(lua_State *L) {
-    return text_row(L, MOY_T_THEME_VARIANT);
-}
-
-// clipboard.put_text(text): true where it was put, false for a text the
-// clipboard refuses (too long).
-static int l_clipboard_put_text(lua_State *L) {
-    size_t n;
-    luaL_checklstring(L, 1, &n);
-    buf_t b;
-    buf_init(L, &b, n + 16u);
-    field_arg(L, &b, 1);
-    const uint8_t *ans;
-    int32_t r = row_call(L, MOY_T_CLIPBOARD_PUT_TEXT, &b, &ans);
-    if (r < 0 && r != -MOY_APP_BAD) {
-        return raise_rc(L, -r);
-    }
-    lua_pushboolean(L, r >= 0);
-    return 1;
-}
-
-static int l_clipboard_text(lua_State *L) {
-    return text_row(L, MOY_T_CLIPBOARD_TEXT);
-}
-
-// clipboard.kind(): "text", or nil for an empty clipboard.
-static int l_clipboard_kind(lua_State *L) {
-    if (scalar_row(L, MOY_T_CLIPBOARD_KIND) == 1) {
-        lua_pushliteral(L, "text");
-    } else {
-        lua_pushnil(L);
-    }
-    return 1;
-}
-
-static int l_clipboard_seq(lua_State *L) {
-    lua_pushinteger(L, (lua_Integer)scalar_row(L, MOY_T_CLIPBOARD_SEQ));
-    return 1;
+    int32_t r = row_call_cap(L, d->row, d->here, &b, cap, grow, &ans);
+    return answer(L, d, r, ans, nargs);
 }
 
 // -- crypto (native/moy_net/moy_crypto.h) -------------------------------------------
@@ -805,7 +685,7 @@ static int crypto_answer(lua_State *L, int32_t r) {
         case MOY_CRYPTO_EABSENT:
             return luaL_error(L, "a build without it");
         case MOY_CRYPTO_ENOMEM:
-            return luaL_error(L, "not enough memory");
+            return raise_rc(L, MOY_APP_NOMEM);
         default:
             if (r < 0) {
                 return luaL_error(L, "a length the call refuses");
@@ -961,192 +841,6 @@ int moy_app_lua_open_crypto(lua_State *L) {
     return 1;
 }
 
-// -- the device handles (moy_dev.h; the door's Python half for the kinds it serves) -----
-
-// Each answers as the row does, an error as nil and its name: the handle, the
-// bytes written, 0 for a close or a set, the bytes read as a string (at most
-// `cap`, 4096 when not given), and dev_get's number as it is (an RSSI is
-// negative).
-
-#define DEV_CAP 4096
-
-static void field_int(buf_t *b, int32_t v) {
-    uint8_t q[4] = { (uint8_t)v, (uint8_t)(v >> 8), (uint8_t)(v >> 16), (uint8_t)(v >> 24) };
-    buf_field(b, q, 4);
-}
-
-static int dev_fail(lua_State *L, int32_t r) {
-    static const char *const names[] = {
-        NULL, "STALE", "FULL", "NOMEM", "DENIED", "NOSTORE", "IO", "BAD", "ABSENT",
-        "NEEDS_VM", "FORGED", "BUSY",
-    };
-    lua_pushnil(L);
-    if (-r > 0 && -r < (int32_t)(sizeof names / sizeof names[0])) {
-        lua_pushstring(L, names[-r]);
-    } else {
-        lua_pushinteger(L, r);
-    }
-    return 2;
-}
-
-static int dev_number(lua_State *L, int k, buf_t *b) {
-    const uint8_t *ans;
-    int32_t r = row_call_cap(L, k, b, 16u, 0, &ans);
-    if (r < 0) {
-        return dev_fail(L, r);
-    }
-    lua_pushinteger(L, r);
-    return 1;
-}
-
-static int dev_bytes(lua_State *L, int k, buf_t *b, size_t cap) {
-    const uint8_t *ans;
-    int32_t r = row_call_cap(L, k, b, cap ? cap : 1u, 0, &ans);
-    if (r < 0) {
-        return dev_fail(L, r);
-    }
-    lua_pushlstring(L, (const char *)ans, (size_t)r);
-    return 1;
-}
-
-static size_t dev_cap(lua_State *L, int i) {
-    lua_Integer c = luaL_optinteger(L, i, DEV_CAP);
-    if (c < 0 || c > (64 << 20)) {
-        luaL_argerror(L, i, "a capacity the row refuses");
-    }
-    return (size_t)c;
-}
-
-// moybyte.dev_open(name[, cfg]) -> h | nil, why
-static int l_moybyte_dev_open(lua_State *L) {
-    lua_settop(L, 2);
-    buf_t b;
-    buf_init(L, &b, 128u);
-    field_arg(L, &b, 1);
-    field_opt(L, &b, 2);
-    return dev_number(L, MOY_T_MOYBYTE_DEV_OPEN, &b);
-}
-
-// moybyte.dev_close(h) -> 0 | nil, why
-static int l_moybyte_dev_close(lua_State *L) {
-    int32_t h = (int32_t)luaL_checkinteger(L, 1);
-    lua_settop(L, 1);
-    buf_t b;
-    buf_init(L, &b, 16u);
-    field_int(&b, h);
-    return dev_number(L, MOY_T_MOYBYTE_DEV_CLOSE, &b);
-}
-
-// moybyte.dev_read(h[, cap]) -> bytes | nil, why
-static int l_moybyte_dev_read(lua_State *L) {
-    int32_t h = (int32_t)luaL_checkinteger(L, 1);
-    size_t cap = dev_cap(L, 2);
-    lua_settop(L, 2);
-    buf_t b;
-    buf_init(L, &b, 16u);
-    field_int(&b, h);
-    field_int(&b, (int32_t)cap);
-    return dev_bytes(L, MOY_T_MOYBYTE_DEV_READ, &b, cap);
-}
-
-// moybyte.dev_write(h, bytes) -> n | nil, why
-static int l_moybyte_dev_write(lua_State *L) {
-    int32_t h = (int32_t)luaL_checkinteger(L, 1);
-    lua_settop(L, 2);
-    buf_t b;
-    buf_init(L, &b, 64u);
-    field_int(&b, h);
-    field_arg(L, &b, 2);
-    return dev_number(L, MOY_T_MOYBYTE_DEV_WRITE, &b);
-}
-
-// moybyte.dev_xfer(h, bytes[, cap]) -> bytes | nil, why
-static int l_moybyte_dev_xfer(lua_State *L) {
-    int32_t h = (int32_t)luaL_checkinteger(L, 1);
-    size_t cap = dev_cap(L, 3);
-    lua_settop(L, 3);
-    buf_t b;
-    buf_init(L, &b, 64u);
-    field_int(&b, h);
-    field_arg(L, &b, 2);
-    field_int(&b, (int32_t)cap);
-    return dev_bytes(L, MOY_T_MOYBYTE_DEV_XFER, &b, cap);
-}
-
-// moybyte.dev_set(h, cfg) -> 0 | nil, why
-static int l_moybyte_dev_set(lua_State *L) {
-    int32_t h = (int32_t)luaL_checkinteger(L, 1);
-    lua_settop(L, 2);
-    buf_t b;
-    buf_init(L, &b, 64u);
-    field_int(&b, h);
-    field_arg(L, &b, 2);
-    return dev_number(L, MOY_T_MOYBYTE_DEV_SET, &b);
-}
-
-// moybyte.dev_get(h, what) -> the number as the row answers it, a code too
-// (an SNR of -1 dB is -4, as DENIED is)
-static int l_moybyte_dev_get(lua_State *L) {
-    int32_t h = (int32_t)luaL_checkinteger(L, 1);
-    lua_settop(L, 2);
-    buf_t b;
-    buf_init(L, &b, 32u);
-    field_int(&b, h);
-    field_arg(L, &b, 2);
-    const uint8_t *ans;
-    lua_pushinteger(L, row_call_cap(L, MOY_T_MOYBYTE_DEV_GET, &b, 16u, 0, &ans));
-    return 1;
-}
-
-// -- the status items (moy_status.h; the panel is a console call, status_panel) ---------
-
-// Each answers as the row does, for every tier alike: a show the item's
-// handle, a state and a remove 0, a refusal its negative code (FULL where the
-// bar holds MOY_STATUS_CAP, BAD, ABSENT for a handle that is no item of the
-// process's).
-
-static int status_number(lua_State *L, int k, buf_t *b) {
-    const uint8_t *ans;
-    lua_pushinteger(L, row_call_cap(L, k, b, 16u, 0, &ans));
-    return 1;
-}
-
-// moybyte.status_show(icon[, state[, order]]) -> item
-static int l_moybyte_status_show(lua_State *L) {
-    luaL_checkstring(L, 1);
-    int32_t state = (int32_t)luaL_optinteger(L, 2, 0);
-    int32_t order = (int32_t)luaL_optinteger(L, 3, 0);
-    lua_settop(L, 1);
-    buf_t b;
-    buf_init(L, &b, 64u);
-    field_arg(L, &b, 1);
-    field_int(&b, state);
-    field_int(&b, order);
-    return status_number(L, MOY_T_MOYBYTE_STATUS_SHOW, &b);
-}
-
-// moybyte.status_state(item, state) -> 0
-static int l_moybyte_status_state(lua_State *L) {
-    int32_t h = (int32_t)luaL_checkinteger(L, 1);
-    int32_t state = (int32_t)luaL_checkinteger(L, 2);
-    lua_settop(L, 0);
-    buf_t b;
-    buf_init(L, &b, 16u);
-    field_int(&b, h);
-    field_int(&b, state);
-    return status_number(L, MOY_T_MOYBYTE_STATUS_STATE, &b);
-}
-
-// moybyte.status_remove(item) -> 0
-static int l_moybyte_status_remove(lua_State *L) {
-    int32_t h = (int32_t)luaL_checkinteger(L, 1);
-    lua_settop(L, 0);
-    buf_t b;
-    buf_init(L, &b, 16u);
-    field_int(&b, h);
-    return status_number(L, MOY_T_MOYBYTE_STATUS_REMOVE, &b);
-}
-
 // -- io and os over the grant's kind ---------------------------------------------------
 
 #define FILE_MT "moybyte.file"
@@ -1180,20 +874,22 @@ static int fail(lua_State *L, const char *path, int e, const char *why) {
     return 3;
 }
 
-// A row's code as io's failure: nothing there ENOENT, the store's own errno
-// as it failed, a refused name EINVAL, and no store the Python face's err.
+// A row's code as io's failure: the store's own errno as it failed; nothing
+// there and a refused name as their errno (native/os_calls.json's errors);
+// any other the Python face's err, as EIO.
 static int fail_rc(lua_State *L, const char *path, int rc) {
-    switch (rc) {
-        case MOY_APP_ABSENT:
-            return fail(L, path, ENOENT, NULL);
-        case MOY_APP_IO:
-            return fail(L, path, run_why(L), NULL);
-        case MOY_APP_BAD:
-            return fail(L, path, EINVAL, NULL);
-        default:
-            push_err(L, rc);
-            return fail(L, path, EIO, lua_tostring(L, -1));
+    if (rc == MOY_APP_IO) {
+        return fail(L, path, run_why(L), NULL);
     }
+    if (rc == MOY_APP_ABSENT || rc == MOY_APP_BAD) {
+        switch (rc) {
+#define X(code, eno) case MOY_APP_##code: return fail(L, path, E##eno, NULL);
+            MOY_APP_ERRNO(X)
+#undef X
+        }
+    }
+    push_err(L, rc);
+    return fail(L, path, EIO, lua_tostring(L, -1));
 }
 
 static int file_reserve(file_t *f, size_t need) {
@@ -1204,7 +900,7 @@ static int file_reserve(file_t *f, size_t need) {
     while (c < need) {
         c *= 2u;
     }
-    char *q = realloc(f->p, c);
+    char *q = moy_krealloc(f->p, c, MOY_KMEM_LIBC);
     if (q == NULL) {
         return 0;
     }
@@ -1286,7 +982,7 @@ static int l_io_open(lua_State *L) {
     f->dirty = mode[0] == 'w';
     if (has && r > 0) {
         if (!file_reserve(f, (size_t)r)) {
-            return luaL_error(L, "not enough memory");
+            return raise_rc(L, MOY_APP_NOMEM);
         }
         memcpy(f->p, ans, (size_t)r);
         f->n = (size_t)r;
@@ -1369,7 +1065,7 @@ static int file_write(lua_State *L) {
             f->pos = f->n;
         }
         if (!file_reserve(f, f->pos + n)) {
-            return luaL_error(L, "not enough memory");
+            return raise_rc(L, MOY_APP_NOMEM);
         }
         memcpy(f->p + f->pos, s, n);
         f->pos += n;
@@ -1479,7 +1175,7 @@ static int file_seek(lua_State *L) {
     f->pos = (size_t)(base + off);
     if (f->pos > f->n) {
         if (!file_reserve(f, f->pos)) {
-            return luaL_error(L, "not enough memory");
+            return raise_rc(L, MOY_APP_NOMEM);
         }
         memset(f->p + f->n, 0, f->pos - f->n);
         f->n = f->pos;
@@ -1672,26 +1368,33 @@ int moy_app_lua_open(lua_State *L, const struct moy_app_run *run) {
     return moy_app_lua_open_hop(L, run, NULL);
 }
 
-static int l_files_save_text(lua_State *L) {
-    return l_files_save(L);
-}
-
 // The names a run's role binding holds, each opened for the role it serves
 // (moy_app_lua_rows.h, generated from native/os_calls.json): a global, or a
-// function of a global table. A read is opened where the run's grant holds
-// its role, as the Python face's ungated `theme()` is; any other name where
-// the run's permissions name it.
+// function of a global table, l_row over its row or its own function. A read
+// is opened where the run's grant holds its role, as the Python face's
+// ungated `theme()` is; any other name where the run's permissions name it.
 typedef struct {
     int8_t role, read;
     const char *tbl, *name;
     lua_CFunction fn;
+    lrow_t row;
 } lname_t;
 
 static const lname_t NAMES[] = {
-#define NAME(role, tbl, name, fn, row, read) { role, read, tbl, name, fn },
+#define NAME(role, tbl, name, read, fn, row, here, ret, shape, in, d0, d1, names) \
+    { role, read, tbl, name, fn, { row, here, ret, shape, in, { d0, d1 }, names } },
     MOY_APP_LUA_NAMES(NAME)
 #undef NAME
 };
+
+static void push_name(lua_State *L, const lname_t *nm) {
+    if (nm->fn != NULL) {
+        lua_pushcfunction(L, nm->fn);
+    } else {
+        lua_pushlightuserdata(L, (void *)&nm->row);
+        lua_pushcclosure(L, l_row, 1);
+    }
+}
 
 int moy_app_lua_open_hop(lua_State *L, const struct moy_app_run *run,
                          moy_app_lua_hop_fn hop) {
@@ -1755,7 +1458,7 @@ int moy_app_lua_open_hop(lua_State *L, const struct moy_app_run *run,
             continue;
         }
         if (nm->tbl == NULL) {
-            lua_pushcfunction(L, nm->fn);
+            push_name(L, nm);
             lua_setglobal(L, nm->name);
             continue;
         }
@@ -1765,7 +1468,7 @@ int moy_app_lua_open_hop(lua_State *L, const struct moy_app_run *run,
             lua_pushvalue(L, -1);
             lua_setglobal(L, nm->tbl);
         }
-        lua_pushcfunction(L, nm->fn);
+        push_name(L, nm);
         lua_setfield(L, -2, nm->name);
         lua_pop(L, 1);
     }

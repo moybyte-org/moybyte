@@ -140,7 +140,7 @@ What the One is for, stated crisply: **"make without a tether — standalone, bi
 
 ### 3.3 The Player — the pocket console (shipping)
 
-ESP32-S3 + SPI ST7789 (320×240) + physical input + SD. Fully working today: carts, on-device editors, audio, OTA (#53), web view (#41). Perf: current numbers live in the **#66 performance ledger** (2026-07-04: Sakura 36–38fps smooth, Sky Run 40–46 at the flush ceiling, render-bound carts 24–29; zero artifacts, micro-stutter fixed at the root).
+ESP32-S3 + SPI ST7789 (320×240) + physical input + SD. Fully working today: carts, on-device editors, audio, OTA (#53), web view (#41). Perf: current numbers live in `docs/perf/ledger.md`, generated from the board pass's records.
 
 - **A D-pad fits better than a keyboard.** Carts read `btn(left/right/up/down/a/b)` — a 1:1 map. The keyboard belongs on the One (for coding); the Player is for *play*. The T-Deck's trackball is a stopgap.
 - **Native 320×240 is the requirement.** A 2.4″ IPS 240×320 (landscape 320×240) panel is the exact canvas — no scaling. This is what disqualifies smaller-screen S3 handhelds (e.g. a 240×135 Cardputer).
@@ -446,7 +446,7 @@ Dual-OTA partitioning: the device flashes a new `.bin` into the **inactive** slo
 
 ### 12.2 The browser console (#41/#151)
 
-Every board serves the **wasm console baked into its own firmware image** (`native/moy_web` + `moy_webhost`), so a phone on the same WiFi gets the whole console from the board itself, behind the pairing pin the board shows on screen. The page RASTERIZES: it is this console compiled to WebAssembly, not a stream of the board's frames, and it reads and writes that board's cartridges over the §3.4 sync RPC (`moy_sync`, plain HTTP). The draw-command protocol and its WebSocket live channel that this section used to describe went with the 2026-08 streaming sunset. **Where a page is SERVED from decides where its carts live**, and the two modes have no crossover: `docs/moycore_direction.md` and `.claude/rules/web.md` are the authorities. This is the Zero's entire reason to exist (§8.4).
+Every board serves the **wasm console its own firmware image names**: the browser console add-on cart whose digest the image carries (`native/moy_net/moy_page.h`, served by `moy_webhost`), so a phone on the same WiFi gets the whole console from the board itself, behind the pairing pin the board shows on screen. The page RASTERIZES: it is this console compiled to WebAssembly, not a stream of the board's frames, and it reads and writes that board's cartridges over the §3.4 sync RPC (`moy_sync`, plain HTTP). The draw-command protocol and its WebSocket live channel that this section used to describe went with the 2026-08 streaming sunset. **Where a page is SERVED from decides where its carts live**, and the two modes have no crossover: `docs/moycore_direction.md` and `.claude/rules/web.md` are the authorities. This is the Zero's entire reason to exist (§8.4).
 
 ### 12.3 Storage
 
@@ -454,7 +454,7 @@ Every board serves the **wasm console baked into its own firmware image** (`nati
 
 ### 12.4 The perf ceiling (#43 → the #66 ledger)
 
-**Current numbers, the frame-budget model, and the lever ledger live in issue #66** (the living performance ledger — edit its body when hardware numbers land; **don't fork the numbers into this doc**, which is why the per-cart snapshot that used to sit here is gone: it was quoting a roster that had since moved by ~2×, in the very sentence telling you not to). The SHAPE of the ceiling, which is what a plan doc is for and does not go stale: the SPI flush is hidden behind render by the double-buffer overlap and streams from internal-SRAM bounce buffers (PSRAM contention can no longer corrupt it), so light carts sit at a FLUSH ceiling; float-physics carts are logic-bound, after the #63/#66 interpreter-tax fixes (native `spr_gate`, doubled caches, REPR_C unboxed floats) rather than before them; and the Python-prim render bound that used to hold the third group down was retired by native text (#62) and map (#32). Remaining SPI-tier levers, in value order, are in #66. **On the One (P4/DSI), the flush ceiling is gone** — which is a core reason the One is the reference tier.
+**Current numbers live in `docs/perf/ledger.md` (generated from the board pass's records), the frame-budget model and the lever ledger in `docs/perf/levers.md`** (**don't fork the numbers into this doc**, which is why the per-cart snapshot that used to sit here is gone: it was quoting a roster that had since moved by ~2×, in the very sentence telling you not to). The SHAPE of the ceiling, which is what a plan doc is for and does not go stale: the SPI flush is hidden behind render by the double-buffer overlap and streams from internal-SRAM bounce buffers (PSRAM contention can no longer corrupt it), so light carts sit at a FLUSH ceiling; float-physics carts are logic-bound, after the #63/#66 interpreter-tax fixes (native `spr_gate`, doubled caches, REPR_C unboxed floats) rather than before them; and the Python-prim render bound that used to hold the third group down was retired by native text (#62) and map (#32). Remaining SPI-tier levers, in value order, are in #66. **On the One (P4/DSI), the flush ceiling is gone** — which is a core reason the One is the reference tier.
 
 ---
 

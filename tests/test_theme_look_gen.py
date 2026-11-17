@@ -49,8 +49,8 @@ def _pkg(**change):
 def _quiet(ws):
     ws.pointer.visible = False
     settle_badges(ws)
-    ws._toast_until = 0
-    ws.bar_layer._clock_text = lambda: _CLOCK
+    ws.toast_until = 0
+    ws.bar_layer.clock_text = lambda: _CLOCK
 
 
 def _world(tmp_path, desk):
@@ -65,8 +65,8 @@ def _world(tmp_path, desk):
         ws.look.set_theme(BASE, persist=False, variant="dark")
     _quiet(ws)
     if desk:
-        ws.open_desk()
-        assert ws.open_app(ws._apps_by_id["files"])
+        ws.home.open_desk()
+        assert ws.spine.open_app(ws.app("files"))
         ws.open_settings()               # focused; files stays behind it
     return ws
 
@@ -78,7 +78,7 @@ def _settle(ws, force=True):
     for _ in range(12):
         _quiet(ws)
         if force:
-            ws._dirty = True
+            ws.mark_dirty()
         ws.frame(1 / 30)
         cur = bytes(cv._buf)
         if cur == prev:
@@ -96,7 +96,7 @@ def _keys(ws, desk):
     if desk:
         wm = ws.wm
         out["desk"] = wm._desk_sig
-        out["chrome"] = tuple(getattr(w, "_chrome_sig", None) for w in wm._wins.values())
+        out["chrome"] = tuple(getattr(w, "_chrome_sig", None) for w in wm.windows.values())
     return out
 
 
@@ -124,15 +124,15 @@ def test_an_in_place_edit_draws_what_a_cold_boot_under_it_draws(tmp_path, desk, 
     assert ws.look.install_theme(edited)[0] == 0
     assert ws.look.look_gen > gen
     assert ws.look.theme_name == THEME
-    assert ws._dirty                      # the edit is one Class A dirty
+    assert ws.frame_state.dirty                      # the edit is one Class A dirty
     after = _settle(ws, force=False)      # no forced repaint: the edit's own
     assert ws.frame_state.frames_drawn > drawn
     assert after != before, "the edited role shows nowhere on this world"
     for name, key in _keys(ws, desk).items():
         assert key != keys[name], name
     if desk:                              # every window buffer, focused or behind
-        assert {w.kind: w._look_gen for w in ws.wm._wins.values() if w.buf is not None} \
-            == {w.kind: ws.look.look_gen for w in ws.wm._wins.values() if w.buf is not None}
+        assert {w.kind: w._look_gen for w in ws.wm.windows.values() if w.buf is not None} \
+            == {w.kind: ws.look.look_gen for w in ws.wm.windows.values() if w.buf is not None}
 
     # Idle after the edit: nothing paints.
     drawn = ws.frame_state.frames_drawn
@@ -176,7 +176,7 @@ def test_a_change_through_the_verb_draws_what_a_boot_of_custom_draws(tmp_path, d
             use_theme(ws, BASE, "dark", store=True)
         _quiet(ws)
         if desk:
-            ws.open_desk()
+            ws.home.open_desk()
             ws.open_settings()
         return ws
 
@@ -220,7 +220,7 @@ def test_a_save_through_edit_file_draws_what_a_boot_of_it_draws(tmp_path, desk):
             use_theme(ws, BASE, "dark", store=True)
         _quiet(ws)
         if desk:
-            ws.open_desk()
+            ws.home.open_desk()
             ws.open_settings()
         return ws
 

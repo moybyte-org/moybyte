@@ -5,7 +5,7 @@ whose manifest opts into the "network" permission (host == device: it mirrors th
 host make_wifi). It is a SYSTEM service, and THE RADIO IS A LEASE (2026-09-07):
 off unless something holds it. The holds are the kernel's lease table's radio
 rows, and the kernel's WiFi driver powers the station from them
-(native/moy_net/moy_net.h's THE BOOK): `Workstation.wifi_hold(tag)` takes a
+(native/moy_net/moy_net.h's THE BOOK): `Spine.wifi_hold(tag)` takes a
 row, whose first holder powers the station up, and the last
 `wifi_release(tag)` lets it go, which powers it down; radio_on and radio_off
 here keep this service's view of the station in step. A console on a shelf
@@ -169,13 +169,41 @@ class DeviceWifi:
         # the radio up only on first real use (scan/connect), never at boot. Whether WiFi
         # and the display can coexist at all on this RAM budget is an open #38 question.
         self.wlan = None
-        # Whether the driver has been brought up this boot. One-way: radio_off()
-        # stops the radio but the driver keeps its internal-RAM allocation, so a
-        # measurement of the idle desk's internal SRAM has to know.
-        self.driver_up = False
+        self._driver_ran = False  # the port's network.WLAN has started this boot
         self._join = None        # (ssid, password, stored, started) while a join runs
         self._joined = None      # the last join's verdict
         _rest_after_vm_start()
+
+    @property
+    def driver_up(self):
+        """Whether the radio's driver holds its internal RAM now, which a
+        measurement of the idle desk's internal SRAM has to know. The kernel's
+        driver says: on an S3 it ends with the station's stop, through a P4's
+        companion radio it stays up. The port's network.WLAN keeps it from its
+        first start to the next boot."""
+        try:
+            import moy_net
+            if hasattr(moy_net, "wifi_on"):
+                return bool(moy_net.wifi_status()[0])
+        except ImportError:
+            pass
+        return self._driver_ran
+
+    @property
+    def station_made(self):
+        """Whether the station's interface was made this boot: once a boot
+        brings WiFi up it keeps its internal RAM until the next boot, though
+        the driver under it ends with the stop (`driver_up` False again).
+        The port's network.WLAN keeps it from its first start, as its
+        driver."""
+        try:
+            import moy_net
+            if hasattr(moy_net, "wifi_on"):
+                st = moy_net.wifi_status()
+                return bool(st[6]) if len(st) > 6 else bool(st[0])
+        except ImportError:
+            pass
+        return self._driver_ran
 
     def _ensure_wlan(self):
         """Bring the radio up on demand (never at boot -- see __init__)."""
@@ -183,7 +211,7 @@ class DeviceWifi:
             return self.wlan
         try:
             self.wlan = kernel_wlan()
-            self.driver_up = True
+            self._driver_ran = True
             self.wlan.active(True)
         except Exception as exc:  # noqa: BLE001 -- no radio / no network module -> degrade
             _diag_note("wifi", "WLAN unavailable, offline: %s" % (exc,))

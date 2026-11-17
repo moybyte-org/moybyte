@@ -22,7 +22,7 @@
 #include "moy_input.h"
 #include "moy_touch.h"
 
-#ifdef MOY_INPUT_BOARD
+#ifdef MOY_ON_BOARD
 #include "freertos/FreeRTOS.h"
 typedef portMUX_TYPE moy_drv_lock_t;
 #define MOY_DRV_LOCK_INIT(l) portMUX_INITIALIZE(l)

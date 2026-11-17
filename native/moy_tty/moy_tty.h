@@ -190,4 +190,8 @@ typedef struct {
 
 void moy_tty_ws_stats(moy_tty_ws_stats_t *out);
 
+// The web terminal's link (moy_tty_ws.c): cut, and its quiet time in ms.
+void moy_web_term_cut(void);
+uint32_t moy_web_term_idle_ms(void);
+
 #endif // MOY_TTY_H

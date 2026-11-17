@@ -21,9 +21,10 @@ to whoever called it.
 - `runtime/shell/console.py` — the shell **kernel**: `Workstation`, shrunk by the 2026-07
   refactor to a compositor — the Layer-stack frame loop, the shared draw
   toolkit (`_glyph`/`_icon`/`_btn`) and store/service attach points
-  (`carts_store`/`wifi`/`updater`); the rest of the class is its `console_*`
-  mixins (`runtime/README.md` lists them): the key and pointer routers are
-  `console_input.py`'s, and the spawn/exit verbs, app registration and
+  (`carts_store`/`wifi`/`updater`); the rest of the console is its services,
+  one object per `console_*` module that `Workstation.__init__` builds over
+  itself (`ws.router`, `ws.home`, `ws.spine`, ...; `runtime/README.md` lists
+  them): the key and pointer routers are `console_input.py`'s, and the spawn/exit verbs, app registration and
   the WiFi lease `runtime/shell/console_spine.py`'s, over the spine's components
   in `native/moy_spine` and the lease table's radio rows (ids, kinds and tags,
   never objects); everything
@@ -61,9 +62,10 @@ to whoever called it.
     outlives the Editor and takes the Game tab out of its workspaces while it
     lasts. Play on the desk is full screen with no window buttons; Projects'
     Play runs a Make card in a window (`docs/theme_and_shell_2026-11.md` §8.1).
-    The keyboard's text mode follows focus (`WindowedWM._move_focus`): each
-    window gets back the mode it had, so a field in one never leaves a game
-    beside it in text mode.
+    The keyboard's text mode follows focus: the input policy
+    (`runtime/shell/input_policy.py`) derives it each frame from the focused
+    window's surface, so a field in one never leaves a game beside it in text
+    mode.
 - **Editor-as-an-app UX (this replaced the maker/player tap-mode):** the home
   (`docs/theme_and_shell_2026-11.md` §8.10) has four tabs, and a tap on Games, Mine or
   Apps **always RUNS the cart** (an app's opens the app) — no mode, no type
@@ -72,7 +74,7 @@ to whoever called it.
   on the Editor's bar (its X pops back to where it was opened from); Make's
   verbs are ＋New / CHANGE / Duplicate / DEL, and in the desk's Projects window PLAY
   (third, in a desk window) (DEL, like every Delete of a cart, asks first:
-  `console_notices.DeleteConfirm`). The desk's
+  `shell_cards.DeleteConfirm`). The desk's
   PROJECTS is the same home in a window (`HomeWindowLayer`): the console
   home's design (hero, details, shelf) in the window's content rect whatever
   the theme's home arrangement, on Make; a pick there opens its window above
@@ -104,7 +106,7 @@ to whoever called it.
   frame and draws its section AS its process; a handheld's cluster is one
   stop, and the bar reserves its focus ring's room. The LEFT zone opens with the **back
   chevron** (`BarLayer.draws_back`; a layout that places the `close` widget
-  gets its X instead): one level back, as Esc and B (`ws.app_back` for a
+  gets its X instead): one level back, as Esc and B (`InputPolicy.back` for a
   registered app, whose `back()` steps its own pages); the launcher root draws
   one only above its mode's floor -- console mode over a P4's parked desk --
   and the Editor's one bar none (its B and Esc step back, and it shows no
@@ -125,10 +127,11 @@ to whoever called it.
   no hold gesture, so a `textmode(True)` game needs no exit of its own. Tools
   and apps leave by the bar's back. `docs/shell_ux_v1.md` §9 and §9a.
 - `runtime/editors/editors_*.py` — the editor cores, one module per editor:
-  `CodeEditor` (`editors_code`), `SpriteSheet` / `TileMap` / `IconSheet` (16×16
-  icon tiles: the shell's baked bar icons and a theme's own pixel tiles;
-  `editors_sheet`), `PaintEditor` (`editors_paint_map`). Each is frozen under
-  its own name.
+  `CodeEditor` (`editors_code`), `PaintEditor` (`editors_paint_map`). Each is
+  frozen under its own name. The formats they edit, `SpriteSheet` / `TileMap` /
+  `IconSheet` (16×16 icon tiles: the shell's baked bar icons and a theme's own
+  pixel tiles), are `runtime/carts/editors_sheet.py`'s, below the toolkit that
+  draws the icons (`tests/test_layers.py`).
 - **`runtime/carts/moy_carts.py` is the `.moy` store** (and the per-project undo
   journal; the #108 user-files layer beside it is native/moy_store's
   `moy_ufiles`, which `moy_carts` names reach and the files role's C rows
@@ -246,9 +249,12 @@ to whoever called it.
 
 Record: `docs/history/console_architecture_2026-08.md` (rev 3, #209). Six
 collaborators — `ws.web`/`prefs`/`covers`/`carts`/`look`/`history` — came out
-from behind the façade in five gated landings. `tests/test_console_facade.py`
-pins every surviving forward with its caller, the 17 legacy property forwards,
-and every `getattr(ws, "…")` name in runtime/device/tools. Facts not to undo:
+from behind the façade in five gated landings; the 2026-11 sprint (phase 9)
+carved the ten mixins into services and retired every forward
+(`runtime/README.md`'s console rows). `tests/test_console_facade.py` holds the
+rules, among them: a private read from outside its owner is made public on
+that owner, never read through; every
+`getattr(ws, "…")` name in runtime/device/tools resolves. Facts not to undo:
 
 - **`ws.system` is an ALIAS of the SystemStore rows (the spine's `Settings`) and
   is never rebound** — `SystemStore.load()` replaces its rows in place. Reads are
@@ -311,7 +317,7 @@ Record and gates: #206, #207, #208.
 
 - **ONE `PERF` line, one producer, every board.** The kernel writes it
   (`native/moy_kernel/moy_perf.c`, from its loop's account stage, the
-  console pushing its half with `ws.perf_push` when a sample is due, and once
+  console pushing its half with `ws.perf.perf_push` when a sample is due, and once
   when a kernel run takes the frame, whose PERF names the cart and leaves the
   console's meters `-`) and
   `runtime/system/perf_line.py` holds the field table and the parser; it is written

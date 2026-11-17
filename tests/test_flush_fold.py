@@ -204,7 +204,7 @@ def test_blit_game_fences_before_it_overwrites_the_scratch():
         src = runtime_text(path)
         at = src.index("        def handle_input():")
         present = src[at:]
-        present = present[:present.index("ws.handle_input()")]
+        present = present[:present.index("ws.router.handle_input()")]
         assert "sys_canvas.sync_back()" in present, path
 
 

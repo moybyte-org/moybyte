@@ -23,21 +23,10 @@ kid-friendly). The keyboard types the same digits and operators. State and
 tape persist while the app stays open, and reset on a fresh open.
 """
 
-try:
-    from layout_base import bar_rows, content_of, metric_class, window_foot, DESK
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import (bar_rows, content_of, metric_class,
-                                     window_foot, DESK)
-
-try:
-    from moy_store_base import builtin_name
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import builtin_name
-
-try:
-    import ui
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui
+from layers import AppLayer
+from layout_base import bar_rows, content_of, metric_class, window_foot, DESK
+from moy_store_base import builtin_name
+import ui
 
 # The keypad, 4 x 5, row by row; None is the 0's second column. A key is its
 # operation: digits, the operators, "C", "<" (backspace), "." and "=".
@@ -122,7 +111,7 @@ class CalcLayout:
                 self.keys.append((kx, ky, kw, kh))
 
 
-class CalcAppLayer:
+class CalcAppLayer(AppLayer):
     """The Calc content Layer + app protocol (see the module docstring)."""
 
     id = "calc"
@@ -287,9 +276,9 @@ class CalcAppLayer:
     # -- input -----------------------------------------------------------------
 
     def handle_input(self, i):
-        ch = i.last_key
+        ch = getattr(i, "typed", 0)
         if ch:
-            c = chr(ch) if isinstance(ch, int) else str(ch)
+            c = chr(ch)
             if c.isdigit() or c in "+-*/=%":
                 self._key(c)
             elif c in ("\b", "\x7f"):

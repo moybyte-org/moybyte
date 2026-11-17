@@ -499,8 +499,8 @@ def test_the_sibling_system_stores_recover_the_same_way(tmp_path):
 
 # -- the radio is a LEASE (2026-09-07) ----------------------------------------
 #
-# Off unless something holds it. `ws.wifi_hold(tag)` powers the radio up and
-# the last `ws.wifi_release(tag)` powers it down, so a console on a shelf spends
+# Off unless something holds it. `ws.spine.wifi_hold(tag)` powers the radio up and
+# the last `ws.spine.wifi_release(tag)` powers it down, so a console on a shelf spends
 # nothing on WiFi; what persists is the credential, never the link. The five
 # holders each have a test in the suite that owns them (the web console in
 # test_moy_webhost, the update screen in test_web_update, the link in
@@ -517,17 +517,17 @@ def test_the_radio_is_off_unless_something_holds_it(tmp_path):
     assert w.radio is False, "a fresh console has its radio off"
 
     # A hold powers it up at once, and a second holder shares it.
-    assert ws.wifi_hold("update") is True
+    assert ws.spine.wifi_hold("update") is True
     assert w.radio is True
-    ws.wifi_hold("settings")
-    ws.wifi_hold("settings")                # idempotent per tag
-    ws.wifi_release("update")
+    ws.spine.wifi_hold("settings")
+    ws.spine.wifi_hold("settings")                # idempotent per tag
+    ws.spine.wifi_release("update")
     assert w.radio is True, "one holder left: the radio stays"
     w.connect("Home WiFi", "hunter2")
     assert w.status()[0] is True
 
     # The last one out powers it down, link and all.
-    ws.wifi_release("settings")
+    ws.spine.wifi_release("settings")
     assert w.radio is False
     assert w.status() == (False, None, None)
     assert ws.leases.holders() == []
@@ -537,7 +537,7 @@ def test_the_radio_is_off_unless_something_holds_it(tmp_path):
     # lease: "off in general" is the rule.
     w.scan()
     assert w.radio is True
-    ws.wifi_release("link")
+    ws.spine.wifi_release("link")
     assert w.radio is False
 
 
@@ -546,8 +546,8 @@ def test_a_console_with_no_wifi_service_takes_no_lease(tmp_path):
 
     ws = build_ws(tmp_path)
     ws.wifi = None
-    assert ws.wifi_hold("web") is False
-    ws.wifi_release("web")                  # and never raises
+    assert ws.spine.wifi_hold("web") is False
+    ws.spine.wifi_release("web")                  # and never raises
 
 
 def _network_cart(carts_dir):
@@ -576,7 +576,7 @@ def test_a_network_cart_holds_the_radio_for_its_run_and_no_longer(tmp_path):
     assert ws.leases.holders() == ["cart:%d" % ws.run.player.pid]   # the run's process
     assert ws.wifi.radio is True
 
-    ws.go_home()
+    ws.home.go_home()
     assert ws.leases.holders() == []
     assert ws.wifi.radio is False
     assert ws.wifi.status() == (False, None, None)
@@ -590,12 +590,12 @@ def test_a_processs_tag_names_its_process(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     for tag in ("cart", "http", "media", "native", "net"):
         with pytest.raises(ValueError):
-            ws.wifi_hold(tag)
-    assert ws.wifi_hold("http", 7) and ws.wifi_hold("settings")
+            ws.spine.wifi_hold(tag)
+    assert ws.spine.wifi_hold("http", 7) and ws.spine.wifi_hold("settings")
     assert sorted(ws.leases.holders()) == ["http:7", "settings"]
-    ws.wifi_release("settings")
+    ws.spine.wifi_release("settings")
     assert ws.wifi.radio is True
-    ws.wifi_release("http", 7)
+    ws.spine.wifi_release("http", 7)
     assert ws.leases.holders() == [] and ws.wifi.radio is False
 
 
@@ -607,7 +607,7 @@ def test_a_plain_cart_never_touches_the_radio(tmp_path):
     assert ws.cart_error is None
     assert ws.leases.holders() == []
     assert ws.wifi.radio is False
-    ws.go_home()
+    ws.home.go_home()
     assert ws.wifi.radio is False
 
 
@@ -617,25 +617,25 @@ def test_the_settings_wifi_panel_holds_the_radio_while_it_is_open(tmp_path):
     ws = build_ws(tmp_path)
     ws.open_settings()
     sl = ws.settings_layer
-    sl.open_wifi()
-    assert sl.wifi_view and "settings" in ws.leases.holders()
+    sl.open_page("wifi")
+    assert sl.showing("wifi") and "settings" in ws.leases.holders()
     assert ws.wifi.radio is True
-    sl.close_wifi()
+    sl.close_page()
     assert ws.leases.holders() == [] and ws.wifi.radio is False
 
     # Leaving Settings with the panel still open -- the HOME key, or the X --
     # ends the lease too: the panel is closed on the way out, not on the next
     # visit, or the radio would stay on until somebody opened Settings again.
-    sl.open_wifi()
+    sl.open_page("wifi")
     assert ws.wifi.radio is True
-    ws.go_home()
-    assert not sl.wifi_view
+    ws.home.go_home()
+    assert not sl.showing("wifi")
     assert ws.leases.holders() == [] and ws.wifi.radio is False
 
     ws.open_settings()
-    sl.open_wifi()
-    ws._exit_settings()
-    assert not sl.wifi_view
+    sl.open_page("wifi")
+    ws.exit_settings()
+    assert not sl.showing("wifi")
     assert ws.leases.holders() == [] and ws.wifi.radio is False
 
 
@@ -735,10 +735,12 @@ def test_a_device_radio_that_will_not_stop_is_a_diag_line_not_a_crash(tmp_path):
 
 
 def test_the_device_remembers_that_its_driver_came_up(tmp_path):
-    """`driver_up` is one-way: radio_off() stops the radio but the ESP-IDF
-    driver keeps its internal-RAM allocation for the rest of the boot, so the
-    on-glass idle-SRAM check (tests/on_glass.py, the wasm engine's) refuses a
-    desk that has had it up rather than comparing against a fresh boot."""
+    """Over the port's network.WLAN `driver_up` is one-way: radio_off() stops
+    the radio but the ESP-IDF driver keeps its internal-RAM allocation for the
+    rest of the boot, so the on-glass idle-SRAM check (tests/on_glass.py, the
+    wasm engine's) refuses a desk that has had it up rather than comparing
+    against a fresh boot. The kernel's driver answers for itself
+    (test_the_kernel_driver_says_whether_it_is_up)."""
     net = _FakeNetwork()
     dev = _device_wifi_over(net, tmp_path)
     try:
@@ -751,6 +753,42 @@ def test_the_device_remembers_that_its_driver_came_up(tmp_path):
         assert dev.driver_up is True
     finally:
         sys.modules.pop("network", None)
+
+
+def test_the_kernel_driver_says_whether_it_is_up(tmp_path, monkeypatch):
+    """Over the kernel's driver `driver_up` is the driver's own answer
+    (moy_net.wifi_status()'s first field): on an S3 the station's stop ends
+    the driver and gives its internal RAM back, so a desk whose radio came
+    up and went down again reads False."""
+    import types
+    status = [False, False, False, None, None, 0]
+    stub = types.SimpleNamespace(wifi_on=lambda: None,
+                                 wifi_status=lambda: tuple(status))
+    monkeypatch.setitem(sys.modules, "moy_net", stub)
+    dev = _device_wifi_class()(None, str(tmp_path))
+    assert dev.driver_up is False
+    status[0] = True
+    assert dev.driver_up is True
+    status[0] = False
+    assert dev.driver_up is False
+
+
+def test_the_station_made_this_boot_is_a_fact_of_its_own(tmp_path, monkeypatch):
+    """The station's interface keeps its internal RAM from the first start to
+    the next boot (moy_net.wifi_status()'s seventh field), while the driver
+    under it ends with the stop: `station_made` stays True where `driver_up`
+    reads False again, which is what an idle-desk measurement asks."""
+    import types
+    status = [False, False, False, None, None, 0, False]
+    stub = types.SimpleNamespace(wifi_on=lambda: None,
+                                 wifi_status=lambda: tuple(status))
+    monkeypatch.setitem(sys.modules, "moy_net", stub)
+    dev = _device_wifi_class()(None, str(tmp_path))
+    assert dev.station_made is False
+    status[0] = status[6] = True
+    assert dev.driver_up is True and dev.station_made is True
+    status[0] = False
+    assert dev.driver_up is False and dev.station_made is True
 
 
 # -- the radio's slow halves are polled, never waited on -----------------------
@@ -922,7 +960,7 @@ def test_the_settings_panel_polls_its_scan_and_join(tmp_path):
     ws.wifi = w = _SlowWifi()
     ws.open_settings()
     sl = ws.settings_layer
-    sl.open_wifi()
+    sl.open_page("wifi")
     assert sl.wifi_scanning and sl.wifi_msg == settings_layer.WIFI_LOOKING
     wid = sl._wifi_wake
     assert wid in moybyte.WAKES.by_id
@@ -947,7 +985,7 @@ def test_the_settings_panel_polls_its_scan_and_join(tmp_path):
     w.polls = 0
     sl._wifi_rescan()
     assert sl._wifi_wake is not None
-    sl.close_wifi()
+    sl.close_page()
     assert sl._wifi_wake is None and not sl.wifi_busy()
 
 
@@ -959,7 +997,7 @@ def test_a_saved_locked_network_that_fails_asks_for_its_password_again(tmp_path)
     w.polls = 10
     ws.open_settings()
     sl = ws.settings_layer
-    sl.open_wifi()
+    sl.open_page("wifi")
     sl.wifi_known = ["Cafe"]
     sl.wifi_sel = 0
     sl._wifi_activate()
@@ -1002,7 +1040,7 @@ def test_the_board_transport_polls_the_link_it_dialled(monkeypatch):
 
 def _wire_links():
     from runtime import net_binding
-    net_binding.install()
+    sys.modules["moy_net"] = net_binding
     if str(ROOT / "device") not in sys.path:
         sys.path.insert(0, str(ROOT / "device"))
     import wire_links

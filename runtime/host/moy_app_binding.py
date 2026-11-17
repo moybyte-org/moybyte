@@ -1,19 +1,19 @@
 # Map (grep -n a name to jump there):
-#   _Buf             moy_fs.h's buffer: an answer the user-files layer allocated
 #   _raise           the ABI's codes as the exceptions the roles raise
 #   _crypto          the crypto rows (native/moy_net/moy_crypto.h)
 #   binding          the module: App, kernel, the role types, the policy
 #   host_bindings    the parity suite's bindings
 """The app ABI's kernel half on the CPython host: the `moy_app` module
 native/moy_app builds, as Python loads it by ctypes from the host's one
-library (runtime/host/host_native.py; tools/moy_index_spike.py's SPINE part
+library (runtime/host/host_native.py; runtime/host/native_parts.py's SPINE part
 carries native/moy_app). The
 runtime package registers it as `moy_app` (runtime/__init__.py), so the host's
 roles are the C rows every image runs.
 
 `binding()` returns a module-like object with modmoy_app.c's names -- App,
 kernel, Damage, Surface, Theme, Prefs, Artwork, Clipboard, the roles served
-in Python (Files, Carts, Nav, Notify, Wallpaper, Install), policy, manifest_error,
+in Python (Files, Carts, Nav, Notify, Wallpaper, Install, Wifi, Bt, Usb), policy,
+manifest_error,
 id_for, roles, rows, perms, kinds, tokens and the constants -- or None where
 there is no C compiler. Each
 call into C is moy_app.h's ABI and nothing more; what a binding adds is the
@@ -26,13 +26,12 @@ import collections
 import ctypes
 import json
 import os
-import sys
 import types
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "tools"))
+import face_errors
+import native_parts
 
-import moy_index_spike  # noqa: E402
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 c = ctypes
 _P = c.c_void_p
@@ -42,9 +41,13 @@ _PU32 = c.POINTER(c.c_uint32)
 _PSIZE = c.POINTER(c.c_size_t)
 _PCHAR = c.c_char_p
 
-OK, STALE, FULL, NOMEM, DENIED, NOSTORE, IO, BAD, ABSENT, NEEDS_VM, FORGED, BUSY = range(12)
+from face_errors import ABSENT, BAD, IO, NOSTORE, OK
+import moy_app_face as _face
+from moy_app_face import (
+    moy_app_policy_t as _Policy, moy_app_run_t as _Run, moy_app_surface_t as _Surf,
+    moy_grant_t as _Grant)
+from moy_store_face import moy_buf_t as _Buf
 KINDS_N, TOKENS_N = 4, 38
-NAME_MAX = 31
 UF_NAME_MAX = 255        # moy_ufiles.h's MOY_UF_NAME_MAX
 NONE_UF, BAD_UF = -1, -2
 DOC_MAX = 255
@@ -52,11 +55,10 @@ TOKEN_ABSENT = -(1 << 31)
 CLIP_MAX = 4096
 SLOTS = 32
 ID_MAX = 63
-_ENOSPC = 28
 
 
 # The role table (native/os_calls.json's rows the ROLE door names, in order:
-# tools/gen_os_table.py's is_door), each as {"role", "verb", "server"}: the served roles' rows are its own, and
+# tools/gen_os/table.py's is_door), each as {"role", "verb", "server"}: the served roles' rows are its own, and
 # its roles and C rows size the C's.
 with open(os.path.join(HERE, "..", "..", "native", "os_calls.json")) as _f:
     _SRC = json.load(_f)
@@ -68,38 +70,8 @@ ROLE_N = len(_SRC["roles"])
 ROW_N = sum(1 for r in _TABLE if r["server"] == "c")
 
 
-class _Buf(c.Structure):
-    """moy_fs.h's moy_buf_t: an answer the user-files layer allocated."""
-    _fields_ = [("p", c.c_void_p), ("n", c.c_size_t)]
-
-
-class _Run(c.Structure):
-    """moy_app_run.h's moy_app_run_t: an app's run on a tier binding."""
-    _fields_ = [("a", c.c_void_p), ("sn", c.c_uint32), ("g", c.c_uint32),
-                ("roles", c.c_uint32)]
-
-
 # surface.pointer()'s answer: the row's five numbers, by name as by index.
 Pointer = collections.namedtuple("Pointer", ("x", "y", "down", "click", "visible"))
-
-
-class _Surf(c.Structure):
-    _fields_ = [("canvas", c.c_uint32), ("w", c.c_int32), ("h", c.c_int32),
-                ("ox", c.c_int32), ("oy", c.c_int32), ("cx", c.c_int32),
-                ("cy", c.c_int32), ("cw", c.c_int32), ("ch", c.c_int32),
-                ("font_scale", c.c_uint8), ("chrome_scale", c.c_uint8),
-                ("windowed", c.c_uint8)]
-
-
-class _Grant(c.Structure):
-    _fields_ = [("id_len", c.c_uint8), ("ns_len", c.c_uint8), ("cls", c.c_uint8),
-                ("kind", c.c_int8), ("roles", c.c_uint32), ("owner", c.c_uint32),
-                ("id", c.c_char * (ID_MAX + 1))]
-
-
-class _Policy(c.Structure):
-    _fields_ = [("roles", c.c_uint32), ("nkinds", c.c_uint8),
-                ("kinds", c.c_int8 * KINDS_N)]
 
 
 _SIGS = (
@@ -141,11 +113,6 @@ _SIGS = (
      c.c_int),
     ("moy_app_theme_read", [_P, c.POINTER(c.c_int32)], _U32),
     ("moy_app_theme_colors", [_P, _U32, _PU32], c.c_int),
-    ("moy_app_theme_token", [_P, _U32, c.c_int, c.POINTER(c.c_int32)], c.c_int),
-    ("moy_app_theme_gen", [_P, _U32], c.c_int32),
-    ("moy_app_theme_light", [_P, _U32], c.c_int32),
-    ("moy_app_theme_name", [_P, _U32, _P, _SIZE, _PSIZE], c.c_int),
-    ("moy_app_theme_variant", [_P, _U32, _P, _SIZE, _PSIZE], c.c_int),
     ("moy_app_damage_all", [_P, _U32], c.c_int),
     ("moy_app_damage_again", [_P, _U32], c.c_int),
     ("moy_app_damage_take", [_P], _U32),
@@ -153,10 +120,6 @@ _SIGS = (
     ("moy_app_prefs_get", [_P, _U32, _PCHAR, _SIZE, _P, _SIZE, _PSIZE], c.c_int),
     ("moy_app_prefs_set", [_P, _U32, _PCHAR, _SIZE, _PCHAR, _SIZE], c.c_int),
     ("moy_app_prefs_clear", [_P, _U32, _PCHAR, _SIZE], c.c_int),
-    ("moy_app_clip_put_text", [_P, _U32, _PCHAR, _SIZE], c.c_int),
-    ("moy_app_clip_text", [_P, _U32, _P, _SIZE, _PSIZE], c.c_int),
-    ("moy_app_clip_kind", [_P, _U32], c.c_int32),
-    ("moy_app_clip_seq", [_P, _U32], c.c_int32),
     ("moy_app_artwork_current", [_P, _U32, _P, _SIZE, _PSIZE, _P, _SIZE, _PSIZE],
      c.c_int),
     ("moy_app_artwork_follow", [_P, _U32, _PCHAR, _SIZE, _PCHAR, _SIZE, _PCHAR, _SIZE],
@@ -224,15 +187,7 @@ _SIGS = (
 
 
 def _raise(rc):
-    if rc == NOMEM:
-        raise MemoryError("moy_app")
-    if rc == FULL:
-        raise OSError(_ENOSPC, "the grant table is full")
-    if rc == STALE:
-        raise ValueError("a grant that ended")
-    if rc == DENIED:
-        raise ValueError("a role the grant does not hold")
-    raise ValueError("an argument the role refuses")
+    raise face_errors.exception(rc)
 
 
 def _check(rc):
@@ -394,11 +349,11 @@ def binding(sanitize=False):
     """The moy_app module over the host's one library, or None with no C
     compiler. The library is the one runtime/host/moy_spine_binding.py loads, so a
     Settings it made is a pointer this one writes."""
-    path = moy_index_spike.host_library("c", sanitize, moy_index_spike.SPINE)
+    path = native_parts.host_library("c", sanitize, native_parts.SPINE)
     if path is None:
         return None
     lib = c.CDLL(path)
-    for name, args, res in _SIGS:
+    for name, args, res in _SIGS + _face.ROLE_SIGS:
         fn = getattr(lib, name)
         fn.argtypes = args
         fn.restype = res
@@ -590,10 +545,7 @@ def binding(sanitize=False):
             if root is None:
                 _check(lib.moy_app_store_bind(self._p, None, b"", 0, 0, 0))
                 return
-            try:
-                import moy_ufiles_binding
-            except ImportError:
-                from runtime import moy_ufiles_binding
+            import moy_ufiles_binding
             rb = _str(str(root))
             parent = str(root).rsplit("/", 1)[0]
             moy_ufiles_binding.library().moy_fs_root((parent or str(root)).encode())
@@ -612,11 +564,9 @@ def binding(sanitize=False):
                 return self._no_store
             if rc == IO:
                 e = lib.moy_app_why(self._p)
-                return str(OSError(e, os.strerror(e)))
-            if rc == BAD:
-                return "a refused argument"
-            if rc == NOMEM:
-                return "memory allocation failed"
+                return face_errors.ERR[IO] % (e, os.strerror(e))
+            if rc in face_errors.ERR:
+                return face_errors.ERR[rc]
             _raise(rc)
 
         def _take(self, buf, text=True):
@@ -667,6 +617,8 @@ def binding(sanitize=False):
         return o
 
     class _Role:
+        _lib = lib
+
         def __init__(self, app, g):
             if not isinstance(app, App):
                 raise TypeError("an App")
@@ -716,38 +668,12 @@ def binding(sanitize=False):
             _check(rc)
             return Pointer(v[0], v[1], bool(v[2]), bool(v[3]), bool(v[4]))
 
-    class Theme(_Role):
+    class Theme(_Role, _face.ThemeRows):
         def colors(self):
             gen = c.c_uint32()
             _check(lib.moy_app_theme_colors(self._app._p, self._g, c.byref(gen)))
             return self._app._colors_at(gen.value,
                                         bool(lib.moy_app_theme_near(self._app._p, self._g)))
-
-        def token(self, role):
-            v = c.c_int32()
-            rc = lib.moy_app_theme_token(self._app._p, self._g, int(role), c.byref(v))
-            if rc == ABSENT:
-                return None
-            _check(rc)
-            return v.value
-
-        def gen(self):
-            return _scalar(lib.moy_app_theme_gen(self._app._p, self._g))
-
-        def light(self):
-            return bool(_scalar(lib.moy_app_theme_light(self._app._p, self._g)))
-
-        def _name(self, fn):
-            buf = c.create_string_buffer(NAME_MAX + 1)
-            n = c.c_size_t()
-            _check(fn(self._app._p, self._g, buf, NAME_MAX + 1, c.byref(n)))
-            return buf.raw[:n.value].decode("utf-8", "surrogateescape")
-
-        def name(self):
-            return self._name(lib.moy_app_theme_name)
-
-        def variant(self):
-            return self._name(lib.moy_app_theme_variant)
 
         def set(self, *a, **kw):
             return self._app._serve(self._g, "theme", "set")(self._g, *a, **kw)
@@ -828,33 +754,8 @@ def binding(sanitize=False):
             Prefs._flushed(self, rc)
             return rc == OK
 
-    class Clipboard(_Role):
-        def put_text(self, text):
-            b = str(text).encode("utf-8", "surrogateescape")
-            rc = lib.moy_app_clip_put_text(self._app._p, self._g, b, len(b))
-            if rc != BAD:
-                _check(rc)
-            return rc == OK
-
-        def text(self):
-            n = c.c_size_t()
-            _check(lib.moy_app_clip_text(self._app._p, self._g, None, 0, c.byref(n)))
-            buf = c.create_string_buffer(n.value or 1)
-            _check(lib.moy_app_clip_text(self._app._p, self._g, buf, n.value,
-                                         c.byref(n)))
-            return buf.raw[:n.value].decode("utf-8", "surrogateescape")
-
-        def kind(self):
-            k = lib.moy_app_clip_kind(self._app._p, self._g)
-            if k < 0:
-                _raise(-k)
-            return "text" if k == 1 else None
-
-        def seq(self):
-            s = lib.moy_app_clip_seq(self._app._p, self._g)
-            if s < 0:
-                _raise(-s)
-            return s
+    class Clipboard(_Role, _face.ClipboardRows):
+        pass
 
     def _names(raw, count, pairs):
         parts = raw.split("\0")
@@ -906,9 +807,13 @@ def binding(sanitize=False):
                 return (None, self._app._err(rc))
             return (self._app._take(buf, not binary.value), None)
 
-        def _named(self, fn, *args):
+        def _named(self, fn, *args, absent_none=False):
+            """`absent_none`: a row that found nothing answers (None, None),
+            as load does."""
             out = c.create_string_buffer(UF_NAME_MAX + 1)
             rc = fn(self._a(), self._g, *args, out)
+            if absent_none and rc == ABSENT:
+                return (None, None)
             if rc != OK:
                 return (None, self._app._err(rc))
             return (out.value.decode("utf-8", "surrogateescape"), None)
@@ -918,7 +823,8 @@ def binding(sanitize=False):
             return self._named(lib.moy_app_files_save, _str(kind), _str(name), b, len(b))
 
         def delete(self, kind, name):
-            return self._named(lib.moy_app_files_delete, _str(kind), _str(name))
+            return self._named(lib.moy_app_files_delete, _str(kind), _str(name),
+                               absent_none=True)
 
         def duplicate(self, kind, name):
             return self._named(lib.moy_app_files_duplicate, _str(kind), _str(name))
@@ -970,7 +876,7 @@ def binding(sanitize=False):
             if err.value == 0:
                 return (None, None)
             if err.value == BAD_UF:
-                return ("a refused argument", None)
+                return (face_errors.ERR[BAD], None)
             return (str(OSError(err.value, os.strerror(err.value))), None)
 
         # -- the codecs: their value, or None
@@ -1079,8 +985,8 @@ def binding(sanitize=False):
         verbs = [r["verb"] for r in _TABLE if r["role"] == role and r["server"] != "c"]
         return type(role.capitalize(), (_Role,), {v: row(v) for v in verbs})
 
-    Carts, Nav, Notify, Install = (
-        _served_role(r) for r in ("carts", "nav", "notify", "install"))
+    Carts, Nav, Notify, Install, Wifi, Bt, Usb = (
+        _served_role(r) for r in ("carts", "nav", "notify", "install", "wifi", "bt", "usb"))
 
     class Wallpaper(_served_role("wallpaper")):
         """The wallpaper's rows served in Python, and its copy's, in C."""
@@ -1137,9 +1043,7 @@ def binding(sanitize=False):
 
     table_names = tuple(lib.moy_app_table_name(i).decode() for i in range(len(_TABLE)))
 
-    class _Native(c.Structure):
-        _fields_ = [("symbol", c.c_char_p), ("fn", c.c_void_p),
-                    ("signature", c.c_char_p), ("attachment", c.c_void_p)]
+    from moy_wasm_face import NativeSymbol as _Native
 
     def wasm_rows():
         n = c.c_uint32()
@@ -1159,10 +1063,7 @@ def binding(sanitize=False):
         if not on:
             lib.moy_app_door_bind(None)
             return
-        try:
-            import moy_loop
-        except ImportError:
-            from runtime import moy_loop
+        import moy_loop
         fn = moy_loop._lib().moy_loop_role
         lib.moy_app_door_bind(c.cast(fn, c.c_void_p))
 
@@ -1171,6 +1072,7 @@ def binding(sanitize=False):
         App=App, kernel=kernel, Damage=Damage, Surface=Surface, Theme=Theme,
         Prefs=Prefs, Clipboard=Clipboard, Artwork=Artwork, Files=Files,
         Carts=Carts, Nav=Nav, Notify=Notify, Wallpaper=Wallpaper, Install=Install,
+        Wifi=Wifi, Bt=Bt, Usb=Usb,
         policy=policy, manifest_error=manifest_error, id_for=id_for,
         roles=lambda: role_names, rows=lambda: row_names, perms=perms,
         table=lambda: table_names, door_bind=door_bind, wasm_rows=wasm_rows,

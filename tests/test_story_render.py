@@ -14,6 +14,7 @@ import os
 
 import pytest
 
+import pixel_goldens
 from runtime import host_canvas, moy_carts
 from runtime import story_doc as D
 from runtime import story_render as R
@@ -119,9 +120,12 @@ def test_the_slide_at_each_zoom_is_its_pinned_pixels(zoom):
     cv = _draw(_full_slide(), zoom[0], zoom[1], _images())
     got = hashlib.sha256(bytes(cv._buf)).hexdigest()[:16]
     want = STORY_HASHES[zoom]
+    png = pixel_goldens.check("slide_%d_%d" % zoom, got, want,
+                              lambda: pixel_goldens.rgb565_rows(cv._buf, cv.w, cv.h),
+                              cv.w, cv.h)
     assert want is not None and got == want, (
-        "the slide at %d/%d drew %s (STORY_HASHES pins it): look at it before taking it"
-        % (zoom[0], zoom[1], got))
+        "the slide at %d/%d drew %s (STORY_HASHES pins it): look at it before taking it%s"
+        % (zoom[0], zoom[1], got, pixel_goldens.message([png])))
 
 
 def test_a_zoom_draws_the_same_layout_smaller():

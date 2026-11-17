@@ -5,6 +5,10 @@
 #define _DEFAULT_SOURCE
 #endif
 
+#include "moy_platform.h"
+
+#include "moy_kmem.h"
+
 #include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -14,6 +18,7 @@
 
 #include "moy_wasi.h"
 #include "moy_evq.h"
+#include "moy_evq_codes.h"
 #include "moy_screen_slot.h"
 #include "moy_sh_board.h"
 #include "moy_log.h"
@@ -28,13 +33,8 @@ _Static_assert(MOY_WASI_POLL_US == MOY_SH_PROG_POLL_US && MOY_WASI_RUNNING == MO
                "a spawned program's ends are moy_sh_prog.h's");
 _Static_assert(MOY_EVQ_FD >= 3 && MOY_EVQ_FD < MOY_WASI_FDS, "the event descriptor is a slot");
 
-// A board is told by the header it has: ESP_PLATFORM is not defined for a
-// usermod's sources on the esp32 port (moy_net.h's MOY_NET_CLOCK_EPOCH).
-#if __has_include("esp_heap_caps.h")
-#define MOY_WASI_BOARD 1
-#endif
 
-#ifdef MOY_WASI_BOARD
+#ifdef MOY_ON_BOARD
 #include <sys/time.h>
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
@@ -55,6 +55,29 @@ enum {
     W_NOTSUP = 58, W_PERM = 63, W_PIPE = 64, W_RANGE = 68, W_ROFS = 69, W_SPIPE = 70, W_XDEV = 75,
     W_NOTCAPABLE = 76,
 };
+
+// The WASI errno of a door's negative answer (native/os_calls.json's errors),
+// which a console call's verb answers too (shell_servers' _DOOR_*).
+static int32_t role_errno(int32_t r) {
+    switch (-r) {
+#define X(code, eno) case MOY_APP_##code: return W_##eno;
+        MOY_APP_ERRNO(X)
+#undef X
+        default:
+            return role_errno(-MOY_APP_FALLBACK);
+    }
+}
+
+// The WASI errno of an event queue's code (native/os_calls.json's evq_errors).
+static int32_t evq_errno(int rc) {
+    switch (rc) {
+#define X(code, eno, app) case MOY_EVQ_##code: return W_##eno;
+        MOY_EVQ_CODES(X)
+#undef X
+        default:
+            return W_INVAL;
+    }
+}
 
 enum { FT_UNKNOWN = 0, FT_CHAR = 2, FT_DIR = 3, FT_FILE = 4 };
 
@@ -121,12 +144,7 @@ struct moy_wasi {
 // -- the host's pieces ------------------------------------------------------------
 
 static void *w_alloc(size_t n) {
-#ifdef MOY_WASI_BOARD
-    void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    return p != NULL ? p : calloc(1, n);
-#else
-    return calloc(1, n);
-#endif
+    return moy_kalloc(n, MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK | MOY_KMEM_ZERO);
 }
 
 static void w_free(void *p) {
@@ -142,20 +160,11 @@ static char *w_strdup(const char *p) {
     return q;
 }
 
-static int64_t mono_us(void) {
-#ifdef MOY_WASI_BOARD
-    return esp_timer_get_time();
-#else
-    struct timespec t;
-    clock_gettime(CLOCK_MONOTONIC, &t);
-    return (int64_t)t.tv_sec * 1000000 + t.tv_nsec / 1000;
-#endif
-}
 
 // Nanoseconds since 1970. A board's clock counts from 2000 (moy_wifi.c), as
 // `date` reads it.
 static uint64_t real_ns(void) {
-#ifdef MOY_WASI_BOARD
+#ifdef MOY_ON_BOARD
     struct timeval tv;
     gettimeofday(&tv, NULL);
     return ((uint64_t)tv.tv_sec + 946684800u) * 1000000000ull + (uint64_t)tv.tv_usec * 1000u;
@@ -167,7 +176,7 @@ static uint64_t real_ns(void) {
 }
 
 static void fill_random(uint8_t *p, size_t n) {
-#ifdef MOY_WASI_BOARD
+#ifdef MOY_ON_BOARD
     moy_seal_random(p, n);
 #elif defined(__EMSCRIPTEN__)
     for (size_t k; n > 0; p += k, n -= k) {
@@ -271,7 +280,7 @@ moy_wasi_t *moy_wasi_new(moy_sh_t *s, int argc, const char *const *argv, const c
     w->magic = MAGIC;
     w->s = s;
     w->hop = hop;
-    if (moy_sh_prog_init(&w->prog, s, roots, bg_pid, budget_ms, mono_us(), w_alloc) != 0) {
+    if (moy_sh_prog_init(&w->prog, s, roots, bg_pid, budget_ms, moy_now_us(), w_alloc) != 0) {
         w->prog.roots = NULL;
         moy_wasi_free(w);
         return NULL;
@@ -319,8 +328,9 @@ moy_wasi_t *moy_wasi_new(moy_sh_t *s, int argc, const char *const *argv, const c
 // listed at their start, taken off before their free, each under the
 // kernel's lock (native/moy_kernel/moy_lock.h; weak, for a build without it,
 // whose one task needs none).
-void moy_lock_take(void) __attribute__((weak));
-void moy_lock_give(void) __attribute__((weak));
+#include "moy_lock.h"
+#pragma weak moy_lock_take
+#pragma weak moy_lock_give
 static moy_wasi_t *s_svcs;
 
 static void svcs_lock(bool take) {
@@ -380,7 +390,7 @@ moy_wasi_t *moy_wasi_service(uint32_t pid, const char *id) {
     w->pid = pid > 1u ? pid : 0u;
     w->fd[MOY_EVQ_FD].kind = K_EVQ;
     w->fd[MOY_EVQ_FD].sh = -1;
-    w->started_us = mono_us();
+    w->started_us = moy_now_us();
     if (w->pid != 0u) {
         svcs_lock(true);
         w->svc_next = s_svcs;
@@ -451,7 +461,7 @@ static void stop(moy_wasi_t *w, int code) {
 // Whether the run goes on: the session's Ctrl-C and the budget where it has
 // a session; a service's ends only by its exit, its stop or a kill.
 static bool going(moy_wasi_t *w) {
-    return w->s != NULL ? moy_sh_prog_poll(&w->prog, mono_us()) : !w->prog.exited;
+    return w->s != NULL ? moy_sh_prog_poll(&w->prog, moy_now_us()) : !w->prog.exited;
 }
 
 static void run_body(void *arg) {
@@ -476,11 +486,11 @@ static uint32_t go(wasm_exec_env_t env, body_fn fn, call_t *c) {
     if (w->hop == NULL) {
         run_body(c);
     } else {
-        int64_t t0 = mono_us();
+        int64_t t0 = moy_now_us();
         if (w->hop(run_body, c) != 0) {
             c->r = W_IO;                // no task to touch the session on
         }
-        w->hopped_us += mono_us() - t0;
+        w->hopped_us += moy_now_us() - t0;
     }
     if (w->prog.exited) {
         wasm_runtime_set_exception(c->inst, EXIT_MSG);
@@ -631,7 +641,7 @@ static void b_clock(call_t *c) {
         c->r = W_INVAL;
         return;
     }
-    uint64_t v = c->a[2] ? 1000u : id == 0 ? real_ns() : (uint64_t)mono_us() * 1000u;
+    uint64_t v = c->a[2] ? 1000u : id == 0 ? real_ns() : (uint64_t)moy_now_us() * 1000u;
     c->r = put64(c, c->a[1], v) ? W_OK : W_FAULT;
 }
 
@@ -732,7 +742,7 @@ static void b_evq_read(call_t *c) {
     size_t got = 0;
     int rc = moy_evq_read(w->pid, p, len, &got);
     c->r = rc == MOY_EVQ_OK ? (put32(c, c->a[3], (uint32_t)got) ? W_OK : W_FAULT)
-           : rc == MOY_EVQ_EMPTY ? W_AGAIN : rc == MOY_EVQ_RANGE ? W_MSGSIZE : W_BADF;
+           : (uint32_t)evq_errno(rc);
 }
 
 // The moybyte.os imports (moy_wasi_os_rows.h): the kernel's calls on the
@@ -754,32 +764,15 @@ static int os_text(const char *p, uint32_t n, char *out, size_t cap) {
     return memchr(out, 0, n) != NULL ? -1 : (int)n;
 }
 
-static int32_t os_errno(int rc) {
-    return -(int32_t)(rc == MOY_EVQ_STALE ? W_BADF : rc == MOY_EVQ_FULL ? W_MFILE
-                      : rc == MOY_EVQ_NOMEM ? W_NOMEM : W_INVAL);
-}
-
 static int32_t w_os_send(wasm_exec_env_t e, const char *app, uint32_t app_n, const char *name,
                          uint32_t name_n, const char *args, uint32_t args_n) {
     moy_wasi_t *w = os_run(e);
-    char a[MOY_EVQ_APP], nm[MOY_EVQ_NAME];
     if (w == NULL || w->pid == 0) {
         return -(int32_t)W_BADF;
     }
-    if (os_text(app, app_n, a, sizeof a) < 0 || os_text(name, name_n, nm, sizeof nm) <= 0) {
-        return -(int32_t)W_INVAL;
-    }
-    const char *j = args_n ? args : "[]";
-    size_t jn = args_n ? args_n : 2u;
-    while (jn && (*j == ' ' || *j == '\t' || *j == '\n')) {
-        j++;
-        jn--;
-    }
-    if (!jn || *j != '[') {
-        return -(int32_t)W_INVAL;
-    }
-    int took = moy_evq_send(w->pid, a, nm, j, jn, NULL);
-    return took == -MOY_EVQ_FULL ? -(int32_t)W_AGAIN : took < 0 ? os_errno(-took) : took;
+    uint32_t took = 0;
+    int rc = moy_evq_send_text(w->pid, app, app_n, name, name_n, args, args_n, &took);
+    return rc == MOY_EVQ_OK ? (int32_t)took : -evq_errno(rc);
 }
 
 static int32_t w_os_on(wasm_exec_env_t e, const char *name, uint32_t name_n, int32_t on) {
@@ -792,7 +785,7 @@ static int32_t w_os_on(wasm_exec_env_t e, const char *name, uint32_t name_n, int
         return -(int32_t)W_INVAL;
     }
     int rc = moy_evq_listen(w->pid, nm, on != 0);
-    return rc == MOY_EVQ_OK ? 0 : os_errno(rc);
+    return rc == MOY_EVQ_OK ? 0 : -evq_errno(rc);
 }
 
 static int32_t w_os_log(wasm_exec_env_t e, int32_t level, const char *text, uint32_t text_n) {
@@ -808,17 +801,23 @@ static int32_t w_os_log(wasm_exec_env_t e, int32_t level, const char *text, uint
     return 0;
 }
 
-// THE SCREEN (screen, present): a WASI app in the Player draws a screen of
-// its own, handed over whole into its slot (moy_screen_slot.h), which its
-// runner opened (runtime/run/wasi_run.py). A present waits while the console
-// holds the last frame: not its wake's run, as a call's wait is not. THE
+// THE SCREEN (screen, present, ui_tell): a WASI app in the Player draws a
+// screen of its own, handed over whole into its slot (moy_screen_slot.h),
+// which its runner opened (runtime/run/wasi_run.py), the toolkit's answers
+// told beside it. A present waits while the console holds the last frame:
+// not its wake's run, as a call's wait is not. THE
 // THEME (ui_pull, ui_font_pull): the console's theme block and the fonts it
 // names, for the toolkit the program links (moy_ui.h's moy_ui_theme_pull),
 // weak here, so an image without the toolkit answers none.
 
-uint32_t moy_ui_theme_pull(uint32_t have, void *buf, size_t cap) __attribute__((weak));
-uint32_t moy_ui_theme_font(uint32_t gen, uint32_t font, void *buf, size_t cap)
-    __attribute__((weak));
+#if __has_include("moy_ui.h")
+#include "moy_ui.h"
+#else
+uint32_t moy_ui_theme_pull(uint32_t have, void *buf, size_t cap);
+uint32_t moy_ui_theme_font(uint32_t gen, uint32_t font, void *buf, size_t cap);
+#endif
+#pragma weak moy_ui_theme_pull
+#pragma weak moy_ui_theme_font
 
 static int32_t w_os_screen(wasm_exec_env_t e, int32_t *wp, int32_t *hp) {
     moy_wasi_t *w = os_run(e);
@@ -844,12 +843,20 @@ static int32_t w_os_present(wasm_exec_env_t e, const void *px, uint32_t n) {
     if (w == NULL || w->pid == 0) {
         return -(int32_t)W_BADF;
     }
-    int64_t t0 = mono_us();
+    int64_t t0 = moy_now_us();
     w->calling = 1;
     int r = moy_screen_slot_present(w->pid, px, n);
     w->calling = 0;
-    w->hopped_us += mono_us() - t0;
+    w->hopped_us += moy_now_us() - t0;
     return r < 0 ? -(int32_t)wasi_errno(-r) : 0;
+}
+
+static int32_t w_os_ui_tell(wasm_exec_env_t e, int32_t answers) {
+    moy_wasi_t *w = os_run(e);
+    if (w == NULL || w->pid == 0) {
+        return -(int32_t)W_BADF;
+    }
+    return moy_screen_slot_tell(w->pid, (uint32_t)answers) == 0 ? 0 : -(int32_t)W_NODEV;
 }
 
 static int32_t w_os_ui_pull(wasm_exec_env_t e, int32_t have, void *buf, uint32_t cap) {
@@ -915,24 +922,6 @@ static bool json_str(char *out, size_t cap, size_t *at, const char *p, uint32_t 
     return true;
 }
 
-// The errno of a door's negative answer (moy_app.h's codes), which a
-// console call's verb answers too (shell_servers' _DOOR_*, moybyte.ABSENT):
-// WASI's numbering of the errno an ELF module reads for it.
-static int32_t role_errno(int32_t r) {
-    switch (-r) {
-        case MOY_APP_DENIED: case MOY_APP_STALE: return W_ACCES;
-        case MOY_APP_FULL: return W_RANGE;
-        case MOY_APP_NOMEM: return W_NOMEM;
-        case MOY_APP_ABSENT: return W_NOENT;
-        case MOY_APP_NOSTORE: return W_NODEV;
-        case MOY_APP_IO: return W_IO;
-        case MOY_APP_NEEDS_VM: return W_AGAIN;
-        case MOY_APP_FORGED: return W_BADMSG;
-        case MOY_APP_BUSY: return W_BUSY;
-        default: return W_INVAL;
-    }
-}
-
 static int32_t call_wait(moy_wasi_t *w, uint32_t ticket, int64_t t0);
 
 static int32_t os_console(wasm_exec_env_t e, const char *name, const char *args, size_t n) {
@@ -945,11 +934,11 @@ static int32_t os_console(wasm_exec_env_t e, const char *name, const char *args,
     if (rc != MOY_VMQ_OK) {
         return -(int32_t)(rc == MOY_VMQ_FULL ? W_AGAIN : W_NOMEM);
     }
-    int64_t t0 = mono_us();
+    int64_t t0 = moy_now_us();
     w->calling++;
     int32_t v = call_wait(w, ticket, t0);
     w->calling--;
-    w->hopped_us += mono_us() - t0;     // the console's time, not its wake's
+    w->hopped_us += moy_now_us() - t0;     // the console's time, not its wake's
     return v;
 }
 
@@ -987,8 +976,8 @@ static int32_t call_wait(moy_wasi_t *w, uint32_t ticket, int64_t t0) {
             return -(int32_t)W_INTR;
         }
         if (!moy_vmq_vm_up()) {
-            t0 = mono_us();                 // no VM to answer it: it waits for one
-        } else if (mono_us() - t0 >= (int64_t)CALL_MS * 1000) {
+            t0 = moy_now_us();                 // no VM to answer it: it waits for one
+        } else if (moy_now_us() - t0 >= (int64_t)CALL_MS * 1000) {
             return -(int32_t)W_AGAIN;
         }
         if (moy_evq_wait(w->pid, CALL_SLICE_MS) != 0 && h_sleeps(w)) {
@@ -1120,11 +1109,11 @@ static int32_t os_role(wasm_exec_env_t e, uint32_t row, int how, const os_arg_t 
     }
     role_call_t c = { &w->run, row, buf, k, out, out != NULL ? cap : 0u, -MOY_APP_NEEDS_VM };
     if (how == OS_HERE) {
-        int64_t t0 = mono_us();         // the console's time (the store's), not its wake's
+        int64_t t0 = moy_now_us();         // the console's time (the store's), not its wake's
         w->calling++;
         c.r = moy_app_role_here(c.run->a, c.run->g, c.row, c.arg, c.n, c.out, c.cap);
         w->calling--;
-        w->hopped_us += mono_us() - t0;
+        w->hopped_us += moy_now_us() - t0;
     }
     if (how == OS_HERE && c.r != -MOY_APP_NEEDS_VM) {
         // answered on the module's own thread
@@ -1139,11 +1128,11 @@ static int32_t os_role(wasm_exec_env_t e, uint32_t row, int how, const os_arg_t 
             }
         }
     } else if (w->hop != NULL) {
-        int64_t t0 = mono_us();
+        int64_t t0 = moy_now_us();
         if (w->hop(role_body, &c) != 0) {
             c.r = -MOY_APP_NEEDS_VM;
         }
-        w->hopped_us += mono_us() - t0;
+        w->hopped_us += moy_now_us() - t0;
 #ifdef MOY_WASI_WEB
     } else if (how != OS_HOP) {
         // the page's one thread is the VM's: the row runs in place
@@ -1900,7 +1889,7 @@ static bool h_sleeps(moy_wasi_t *w) {
 // own task's.
 static void nap(moy_wasi_t *w, int ms) {
     if (w->s == NULL) {
-#ifdef MOY_WASI_BOARD
+#ifdef MOY_ON_BOARD
         TickType_t t = pdMS_TO_TICKS(ms);
         vTaskDelay(t ? t : 1);
 #else
@@ -1973,7 +1962,7 @@ static void b_poll(call_t *c) {
         memcpy(&flags, s + 40, 2);
         int64_t us = (int64_t)(timeout / 1000u);
         if (flags & 1) {
-            int64_t now = id == 0 ? (int64_t)(real_ns() / 1000u) : mono_us();
+            int64_t now = id == 0 ? (int64_t)(real_ns() / 1000u) : moy_now_us();
             us = us > now ? us - now : 0;
         }
         if (wait_us < 0 || us < wait_us) {
@@ -2002,8 +1991,8 @@ static void b_poll(call_t *c) {
 // run has ended (the task serving it polls Ctrl-C and the budget; with no
 // `hop` nothing else does, so the slice polls them here).
 static uint32_t rest(wasm_exec_env_t e, moy_wasi_t *w, int64_t us) {
-    int64_t end = mono_us() + us;
-    for (int64_t left = us; left > 0; left = end - mono_us()) {
+    int64_t end = moy_now_us() + us;
+    for (int64_t left = us; left > 0; left = end - moy_now_us()) {
         nap(w, left > 20000 ? 20 : (int)((left + 999) / 1000));
         if (w->hop == NULL) {
             going(w);
@@ -2017,17 +2006,18 @@ static uint32_t rest(wasm_exec_env_t e, moy_wasi_t *w, int64_t us) {
 }
 
 // The one kernel wait on the run's event queue until an event is queued or
-// `us` passes (<0: no deadline), in slices: W_OK with *woke where an event
-// came, W_INTR as soon as the run has ended.
+// `us` passes (<0: no deadline, 0: due already, the queue read once), in
+// slices: W_OK with *woke where an event came, W_INTR as soon as the run has
+// ended.
 static uint32_t evq_rest(wasm_exec_env_t e, moy_wasi_t *w, int64_t us, bool *woke) {
-    int64_t end = us < 0 ? 0 : mono_us() + us;
+    int64_t end = us < 0 ? 0 : moy_now_us() + us;
     *woke = false;
     for (;;) {
         if (w->hup || (moy_evq_queued(w->pid) > 0 && !moy_super_held(w->pid))) {
             *woke = true;
             return W_OK;
         }
-        int64_t left = end ? end - mono_us() : 20000;
+        int64_t left = end ? end - moy_now_us() : 20000;
         if (left <= 0) {
             return W_OK;
         }
@@ -2048,7 +2038,7 @@ static uint32_t evq_rest(wasm_exec_env_t e, moy_wasi_t *w, int64_t us, bool *wok
 // queue's STEP (moy_evq.h, IN TURN). W_OK with *held where it waited so,
 // W_INTR where the run ended meanwhile.
 static uint32_t wake_end(wasm_exec_env_t e, moy_wasi_t *w, bool *held) {
-    int64_t now = mono_us();
+    int64_t now = moy_now_us();
     if (w->woke_us != 0) {
         int64_t cost = now - w->woke_us - w->hopped_us;
         uint32_t us = (uint32_t)(cost > 0 ? cost : 0);
@@ -2089,17 +2079,18 @@ static uint32_t w_poll_oneoff(wasm_exec_env_t e, void *in_at, void *out_at, uint
         c = (call_t){ .a = { in, out, n, nout } };
         r = go(e, b_poll, &c);
     }
-    int64_t end = (int64_t)c.b[0] >= 0 ? mono_us() + (int64_t)c.b[0] : -1;
+    int64_t end = (int64_t)c.b[0] >= 0 ? moy_now_us() + (int64_t)c.b[0] : -1;
     while (r == W_OK && c.a[5]) {
         bool woke;
-        r = evq_rest(e, w, end < 0 ? -1 : end - mono_us(), &woke);
+        int64_t now = moy_now_us();
+        r = evq_rest(e, w, end < 0 ? -1 : end > now ? end - now : 0, &woke);
         if (r != W_OK || !woke) {
             break;                      // the clock's event stands
         }
         c = (call_t){ .a = { in, out, n, nout } };
         r = go(e, b_poll, &c);
     }
-    w->woke_us = mono_us();
+    w->woke_us = moy_now_us();
     w->hopped_us = 0;
     w->struck = 0;
     w->wakes++;
@@ -2244,8 +2235,12 @@ static const NativeSymbol OS[] = {
 
 // A board's session registers through moy_wasm_register_rows
 // (modmoy_wasm.c); the host has no sessions and registers directly.
-int moy_wasm_register_rows(const char *module, const NativeSymbol *rows, uint32_t n)
-    __attribute__((weak));
+#if __has_include("moy_wasm_session.h") && __has_include("wasm_export.h")
+#include "moy_wasm_session.h"
+#else
+int moy_wasm_register_rows(const char *module, const NativeSymbol *rows, uint32_t n);
+#endif
+#pragma weak moy_wasm_register_rows
 
 static bool register_rows(const char *module, const NativeSymbol *rows, uint32_t n) {
     return moy_wasm_register_rows != NULL ? moy_wasm_register_rows(module, rows, n) != 0
@@ -2339,7 +2334,7 @@ static void drain(const moy_wasi_runner_t *r, void *job) {
 }
 
 int moy_wasi_step(moy_wasi_t *w, const moy_wasi_runner_t *r, void *job, uint32_t max_us) {
-    if (moy_sh_prog_step(&w->prog, max_us, mono_us, r->done, r->serve, job)
+    if (moy_sh_prog_step(&w->prog, max_us, moy_now_us, r->done, r->serve, job)
         == MOY_SH_PROG_RUNNING) {
         return MOY_WASI_RUNNING;
     }
@@ -2374,7 +2369,7 @@ void moy_wasi_kill(moy_wasi_t *w, int code) {
 }
 
 const char *moy_wasi_watch(moy_wasi_t *w) {
-    int64_t now = mono_us();
+    int64_t now = moy_now_us();
     if (w->prog.exited || w->hup) {
         return NULL;                    // ending
     }

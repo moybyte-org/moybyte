@@ -271,7 +271,7 @@ def _petme_hello(cv):
 
 def _frame(ws):
     for _ in range(3):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30)
 
 

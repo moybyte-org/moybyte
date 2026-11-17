@@ -12,10 +12,7 @@ picture is the `artwork` role's (`current`), and a renamed drawing is followed
 there (`artwork.follow`).
 """
 
-try:
-    from file_widgets import cover_indices
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.file_widgets import cover_indices
+from file_widgets import cover_indices
 
 
 DRAWINGS = "drawings"

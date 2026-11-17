@@ -1,0 +1,49 @@
+--- a/components/esp_driver_ppa/src/ppa_core.c
++++ b/components/esp_driver_ppa/src/ppa_core.c
+@@ -417,16 +417,24 @@
+                                  (oper_type == PPA_OPERATION_BLEND) ? sizeof(ppa_blend_oper_t) :
+                                  (oper_type == PPA_OPERATION_FILL) ? sizeof(ppa_fill_oper_t) : 0;
+     assert(ppa_trans_desc_size != 0);
+-    size_t trans_elm_storage_size = sizeof(ppa_trans_t) + SIZEOF_DMA2D_TRANS_T + sizeof(dma2d_trans_config_t) + sizeof(ppa_dma2d_trans_on_picked_config_t) + ppa_trans_desc_size;
++    // Moybyte P4: only the 2D-DMA transaction context, which holds an atomic,
++    // is allocated from internal memory; the rest of the element (the PPA
++    // operation and the 2D-DMA configuration) takes PPA_MEM_ALLOC_CAPS. A
++    // client keeps its elements for as long as it is registered, so its whole
++    // queue depth of them would otherwise sit in internal RAM.
++    size_t trans_elm_storage_size = sizeof(ppa_trans_t) + sizeof(dma2d_trans_config_t) + sizeof(ppa_dma2d_trans_on_picked_config_t) + ppa_trans_desc_size;
+     for (int i = 0; i < trans_elm_num; i++) {
+-        // always allocate memory from internal memory because the transaction storage embeds a dma2d_trans_t which contains atomic variable
+-        void *trans_elm_storage = heap_caps_calloc(1, trans_elm_storage_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
++        void *trans_elm_storage = heap_caps_calloc(1, trans_elm_storage_size, PPA_MEM_ALLOC_CAPS);
++        dma2d_trans_t *dma_trans_elm = (dma2d_trans_t *)heap_caps_calloc(1, SIZEOF_DMA2D_TRANS_T, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+         SemaphoreHandle_t ppa_trans_sem = xSemaphoreCreateBinaryWithCaps(PPA_MEM_ALLOC_CAPS);
+ 
+-        if (!trans_elm_storage || !ppa_trans_sem) {
++        if (!trans_elm_storage || !dma_trans_elm || !ppa_trans_sem) {
+             if (trans_elm_storage) {
+                 free(trans_elm_storage);
+             }
++            if (dma_trans_elm) {
++                free(dma_trans_elm);
++            }
+             if (ppa_trans_sem) {
+                 vSemaphoreDeleteWithCaps(ppa_trans_sem);
+             }
+@@ -436,8 +444,7 @@
+ 
+         // Construct trans_elm
+         ppa_trans_t *new_trans_elm = (ppa_trans_t *)trans_elm_storage;
+-        dma2d_trans_t *dma_trans_elm = (dma2d_trans_t *)((uint32_t)trans_elm_storage + sizeof(ppa_trans_t));
+-        dma2d_trans_config_t *dma_trans_desc = (dma2d_trans_config_t *)((uint32_t)dma_trans_elm + SIZEOF_DMA2D_TRANS_T);
++        dma2d_trans_config_t *dma_trans_desc = (dma2d_trans_config_t *)((uint32_t)trans_elm_storage + sizeof(ppa_trans_t));
+         ppa_dma2d_trans_on_picked_config_t *trans_on_picked_desc = (ppa_dma2d_trans_on_picked_config_t *)((uint32_t)dma_trans_desc + sizeof(dma2d_trans_config_t));
+         void *ppa_trans_desc = (void *)((uint32_t)trans_on_picked_desc + sizeof(ppa_dma2d_trans_on_picked_config_t));
+ 
+@@ -462,6 +469,7 @@
+         if (trans_elm->sem) {
+             vSemaphoreDeleteWithCaps(trans_elm->sem);
+         }
++        free(trans_elm->dma_trans_placeholder);
+         free(trans_elm);
+     }
+ }

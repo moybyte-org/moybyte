@@ -1,5 +1,9 @@
 // moy_fetch: the `http` device API's driver (moy_fetch.h).
 
+#include "moy_tasks.h"
+
+#include "moy_platform.h"
+
 #include "moy_fetch.h"
 
 #include <stdio.h>
@@ -13,14 +17,9 @@
 #define FETCH_EVENTS 1
 #include "moy_input.h"
 #endif
-// ESP_PLATFORM is not defined for a usermod's sources on the esp32 port, so a
-// board is recognised by the header it has.
-#if __has_include("esp_heap_caps.h")
-#define FETCH_ON_BOARD 1
-#endif
 #endif
 
-#if defined(FETCH_ON_BOARD) && defined(MOY_API_HTTP)
+#if defined(MOY_ON_BOARD) && defined(MOY_API_HTTP)
 #define FETCH_TASK 1
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
@@ -114,7 +113,7 @@ static void open_source(void) {
 }
 
 #ifdef FETCH_TASK
-extern int moy_net_dialing(void) __attribute__((weak));
+#pragma weak moy_net_dialing
 
 // The station the console asked for, waited for here rather than on the VM:
 // a request made while it associates resolves its host once it has an address.
@@ -276,7 +275,7 @@ static void worker(void *arg) {
 static int start(void) {
     #ifdef FETCH_TASK
     if (s_task == NULL
-        && xTaskCreatePinnedToCore(worker, "moy_fetch", 6144, NULL, 5, &s_task, 0) != pdPASS) {
+        && !moy_task_spawn(MOY_TASK_FETCH, worker, NULL, &s_task)) {
         s_task = NULL;
         return -MOY_FETCH_ENOMEM;
     }
@@ -286,7 +285,7 @@ static int start(void) {
 }
 
 int moy_fetch_present(void) {
-    #if defined(FETCH_ON_BOARD) && !defined(MOY_API_HTTP)
+    #if defined(MOY_ON_BOARD) && !defined(MOY_API_HTTP)
     return 0;
     #else
     return 1;
@@ -303,8 +302,9 @@ static int open_slot(uint32_t owner, const char *url, uint32_t cap, int stream, 
 // the kernel's table has one client task): the face on the VM's task and a
 // compiled program's handle on its own (moy_fetch_dev.c) take and give slots
 // under it. The worker changes a slot's state under LOCK alone.
-void moy_lease_lock(void) __attribute__((weak));
-void moy_lease_unlock(void) __attribute__((weak));
+#include "moy_lease.h"
+#pragma weak moy_lease_lock
+#pragma weak moy_lease_unlock
 
 static void client_lock(void) {
     if (moy_lease_lock != NULL) {

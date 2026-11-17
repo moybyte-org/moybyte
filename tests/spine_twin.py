@@ -156,7 +156,7 @@ class Table:
 
 class AppRegistry:
     """The system apps, in registration order (which is dispatch precedence).
-    A row is (id, title, text_mode, min_size); apps never unregister."""
+    A row is (id, title, min_size); apps never unregister."""
 
     SLOTS = 64
 
@@ -164,7 +164,7 @@ class AppRegistry:
         self._t = Table(KIND_APP, "app", self.SLOTS)
         self._by_id = {}
 
-    def register(self, app_id, title, text_mode=False, min_size=None):
+    def register(self, app_id, title, min_size=None):
         _kind(app_id)
         if app_id in self._by_id:
             raise ValueError("duplicate app id: " + app_id)
@@ -172,7 +172,7 @@ class AppRegistry:
             min_size = (int(min_size[0]), int(min_size[1]))
             if not all(-(1 << 31) <= v < (1 << 31) for v in min_size):
                 raise ValueError("min_size must fit 32 bits")
-        h = self._t.new((app_id, str(title), bool(text_mode), min_size))
+        h = self._t.new((app_id, str(title), min_size))
         self._by_id[app_id] = h
         return h
 
@@ -188,11 +188,8 @@ class AppRegistry:
     def title(self, h):
         return self._t.get(h)[1]
 
-    def text_mode(self, h):
-        return self._t.get(h)[2]
-
     def min_size(self, h):
-        return self._t.get(h)[3]
+        return self._t.get(h)[2]
 
     def valid(self, h):
         return self._t.valid(h)

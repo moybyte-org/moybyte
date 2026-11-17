@@ -27,7 +27,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/.build"
 MPY_DIR="${BUILD_DIR}/micropython"
-MPY_TAG="${MPY_TAG:-v1.28.0}"
 BOARD="MOYBYTE_ZERO"
 BOARD_DIR="${SCRIPT_DIR}/boards/${BOARD}"
 DIST_DIR="${REPO_ROOT}/dist/zero"
@@ -44,7 +43,7 @@ mkdir -p "${BUILD_DIR}" "${DIST_DIR}"
 # 1) Toolchain: our OWN MicroPython checkout (sharing one would race the other
 #    boards' sed-patched esp32_common.cmake -- and this board patches NEITHER,
 #    so a shared tree would silently hand it the siblings' patches), and
-#    ESP-IDF v5.5.1 reused from the P4, which owns the shared checkout.
+#    ESP-IDF reused from the P4, which owns the shared checkout.
 # ---------------------------------------------------------------------------
 moybyte_clone_micropython
 moybyte_setup_idf esp32s3 \
@@ -142,6 +141,17 @@ moybyte_patch_pwm_ledc_book
 # DECLINED moybyte_patch_p4_ppa_srm_mb_order -- an ESP32-P4 silicon patch: the
 #    PPA SRM engine's macro-block-order bypass. No PPA.
 #
+# DECLINED moybyte_patch_p4_coredump_dram -- an ESP32-P4 linker patch: the
+#    rev < v3 P4's high-SRAM data section. The S3's linker script has none.
+#
+# DECLINED moybyte_patch_p4_heap_low_sram -- an ESP32-P4 heap patch: the
+#    rev < v3 P4's low-SRAM heap priority. The S3 has no such region.
+#
+# DECLINED moybyte_patch_p4_ppa_trans_context -- an ESP32-P4 driver patch: the
+#    PPA's transaction elements. This board has no PPA.
+# DECLINED moybyte_patch_p4_clk_switch -- an ESP32-P4 startup patch: the
+#    P4's CPU clock switch. This board is an ESP32-S3.
+#
 # DECLINED moybyte_patch_esp_hosted_bump -- the ESP-Hosted 2.12.12 bump. That
 #    component is the P4's radio (a C6 slave over SDIO); this board's WiFi is
 #    on-die and its build pulls esp_hosted in nowhere.
@@ -172,27 +182,20 @@ moybyte_patch_pwm_ledc_book
 #    and nothing else) with the web blob generated INTO the staged copy, then
 #    the shared Python modules (board.toml [modules.*]).
 #
-#    ...then the seed roster, PACKED (2026-08-30). This board shipped with NO
-#    carts at all until then -- a flashed Zero came up an empty console and its
-#    roster arrived over a USB cable, or never -- and the arithmetic is why.
-#    BOTH FORMS WERE BUILT: with the plain `CARTS = [...]` the console boards
-#    freeze, this image is 2,830,672 B of the 2,883,584 B slot and leaves
-#    51 KB -- under the board's headroom floor, a failed build, in a
-#    slot this board pays for twice. With the same 35 carts as one raw deflate
-#    stream each it is 2,399,232 B and leaves 473 KB, and
-#    `zero_host.seed_carts()` inflates them into an EMPTY store on first boot.
-#    `--packed` is the only difference from the
-#    console boards' invocation: same generator, same manifests, same
-#    declarations.
+#    ...then the seed roster, PACKED (2026-08-30: one raw deflate stream a
+#    cart, which `zero_host.seed_carts()` seeds as a console seeds its own),
+#    and only the carts board.toml's `[roster] image` names (the core carts,
+#    every app and five games): the rest are official carts the release
+#    publishes, which the page this board serves installs and an update keeps
+#    current (runtime/carts/web_addon.py). `--packed` and `--only` are the
+#    differences from the console boards' invocation: same generator, same
+#    manifests, same declarations.
 # ---------------------------------------------------------------------------
 moybyte_stage_native
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" stage "${SCRIPT_DIR}"
-#    The roster is cut to this board's store and led by the shell's own carts:
-#    board.toml's `[roster]`.
-ZERO_SKIP="$("${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" roster-skip "${SCRIPT_DIR}")"
-ZERO_FIRST="$("${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" roster-first "${SCRIPT_DIR}")"
+ZERO_ONLY="$("${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" roster-only "${SCRIPT_DIR}")"
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_device_carts.py" --packed \
-  "${MODULES_DIR}/carts_data.py" --skip "${ZERO_SKIP}" --first "${ZERO_FIRST}"
+  "${MODULES_DIR}/carts_data.py" --only "${ZERO_ONLY}"
 
 #    The OTA identity stamp (#53). `xiao_zero` is the board id inside the signed
 #    manifest -- reserved in board.toml since this board's rebuild and wired for

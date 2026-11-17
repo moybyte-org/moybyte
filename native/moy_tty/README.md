@@ -20,7 +20,8 @@ server could still serve the web terminal. How a face is reached is
 
 ## What runs where
 
-- **the face task** (`moy_tty`, priority 1, core 0, a 24 KB PSRAM stack)
+- **the face task** (`moy_tty`, priority 1, core 0, a 24 KB PSRAM stack, or
+  12 KB of internal SRAM on a board without PSRAM)
   runs a session's shell: every C built-in, the parse and the line
   discipline, so a long command holds no frame and a slow client blocks only
   this task. Each transport holds it while it serves (`moy_tty_hold`); it is
@@ -88,7 +89,10 @@ An SFTP face adds its request and answer buffers (34 KB and 32 KB) and
 its handles, PSRAM, for its length. A face's record (its line, history and output piece, about 7 KB), the
 session's 32 KB arena (`moy_tty_sh.c`, the most one used is `stats()`'s
 `arena_peak`, measured in #246) and the face task's stack are PSRAM; the
-bridge's two 2 KB buffers live while a page is connected.
+bridge's two 2 KB buffers live while a page is connected. A board without
+PSRAM pays all of it in its one internal heap, so it takes a 12 KB arena and
+the smaller stack, and its SSH server refuses SFTP
+(`native/moy_ssh/README.md`, Memory).
 
 ## Boards
 

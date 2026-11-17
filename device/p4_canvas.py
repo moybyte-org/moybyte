@@ -36,11 +36,11 @@ The two-domain seam (#39) as it runs on both P4 boards:
 
 try:
     from device_canvas import (DeviceCanvas, SystemCanvas, _LayerComp, _IN_PLACE,
-                               _ST_N_FILL, _ST_N_TEXT, _room)
+                               _ST_N_FILL, _ST_N_TEXT, _room, _glass_mod)
     from device_util import _ticks_ms, _ticks_diff
 except ImportError:  # pragma: no cover - host package lane
     from device.device_canvas import (DeviceCanvas, SystemCanvas, _LayerComp, _IN_PLACE,
-                                      _ST_N_FILL, _ST_N_TEXT, _room)
+                                      _ST_N_FILL, _ST_N_TEXT, _room, _glass_mod)
     from device.device_util import _ticks_ms, _ticks_diff
 
 
@@ -54,17 +54,6 @@ class P4SystemCanvas(SystemCanvas):
     # a class attribute so the one system canvas AND its layers share it, and a
     # PPA error demotes to the CPU kernel globally. None = CPU-only (blit565).
     _ppa = None
-
-    # Game-composite filtering: the PPA's SRM scaler is fixed BILINEAR in
-    # silicon (no nearest mode, no flag -- 2026-08-20), which smears pixel-art
-    # carts. False = CRISP PIXELS (Settings row, persisted via
-    # the console's crisp-pixels setter -> set_crisp_scale below): the game
-    # canvas's composite goes nearest-neighbour through moy_ppa.blit_crisp's
-    # SRAM-bounce band pipeline, falling back to the CPU kernel. A compiled
-    # cart's direct-colour frame is scaled from the cart's memory
-    # (present_frame) and keeps the bilinear scale. A class attribute like
-    # _ppa: the one system canvas and its layers share the mode.
-    _smooth = True
 
     @classmethod
     def enable_ppa(cls):
@@ -108,6 +97,13 @@ class P4SystemCanvas(SystemCanvas):
         if ss is not None:
             self.set_strips = ss
             self.strip_moved = comp.strip_moved
+        # A compositor that queues a frame's show behind its stamp shows the
+        # landed ones when asked mid-draw: the WM asks once a drag's restore
+        # has run, so the refresh that takes a stamped frame on glass comes
+        # before the next frame claims the buffer it leaves.
+        sl = getattr(comp, "show_landed", None)
+        if sl is not None:
+            self.show_landed = sl
         # The quiet-frame snapshot (sync_back / _gates_unchanged): the two
         # native gate counters and this surface's clears, as three ints so a
         # play frame builds no tuple. -1 = no frame yet, never "unchanged".
@@ -145,15 +141,18 @@ class P4SystemCanvas(SystemCanvas):
         SystemCanvas.cls(self, c)
 
     def set_crisp_scale(self, on):
-        """Settings -> CRISP PIXELS (probed by the console's crisp-pixels setter): route
-        the game canvas's composite nearest-neighbour instead of the PPA's
-        fixed bilinear -- the palette-based frames, pixel art's. A compiled
-        cart's direct-colour frame (present_frame) keeps the bilinear scale
-        either way. Turning crisp OFF returns blit_crisp's SRAM bounce bands
-        to the internal heap -- that pool is the Lua allocator's first choice,
-        so a mode nobody has on must not tax it."""
+        """Settings -> CRISP PIXELS (probed by the console's crisp-pixels
+        setter): the game composite (moy_glass.game_composite, one C body for
+        this canvas, the rotated compositor's paint route and the kernel's
+        front) goes nearest-neighbour instead of the PPA's fixed bilinear
+        scaler, whose smear pixel art shows -- the palette-based frames.
+        A compiled cart's direct-colour frame (present_frame) keeps the
+        bilinear scale either way. Turning crisp OFF returns the crisp
+        path's SRAM bounce bands to the internal heap -- that pool is the
+        Lua allocator's first choice, so a mode nobody has on must not tax
+        it."""
         on = bool(on)
-        P4SystemCanvas._smooth = not on
+        _glass_mod.game_crisp(on)
         ppa = self._ppa
         if not on and ppa is not None:
             rel = getattr(ppa, "crisp_release", None)
@@ -298,20 +297,23 @@ class P4SystemCanvas(SystemCanvas):
 
     def _blit_game_full(self, gc, ox, oy, scale, defer=False):
         """wm_paint._blit_game's device path (#58/#73): integer-scale the
-        320x240 game canvas into this surface at (ox, oy). Hardware PPA (DMA,
-        ~2.6x faster than the CPU blit -- measured) when available, else the
-        moy_gfx CPU kernel. NOTE the two do NOT write the same bytes: the PPA
-        scaler is fixed bilinear (smeared pixel art), the CPU kernel nearest --
-        which is what the CRISP PIXELS toggle (_smooth above) trades on. In
-        crisp mode moy_ppa.blit_crisp keeps nearest pixels at ~60% of the CPU
-        kernel's cost (SRAM bounce bands + 1:1 DMA ship, byte-exact vs the CPU
-        kernel -- glass-verified); any refusal falls back to the CPU kernel.
+        game canvas into this surface at (ox, oy) through the game composite
+        (moy_glass.game_composite, native/moy_glass/moy_present_game.c): the
+        PPA's banded nearest under CRISP PIXELS, else its bilinear scale (DMA,
+        ~2.6x faster than the CPU blit -- measured), the CPU kernel's nearest
+        where the PPA does not take it. The two scales do NOT write the same
+        bytes, which is the trade CRISP PIXELS makes; the crisp path and the
+        CPU kernel do. A PPA error demotes the composite to the CPU kernel,
+        and this canvas's other PPA hooks with it.
 
-        defer=True (a QUIET game frame, where this is the frame's LAST framebuffer
-        write) kicks the PPA async and hands the show to P4Compositor.flush ->
-        present_pending, so the DMA overlaps the next frame's input poll (#58
-        composite-overlap budget lever). full-paint frames pass defer=False so
-        the following chrome never races the DMA."""
+        defer=True (a QUIET game frame, where this is the frame's LAST
+        framebuffer write) leaves the PPA's op in flight and hands the show
+        to P4Compositor.flush -> present_pending, so the DMA overlaps the next
+        frame's input poll (#58 composite-overlap budget lever). Full-paint
+        frames pass defer=False so the following chrome never races the DMA.
+        NOTE the DOUBLE GAME CANVAS (copy-on-swap so the pending composite
+        could go fence-free) was built and REVERTED 2026-07-28: windowed
+        Brick Siege 56 -> 41fps; #58 has the numbers."""
         fb = getattr(gc, "flush_batch", None)
         if fb is not None:
             fb()
@@ -319,26 +321,23 @@ class P4SystemCanvas(SystemCanvas):
         ox = int(ox)
         oy = int(oy)
         scale = int(scale)
-        ppa = self._ppa
+        comp = self._comp
         # A ROTATED compositor (a landscape desk on portrait glass) presents by
         # rotating the paint buffer, so the composite lands in the paint buffer
         # synchronously -- there is no scan-out switch to defer -- and a quiet
-        # frame instead tells the compositor which rect it may rotate alone.
-        if getattr(self._comp, "rotated", False):
-            # Register the composite and let the compositor decide at flush:
-            # a quiet frame (nothing else drew -- the gates below) goes to the
-            # scan buffer directly, anything else takes the paint route. The
-            # PPA only wins bilinear; crisp pixels take the paint route too.
-            comp = self._comp
-            direct = (ppa is not None and P4SystemCanvas._smooth
-                      and ox >= 0 and oy >= 0
-                      and ox + gc.w * scale <= self.w
-                      and oy + gc.h * scale <= self.h)
-            comp.mark_game(gc._buf, gc.w, gc.h, ox, oy, scale,
-                           lambda: self._composite_paint(gc, ox, oy, scale),
-                           self._gates_unchanged, direct)
+        # frame (nothing else drew: the gates below) instead scales the game
+        # straight to the scan buffer where the bilinear scale takes it. The
+        # compositor composites into the paint buffer itself (no callable).
+        if getattr(comp, "rotated", False):
+            comp.mark_game(gc._buf, gc.w, gc.h, ox, oy, scale, None,
+                           self._gates_unchanged, None)
             return
-        self._composite_paint(gc, ox, oy, scale, defer)
+        r = _glass_mod.game_composite(self._buf, self.w, self.h, ox, oy,
+                                      gc._buf, gc.w, gc.h, scale, defer)
+        if r > 0:
+            comp._composite_pending = True         # flush() will defer
+        elif r < 0:
+            P4SystemCanvas._ppa = None
 
     def sync_back(self):
         SystemCanvas.sync_back(self)
@@ -360,63 +359,6 @@ class P4SystemCanvas(SystemCanvas):
         return (st[_ST_N_FILL] == self._q_fill
                 and st[_ST_N_TEXT] == self._q_text
                 and self._clears == self._q_clears)
-
-    def _composite_paint(self, gc, ox, oy, scale, defer=False):
-        """The composite into THIS canvas's buffer: PPA (crisp or bilinear)
-        with the CPU kernel as the fallback. `defer` is the Waveshare's async
-        kick (never on a rotated compositor)."""
-        ppa = self._ppa
-        # The PPA needs the scaled block to fit INSIDE the output picture (it
-        # can't clip like the CPU kernel). The game->window composite always
-        # fits (scale is derived from the window rect); only the cover-crop
-        # backdrop overflows, and that takes the CPU path below. A non-fit is a
-        # normal per-call condition, NOT a PPA failure -- don't demote for it.
-        if ppa is not None and not P4SystemCanvas._smooth:
-            # CRISP PIXELS: nearest-neighbour banded composite. blit_crisp
-            # applies the same fit gate itself and returns False on any
-            # refusal (no SRAM bands / non-fit / hardware error), which falls
-            # through to the CPU kernel below -- identical pixels, slower.
-            # It never demotes _ppa: the bilinear path stays healthy.
-            bc = getattr(ppa, "blit_crisp", None)
-            if bc is not None:
-                try:
-                    if bc(self._buf, self.w, self.h, ox, oy,
-                          gc._buf, gc.w, gc.h, scale, 1 if defer else 0):
-                        if defer:
-                            self._comp._composite_pending = True
-                        return
-                except Exception as exc:  # noqa: BLE001 -- fall to the CPU
-                    print("Moybyte P4 crisp blit failed -> CPU:", exc)
-        elif ppa is not None and ox >= 0 and oy >= 0 \
-                and ox + gc.w * scale <= self.w and oy + gc.h * scale <= self.h:
-            try:
-                if defer:
-                    # NOTE the DOUBLE GAME CANVAS (copy-on-swap so this pending
-                    # could go fence-free) was built and REVERTED 2026-07-28
-                    # with a measured verdict: windowed Brick Siege 56 -> 41fps.
-                    # The blocking "game" fence this defer pays at
-                    # present_pending measured ~FREE at this composite size
-                    # (the DMA finishes within the input poll), while the
-                    # swap's ~150KB retention memcpy cost 4-5ms EVERY quiet
-                    # frame and the fence-free show backlogged into
-                    # _drain_pending collisions. See #58 for the numbers; the
-                    # design is in git history if a bigger composite ever
-                    # changes the arithmetic.
-                    ppa.blit_async(self._buf, self.w, self.h, ox, oy,
-                                   gc._buf, gc.w, gc.h, scale)
-                    self._comp._composite_pending = True   # flush() will defer
-                else:
-                    ppa.blit_scale(self._buf, self.w, self.h, ox, oy,
-                                   gc._buf, gc.w, gc.h, scale)
-                return
-            except Exception as exc:  # noqa: BLE001 -- real error -> CPU forever
-                print("Moybyte P4 PPA blit failed -> CPU:", exc)
-                P4SystemCanvas._ppa = None
-        g = self._gfx
-        if g is None:
-            return
-        g.blit565_scale(self._buf, self.w, self.h, ox, oy,
-                        gc._buf, gc.w, gc.h, scale)
 
     # -- a compiled cart's frame, from its own memory -------------------------
     #

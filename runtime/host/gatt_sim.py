@@ -12,10 +12,7 @@ and a subscription at once.
   notify(addr, handle, data)    it notifies: whether a subscriber heard
   advertised()                  what the console advertises"""
 
-try:
-    from . import moy_gatt as _N
-except ImportError:  # loaded flat
-    import moy_gatt as _N
+import moy_gatt as _N
 
 
 def addr_bytes(s):

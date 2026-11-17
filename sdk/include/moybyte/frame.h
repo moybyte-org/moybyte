@@ -25,8 +25,13 @@
 // are byte-swapped, the rect its ui frame lies in (its content_rect():
 // the screen less the host's bars; a width of 0, the whole screen), and the
 // surface it lays out for, `_layout`'s (w, h, fs) (moybyte/ui.h; a width of
-// 0, none told). A game's frames carry none: 0.
-#define MOY_FRAME_IN 13
+// 0, none told), the frame's steps beyond its presses (a held direction's
+// repeats and the trackball's steps, four bytes: left, right, up, down; a
+// held key's typing repeats: the key, and their count << 16) and the
+// console's asks of the toolkit the app links (MOY_FRAME_ASK_*: its cancel
+// and its back, which the app's last moy_ui_tell said it would take). A
+// game's frames carry none: 0.
+#define MOY_FRAME_IN 16
 #define MOY_FRAME_X 0
 #define MOY_FRAME_Y 1
 #define MOY_FRAME_PTR 2
@@ -40,6 +45,16 @@
 #define MOY_FRAME_LAYOUT_W 10
 #define MOY_FRAME_LAYOUT_H 11
 #define MOY_FRAME_LAYOUT_FS 12
+#define MOY_FRAME_REP 13
+#define MOY_FRAME_KEYREP 14
+#define MOY_FRAME_ASK 15
+#define MOY_FRAME_ASK_CANCEL 1
+#define MOY_FRAME_ASK_BACK 2
+// moy_ui_tell's answers (moybyte/os.h): a field in focus (the keyboard
+// types), a cancel the toolkit would take, a back it would take.
+#define MOY_FRAME_TOLD_TYPING 1
+#define MOY_FRAME_TOLD_CANCEL 2
+#define MOY_FRAME_TOLD_BACK 4
 
 // A frame: the buttons held and those pressed since the last frame, a bit
 // each in moy_button's order (MOY_BIT(MOY_BTN_A)), its milliseconds, and
@@ -72,8 +87,8 @@ static inline const char *moy_game_num_(const char *s, int32_t *out) {
 // Every other message read on the way goes to `other` (NULL: dropped).
 // Frames that queued while the program was busy are read as one: the last
 // one's held buttons and input words, every one's presses and milliseconds.
-// A frame carrying a key or a pointer state ends the read, so a later one
-// never writes over its input words.
+// A frame carrying a key, a pointer state, steps or an ask ends the read,
+// so a later one never writes over its input words.
 static inline int moy_game_frame(moy_frame_t *f,
                                  void (*other)(const moy_evq_ev_t *ev, const char *args)) {
     static union {
@@ -117,7 +132,9 @@ static inline int moy_game_frame(moy_frame_t *f,
             ms += (uint32_t)v[2];
             memcpy(f->in, v + 3, sizeof f->in);
             got = 1;
-            if (f->in[MOY_FRAME_KEY] != 0 || f->in[MOY_FRAME_PTR] != 0) {
+            if (f->in[MOY_FRAME_KEY] != 0 || f->in[MOY_FRAME_PTR] != 0
+                || f->in[MOY_FRAME_REP] != 0 || f->in[MOY_FRAME_KEYREP] != 0
+                || f->in[MOY_FRAME_ASK] != 0) {
                 f->pressed = pressed;
                 f->ms = ms;
                 return 1;

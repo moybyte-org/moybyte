@@ -31,7 +31,7 @@ TITLES = {"python": "Layout Py", "lua": "Layout Lua", "wasm": "Layout Wasm",
 
 def _frame(drv):
     quiesce(drv.ws)
-    drv.ws._dirty = True
+    drv.ws.mark_dirty()
     drv.frame(DT)
 
 
@@ -53,7 +53,7 @@ def _shot(drv):
     last = _pixels(drv.ws)
     same = 0
     for _ in range(600):
-        app = drv.ws.run.player._lua
+        app = drv.ws.run.player.lua
         before = getattr(app, "presented", None)
         _frame(drv)
         now = _pixels(drv.ws)
@@ -81,12 +81,12 @@ def _script(ws):
     for _ in range(3):
         _frame(drv)
     out.append((_surface(ws), _shot(drv)))
-    win = ws.wm._wins["desktop"]
-    ws.wm._resize_window(win, win.w - 120, win.h - 80)
+    win = ws.wm.windows["desktop"]
+    ws.wm.resize_window(win, win.w - 120, win.h - 80)
     out.append((_surface(ws), _shot(drv)))
     ws.look.set_font_scale(3, persist=False)
     out.append((_surface(ws), _shot(drv)))
-    ws.wm._toggle_max(ws.wm._wins["desktop"])
+    ws.wm.toggle_max(ws.wm.windows["desktop"])
     out.append((_surface(ws), _shot(drv)))
     return out
 
@@ -119,15 +119,15 @@ def _install(tier, root):
 
 def _pmem0(ws):
     p = ws.run.player
-    if p.ns.get("pmem") is not None and getattr(p, "_lua", None) is None:
+    if p.ns.get("pmem") is not None and getattr(p, "lua", None) is None:
         return p.ns["pmem"](0)
-    run = getattr(p._lua, "_run", None)
+    run = getattr(p.lua, "_run", None)
     if run is not None and hasattr(run, "pmem"):
         return list(run.pmem()[1])[0]
     import sys
     from array import array
     img = array("i", bytearray(4 * 256))
-    sys.modules[type(p._lua).__module__]._moycore.pmem_image(img)
+    sys.modules[type(p.lua).__module__]._moycore.pmem_image(img)
     return img[0]
 
 
@@ -142,16 +142,16 @@ def _open(tier, base, desk, **kw):
     ws = build_desktop_ws(base) if desk else host_app.build_workstation(root, **kw)
     rt = {"wasi": "wasm"}.get(tier, tier)
     if tier != "python" and rt not in ws.runtimes:
-        ws.exit()
+        ws.spine.exit()
         return None
     ws.look.set_theme("moy", persist=False)
     ws.pointer.visible = False
-    ws.bar_layer._clock_text = lambda: "10:30"
+    ws.bar_layer.clock_text = lambda: "10:30"
     if desk:
-        ws.open_desk()
+        ws.home.open_desk()
     cart = next(c for c in ws.carts.all if c["title"] == TITLES[tier])
-    ws._open_workspace(cart)
-    ws.play(ws.launcher_layer)
+    ws.open_workspace(cart)
+    ws.spine.play(ws.launcher_layer)
     if ws.confirm.open:             # a copied app's consent: Open
         act = ws.confirm._act
         ws.confirm.cancel()
@@ -175,7 +175,7 @@ def runs(tmp_path_factory):
         assert p.cart_error is None, (tier, p.cart_error)
         init = _pmem0(ws) if tier in ("python", "lua", "wasm") else None
         out[tier] = (shots, bound, init)
-        ws.exit()
+        ws.spine.exit()
     return out
 
 
@@ -196,9 +196,9 @@ def consoles(tmp_path_factory):
             drv = make_drv(ws)
             for _ in range(3):
                 _frame(drv)
-            out[(name, tier)] = (ws.run.player.ui_face(), _shot(drv))
+            out[(name, tier)] = (ws.run.player.face.ui_face(), _shot(drv))
             assert ws.run.player.cart_error is None, (name, tier)
-            ws.exit()
+            ws.spine.exit()
     return out
 
 
@@ -247,9 +247,9 @@ def test_every_tier_draws_the_python_apps_page_on_each_console(consoles, console
 
 
 def test_a_responsive_app_draws_in_the_look_at_the_canvas_scale(consoles):
-    """The face each run's `ui` frame draws with (Player.ui_face): the
+    """The face each run's `ui` frame draws with (AppFace.ui_face): the
     shell's look, at the T-Deck's 1 and the console's 3."""
-    from runtime import player
+    from runtime import player_face as player
     for console, fs in (("tdeck", 1), ("console_fs3", 3)):
         face = consoles[(console, "python")][0]
         assert face & player._FACE_LOOK, console
@@ -267,7 +267,7 @@ def test_the_look_is_not_the_carts(tmp_path):
     look = _shot(drv)
     ws.run.player._boundary = 1
     cart = _shot(drv)
-    ws.exit()
+    ws.spine.exit()
     assert look != cart
 
 

@@ -101,7 +101,7 @@ parser and response writer under them are the native `moy_net`. This is the boar
 
 [[modules.shared.group]]
 files = ["moy_carts.py", "moy_store_base.py", "moy_seed.py", "moy_docs.py", "moy_pack.py",
-         "moyimg.py", "cart_listing.py"]
+         "moy_backup.py", "moyimg.py", "cart_listing.py"]
 why = """
 THE ZERO SUPPORTS ALL FEATURES (owner call 2026-08-25), and this pair is what
 that call bought. `moy_sync.file_kinds()` asks the store module for the
@@ -120,7 +120,8 @@ store without gaining a second copy of the seed rules.
 `moy_carts` is an umbrella over modules of its own -- `moy_store_base`
 (the on-card layout), `moy_seed` (the seeders), `moy_docs` (the WiFi, system
 and achievements documents beside the carts), `moy_pack` (the `.moy` archive
-and adopt) and the leaf `cart_listing` (how a manifest's description, genre
+and adopt), `moy_backup` (the store's backup archive, which the store's
+format door writes before a step) and the leaf `cart_listing` (how a manifest's description, genre
 and tags read, SPEC.md 3.7) -- imported and re-exported, so the umbrella
 cannot load without them. The user-files layer behind its
 other names (list, save, the trash, the sidecars) is native/moy_store's, built
@@ -145,6 +146,17 @@ Leaves the transport import by name: `moy_webhost` imports `ticks` (the
 wrap-safe ms clock its closing grace window is written against). `web_view_ws`
 was the other name here until 2026-09, when the WebSocket half of the transport
 went with it -- the RPC it was kept for shipped as plain HTTP."""
+
+[[modules.shared.group]]
+files = ["web_addon.py", "cart_index.py", "cart_unpack.py", "cart_files.py",
+         "app_imports.py"]
+why = """
+The browser console is an add-on cart (runtime/carts/web_addon.py), and on
+this board it is the whole use: provisioning installs the one that fits the
+image (provision.sh), and after an update the image installs the one that
+fits it from its release's own signed index, through the console's one
+install (cart_index, which every file of the cart is checked by before it
+lands, and the modules it imports)."""
 
 [[modules.shared.group]]
 files = ["ssh_service.py"]
@@ -198,9 +210,9 @@ source   = "device"
 why = """
 The second staging source, an allowlist for the same reason it is one on every
 board -- `device/` is the boards' shared device tier and not every board drives
-every piece of it. This board drives four files of it, which is the smallest
-device set in the fleet and is the honest measure of what a headless board is:
-a socket, an HTTP/WS transport, a store host and an updater.
+every piece of it. This board drives the smallest device set in the fleet (it
+and the C3 Zero share it), which is the honest measure of what a headless board
+is: a store host, an HTTP transport and an updater.
 
 The absences are the whole console: no `device_canvas` (nothing
 to draw on), no `device_boot`/`device_api` (no FrameLoop, no cart namespace),
@@ -214,6 +226,19 @@ Empty, and it is the only board where it is. `moybyte/` is the boards' real
 InputState plus the T-Deck keyboard matrix and the #69 poller; the other three
 freeze it whole because they all construct an InputState. This board never
 does -- its inputs arrive as HTTP requests."""
+
+[[modules.device.group]]
+files = ["zero_host.py", "zero_setup.py", "zero_shell.py"]
+why = """
+The Zero's own three: the store host main.py serves, its first-boot setup
+access point and its terminal. They are in device/ because both Zero boards
+take them (this one and firmware/esp32c3_zero/), and nothing else does."""
+
+[[modules.device.group]]
+files = ["cart_net.py"]
+why = """
+The transport cart_index fetches through on a board (the kernel's client):
+the add-on's install above is its one user here."""
 
 [[modules.device.group]]
 files = ["moy_webhost.py"]
@@ -242,25 +267,22 @@ boot verdict and the rollback confirm the frame loop drives."""
 # ---------------------------------------------------------------------------
 
 [roster]
-# The system carts the image's seed roster leaves out (build.sh, and
-# provision.sh's --carts), cut to the 896 KiB store beside the seed's reserve
-# (zero_host.SEED_RESERVE; owner, 2026-11-07). The roster keeps every app and
-# service, one desktop (Ocean Desktop) beside the Wallpaper app, and five games:
-# Brick Siege, Letter Blitz, Tap Game, Harpoon Pop and Star Catcher. Out: the
-# other games, the other wallpapers, the Lua twins, the perf and test fixtures,
-# and Pin Light, a demo of the pins a browser cart drives (README.md's
-# checklist pushes it). A
-# new system cart joins the roster unless it is named here.
-#
-# `first`: the shell's own carts lead the roster, so a seed the reserve cuts
-# short leaves out a game or a wallpaper, never the Terminal or Files.
-first = ["service", "app"]
-skip = [
-  "moybyte.bench", "moybyte.bench_lua", "moybyte.coin_quest", "moybyte.tap_only_red",
-  "moybyte.brick_siege_lua", "moybyte.sakura_lua",
-  "moybyte.bullet_storm", "moybyte.hop_quest", "moybyte.pixel_pet", "moybyte.sky_run",
-  "moybyte.tiny_runner", "moybyte.pin_light",
-  "moybyte.space_desktop", "moybyte.sakura", "moybyte.moy_night", "moybyte.open_machine",
+# The seed carts the image carries beside the core (moy_seed.CORE: Get Carts,
+# Files, Appearance, Achievements, the Wallpaper slot and Moy Night, the
+# default backdrop), compressed: every app, and the five games the store kept
+# since 2026-11-07 (Brick Siege, Letter Blitz, Tap Game, Harpoon Pop, Star
+# Catcher). zero_host.seed_carts seeds them as a console seeds its own (owner,
+# 2026-11-17): present unless the kid removed one, a newer one in a new image
+# replacing the store's. Every other system cart is an official cart the
+# release publishes in carts-<board>.json, which the page this board serves
+# installs (`/official`); after an update the board brings the ones it holds
+# to the new release (runtime/carts/web_addon.py), and a cable flash brings
+# them to this tree's (tools/board_flash.py's install_carts).
+image = [
+  "moybyte.calc", "moybyte.music", "moybyte.my_art", "moybyte.notes",
+  "moybyte.paint", "moybyte.storybook", "moybyte.terminal",
+  "moybyte.brick_siege", "moybyte.letter_blitz", "moybyte.tap_game",
+  "moybyte.harpoon_pop", "moybyte.star_catcher",
 ]
 
 [flash]
@@ -277,20 +299,24 @@ skip = [
 # WEDGED the CDC. Every flash needed a human holding BOOT. mpconfigboard.h
 # carries that evidence; the BOOT hold remains the recovery, not the routine.
 #
-# `after` stays watchdog_reset, which is PROVEN on this board, rather than
-# following the peripheral to the console boards' hard_reset. hard_reset did
-# nothing here on CDC -- a cable flash left the board sitting in the loader,
-# reading exactly like an image that did not take -- and one change at a time is
-# how that was found out.
+# No `after`: esptool's hard_reset (an RTS pulse through the USB-Serial/JTAG)
+# boots the app and the USB device stays put, as on the C3. `watchdog_reset`
+# (this board's until 2026-11-17, from its CDC days, when hard_reset left it
+# in the loader) resets the whole chip, USB included: the host drops the
+# device and enumerates it again under a new ttyACM number while the board
+# boots, and a port opened in that window wedged the USB until a replug
+# (twice on 2026-11-17, the cable flash's add-on install opening it).
 image          = "dist/zero/moybyte_zero.bin"
 offset         = "0x0"
-after          = "watchdog_reset"
 baud           = 460800
 otadata_offset = "0x1d000"
 otadata_size   = "0x2000"
+# The carts folder the browser console add-on that fits the flashed image is
+# installed into, over the REPL, after a cable flash (tools/board_flash.py).
+addon          = "/moy/carts"
 
 [image]
-# The OTA-slot headroom this board's app image keeps, browser console baked in.
+# The OTA-slot headroom this board's app image keeps.
 # The build FAILS under it (moybyte_app_size_guard, tools/esp32_build_lib.sh,
 # MOYBYTE_ALLOW_UNDER_FLOOR=1 for an experiment). The headroom is the build's
 # to print; the floor is the design.
@@ -308,8 +334,10 @@ otadata_size   = "0x2000"
 # Zero's way out is a card-backed Zero or one without OTA, not a trim per
 # step. Only the slot-fit guard (#168) holds this image now. The slots grew by
 # 256 KiB each to 3.5 MiB (owner, 2026-11-07) for the C shell, the SSH server
-# and SFTP (the moy_sh, moy_tty and moy_ssh takes below), leaving an 896 KiB
-# store; the partition CSV carries the arithmetic.
+# and SFTP (the moy_sh, moy_tty and moy_ssh takes below). They are 2 MiB since
+# 2026-11-17, when the browser console left the image for its add-on cart
+# (native/moy_net/moy_page.h), and the store holds that add-on; the partition
+# CSV carries the arithmetic.
 headroom_floor_kib = 0
 
 [serial]
@@ -358,12 +386,12 @@ baud = 115200
 # ---------------------------------------------------------------------------
 # THE HARDWARE (docs/os_2026-11/hardware.md section 1): every GPIO of the chip
 # in exactly one row -- `os`, `class`, `lease`, `never` -- or in `unused`.
-# The `lease` row is the pin allowlist (`MOY_NET_GPIO_PINS` in
-# boards/MOYBYTE_ZERO/mpconfigboard.h, README.md's "Pins"), which
-# tests/test_board_toml.py holds equal to it; `unused` is the pads the XIAO
-# does not bring out. The `lora` row is the Wio-SX1262 on the XIAO's
-# board-to-board connector (the XIAO ESP32-S3 & Wio-SX1262 kit), which takes
-# the D8-D10 SPI pads with it.
+# The `lease` row is the pin allowlist: the build emits it as
+# MOY_LEASE_GPIO_PINS, the /gpio route serves it (MOY_NET_GPIO_ROUTE in
+# boards/MOYBYTE_ZERO/mpconfigboard.h), and README.md's "Pins" says why each
+# pad is in or out; `unused` is the pads the XIAO does not bring out. The
+# `lora` row is the Wio-SX1262 on the XIAO's board-to-board connector (the
+# XIAO ESP32-S3 & Wio-SX1262 kit), which takes the D8-D10 SPI pads with it.
 
 [hardware]
 chip_gpio = "esp32s3"
@@ -426,7 +454,7 @@ was introduced to end, one board late. A pushed copy still WINS at serve time;
 the image is the guarantee, not the ceiling (.claude/rules/web.md).
 
 `moy_index`, the store's native index, compiles here as on every image (its
-hook, MOY_INDEX_IMPL in tools/moy_index_spike.py, is `c` unless a build says
+hook, MOY_INDEX_IMPL in tools/native_check.py, is `c` unless a build says
 `py`), and `moy_spine`, the kernel's spine, is native here as on every image;
 this board is one of the five targets both must link into.
 

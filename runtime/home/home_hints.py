@@ -16,16 +16,10 @@ order. It owns no state of its own: the tab row's focus and the selection
 it names are the layer's.
 """
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-    import layout_base as _lb
-    from home_grid import _VERB_HINT
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-    from runtime import layout_base as _lb
-    from runtime.home_grid import _VERB_HINT
+import ui as _ui
+import ui_draw as _ui_draw
+import layout_base as _lb
+from home_grid import _VERB_HINT
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 # The strip's words and keys: the star's, the verbs' letters, the strips'
@@ -231,7 +225,7 @@ class HomeHints:
         for v, x0, x1 in spans:
             if x0 <= px < x1:
                 if v == "tabs":
-                    self.ws.step_home_tab(1, self.grid)
+                    self.ws.home.step_home_tab(1, self.grid)
                 else:
                     self._do_verb(v)
                 return True
@@ -241,15 +235,12 @@ class HomeHints:
         """The hint strip's keys, typed (an edge: a held key acts once):
         C, /, N, Y, X and P the verbs it names, Q and E the tabs, F the
         selected card's favourite star."""
-        k = self.ws.input.last_key
-        prev = self._kprev
-        if k != prev:
-            self._kprev = k     # a store on the layer walks its classes: only on a change
-        if not k or k == prev or not (32 < k < 127):
+        k = self.ws.input.typed
+        if not (32 < k < 127):
             return False
         ch = chr(k).lower()
         if ch in ("q", "e"):
-            self.ws.step_home_tab(-1 if ch == "q" else 1, self.grid)
+            self.ws.home.step_home_tab(-1 if ch == "q" else 1, self.grid)
             if self._tab_keys:
                 self._tab_at = self.grid.tab
                 self._zone_bump += 1

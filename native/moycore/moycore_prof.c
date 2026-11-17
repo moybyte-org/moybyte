@@ -4,12 +4,9 @@
 
 #include "modmoycore_int.h"
 
-#if __has_include("esp_heap_caps.h")
-#include "esp_heap_caps.h"
-#define PROF_ALLOC(n) heap_caps_calloc(1, (n), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
-#else
-#define PROF_ALLOC(n) calloc(1, (n))
-#endif
+#include "moy_kmem.h"
+
+#define PROF_ALLOC(n) moy_kalloc((n), MOY_KMEM_PSRAM | MOY_KMEM_ZERO)
 
 // -- the per-verb profiler ---------------------------------------------------
 //
@@ -497,7 +494,7 @@ int moycore_lprof_install(lua_State *L, int interval, int32_t lo, int32_t hi)
 {
     int mask;
     if (moycore_lp_on) lprof_uninstall(L);
-    g_lp = (lprof_slot_t *)malloc(LPROF_SLOTS * sizeof(lprof_slot_t));
+    g_lp = (lprof_slot_t *)moy_kalloc(LPROF_SLOTS * sizeof(lprof_slot_t), MOY_KMEM_LIBC);
     if (!g_lp) return 0;
     lprof_zero();
     lprof_pin(L, lo, hi);

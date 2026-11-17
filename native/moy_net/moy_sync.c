@@ -4,6 +4,8 @@
 #include <string.h>
 #include <strings.h>
 
+#include "moy_sb.h"
+#include "moy_codec.h"
 #include "moy_json.h"
 #include "moy_net.h"
 
@@ -24,37 +26,24 @@ int moy_sync_decode(const char *body, size_t n, moy_sync_env_t *e) {
     return MOY_SYNC_OK;
 }
 
-typedef struct {
-    char *out;
-    size_t cap, n;
-} sink_t;
-
-static void put(sink_t *s, const char *p, size_t k) {
-    if (s->n < s->cap) {
-        size_t room = s->cap - s->n;
-        memcpy(s->out + s->n, p, k < room ? k : room);
-    }
-    s->n += k;
-}
-
-static void field(sink_t *s, const char *name, const char *v, size_t v_n) {
-    put(s, s->n > 1 ? ", \"" : "\"", s->n > 1 ? 3 : 1);
-    put(s, name, strlen(name));
-    put(s, "\": ", 3);
-    put(s, v, v_n);
+static void field(moy_sb_t *s, const char *name, const char *v, size_t v_n) {
+    moy_sb_put(s, s->n > 1 ? ", \"" : "\"", s->n > 1 ? 3 : 1);
+    moy_sb_put(s, name, strlen(name));
+    moy_sb_put(s, "\": ", 3);
+    moy_sb_put(s, v, v_n);
 }
 
 size_t moy_sync_encode(char *out, size_t cap, const char *v, size_t v_n,
                        const char *root, size_t root_n, const char *ops,
                        size_t ops_n) {
-    sink_t s = {out, cap, 0};
-    put(&s, "{", 1);
+    moy_sb_t s = moy_sb_fixed(out, cap);
+    moy_sb_put(&s, "{", 1);
     field(&s, "v", v, v_n);
     if (root != NULL) {
         field(&s, "root", root, root_n);
     }
     field(&s, "ops", ops, ops_n);
-    put(&s, "}", 1);
+    moy_sb_put(&s, "}", 1);
     return s.n;
 }
 

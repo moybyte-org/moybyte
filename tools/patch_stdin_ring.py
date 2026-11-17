@@ -45,8 +45,9 @@ memory, so the ISR stays IRAM-safe through a flash write.
 Only a board whose serial is a UART takes this. The USB-Serial/JTAG boards'
 ISR takes only what the ring has room for and the USB host waits for the rest,
 so a stall there costs throughput and never a byte, and it already wakes the
-reader. TCM_DRAM_ATTR is the P4's: another chip taking this fails to compile
-rather than placing the ring somewhere unmeasured.
+reader. SPM_DRAM_ATTR (ESP-IDF names the TCM its SPM) is the P4's: another
+chip taking this fails to compile rather than placing the ring somewhere
+unmeasured.
 
 Applied by `moybyte_patch_stdin_ring` in tools/esp32_build_lib.sh, to
 `ports/esp32/mphalport.c` and `ports/esp32/uart.c`. All-or-nothing: every
@@ -70,7 +71,7 @@ HUNKS = [
      "// %s, %d bytes: a UART with no flow control drops what arrives\n"
      "// while a heap collection stalls the reader (tools/patch_stdin_ring.py).\n"
      "#include \"esp_attr.h\"\n"
-     "static uint8_t TCM_DRAM_ATTR stdin_ringbuf_array[%d];\n"
+     "static uint8_t SPM_DRAM_ATTR stdin_ringbuf_array[%d];\n"
      % (MARKER, RING_BYTES, RING_BYTES)),
     ("ports/esp32/uart.c", "RX threshold",
      "#define RXFIFO_FULL_THR (SOC_UART_FIFO_LEN - 8)\n",

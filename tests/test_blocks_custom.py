@@ -425,7 +425,7 @@ def _ws_with_block_cart(tmp_path, title="Custom Block Cart"):
 def test_ui_my_blocks_palette_creates_proc_and_places_call(tmp_path):
     import runtime.block_editor_ui as BUI
     ws = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     bui = ws.block_ui
     be = bui.blocks_ed
 
@@ -462,7 +462,7 @@ def test_ui_my_blocks_palette_creates_proc_and_places_call(tmp_path):
 def test_ui_proc_menu_adds_an_input(tmp_path):
     import runtime.block_editor_ui as BUI
     ws = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     bui = ws.block_ui
     be = bui.blocks_ed
     pd = be.new_proc("f")

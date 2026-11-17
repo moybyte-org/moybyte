@@ -1,11 +1,16 @@
 # moy_store — the store, native
 
 The store in C (`docs/history/kernel_store_2026-10.md`; #224), linked by every image:
-the boards, the browser and the desktop MicroPython. `runtime/carts/moy_fs.py`,
-`runtime/carts/moy_carts.py` and `runtime/carts/moy_store_base.py` delegate to it wherever
-the module imports; CPython (the simulator, the tools, the tests) keeps the
-Python twins, the reference the C is held to, except where the C is the one
-implementation and CPython reaches it over ctypes (the shelf's record).
+the boards, the browser and the desktop MicroPython; CPython (the simulator, the
+tools, the tests) reaches it over ctypes as the same module
+(`runtime/host/moy_store_binding.py`, face.json's host rows). It is the one
+body on every tier: the file verbs and crash-safe write, the catalogue and the
+whole-cart load, the seed, the journal, the archive and adopt, the tree
+removal and the shelf (`runtime/carts/moy_fs.py`, `moy_carts.py`, `moy_seed.py`,
+`moy_journal.py`, `moy_pack.py`, `moy_store_base.py` and `cart_index.py` call
+them; `tests/test_store_one_body.py` fails a Python body of one). The rows the
+host leaves out are a VM's own: the card, the internal volume, the store task,
+the lock meter and the heap meter.
 
 | file | what it is |
 |---|---|
@@ -13,18 +18,19 @@ implementation and CPython reaches it over ctypes (the shelf's record).
 | `moy_fs.h`, `moy_fs.c` | the crash-safe write (marker, stamped backup, file in place), its recovering reader, the claim, the plain file verbs, and the wire's skip rule (`moy_sync._skip` calls it) |
 | `moy_load.h` | loading a cart whole (`moy_cat_load`, in `moy_cat.c`, the same reader as the entry): its scripts, config, flags, sheet, sounds, map, blocks, images and scenes into one PSRAM arena, freed once the binding has built `load`'s dict |
 | `moy_journal.h`, `moy_journal.c` | the journal: `journal.jsonl` appended one json.dumps line a commit, the snapshot first (a claimed publish backup where the stamp matches), the cursor map last; undo and redo by file scope; compaction to 64 entries and 512 KiB; #136's list, snapshot and restore; the graduation rider's manifest write |
-| `moy_pack.h`, `moy_pack.c` | a cart as it travels: the `.moy` archive (every tier's, the browser's export and import included; stored entries written, stored and deflated read), and adopt, a staged cart moved into place by one rename (Get Carts installs through it) |
-| `moy_files.h`, `moy_files.c` | a compiled cart's written files (SPEC.md 16.12), `runtime/carts/cart_files.py` in C rule for rule over `moy_vol`: the key a path is kept under and back, the cart's folder beside the store, the write whole or not at all (`~part`, `~done`), the recovery at open, erase and the listing; the held file a read streams through; `tests/test_moy_files.py` holds it to the Python. A compiled cart's run calls it (moycore's files, `native/moycore/README.md`) |
-| `moy_ufiles.h`, `moy_ufiles.c` | the #108 user-files layer (the shared folders of `files/` beside the carts folder, a project's folder as a kind, the vault's whole-name rule, naming, the restorable trash, the #111 op-history sidecars, provenance) and its codecs (a picture's moyimg-v1 written through its own hash-chain deflate at a 4 KiB window, `moy_uf_deflate`, which a board's Python codecs reach as `moy_ufiles.deflate`, a cover written indexed and read through `native/moy_png`, and a picture read from its file a row at a time and cover-sampled into a screen-sized buffer, `moy_uf_cover_image` over `moy_img.h`'s streamed reader, which `tests/test_picture_stream.py` holds to `runtime/carts/moyimg.py`'s `cover_stream`), with the wallpaper's backing copy; the reference was `runtime/moy_files.py` and `runtime/moy_file_ops.py`, and `tests/test_userfiles_parity.py` holds both bindings to the bytes they wrote. Built with `native/moy_app` (its module `moy_ufiles` is `modmoy_ufiles.c`), whose files rows reach it through its verb table, so the Zero, which denies moy_app, carries none of it |
+| `moy_pack.h`, `moy_pack.c` | a cart as it travels: the `.moy` archive (every tier's, the browser's export and import included; stored entries written, stored and deflated read), the format door's export archive (`moy_pack_paths`: members under one folder, `runtime/carts/moy_backup.py`), and adopt, a staged cart moved into place by one rename (Get Carts installs through it) |
+| `moy_files.h`, `moy_files.c` | a compiled cart's written files (SPEC.md 16.12) over `moy_vol`, on every tier: the key a path is kept under and back (`runtime/carts/cart_files.py`'s `key`, which names an app's files on a VM, is held to it), the cart's folder beside the store, the write whole or not at all (`~part`, `~done`), the recovery at open, erase and the listing; the held file a read streams through; `tests/test_moy_files.py` is its net. A compiled cart's run calls it (moycore's files, `native/moycore/README.md`) |
+| `moy_ufiles.h`, `moy_ufiles.c` | the #108 user-files layer (the shared folders of `files/` beside the carts folder, a project's folder as a kind, the vault's whole-name rule, naming, the restorable trash, the #111 op-history sidecars, provenance) and its codecs (a picture's moyimg-v1 written through its own hash-chain deflate at a 4 KiB window, `moy_uf_deflate`, which a board's Python codecs reach as `moy_ufiles.deflate`, a cover written indexed and read through `native/moy_png`, and a picture read from its file a row at a time and cover-sampled into a screen-sized buffer, `moy_uf_cover_image` over `moy_img.h`'s streamed reader, which `tests/test_picture_stream.py` holds over every shape and the boards' VM), with the wallpaper's backing copy; the reference was `runtime/moy_files.py` and `runtime/moy_file_ops.py`, and `tests/test_userfiles_parity.py` holds both bindings to the bytes they wrote. Built with `native/moy_app` (its module `moy_ufiles` is `modmoy_ufiles.c`), whose files rows reach it through its verb table, so the Zero, which denies moy_app, carries none of it |
 | `moy_card.c` | the card volume, owned (the one FAT instance a task reaches, while its sectors are the board's driver's, listed in the volume table at its mount and taken out at the hold; a native RAM medium on the unix port, `card_ram`, for the tests): the store's FATFS (a VfsFat object in PSRAM) over a NATIVE block device with the read cache (`moy_cache.c`), mounted for Python at `/sd` (`moy_store.card`), its sectors from `moy_sd_card_io` on a board (SPI on the S3s, SDMMC on the P4s) or a Python driver on the host; the mount is C (`moy_store_card_mount`), and `moy_store_card_up` brings the board's card up (`native/moy_sd/moy_sd.h`) and mounts it with no VM, for the recovery floor's shell; `card_hold` lends the card out whole (USB mass storage, `runtime/system/usb_drive.py`): refused while the volume is in the mount table, it puts the held zero run on the card and closes the FATFS, every mount then answering EBUSY until it is let go, which drops the cache; `card_stats` is the tests' check and fault switch |
 | `moy_cache.h`, `moy_cache.c` | the card's 32-sector read cache with no VM on either side: one-sector reads from the last 32 (clock eviction), every write dropping what it covers before it is issued; and its zero runs: the one-sector zero writes from a cluster's start (FatFS clearing a new directory's cluster a sector at a time) held and issued as one multi-block write before anything else reaches the card; under `moy_card.c` on every board and under `fuzz_fs.c`'s RAM card at every cut |
 | `moy_arena.h` | a store call's scratch, freed at once |
 | `moy_seed.h`, `moy_seed.c` | the seed: a packed roster blob inflated (the image's uzlib) into PSRAM and written as `moybyte.<slug>.moy`; a re-seed keeps the kid's saves and config in place and publishes the manifest last, so a cut seed reads as the older version, or as none |
-| `moy_shelf.h`, `moy_shelf.c` | the shelf's record (`installed.json`: its one reader, the record without a cart as `json.dumps` writes it, an installed cart found by folder or id) and a cart's removal (the rename out of the carts folder, the record, the delete, its written files: `moy_shelf_remove` in one call, `moy_shelf_take` and `moy_shelf_written` for the VM's steps); `runtime/carts/cart_index.py` calls it on every tier (CPython through `runtime/host/moy_shelf_binding.py`) and the C shell's `pkg list` and `pkg remove` with no VM |
-| `moy_cat.h`, `moy_cat.c` | the catalogue: the shelf's scan of a root (one listing, then per cart folder one enter, one listing and the files it shows), one cart's entry, and the whole-folder verbs (remove, copy) |
+| `moy_shelf.h`, `moy_shelf.c` | the shelf's record (`installed.json`: its one reader, the record without a cart as `json.dumps` writes it, an installed cart found by folder or id) and a cart's removal (the rename out of the carts folder, the record, the delete, its written files: `moy_shelf_remove` in one call, `moy_shelf_take` and `moy_shelf_written` for the VM's steps); `runtime/carts/cart_index.py` calls it on every tier (CPython through `runtime/host/moy_store_binding.py`) and the C shell's `pkg list` and `pkg remove` with no VM |
+| `moy_removed.h`, `moy_removed.c`, `moy_core.h` | the core carts and the removal record: which built-ins a console keeps (`moy_core.h`, generated from `moy_seed.CORE` by `tools/gen_core_carts.py`) and the optional ones it removed (`system/removed` beside the carts folder, one folder a line, read filtered and written crash-safe); `runtime/carts/moy_seed.py`'s `load_removed`, `note_removed` and `unremove` call it on every tier, and the C shell's `pkg remove` and the sync wire's cart delete (`native/moy_net/moy_sync_apply.c`) with no VM |
+| `moy_cat.h`, `moy_cat.c` | the catalogue: the shelf's scan of a root (one listing, then per cart folder one enter, one listing and the files it shows), one cart's entry, the folder a cart is stored in (`moy_cat_folder`, `moy_store_base.cart_folder`'s row, on every build: the seed needs the inflater, the name does not), and the whole-folder verbs (remove, copy) |
 | `modmoy_store.c` | the MicroPython binding, module `moy_store`: the mount-table resolve on the VM's task (the kernel's own `lfs2_t` under a `KVfs`, VfsFat's `FATFS`, VfsLfs2's `lfs2_t` behind a layout check, VfsPosix at `/`), which fills the volume table at each change of the mount table, and the table's resolve on any other task (`moy_store_on_vm` says which); every call under `nlr_push` and the store's lock; scratch per task and the marker cache in PSRAM on a board; on the unix port the tests' task (`task`, `task_join`), two threads of no VM working the store, or walking a folder inside one gate |
 | `moy_kvfs.c` | the internal flash volume, the kernel's: its `lfs2_t` over the "vfs" partition (a RAM medium on the unix port, for the host's tests), listed in the volume table at `/` at its mount, and `KVfs`, the VFS type each VM's start mounts at `/`, each littlefs call under the store's lock |
-| `moy_store_host.c` | the host's imports over malloc and POSIX, for the ctypes binding |
+| `moy_store_host.c` | the host's imports over malloc and POSIX, for the ctypes faces (`runtime/host/moy_store_binding.py`, `moy_ufiles_binding.py`) |
 | `fuzz_fs.c` | the power-cut matrix (`--matrix`) and the seeded fuzz over oofatfs on a RAM card behind the read cache (every hit compared with the card) and littlefs2 on a RAM flash, under ASan and UBSan |
 | `host/py/mpconfig.h` | the FAT settings oofatfs reads, for the host builds |
 | `micropython.cmake`, `micropython.mk` | the boards', and the desktop's and browser's, builds |
@@ -36,11 +42,13 @@ claim across folders declines, so the journal writes its own copy (littlefs
 folder's other entries).
 
 The nets: `tests/test_moy_store.py` (the matrix and the fuzz, the user-files layer's writes among the cut ones, the C over POSIX
-against the twin through ctypes, the desktop MicroPython against CPython),
-`tests/test_store_native.py` (the shelf and moy_json on the desktop MicroPython
-against CPython over every cart and generated ones) and
+through ctypes and on the desktop MicroPython), `tests/test_moy_fs_publish.py` (each state a cut leaves, read),
+`tests/test_store_one_body.py` (the one body, the trial's store and its door, the board stamp, the door's export),
+`tests/test_store_native.py` (the shelf, the seed and the journal read alike by
+the VM's face and CPython's over every cart and generated ones, and moy_json
+against CPython's json) and
 `tests/test_store_on_vfs.py` (the store on FAT and littlefs volumes under the
 desktop MicroPython, every write the C store's) and `tests/test_store_tasks.py`
 (a task of no VM and the VM's Python working one volume at once, on the
 kernel's flash and the card's FAT). The harness is
-`tools/moy_index_spike.py --component fs sanitize`.
+`tools/native_check.py --component fs sanitize`.

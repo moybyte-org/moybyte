@@ -1,15 +1,13 @@
 """The store's crash-safe write in C (native/moy_store, docs/history/kernel_store_2026-10.md
-section 5), held to runtime/carts/moy_fs.py, which CPython keeps as its twin.
+section 5), the one body every tier runs (runtime/carts/moy_fs.py names it).
 
   * the power-cut matrix: every scripted write sequence on oofatfs over a RAM
     card and littlefs2 over a RAM flash, cut at every block write, reads back
     as the version before or the version written, whole -- and the seeded
     random sequences with a random cut -- under ASan and UBSan;
-  * the C store over POSIX through ctypes answers as the twin does, call for
-    call, and leaves no scratch behind;
-  * the desktop MicroPython, whose moy_fs delegates to the native module, and
-    CPython over the twin play one session on a real folder and print the same
-    lines.
+  * the C store over POSIX through ctypes answers each case of the story and
+    leaves no scratch behind;
+  * the desktop MicroPython plays one session through moy_fs on a real folder.
 
 tests/test_store_on_vfs.py runs the store on FAT and littlefs volumes under
 the desktop MicroPython, where every write is the C store's.
@@ -19,12 +17,12 @@ import ctypes
 import os
 import re
 import subprocess
-import sys
 
 import pytest
 
 from runtime import moy_fs
-from tools import moy_index_spike as spike
+from runtime import native_parts
+from tools import native_check
 from unix_mp import require_unix_mp, runtime_tree
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -38,7 +36,7 @@ def _no_toolchain(what):
 
 
 def test_the_power_cut_matrix_holds_on_fat_and_littlefs():
-    got = spike.fuzz_matrix(spike.FS)
+    got = native_check.fuzz_matrix(native_parts.FS)
     if got is None:
         _no_toolchain("no sanitizer toolchain or no MicroPython tree "
                       "(make unix-micropython)")
@@ -56,9 +54,9 @@ def test_the_power_cut_matrix_holds_on_fat_and_littlefs():
 
 
 def test_the_seeded_fuzz_runs_clean_under_the_sanitizers():
-    if not os.path.isdir(os.path.join(spike.MPY, "lib", "oofatfs")):
+    if not os.path.isdir(os.path.join(native_parts.MPY, "lib", "oofatfs")):
         _no_toolchain("no MicroPython tree (make unix-micropython)")
-    got = spike.fuzz_seeded("c", seed=1, runs=300, comp=spike.FS)
+    got = native_check.fuzz_seeded("c", seed=1, runs=300, comp=native_parts.FS)
     if got is None:
         _no_toolchain("no C compiler with AddressSanitizer here")
     ok, secs, out = got
@@ -76,13 +74,14 @@ class _Buf(ctypes.Structure):
 def _lib():
     san = os.environ.get("MOY_FS_SANITIZE") == "1"
     if san:
-        path = spike.host_library("c", sanitize=True, comp=spike.FS)
+        path = native_parts.host_library("c", sanitize=True, comp=native_parts.FS)
     else:
         # The store's part alone, a library of this suite's own: its leak and
         # roots checks clear process-wide state the host's one library shares
         # with every other store user.
         from runtime import native_build
-        path = native_build.build_parts("moy_fs_c", [spike.part(spike.FS)], spike.FS.cache)
+        path = native_build.build_parts("moy_fs_c", [native_parts.part(native_parts.FS)],
+                                            native_parts.FS.cache)
     if path is None:
         _no_toolchain("no C compiler")
     lib = ctypes.CDLL(path)
@@ -105,7 +104,7 @@ def _lib():
 
 
 class _CStore:
-    """runtime/carts/moy_fs.py's calls over the C store, as the twin answers them."""
+    """runtime/carts/moy_fs.py's calls over the C store."""
 
     def __init__(self, lib):
         self.lib = lib
@@ -141,23 +140,6 @@ class _CStore:
 
     def claim(self, path, dest, stamp):
         return bool(self.lib.moy_fs_claim(path.encode(), dest.encode(), *stamp))
-
-
-class _PyStore:
-    def set_publish_root(self, root):
-        moy_fs.set_publish_root(root)
-
-    def publish(self, path, text):
-        moy_fs._write_atomic(path, text)
-
-    def read_recover(self, path):
-        return moy_fs._read_recover(path)
-
-    def read_stamped(self, path):
-        return moy_fs._read_stamped(path)
-
-    def claim(self, path, dest, stamp):
-        return moy_fs._claim_bak(path, dest, stamp)
 
 
 def _session(store, d):
@@ -208,13 +190,15 @@ def _session(store, d):
     return out
 
 
-def test_the_c_store_answers_as_the_twin_on_posix(tmp_path):
+def test_the_c_store_answers_the_story_on_posix(tmp_path):
     lib = _lib()
     c = _session(_CStore(lib), str(tmp_path / "c"))
     lib.moy_fs_roots_clear()
     assert lib.moy_store_host_live() == 0
-    p = _session(_PyStore(), str(tmp_path / "py"))
-    assert c == p
+    assert c == [("published", True), ("torn prefix", True), ("healed", True),
+                 ("foreign", True, False), ("claim", True, True, False),
+                 ("claim wrong stamp", False), ("legacy", "old text\n"), ("empty", None),
+                 ("torn bak", None), ("missing", True, True), ("never", 2)]
 
 
 # -- the desktop MicroPython over the native module ----------------------------------
@@ -224,8 +208,7 @@ import os, sys
 sys.path.insert(0, @RUNTIME@)
 import moy_fs
 D = @DIR@
-native = getattr(moy_fs, "_native", None) is not None
-print("native", native)
+print("native", moy_fs._native.__name__)
 root = D + "/carts"
 cart = root + "/a.moy"
 for p in (root, cart, cart + "/journal"):
@@ -268,12 +251,11 @@ def _vm_session(cmd, d):
     return out.stdout.splitlines()
 
 
-def test_the_vm_store_is_the_native_one_and_answers_as_the_twin(tmp_path):
+def test_the_vm_store_is_the_native_one(tmp_path):
     exe = require_unix_mp(
         "moy_store",
         why="the store's file verbs on the VM a board runs, over the native "
             "module (docs/history/kernel_store_2026-10.md section 10, slice 2).")
-    vm = _vm_session([exe], tmp_path / "vm")
-    cp = _vm_session([sys.executable], tmp_path / "cpython")
-    assert vm[0] == "native True" and cp[0] == "native False"
-    assert vm[1:] == cp[1:]
+    assert _vm_session([exe], tmp_path / "vm") == [
+        "native moy_store", "published True (440, 2817393964)", "torn True True", "at True",
+        "claim True True False", "bytes True None", "removed False", "never 2"]

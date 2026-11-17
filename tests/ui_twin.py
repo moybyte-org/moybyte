@@ -1059,7 +1059,7 @@ _GLYPHS = {
     "menu":   (0x000, 0x000, 0x7FE, 0x7FE, 0x000, 0x7FE, 0x7FE, 0x000, 0x7FE, 0x7FE, 0x000, 0x000),
     # "projects": a 2x2 grid of tiles -- the Editor's "back to the project-picker"
     # affordance (spec shell_ux_v1.md). Not an IconSheet slot, so it renders via the
-    # _glyph fallback (ws._icon falls back to this 12x12 bitmap for kinds not in _ICON).
+    # _glyph fallback (ws.icon falls back to this 12x12 bitmap for kinds not in _ICON).
     "projects": (0x000, 0x7BC, 0x7BC, 0x7BC, 0x7BC, 0x000, 0x000, 0x7BC, 0x7BC, 0x7BC, 0x7BC, 0x000),
     # --- editor tool-row glyphs (#89-#93) -----------------------------------
     # The pre-literate icons for the six editors' new tool buttons -- the paint

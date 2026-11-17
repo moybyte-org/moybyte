@@ -32,3 +32,38 @@ def test_archived_firmware_runtime_contract_names_the_lilygo_target():
     assert "LilyGO T-Deck Plus" in text
     assert "moybyte check-portable" in text
     assert "lilygo_t_deck_plus" in text
+
+
+def _problems_for(monkeypatch, text, doc="docs/fixture.md"):
+    sys.path.insert(0, str(ROOT / "tools"))
+    try:
+        import check_docs
+    finally:
+        sys.path.remove(str(ROOT / "tools"))
+    monkeypatch.setattr(check_docs, "docs", lambda: [doc])
+    monkeypatch.setattr(check_docs, "read", lambda rel: text)
+    monkeypatch.setattr(check_docs, "PROBLEMS", [])
+    check_docs.check_paths()
+    return check_docs.PROBLEMS
+
+
+def test_a_path_with_a_directory_must_exist_there(monkeypatch):
+    # runtime/run/player.py is real; runtime/player.py is where it used to be,
+    # and a file of that BASENAME exists elsewhere, which must not rescue it.
+    assert _problems_for(monkeypatch, "see `runtime/run/player.py`.") == []
+    stale = _problems_for(monkeypatch, "see `runtime/player.py`.")
+    assert len(stale) == 1 and "runtime/player.py" in stale[0]
+
+
+def test_a_doc_path_moved_to_history_must_say_so(monkeypatch):
+    stale = _problems_for(monkeypatch, "see `docs/kernel_toolkit_2026-10.md`.")
+    assert len(stale) == 1
+    assert _problems_for(
+        monkeypatch, "see `docs/history/kernel_toolkit_2026-10.md`.") == []
+
+
+def test_a_vendored_doc_may_name_its_upstream_paths(monkeypatch):
+    text = "compiled by `runtime/audio_binding.py`."
+    assert _problems_for(monkeypatch, text) != []
+    assert _problems_for(
+        monkeypatch, text, "native/moy_audio/libmoy/UPSTREAM.md") == []

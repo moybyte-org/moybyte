@@ -1,0 +1,13 @@
+{
+  "dir": "native/p4/moy_dsi/vendor_jd9365",
+  "upstream": {
+    "name": "esp_lcd_jd9365, as Guition's JC8012P4A1C demo carries it",
+    "url": "https://github.com/DevinWatson/10.1-inch-ESP32P4-Xiaozhi-ESP32-C6-JC8012P4A1C_I_W_Y",
+    "path": "1-Demo/arduino-examples/esp32p4_lvgl_v8/src/lcd/",
+    "copied": "2026-09-06"
+  },
+  "files": {
+    "native/p4/moy_dsi/vendor_jd9365/esp_lcd_jd9365.c": "3c02d3a63eaf6a943be3e419347c2d06de7eab379c2d43ce56797b99aaec04d8",
+    "native/p4/moy_dsi/vendor_jd9365/include/esp_lcd_jd9365.h": "f2ad82167c9092712cfa16ab4befbe02f325da756b67f4ff510d634d37f28cc4"
+  }
+}

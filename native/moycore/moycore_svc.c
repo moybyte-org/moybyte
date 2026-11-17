@@ -1,13 +1,12 @@
 // moycore_svc: the Lua tier's services. moycore_svc.h has the contract.
 
-// The host's clock_gettime under a strict C standard.
-#if defined(__has_include) && !defined(_POSIX_C_SOURCE)
-#if !__has_include("esp_heap_caps.h")
-#define _POSIX_C_SOURCE 200809L
-#endif
-#endif
+#include "moy_platform.h"
+
+#include "moy_kmem.h"
 
 #include "moycore_svc.h"
+#include "moycore_moybyte.h"
+#include "moycore_lua.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,13 +30,8 @@
 #define MOY_APP_LUA_CALLS(X)
 #endif
 
-#if defined(__has_include)
-#if __has_include("esp_heap_caps.h")
-#define SVC_BOARD 1
-#endif
-#endif
 
-#ifdef SVC_BOARD
+#ifdef MOY_ON_BOARD
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -45,28 +39,31 @@
 #include "freertos/idf_additions.h"
 #include "sdkconfig.h"
 #define SVC_TASKS 1
-#if CONFIG_IDF_TARGET_ESP32P4
-#define SVC_CORE 0
-#else
-// The S3s: core 1, the VM's (core 0 has the flush feed and fold, input and
-// the radios), and the task's stack in PSRAM, so a service holds no internal
-// SRAM past its task's control block (the shares' internal cap, moy_play.h).
-// The task never touches flash itself: its file rows hop to the VM's task.
-#define SVC_CORE 1
-#define SVC_STACK_PSRAM 1
-#endif
+#include "moy_tasks.h"              // the task's core and stack (MOY_TASK_SVC)
 #endif
 
 // The OS log (native/moy_kernel/moy_log.h), where the image has it.
-void moy_log_write(int level, uint32_t pid, const char *text, size_t n) __attribute__((weak));
+#include "moy_log.h"
+#pragma weak moy_log_write
 enum { LOG_ERR = 3, LOG_WARNING = 4, LOG_INFO = 6 };
 
 // The prefs names' JSON (native/moy_app/moy_app_lua.h), where the image has
 // the app ABI: a message's arguments, the console's names and its answers.
-int moy_app_lua_json_push(lua_State *L, const char *text, size_t n) __attribute__((weak));
-const char *moy_app_lua_json_dump(lua_State *L, int idx, size_t *n) __attribute__((weak));
+#if __has_include("moy_app_lua.h")
+#include "moy_app_lua.h"
+#else
+int moy_app_lua_json_push(lua_State *L, const char *text, size_t n);
+const char *moy_app_lua_json_dump(lua_State *L, int idx, size_t *n);
+#endif
+#pragma weak moy_app_lua_json_push
+#pragma weak moy_app_lua_json_dump
 // The crypto rows (moy_app_lua.h), which need no grant.
-int moy_app_lua_open_crypto(lua_State *L) __attribute__((weak));
+#if __has_include("moy_app_lua.h")
+#include "moy_app_lua.h"
+#else
+int moy_app_lua_open_crypto(lua_State *L);
+#endif
+#pragma weak moy_app_lua_open_crypto
 
 // The role names of its app's run (moy_app_lua.h), where the image has the
 // app ABI.
@@ -74,9 +71,12 @@ int moy_app_lua_open_crypto(lua_State *L) __attribute__((weak));
 #if __has_include("moy_app_run.h")
 #include "moy_app_run.h"
 #define SVC_APP 1
-int moy_app_lua_open_hop(lua_State *L, const struct moy_app_run *run,
-                         int (*hop)(lua_State *L, void (*fn)(void *), void *arg, int here))
-    __attribute__((weak));
+#if __has_include("moy_app_lua.h")
+#include "moy_app_lua.h"
+#else
+int moy_app_lua_open_hop(lua_State *L, const struct moy_app_run *run, moy_app_lua_hop_fn hop);
+#endif
+#pragma weak moy_app_lua_open_hop
 #endif
 #endif
 
@@ -87,19 +87,6 @@ enum { CALL_OK, CALL_ERR, CALL_ABORT, CALL_EXIT, CALL_WAIT };
 enum { THEN_CHUNK, THEN_START, THEN_STOP, THEN_CB };
 // A console call's passage: posted on the VM's queue, answered by the console.
 enum { REQ_NONE, REQ_POSTED, REQ_ANSWERED };
-
-typedef struct {
-    uint32_t id;                // 0: a free timer
-    uint32_t due;               // ms
-    uint32_t every;             // 0: once
-    int ref;                    // the callback, in the registry
-} svc_timer_t;
-
-typedef struct {
-    uint32_t id;                // 0: a free wake
-    int ref;                    // the handler, in the registry
-    char name[MOY_EVQ_NAME];
-} svc_on_t;
 
 typedef struct {
     lua_State *L;
@@ -115,10 +102,8 @@ typedef struct {
     volatile int32_t exit;
     volatile uint32_t heap;
     volatile uint32_t cpu_us;
-    uint32_t now;               // the step's clock, ms
-    uint32_t next_id;
-    svc_timer_t tm[MOYCORE_SVC_TIMERS];
-    svc_on_t on[MOYCORE_SVC_ONS];
+    moycore_mb_t mb;            // its `moybyte` table's wakes (moycore_moybyte.h)
+    uint8_t mb_open;
     uint8_t own_q;              // its event queue is its own, opened at its start
     uint8_t orphan;             // its VM stopped before its task was done
     // the call under way: its coroutine (anchored at co_ref), NULL for none
@@ -133,10 +118,10 @@ typedef struct {
     uint8_t exiting;
     int32_t exit_req;
     // the message it delivers: taken from its event queue, handed to each of
-    // its wakes on the name in turn (msg_next the next to look at)
+    // its handlers in turn (msg_next the next to look at, moycore_mb_next)
     char *msg;                  // its arguments, a JSON array; NULL: none
     size_t msg_n;
-    uint8_t msg_next;
+    uint32_t msg_next;
     moy_evq_ev_t ev;            // its sender and its name
     // its console call, on the VM's queue (moy_vmq.h)
     uint8_t req;                // REQ_*
@@ -161,8 +146,9 @@ static uint16_t s_gen;
 // (native/moy_kernel/moy_lock.h; weak, for a build without it, whose one task
 // needs none), so moycore_svc_of may walk it from any task; every other walk
 // is the VM's task's, which alone writes it.
-void moy_lock_take(void) __attribute__((weak));
-void moy_lock_give(void) __attribute__((weak));
+#include "moy_lock.h"
+#pragma weak moy_lock_take
+#pragma weak moy_lock_give
 
 static void row_put(uint32_t slot, svc_t *s) {
     if (moy_lock_take != NULL) {
@@ -176,30 +162,12 @@ static void row_put(uint32_t slot, svc_t *s) {
 
 // -- the clock, the memory -------------------------------------------------------
 
-static int64_t now_us(void) {
-    #ifdef SVC_BOARD
-    return esp_timer_get_time();
-    #else
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
-    #endif
-}
-
 static void *mem_realloc(void *p, size_t n) {
-    #ifdef SVC_BOARD
-    return heap_caps_realloc(p, n, MALLOC_CAP_SPIRAM);
-    #else
-    return realloc(p, n);
-    #endif
+    return moy_krealloc(p, n, MOY_KMEM_PSRAM);
 }
 
 static void *mem_calloc(size_t n) {
-    #ifdef SVC_BOARD
-    return heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM);
-    #else
-    return calloc(1, n);
-    #endif
+    return moy_kalloc(n, MOY_KMEM_PSRAM | MOY_KMEM_ZERO);
 }
 
 static char *mem_copy(const char *p, size_t n) {
@@ -243,7 +211,7 @@ static svc_t *of_state(lua_State *L) {
 static void hook(lua_State *L, lua_Debug *ar) {
     (void)ar;
     svc_t *s = of_state(L);
-    if (!s->aborted && !s->exiting && (uint32_t)(now_us() - s->t0) <= s->budget) {
+    if (!s->aborted && !s->exiting && (uint32_t)(moy_now_us() - s->t0) <= s->budget) {
         return;
     }
     s->aborted = s->aborted || !s->exiting;
@@ -258,11 +226,11 @@ static void hook(lua_State *L, lua_Debug *ar) {
 // stopped. A call that waits on a console call keeps its coroutine.
 static int resume(svc_t *s, int nargs) {
     lua_State *co = s->co;
-    s->seg = now_us();
+    s->seg = moy_now_us();
     s->t0 = s->seg - s->spent;
     int nres = 0;
     int rc = lua_resume(co, s->L, nargs, &nres);
-    int64_t t = now_us();
+    int64_t t = moy_now_us();
     s->cpu_us += (uint32_t)(t - s->seg);
     s->spent = t - s->t0;
     int out;
@@ -307,133 +275,6 @@ static int call(svc_t *s, uint32_t budget, int nargs, uint8_t then) {
 
 // -- the names -----------------------------------------------------------------------
 
-static svc_timer_t *timer_of(svc_t *s, uint32_t id) {
-    for (uint32_t i = 0; i < MOYCORE_SVC_TIMERS; i++) {
-        if (s->tm[i].id == id && id != 0) {
-            return &s->tm[i];
-        }
-    }
-    return NULL;
-}
-
-static svc_on_t *on_of(svc_t *s, uint32_t id) {
-    for (uint32_t i = 0; i < MOYCORE_SVC_ONS; i++) {
-        if (s->on[i].id == id && id != 0) {
-            return &s->on[i];
-        }
-    }
-    return NULL;
-}
-
-static void timer_end(svc_t *s, svc_timer_t *t) {
-    if (s->L != NULL) {
-        luaL_unref(s->L, LUA_REGISTRYINDEX, t->ref);
-    }
-    t->id = 0;
-}
-
-static void on_end(svc_t *s, svc_on_t *o) {
-    if (s->L != NULL) {
-        luaL_unref(s->L, LUA_REGISTRYINDEX, o->ref);
-    }
-    if (o->id != 0) {
-        moy_evq_listen(s->pid, o->name, false);
-    }
-    o->id = 0;
-}
-
-static uint32_t new_id(svc_t *s) {
-    if (++s->next_id == 0) {
-        s->next_id = 1;
-    }
-    return s->next_id;
-}
-
-static int timer_add(lua_State *L, int every) {
-    svc_t *s = of_state(L);
-    lua_Integer ms = luaL_checkinteger(L, 1);
-    luaL_checktype(L, 2, LUA_TFUNCTION);
-    if (ms < 1) {
-        ms = 1;
-    }
-    svc_timer_t *t = timer_of(s, 0);
-    for (uint32_t i = 0; t == NULL && i < MOYCORE_SVC_TIMERS; i++) {
-        if (s->tm[i].id == 0) {
-            t = &s->tm[i];
-        }
-    }
-    if (t == NULL) {
-        return luaL_error(L, "every timer of the service is taken");
-    }
-    lua_pushvalue(L, 2);
-    t->ref = luaL_ref(L, LUA_REGISTRYINDEX);
-    t->id = new_id(s);
-    t->due = s->now + (uint32_t)ms;
-    t->every = every ? (uint32_t)ms : 0u;
-    lua_pushinteger(L, (lua_Integer)t->id);
-    return 1;
-}
-
-static int l_every(lua_State *L) {
-    return timer_add(L, 1);
-}
-
-static int l_after(lua_State *L) {
-    return timer_add(L, 0);
-}
-
-static int l_on(lua_State *L) {
-    svc_t *s = of_state(L);
-    size_t n;
-    const char *name = luaL_checklstring(L, 1, &n);
-    luaL_checktype(L, 2, LUA_TFUNCTION);
-    if (n == 0 || n >= MOY_EVQ_NAME) {
-        return luaL_error(L, "no message %s", name);
-    }
-    svc_on_t *o = NULL;
-    for (uint32_t i = 0; o == NULL && i < MOYCORE_SVC_ONS; i++) {
-        if (s->on[i].id == 0) {
-            o = &s->on[i];
-        }
-    }
-    if (o == NULL) {
-        return luaL_error(L, "every message wake of the service is taken");
-    }
-    if (moy_evq_listen(s->pid, name, true) != MOY_EVQ_OK) {
-        return luaL_error(L, "the service listens on too many names");
-    }
-    lua_pushvalue(L, 2);
-    o->ref = luaL_ref(L, LUA_REGISTRYINDEX);
-    memcpy(o->name, name, n + 1u);
-    o->id = new_id(s);
-    lua_pushinteger(L, (lua_Integer)o->id);
-    return 1;
-}
-
-static int l_cancel(lua_State *L) {
-    svc_t *s = of_state(L);
-    uint32_t id = (uint32_t)luaL_checkinteger(L, 1);
-    svc_timer_t *t = timer_of(s, id);
-    if (t != NULL) {
-        timer_end(s, t);
-    }
-    svc_on_t *o = on_of(s, id);
-    if (o != NULL) {
-        on_end(s, o);
-    }
-    return 0;
-}
-
-static int l_log(lua_State *L) {
-    lua_Integer level = luaL_checkinteger(L, 1);
-    size_t n;
-    const char *text = luaL_checklstring(L, 2, &n);
-    if (moy_log_write != NULL) {
-        moy_log_write(level < 0 ? 0 : level > 7 ? 7 : (int)level, of_state(L)->pid, text, n);
-    }
-    return 0;
-}
-
 static int l_print(lua_State *L) {
     int n = lua_gettop(L);
     luaL_Buffer b;
@@ -471,7 +312,7 @@ static int l_time(lua_State *L) {
 
 static int l_clock(lua_State *L) {
     svc_t *s = of_state(L);
-    lua_pushnumber(L, (lua_Number)(s->cpu_us + (uint32_t)(now_us() - s->seg)) / 1e6f);
+    lua_pushnumber(L, (lua_Number)(s->cpu_us + (uint32_t)(moy_now_us() - s->seg)) / 1e6f);
     return 1;
 }
 
@@ -492,11 +333,6 @@ static int console_k(lua_State *L, int status, lua_KContext ctx) {
     lua_pushnil(L);
     lua_pushfstring(L, "the console refused %s", s->req_name);
     return 2;
-}
-
-// A message's sender: the app id the OS stamped on it.
-static void push_sender(lua_State *L, const svc_t *s) {
-    lua_pushstring(L, s->ev.app);
 }
 
 // A console call (its name the upvalue): its arguments posted as a JSON array
@@ -533,189 +369,27 @@ static int l_console(lua_State *L) {
     return lua_yieldk(L, 0, 0, console_k);
 }
 
-// `moybyte.send(app, name, ...)`: the kernel's send (moy_evq.h) on the
-// service's own task, as a compiled program's moy_send is, so it needs no
-// console and goes on through a VM stop: how many took it, or nil and why
-// ("full": BACKPRESSURE refused it; "no queue").
-static int l_send(lua_State *L) {
-    svc_t *s = of_state(L);
-    const char *app = luaL_checkstring(L, 1);
-    const char *name = luaL_checkstring(L, 2);
-    if (moy_app_lua_json_dump == NULL) {
-        return luaL_error(L, "no messages in this build");
-    }
-    int n = lua_gettop(L);
-    luaL_checkstack(L, 2 * n + 4, NULL);
-    lua_pushliteral(L, "[");
-    for (int i = 3; i <= n; i++) {
-        if (i > 3) {
-            lua_pushliteral(L, ", ");
-        }
-        moy_app_lua_json_dump(L, i, NULL);
-    }
-    lua_pushliteral(L, "]");
-    lua_concat(L, n >= 3 ? 2 * (n - 2) + 1 : 2);
-    size_t len;
-    const char *text = lua_tolstring(L, -1, &len);
-    int took = moy_evq_send(s->pid, app, name, text, len, NULL);
-    if (took >= 0) {
-        lua_pushinteger(L, took);
-        return 1;
-    }
-    lua_pushnil(L);
-    lua_pushstring(L, took == -MOY_EVQ_FULL ? "full" : "no queue");
-    return 2;
-}
-
-// `moybyte.at`'s kernel half (ALARMS): the kernel's alarm at wall time `t`
-// (moy_evq_at, under the service's `alarms`), on the service's own task:
-// its id, or nil and why.
-static int l_at(lua_State *L) {
-    svc_t *s = of_state(L);
-    int64_t whole;
-    if (lua_isinteger(L, 1)) {
-        whole = (int64_t)lua_tointeger(L, 1);
-    } else {
-        // a fraction rounds up: no earlier than `t` (Lua's numbers are floats)
-        lua_Number t = luaL_checknumber(L, 1);
-        whole = t >= 4.0e9f ? (int64_t)4e9 : t <= -4.0e9f ? (int64_t)-4e9 : (int64_t)t;
-        if ((lua_Number)whole < t) {
-            whole++;
-        }
-    }
-    uint32_t id = 0;
-    int rc = moy_evq_at(s->pid, whole, &id);
-    if (rc == MOY_EVQ_OK) {
-        lua_pushinteger(L, (lua_Integer)id);
-        return 1;
-    }
-    lua_pushnil(L);
-    lua_pushstring(L, rc == MOY_EVQ_DENIED ? "moybyte.at needs \"alarms\""
-                      : rc == MOY_EVQ_FULL ? "every timer of the service is taken"
-                                           : "no queue");
-    return 2;
-}
-
-static int deliver_k(lua_State *L, int status, lua_KContext ctx) {
-    (void)L;
-    (void)status;
-    (void)ctx;
-    return 0;
-}
-
-// A message delivered: its handler (at 1) called with its sender's app id and
-// the arguments its JSON array holds, each in its place, a null as nil.
-static int l_deliver(lua_State *L) {
-    svc_t *s = of_state(L);
-    luaL_checkstack(L, 1, NULL);
-    push_sender(L, s);
-    int n = 1;
-    if (s->msg != NULL && moy_app_lua_json_push != NULL) {
-        const char *end = s->msg + s->msg_n;
-        const char *v = moy_json_ws(s->msg, end);
-        const char *past = moy_json_value(v, end, 0u);
-        if (past != NULL && moy_json_kind(v, past) == MOY_JSON_ARR) {
-            moy_json_iter_t it;
-            const char *k, *ke, *e, *ee;
-            moy_json_iter(&it, v, past);
-            while (moy_json_next(&it, &k, &ke, &e, &ee)) {
-                luaL_checkstack(L, 1, NULL);
-                moy_app_lua_json_push(L, e, (size_t)(ee - e));
-                n++;
-            }
-        }
-    }
-    lua_callk(L, n, 0, 0, deliver_k);
-    return 0;
-}
-
-static const luaL_Reg MOYBYTE[] = {
-    { "every", l_every }, { "after", l_after }, { "cancel", l_cancel },
-    { "on", l_on }, { "log", l_log }, { "exit", l_exit }, { NULL, NULL },
-};
-
 static const luaL_Reg OS[] = { { "time", l_time }, { "clock", l_clock }, { NULL, NULL } };
 
+
+// The tier's one sandbox (moycore_lua_sandbox), `print` and `os` the
+// service's own, and its process's `moybyte` table with `exit`.
 static void open_names(lua_State *L) {
-    static const luaL_Reg libs[] = {
-        { LUA_GNAME, luaopen_base }, { LUA_COLIBNAME, luaopen_coroutine },
-        { LUA_TABLIBNAME, luaopen_table }, { LUA_STRLIBNAME, luaopen_string },
-        { LUA_MATHLIBNAME, luaopen_math },
-    };
-    for (size_t i = 0; i < sizeof libs / sizeof libs[0]; i++) {
-        luaL_requiref(L, libs[i].name, libs[i].func, 1);
-        lua_pop(L, 1);
-    }
-    static const char *const banned[] = { "load", "dofile", "loadfile", NULL };
-    for (const char *const *b = banned; *b; b++) {
-        lua_pushnil(L);
-        lua_setglobal(L, *b);
-    }
+    svc_t *s = of_state(L);
+    moycore_lua_sandbox(L);
     lua_pushcfunction(L, l_print);
     lua_setglobal(L, "print");
     luaL_newlib(L, OS);
     lua_setglobal(L, "os");
-    luaL_newlib(L, MOYBYTE);
-    lua_pushinteger(L, LOG_ERR);
-    lua_setfield(L, -2, "ERR");
-    lua_pushinteger(L, LOG_WARNING);
-    lua_setfield(L, -2, "WARNING");
-    lua_pushinteger(L, LOG_INFO);
-    lua_setfield(L, -2, "INFO");
-#define CALL(name)                          \
-    lua_pushliteral(L, "moybyte." name);    \
-    lua_pushcclosure(L, l_console, 1);      \
-    lua_setfield(L, -2, name);
-    MOY_APP_LUA_CALLS(CALL)
-#undef CALL
-    lua_pushcfunction(L, l_send);       // the kernel's, not a console call
-    lua_setfield(L, -2, "send");
-    lua_pushcfunction(L, l_at);         // the alarm's kernel half (ALARMS)
-    lua_setfield(L, -2, "at");
-    lua_setglobal(L, "moybyte");
+    moycore_mb_open(L, &s->mb, s->pid, l_console);
+    s->mb_open = 1;
+    lua_getglobal(L, "moybyte");
+    lua_pushcfunction(L, l_exit);
+    lua_setfield(L, -2, "exit");
+    lua_pop(L, 1);
     if (moy_app_lua_open_crypto != NULL) {
         moy_app_lua_open_crypto(L);     // its run's role binding's, held with no grant
     }
-}
-
-// `moybyte.at(t, fn)`, an alarm, over its kernel half (l_at): the kernel's
-// alarm posts the service the system's message "moybyte.at" with the
-// alarm's id, VM or no VM, which one message wake, held while an alarm is
-// due, hears. The wake is
-// made before the call, so an alarm already due finds it listening. An
-// alarm's id is negative, apart from the service's own wakes'; cancelling
-// one cancels the kernel's alarm too (l_unalarm), giving its slot back.
-static const char ALARMS[] =
-    "local unalarm = ...\n"
-    "local m = moybyte\n"
-    "local call, on, cancel = m.at, m.on, m.cancel\n"
-    "local fns, n, ear = {}, 0, nil\n"
-    "local function drop() n = n - 1; if n == 0 then cancel(ear); ear = nil end end\n"
-    "local function hear(_, w)\n"
-    "  local fn = fns[-w]\n"
-    "  if fn == nil then return end\n"
-    "  fns[-w] = nil; drop(); fn()\n"
-    "end\n"
-    "function m.at(t, fn)\n"
-    "  if type(fn) ~= 'function' then error('moybyte.at needs a function', 2) end\n"
-    "  if ear == nil then ear = on('moybyte.at', hear) end\n"
-    "  n = n + 1\n"
-    "  local w, why = call(t)\n"
-    "  if w == nil then drop(); error(why, 2) end\n"
-    "  fns[-w] = fn\n"
-    "  return -w\n"
-    "end\n"
-    "function m.cancel(id)\n"
-    "  if type(id) == 'number' and id < 0 and fns[id] ~= nil then\n"
-    "    fns[id] = nil; unalarm(-id); drop(); return\n"
-    "  end\n"
-    "  return cancel(id)\n"
-    "end\n";
-
-// The kernel's alarm `id` of the service's own cancelled (moy_evq.h, TIMERS).
-static int l_unalarm(lua_State *L) {
-    moy_evq_timer_cancel(of_state(L)->pid, (uint32_t)luaL_checkinteger(L, 1));
-    return 0;
 }
 
 #ifdef SVC_APP
@@ -729,9 +403,9 @@ static int vm_hop(lua_State *L, void (*fn)(void *), void *arg, int here) {
     #ifdef SVC_TASKS
     svc_t *s = of_state(L);
     if (here && xTaskGetCurrentTaskHandle() == s->task) {
-        int64_t t0 = now_us();
+        int64_t t0 = moy_now_us();
         fn(arg);
-        uint32_t took = (uint32_t)(now_us() - t0);
+        uint32_t took = (uint32_t)(moy_now_us() - t0);
         s->t0 += took;
         s->seg += took;
         return 0;
@@ -811,11 +485,11 @@ static int l_open_env(lua_State *L) {
 // -- the life ------------------------------------------------------------------------
 
 static void end(svc_t *s, int32_t code) {
-    for (uint32_t i = 0; i < MOYCORE_SVC_ONS; i++) {
-        if (s->on[i].id != 0) {
-            moy_evq_listen(s->pid, s->on[i].name, false);
-        }
+    if (s->L != NULL && s->mb_open) {
+        lua_settop(s->L, 0);
+        moycore_mb_end(s->L, &s->mb);
     }
+    s->mb_open = 0;
     moy_vmq_drop(s->pid);
     if (s->own_q) {
         moy_evq_close(s->pid);
@@ -826,12 +500,6 @@ static void end(svc_t *s, int32_t code) {
         s->L = NULL;
     }
     s->co = NULL;
-    for (uint32_t i = 0; i < MOYCORE_SVC_TIMERS; i++) {
-        s->tm[i].id = 0;
-    }
-    for (uint32_t i = 0; i < MOYCORE_SVC_ONS; i++) {
-        s->on[i].id = 0;
-    }
     free(s->src);
     s->src = NULL;
     free(s->env);
@@ -847,17 +515,7 @@ static void end(svc_t *s, int32_t code) {
 }
 
 static bool has_wakes(const svc_t *s) {
-    for (uint32_t i = 0; i < MOYCORE_SVC_TIMERS; i++) {
-        if (s->tm[i].id != 0) {
-            return true;
-        }
-    }
-    for (uint32_t i = 0; i < MOYCORE_SVC_ONS; i++) {
-        if (s->on[i].id != 0) {
-            return true;
-        }
-    }
-    return false;
+    return s->mb_open && moycore_mb_wakes(&s->mb);
 }
 
 // The answer of a start's or a stop's call: true when the service ended.
@@ -1003,12 +661,6 @@ static void start(svc_t *s) {
     }
     *(svc_t **)lua_getextraspace(s->L) = s;
     open_names(s->L);
-    if (luaL_loadbufferx(s->L, ALARMS, sizeof ALARMS - 1u, "=alarms", "t") != LUA_OK
-        || (lua_pushcfunction(s->L, l_unalarm), lua_pcall(s->L, 1, 0, 0)) != LUA_OK) {
-        snprintf(s->why, sizeof s->why, "its alarms do not open");
-        end(s, MOYCORE_SVC_EXIT_CRASHED);
-        return;
-    }
     lua_pushcfunction(s->L, l_open_run);
     if (lua_pcall(s->L, 0, 0, 0) != LUA_OK) {
         const char *m = lua_tostring(s->L, -1);
@@ -1045,17 +697,15 @@ static void stop(svc_t *s) {
     end(s, 0);
 }
 
-// The next delivery of the message under way to a wake on its name, or of
-// the oldest one on its event queue: its delivery and its handler pushed on
-// the main state, the message held for it: 1, or 0 for none.
+// The next handler of the message under way, or of the oldest one on its
+// event queue (moycore_mb_next): pushed on the main state with its
+// arguments, the message held for it: how many arguments, -1 for none.
 static int take_mail(svc_t *s) {
     for (;;) {
-        while (s->msg != NULL && s->msg_next < MOYCORE_SVC_ONS) {
-            svc_on_t *o = &s->on[s->msg_next++];
-            if (o->id != 0 && strcmp(o->name, s->ev.name) == 0) {
-                lua_pushcfunction(s->L, l_deliver);
-                lua_rawgeti(s->L, LUA_REGISTRYINDEX, o->ref);
-                return 1;
+        if (s->msg != NULL) {
+            int nargs = moycore_mb_next(s->L, &s->mb, &s->ev, s->msg, s->msg_n, &s->msg_next);
+            if (nargs >= 0) {
+                return nargs;
             }
         }
         free(s->msg);
@@ -1065,30 +715,30 @@ static int take_mail(svc_t *s) {
         if (rc == MOY_EVQ_RANGE) {
             char *big = mem_realloc(NULL, s->ev.n + 1u);
             if (big == NULL) {
-                return 0;
+                return -1;
             }
             if (moy_evq_take(s->pid, &s->ev, big, s->ev.n + 1u) != MOY_EVQ_OK) {
                 free(big);
-                return 0;
+                return -1;
             }
             s->msg = big;
         } else if (rc == MOY_EVQ_OK) {
             s->msg = mem_copy(small, s->ev.n);
             if (s->msg == NULL) {
-                return 0;
+                return -1;
             }
         } else {
-            return 0;
+            return -1;
         }
         s->msg_n = s->ev.n;
         s->msg_next = 0;
     }
 }
 
-// What is due on `s` at `now`; the ms to its next deadline (UINT32_MAX while
-// a call waits on the console).
-static uint32_t run(svc_t *s, uint32_t now) {
-    s->now = now;
+// What is due on `s`: its messages (its timers' among them, which the
+// kernel's run posts it), each handler a call; 0 where it has more to hand
+// at once, else UINT32_MAX (its wait is the timers' deadline, its task's).
+static uint32_t run(svc_t *s) {
     if (s->co != NULL) {
         if (s->req == REQ_POSTED) {
             char *ans = NULL;
@@ -1124,31 +774,13 @@ static uint32_t run(svc_t *s, uint32_t now) {
     if (s->state != MOYCORE_SVC_RUNNING || moy_super_held(s->pid)) {
         return UINT32_MAX;
     }
-    for (uint32_t i = 0; i < MOYCORE_SVC_TIMERS && s->state == MOYCORE_SVC_RUNNING; i++) {
-        svc_timer_t *t = &s->tm[i];
-        if (t->id == 0 || (int32_t)(now - t->due) < 0) {
-            continue;
-        }
-        lua_rawgeti(s->L, LUA_REGISTRYINDEX, t->ref);
-        if (t->every != 0) {
-            t->due += t->every;
-            if ((int32_t)(now - t->due) >= 0) {
-                t->due = now + t->every;
-            }
-        } else {
-            timer_end(s, t);
-        }
-        begin(s, MOY_SUPER_ABORT_US, 0, THEN_CB);
-        if (s->co != NULL) {
-            return UINT32_MAX;
-        }
-    }
     if (s->msg == NULL) {
         moy_evq_step(s->pid);           // a run hands MOY_EVQ_BATCH messages at most
     }
+    int nargs;
     while (s->state == MOYCORE_SVC_RUNNING && !s->stop_req && !moy_super_held(s->pid)
-           && take_mail(s)) {
-        begin(s, MOY_SUPER_ABORT_US, 1, THEN_CB);
+           && (nargs = take_mail(s)) >= 0) {
+        begin(s, MOY_SUPER_ABORT_US, nargs, THEN_CB);
         if (s->co != NULL) {
             return UINT32_MAX;
         }
@@ -1162,34 +794,27 @@ static uint32_t run(svc_t *s, uint32_t now) {
     }
     if (!has_wakes(s)) {
         end(s, 0);
-        return UINT32_MAX;
     }
-    uint32_t wait = UINT32_MAX;
-    for (uint32_t i = 0; i < MOYCORE_SVC_TIMERS; i++) {
-        if (s->tm[i].id != 0) {
-            int32_t d = (int32_t)(s->tm[i].due - now);
-            uint32_t w = d > 0 ? (uint32_t)d : 0u;
-            wait = w < wait ? w : wait;
-        }
-    }
-    return wait;
+    return UINT32_MAX;
 }
 
 #ifdef SVC_TASKS
 static void svc_task(void *arg) {
     svc_t *s = arg;
     for (;;) {
-        uint32_t wait = run(s, (uint32_t)(now_us() / 1000));
+        uint32_t next = moy_evq_timers_run();   // the kernel's timers, its own among them
+        uint32_t wait = run(s);
         if (s->state == MOYCORE_SVC_EXITED) {
             break;
         }
+        wait = next < wait ? next : wait;
         if (wait > 1000u) {
             wait = 1000u;
         }
         moy_evq_wait(s->pid, wait > 0 ? wait : 1u);     // the one kernel wait
     }
     moy_evq_unwait(s->pid);             // the queue may outlive this task
-    #ifdef SVC_STACK_PSRAM
+    #if MOY_TASK_SVC_PSRAM
     // A task made with its caps is deleted by another (row_free): its own
     // delete would make a helper task, in internal SRAM, to free its stack.
     s->done = 1;
@@ -1223,7 +848,7 @@ static svc_t *row_of(uint32_t h) {
 static void row_free(uint32_t slot) {
     svc_t *s = s_row[slot];
     row_put(slot, NULL);
-    #ifdef SVC_STACK_PSRAM
+    #if MOY_TASK_SVC_PSRAM
     if (s->task != NULL) {
         vTaskDeleteWithCaps(s->task);
     }
@@ -1301,15 +926,7 @@ int moycore_svc_start(uint32_t pid, const char *id, const moycore_svc_chunk_t *c
     }
     row_put(slot, s);
     #ifdef SVC_TASKS
-    #ifdef SVC_STACK_PSRAM
-    BaseType_t made = xTaskCreatePinnedToCoreWithCaps(svc_task, "moy_svc", MOYCORE_SVC_STACK, s,
-                                                      MOYCORE_SVC_PRIO, &s->task, SVC_CORE,
-                                                      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    #else
-    BaseType_t made = xTaskCreatePinnedToCore(svc_task, "moy_svc", MOYCORE_SVC_STACK, s,
-                                              MOYCORE_SVC_PRIO, &s->task, SVC_CORE);
-    #endif
-    if (made != pdPASS) {
+    if (!moy_task_spawn(MOY_TASK_SVC, svc_task, s, &s->task)) {
         row_put(slot, NULL);
         if (s->own_q) {
             moy_evq_close(pid);
@@ -1354,14 +971,7 @@ int moycore_svc_info(uint32_t h, moycore_svc_info_t *out) {
     } else {
         out->why[0] = 0;
     }
-    uint8_t w = 0;
-    for (uint32_t i = 0; i < MOYCORE_SVC_TIMERS; i++) {
-        w = (uint8_t)(w + (s->tm[i].id != 0));
-    }
-    for (uint32_t i = 0; i < MOYCORE_SVC_ONS; i++) {
-        w = (uint8_t)(w + (s->on[i].id != 0));
-    }
-    out->wakes = w;
+    out->wakes = (uint8_t)(s->mb_open ? moycore_mb_count(&s->mb) : 0u);
     out->mail = (uint8_t)moy_evq_queued(s->pid);
     return MOYCORE_SVC_OK;
 }
@@ -1426,18 +1036,17 @@ uint32_t moycore_svc_term(const char *id, size_t n) {
     return svc_find(id, n, true);
 }
 
-uint32_t moycore_svc_step(uint32_t now_ms) {
+uint32_t moycore_svc_step(void) {
     uint32_t wait = UINT32_MAX;
     #ifndef SVC_TASKS
+    wait = moy_evq_timers_run();
     for (uint32_t i = 0; i < MOYCORE_SVCS; i++) {
         svc_t *s = s_row[i];
         if (s != NULL && s->state != MOYCORE_SVC_EXITED) {
-            uint32_t w = run(s, now_ms);
+            uint32_t w = run(s);
             wait = w < wait ? w : wait;
         }
     }
-    #else
-    (void)now_ms;
     #endif
     return wait;
 }
@@ -1465,7 +1074,7 @@ void moycore_svc_vm_stop(bool keep) {
     // A fresh start follows: each service ends now. No console answers a
     // call any more, so each is refused, and the hops its role rows wait on
     // are served here, on the VM's task while the VM still stands.
-    int64_t until = now_us() + (int64_t)(MOYCORE_SVC_STOP_MS + 500u) * 1000;
+    int64_t until = moy_now_us() + (int64_t)(MOYCORE_SVC_STOP_MS + 500u) * 1000;
     for (;;) {
         bool live = false;
         for (uint32_t i = 0; i < MOYCORE_SVCS; i++) {
@@ -1477,7 +1086,7 @@ void moycore_svc_vm_stop(bool keep) {
                 live = true;
             }
         }
-        if (!live || now_us() >= until) {
+        if (!live || moy_now_us() >= until) {
             break;
         }
         moy_vmq_serve();

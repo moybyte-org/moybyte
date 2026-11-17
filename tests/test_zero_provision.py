@@ -92,7 +92,7 @@ def test_the_module_push_is_opt_in_and_undoable():
         "the module push is no longer opt-in")
     assert "--clean" in SCRIPT and "os.remove" in SCRIPT, (
         "there is no way to remove pushed copies that shadow the image")
-    host = (ZERO / "modules" / "zero_host.py").read_text()
+    host = (ROOT / "device" / "zero_host.py").read_text()
     assert "SHADOWING the image" in host, (
         "zero_host no longer reports pushed copies shadowing the image")
 

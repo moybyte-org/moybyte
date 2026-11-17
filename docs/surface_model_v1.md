@@ -107,7 +107,7 @@ are always `!=`, never `>`.
 - **L5 — compositing strategy is backend-owned.** The shared layer decides
   *whether* a surface changed; the backend decides *how* the glass catches up.
 - **L6 — the degenerate tier pays ~nothing, and here is the arithmetic.** On
-  the S3 the **existing** `ws._dirty` writes stay as they are (§3), and the
+  the S3 the **existing** `ws.mark_dirty()` calls stay as they are (§3), and the
   frame gate reads the kernel's own epoch once a frame (§15's leg): one C
   call per frame, ≈ single-digit µs, and no new per-draw work.
 - **L7 — no retained widget tree, no per-widget damage.** Litigated; §8.
@@ -125,7 +125,7 @@ are always `!=`, never `>`.
   - *Perf (the silent-disable direction):* on a placement-only gesture frame
     the harness asserts **zero content gens moved and zero surface streams
     shipped**; every backend exposes ship/skip counters via the existing
-    `ws.note_cost` convention. This is the direction the recurring real
+    `ws.perf.note_cost` convention. This is the direction the recurring real
     defects lived in — the 72ms bar-strip rebuild that "produced no signal"
     (ui_damage §2.1) and the make-group freeze that never engaged — and a
     hash assertion cannot catch either.
@@ -140,20 +140,20 @@ are always `!=`, never `>`.
 ## 3. The dirty protocol — three producer classes, all owned
 
 **The #44 gate has three legs**, and the model absorbs all three —
-`_needs_redraw` is `_dirty OR _animating(dt) OR ptr_state != _last_ptr`
+`_needs_redraw` is `frame_state.dirty OR _animating(dt) OR ptr_state != _last_ptr`
 (`console.py`) plus the kernel-frame epoch (§15) and the WM's owed-repaint
 legs, and the windowed content-freeze (`_content_static`, `wm_paint.py`)
 re-derives the three conditions per window. A model
-that absorbed only the `_dirty` leg would freeze live wallpapers, the music
+that absorbed only the dirty leg would freeze live wallpapers, the music
 playhead, OTA progress, and every paint stroke — the review's top finding.
 
 **Class A — explicit gen bumps.** The signal rides the **existing**
-`ws._dirty = True` writes, *observed, not rewritten*: an un-attributed dirty
+`ws.mark_dirty()` calls, *observed, not rewritten*: an un-attributed dirty
 is a **global** change — the whole frame repaints — safe, never wrong, merely
 unprofitable. Per-surface attribution is **opt-in
 per site**, added only where audited, so shared `*_layer.py` code stays
 S3-safe. Attribution is never mechanical: there were about 135 raw
-`_dirty = True` sites across 31 files on 2026-10-07, several firing from
+dirty-marking sites across 31 files on 2026-10-07, several firing from
 async contexts (wifi scan, bluetooth, OTA `download_step`) where "the active
 surface" would mis-attribute. An un-audited site stays a global epoch and is
 correct.
@@ -184,7 +184,7 @@ advertisement.
 | owner | signal |
 |---|---|
 | running game (Player) | Class B while running; gen moves on frames it renders (L9) |
-| app windows (Editor tabs, Settings, Desk-Lab apps) | Class A via the existing `_dirty` writes (global epoch until attributed); Class C during gestures |
+| app windows (Editor tabs, Settings, Desk-Lab apps) | Class A via the existing `mark_dirty()` calls (global epoch until attributed); Class C during gestures |
 | self-animating panels (music preview, bluetooth, OTA, live wallpaper, overlays) | Class B declaration |
 | wallpaper (static, e.g. `moybyte.moy_night.moy`) | nothing — idles free *by construction* |
 | bar | Class A: clock tick (1/s), status change, lent-zone redraw request from the app |
@@ -250,7 +250,7 @@ remain opaque rects; chrome bands may exceed them.
 `FullscreenStackWM` only. Surfaces degenerate to: one app surface + bar + the
 game composite (`composite_game`/`viewport`). Strategy: memoized stack (#66)
 + full repaint under the gate. **No Python Surface object exists here**: the
-rows are the kernel's (§15), producer signals ride the unmodified `_dirty`
+rows are the kernel's (§15), producer signals ride the unmodified dirty flag
 writes folded once per painted frame, and L6 shows the ≤single-digit-µs
 arithmetic. Hardware constraints bounding any future change: the banded
 flush fed from core 0 (`native/moy_flush/moy_flush.h`); the SD/display shared
@@ -484,7 +484,7 @@ folded into is gone (§16).
 
 | mechanism | where it stands |
 |---|---|
-| #44 `ws._dirty` frame gate (three legs: dirty / `_animating` / pointer) | §3's three producer classes: the `_dirty` writes are the Class A epoch signal; the predicate is Python (`runtime/shell/console.py`), with the kernel epoch as one more leg (§15) |
+| #44 `frame_state.dirty` frame gate (three legs: dirty / `_animating` / pointer) | §3's three producer classes: the `mark_dirty()` calls are the Class A epoch signal; the predicate is Python (`runtime/shell/console.py`), with the kernel epoch as one more leg (§15) |
 | the bar strip cache keyed on canvas identity (ui_damage §2.1's flagship bug) | the identity key behind the silent rebuild is gone; `tests/test_top_bar.py` pins the strip's rebuild budget |
 | `_content_static` by-name freeze + its exclusion lists | the windowed WM's own, under §14.1's focused-window content freeze |
 | streak/sig family (`_win_sig`/`_stamp_streak`, `_chrome_sig/_streak`, `_chip_sig/_streak`, `_desk_sig/_streak`, `_bezel_key/_paints`) | the windowed WM's per-buffer state, beside §14.3's shown ring |
@@ -657,7 +657,7 @@ PAINTED frame that provably did not change the focused window's content, the
 content draw is skipped and the retained `win.buf` stamp presents it instead.
 "Provably" is five checkable facts, all of them required.
 
-- **`ws._dirty` is false, or the WM's own mode-switch mark.** It is still
+- **`ws.frame_state.dirty` is false, or the WM's own mode-switch mark.** It is still
   readable during the draw — `frame()` clears it after — so false means no
   input or state handler reported a visible change this frame. The home's X
   bringing the desk back marks `MODE_MARK`, which no window's content moved
@@ -669,7 +669,7 @@ content draw is skipped and the retained `win.buf` stamp presents it instead.
   WM's.** Class C (§3) mutates content without marking dirty, so any button
   activity renders live. The check reads BOTH frames because handlers consume
   `p.click` in place — a tap that opens a prompt zeroes it before the draw sees
-  it, and the previous frame's edge is still in `ws._last_ptr`. A press that
+  it, and the previous frame's edge is still in `ws.last_ptr`. A press that
   lands on chrome — a strip, its buttons, a resize zone, a full-screen
   window's row head — is the WM's (`_grab`): no content is handed it, its
   drag or its release, so it waives the check. A position/visibility-only change is inert:
@@ -978,8 +978,9 @@ this frame's picture, and copying it out is cheaper than drawing it again.
 **The backend verb is `copy_last(x, y, w, h)` on the root canvas**, bound
 from its compositor where that compositor names the buffer the last
 presented frame drew into (the P4s' DSI and rotated compositors, the S3s'
-banded one), absent elsewhere (the web's canvas, one persistent buffer,
-has none). It copies the rect, in buffer coordinates, from that buffer
+banded one) and by the one-buffer compositor (the host's and the
+browser's root, `runtime/toolkit/one_buffer.py`), whose one buffer is the
+last frame's. It copies the rect, in buffer coordinates, from that buffer
 into the one this frame draws into: on a P4 after fencing any queued op
 still writing it (`moy_dsi_last`), whole rows through the AXI GDMA
 (`moy_ppa.copy`) and any other rect a row copy on the CPU; on an S3 a row
@@ -1161,7 +1162,7 @@ own, built for the host as much as for the boards, and carries no widget tree
 (L7); a backend still implements §4 and invents no invalidation mechanism
 (L10). The §8 ruling against per-object
 generation counters stands. L6's arithmetic holds on the S3 because the
-`_dirty` writes are untouched and the frame gate reads the epoch once per
+`mark_dirty()` calls are untouched and the frame gate reads the epoch once per
 painted frame.
 
 `runtime/shell/console.py`'s frame gate and the windowed WM's content freeze (§14.1)

@@ -83,6 +83,14 @@
 #define MOY_UF_KINDS 6
 #define MOY_UF_TRASH_KEEP 50u
 #define MOY_UF_HISTORY_KEEP 32u
+// The layout's names: the default root, and the folders and suffixes under it.
+#define MOY_UF_CARTS_DIR "/sd/moybyte/carts"
+#define MOY_UF_FILES_DIR "files"
+#define MOY_UF_TRASH_DIR ".Trash"
+#define MOY_UF_HISTORY_DIR ".history"
+#define MOY_UF_HISTORY_EXT ".jsonl"
+#define MOY_UF_DOC_EXT ".md"
+#define MOY_UF_PROJECT_KIND "project:"
 #define MOY_UF_COVER_SIDE 128
 #define MOY_UF_COVER_MAX 65536u     // a cover's bytes (cover_png.MAX_BYTES)
 #define MOY_UF_WBITS 12             // the ZLIB window a picture is written at
@@ -144,6 +152,7 @@ int moy_uf_rename(const char *root, const char *kind, const char *name,
                   const char *title, char *name_out);
 int moy_uf_duplicate(const char *root, const char *kind, const char *name,
                      char *name_out);
+// delete: NONE where `name` names nothing.
 int moy_uf_delete(const char *root, const char *kind, const char *name,
                   char *name_out);
 int moy_uf_restore(const char *root, const char *kind, const char *name,

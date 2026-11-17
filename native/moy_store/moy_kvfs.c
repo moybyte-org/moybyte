@@ -40,9 +40,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "moy_kmem.h"
+
 #if MOY_KVFS_FLASH
-#include "esp_heap_caps.h"
 #include "esp_partition.h"
+#include "moy_vol.h"
 #endif
 #include "extmod/vfs.h"
 #include "lib/littlefs/lfs2.h"
@@ -83,6 +85,7 @@ static kvol_t *s_kv;
 static int kv_read(const struct lfs2_config *c, lfs2_block_t b, lfs2_off_t off, void *buf,
                    lfs2_size_t n) {
     const kvol_t *k = c->context;
+    moy_store_tick();
     return esp_partition_read(k->part, b * c->block_size + off, buf, n) == ESP_OK ? 0 : LFS2_ERR_IO;
 }
 
@@ -93,7 +96,12 @@ static int kv_read(const struct lfs2_config *c, lfs2_block_t b, lfs2_off_t off, 
 // semaphore for the write's whole span: the next frame is kicked only after
 // it. moy_flush is the S3 boards' (weak: a P4 has no feeder; its DSI DMA
 // scans without the cache).
-bool moy_flush_kdrain(void) __attribute__((weak));
+#if __has_include("moy_flush.h")
+#include "moy_flush.h"
+#else
+bool moy_flush_kdrain(void);
+#endif
+#pragma weak moy_flush_kdrain
 
 static void kv_quiet(void) {
     if (moy_flush_kdrain != NULL) {
@@ -105,12 +113,14 @@ static int kv_prog(const struct lfs2_config *c, lfs2_block_t b, lfs2_off_t off,
                    const void *buf, lfs2_size_t n) {
     const kvol_t *k = c->context;
     kv_quiet();
+    moy_store_tick();
     return esp_partition_write(k->part, b * c->block_size + off, buf, n) == ESP_OK ? 0 : LFS2_ERR_IO;
 }
 
 static int kv_erase(const struct lfs2_config *c, lfs2_block_t b) {
     const kvol_t *k = c->context;
     kv_quiet();
+    moy_store_tick();
     return esp_partition_erase_range(k->part, b * c->block_size, c->block_size) == ESP_OK
            ? 0 : LFS2_ERR_IO;
 }
@@ -149,19 +159,16 @@ static kvol_t *kvol_new(void) {
     if (p == NULL) {
         return NULL;
     }
-    kvol_t *k = heap_caps_calloc(1, sizeof(kvol_t), MALLOC_CAP_SPIRAM);
-    if (k == NULL) {
-        k = heap_caps_calloc(1, sizeof(kvol_t), MALLOC_CAP_8BIT);
-    }
+    kvol_t *k = moy_kalloc(sizeof(kvol_t), MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK | MOY_KMEM_ZERO);
     if (k == NULL) {
         return NULL;
     }
     k->part = p;
     uint32_t blocks = p->size / 4096;
     #else
-    kvol_t *k = calloc(1, sizeof(kvol_t));
+    kvol_t *k = moy_kalloc(sizeof(kvol_t), MOY_KMEM_LIBC | MOY_KMEM_ZERO);
     uint32_t blocks = MOY_KVFS_RAM_BLOCKS;
-    if (k == NULL || (k->ram = malloc(blocks * 4096u)) == NULL) {
+    if (k == NULL || (k->ram = moy_kalloc(blocks * 4096u, MOY_KMEM_LIBC)) == NULL) {
         free(k);
         return NULL;
     }

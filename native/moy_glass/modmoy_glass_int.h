@@ -7,6 +7,8 @@
 #ifndef MODMOY_GLASS_INT_H
 #define MODMOY_GLASS_INT_H
 
+#include "moy_platform.h"
+
 #include <string.h>
 
 #include "py/binary.h"
@@ -19,8 +21,7 @@
 
 #include "moy_light.h"
 
-#if __has_include("esp_heap_caps.h")
-#define MOY_GLASS_BOARD 1
+#ifdef MOY_ON_BOARD
 #include "esp_heap_caps.h"
 #else
 #include <stdlib.h>
@@ -72,7 +73,7 @@ extern int MOY_KERNEL_PANEL(ship)(int n);
 
 // The banded compositor is built on a banded board and on the desktop
 // MicroPython (a test's panel module double); a DSI board has none.
-#if MOY_GLASS_BANDED || !defined(MOY_GLASS_BOARD)
+#if MOY_GLASS_BANDED || !defined(MOY_ON_BOARD)
 #define MOY_GLASS_BANDED_TYPE 1
 
 // The compositors' objects, which the kernel's frame reads too.
@@ -107,7 +108,7 @@ typedef struct {
     moy_rot_ops_t ops;
     mp_obj_t dsi, ppa, gfx;
     mp_obj_t bufs[10];          // by the engine's buffer ids
-    mp_obj_t paint, quiet;      // this frame's game callables
+    mp_obj_t paint, quiet;      // this frame's game callables (paint None: the game composite)
     mp_obj_t stamp;             // the deferred stamp's tuple, or None
     mp_obj_t held;              // the glass Bufs the paint buffers and scratch are
     mp_obj_t rotate, rotate_scale, bounce, refreshes;   // the transport's verbs
@@ -127,6 +128,9 @@ bool glass_shift(mp_obj_t ppa, mp_obj_t dst, mp_obj_t src, mp_int_t W, mp_int_t 
                  const mp_obj_t *a, bool *fly, int *b);
 void glass_copy_into(mp_obj_t ppa, mp_obj_t src, mp_int_t W, mp_int_t H,
                      size_t n_args, const mp_obj_t *a);
+// ...and the game composite (moy_present_game.c) over two pictures.
+int glass_game(mp_obj_t dst, int dw, int dh, int dx, int dy, mp_obj_t src, int sw, int sh,
+               int scale, bool defer, bool frame);
 
 // modmoy_glass_banded.c
 void glass_banded_light(mp_obj_t panel, bool on);

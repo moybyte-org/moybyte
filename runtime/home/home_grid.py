@@ -33,22 +33,13 @@ imports no home module.
 
 from array import array
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-    import cart_listing as _cl
-    import iconsets as _iconsets
-    import layout_base as _lb
-    from chrome import _ticks_ms, _ticks_diff
-    from moy_store_base import builtin_name as _builtin_name
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-    from runtime import cart_listing as _cl
-    from runtime import iconsets as _iconsets
-    from runtime import layout_base as _lb
-    from runtime.chrome import _ticks_ms, _ticks_diff
-    from runtime.moy_store_base import builtin_name as _builtin_name
+import ui as _ui
+import ui_draw as _ui_draw
+import cart_listing as _cl
+import iconsets as _iconsets
+import layout_base as _lb
+from chrome import _ticks_ms, _ticks_diff
+from moy_store_base import builtin_name as _builtin_name
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
@@ -216,6 +207,21 @@ def _draw_star_badge(cv, names, th, rect, on):
         cv.rect(x + dx, y + dy, w, 1, ink)
 
 
+def _draw_broken_badge(cv, names, th, rect):
+    """The crash guard's corner badge on a cart it turned off (#160): the
+    favourite star's round chip on the theme's surface, ringed in red and
+    holding a red cross."""
+    x, y, side, _h = rect
+    red = names["red"]
+    cv.rrect(x, y, side, side, side // 2, th.get("surface", names["white"]), ring=red)
+    t = max(2, side // 7)
+    m = side * 2 // 7               # the cross's inset from the chip's edge
+    n = side - 2 * m - t + 1        # its rows
+    for k in range(n):
+        cv.rect(x + m + k, y + m + k, t, 1, red)
+        cv.rect(x + side - m - t - k, y + m + k, t, 1, red)
+
+
 def _hint_strip(lay, keys, desk):
     """The home's hint strip along the content's foot, (x, y, w, h): the
     handheld's 20 rows at the font scale, the desk's 34 glass pixels at the
@@ -304,7 +310,7 @@ class Launcher:
 
     def __init__(self, items, layout=None, names=None):
         self.items = items
-        self.tab = HOME_TABS[0][0]   # the home's active tab (ws.set_home_tab)
+        self.tab = HOME_TABS[0][0]   # the home's active tab (ws.home.set_home_tab)
         self.tab_sel = {}            # tab -> the path its card was on when left
         # bumped whenever anything the bar's zone shows changes (BarLayer
         # folds it into its cache key); set before `sel`, whose setter reads it
@@ -331,6 +337,8 @@ class Launcher:
         self.wall_ink = None          # (white, black) over a wallpaper (_wall_ink)
         self.ground = None            # the home's ground's colour (_ground_of)
         self.favorite_for = None      # optional cart -> bool (ws.carts.is_favorite)
+        self.broken_for = None        # optional cart -> bool (ws.spine.cart_broken)
+        self.broken_ids = None        # optional () -> what broken_for answers from
         self.own_for = None           # optional cart -> bool (ws.carts.is_own)
         self.plays_for = None         # optional cart -> its play record (ws.carts.plays)
         self.today_for = None         # optional () -> today as YYYYMMDD, 0 unknown
@@ -372,10 +380,7 @@ class Launcher:
         if layout is None:
             # a bare Launcher(items) (unit construction); lazy, so there is
             # no launcher_layer<->console module-load cycle
-            try:
-                from console import Layout
-            except ImportError:  # pragma: no cover - host fallback when not yet aliased
-                from runtime.console import Layout
+            from console import Layout
             layout = Layout()
         self.set_layout(layout)
 
@@ -1384,14 +1389,35 @@ class Launcher:
     def _corner_r(self, side):
         return self._cells().r
 
-    def _favorite_badge_geom(self, rect):
+    def _favorite_badge_geom(self, rect, left=False):
         """The corner badge square for card rect `rect` -- one formula shared by
-        the draw path and favorite_rect (hit-test), so they can never desync."""
+        the draw path and favorite_rect (hit-test), so they can never desync.
+        `left`: the top-left corner's, the broken mark's."""
         x, y, w, _h = rect
         fs = self.layout.fs
         sz = max(14 * fs, 16, 12 * _lb.unit()) | 1      # odd: the star centres on a pixel
         pad = max(2 * fs, _ui_draw.depth()[1] // 2 + 2)
-        return (x + w - sz - pad, y + pad, sz, sz)
+        return (x + pad if left else x + w - sz - pad, y + pad, sz, sz)
+
+    def _broken_badge_geom(self, rect):
+        """The broken mark's square on card rect `rect`: the star's, in the
+        top-left corner, no wider than a quarter of a small card."""
+        x, y, sz, _sz = self._favorite_badge_geom(rect, True)
+        sz = min(sz, rect[2] // 4) | 1
+        return (x, y, sz, sz)
+
+    def is_broken(self, it):
+        """Whether card `it` wears the crash guard's mark: a cart on the Make
+        tab the guard turned off."""
+        f = self.broken_for
+        return (f is not None and self.tab == "make" and bool(it.get("path"))
+                and it.get("type") not in PSEUDO_TILE_TYPES and f(it))
+
+    def broken_key(self):
+        """What the cards' broken marks are a function of: the Make tab's
+        broken ids, None anywhere else."""
+        f = self.broken_ids
+        return f() if f is not None and self.tab == "make" else None
 
     def _card_frame(self, cv, rect):
         """A card's thin border where the theme's cards are square (`card_r`

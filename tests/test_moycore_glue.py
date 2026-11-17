@@ -52,6 +52,7 @@ from pathlib import Path
 import pytest
 
 from tools.wasm_module import format_version
+import spec_table
 
 ROOT = Path(__file__).resolve().parent.parent
 GLUE_SRC = ROOT / "device" / "moycore_glue.py"
@@ -489,20 +490,27 @@ class MinimalInput:
         return name in self._pressed
 
 
-class FakePlayer:
-    """The Player's `ui_room()`: None, a game's whole canvas, unless a test
-    sets an app's content_rect; and its `ui_face()`, a game's 0 unless a test
-    sets one."""
+class FakeFace:
+    """The Player's app face: its `ui_room()`, None, a game's whole canvas,
+    unless a test sets an app's content_rect; and its `ui_face()`, a game's
+    0 unless a test sets one."""
 
     def __init__(self):
         self.room = None
-        self.face = 0
+        self.word = 0
 
     def ui_room(self):
         return self.room
 
     def ui_face(self):
-        return self.face
+        return self.word
+
+
+class FakePlayer:
+    """The Player, as the glue reads it: its app face."""
+
+    def __init__(self):
+        self.face = FakeFace()
 
 
 class FakeRun:
@@ -532,7 +540,9 @@ class FakeWs:
                            project, start)
         self.input = inp if inp is not None else FakeInput()
         if pmem is not None:
-            self.pmem = pmem
+            if self.run.project is None:
+                self.run.project = types.SimpleNamespace()
+            self.run.project.pmem = pmem
 
 
 class NsSession:
@@ -608,12 +618,18 @@ class World:
     exercise the first one's board.
     """
 
-    NAMES = ("moycore", "runtime.moycore", "ticks", "device_canvas", "lua_ext",
-             "moy_wasm")
+    NAMES = ("moycore", "runtime.moycore", "ticks", "device_canvas", "moy_wasm")
 
-    def __init__(self, moycore=True, flat_ticks=True, flat_lua_ext=True,
+    def __init__(self, moycore=True, fake_ticks=True,
                  wire_fallback=b"\1" * 128, wasm_chip=None):
         self.saved = {n: sys.modules.get(n, KeyError) for n in self.NAMES}
+        try:
+            self._load(moycore, fake_ticks, wire_fallback, wasm_chip)
+        except BaseException:
+            self.close()
+            raise
+
+    def _load(self, moycore, fake_ticks, wire_fallback, wasm_chip):
         if wasm_chip is None:
             sys.modules["moy_wasm"] = None     # no engine in this build
         else:
@@ -621,8 +637,6 @@ class World:
             mw.CHIP = wasm_chip
             mw.FORMAT = format_version()
             sys.modules["moy_wasm"] = mw
-        if not flat_lua_ext:
-            sys.modules["lua_ext"] = None      # no frozen flat name: the host
         self.clock = Clock()
         self.core = FakeMoycore() if moycore else None
         if moycore:
@@ -630,12 +644,12 @@ class World:
         else:
             sys.modules["moycore"] = None      # PEP 328: raises ImportError
             sys.modules["runtime.moycore"] = None   # ...and the host's binding
-        if flat_ticks:
+        if fake_ticks:                         # the real one, on this clock
+            from runtime import ticks
             tk = types.ModuleType("ticks")
+            tk.__dict__.update(ticks.__dict__)
             tk._since_ms = self.clock.since_ms
             sys.modules["ticks"] = tk
-        else:
-            sys.modules["ticks"] = None        # the host: runtime.ticks
         if wire_fallback is not None:
             dc = types.ModuleType("device_canvas")
             dc._PAL565_WIRE_BUF = wire_fallback
@@ -868,19 +882,6 @@ def test_a_pmem_holder_that_has_not_loaded_its_cells_starts_from_zeroes(w):
 # -- the superset: a DENY list, not an allow list ------------------------------
 
 
-def _libmoy_installed_globals():
-    """The global names libmoy's own binding installs, parsed from it."""
-    src = (ROOT / "native" / "moycore" / "libmoy" / "moy_lua.c").read_text(
-        encoding="utf-8")
-    head = src.index("static const luaL_Reg VERBS[] = {")
-    table = src[head:]
-    table = table[:table.index("{NULL, NULL}")]
-    names = set(re.findall(r'\{"(\w+)",', table))
-    host = src[src.index("static void open_host_verbs"):head]
-    # W and H are integers (SPEC.md 9's canvas size), not verbs.
-    return names | set(re.findall(r'lua_setglobal\(L, "(\w+)"\)', host))
-
-
 def test_the_deny_list_is_exactly_what_libmoys_binding_installs():
     """The list the registration loop subtracts is only as good as its
     contents, and every test below derives its namespace FROM it -- so this is
@@ -896,7 +897,7 @@ def test_the_deny_list_is_exactly_what_libmoys_binding_installs():
     # which is why they sit in NOT_REGISTRABLE instead.
     overridden = {"make_layer", "draw_layer"}
     assert overridden <= NOT_REGISTRABLE
-    installed = _libmoy_installed_globals()
+    installed = spec_table.verbs()
     assert installed - overridden - LIBMOY_VERBS == set(), \
         "libmoy installs verbs LIBMOY_VERBS has not learnt"
     assert LIBMOY_VERBS - installed == set(), \
@@ -957,22 +958,6 @@ def test_non_callable_namespace_entries_are_skipped(w):
     assert "_moy_cfg" not in w.core.registered
 
 
-def test_the_glue_finds_the_shared_lists_with_or_without_the_frozen_flat_name():
-    """A board freezes `lua_ext` flat; a host has only the `runtime` package.
-    Both arms must bind the SAME objects -- the fallback is what makes this
-    file, and every other host test of the device module, real."""
-    from runtime import lua_ext
-
-    world = World(flat_lua_ext=False)
-    try:
-        assert world.mod.LIBMOY_VERBS is lua_ext.LIBMOY_VERBS
-        assert world.mod.MOY_BUTTONS is lua_ext.MOY_BUTTONS
-        assert world.mod.install_handles is lua_ext.install_handles
-        world.run()                        # and it still builds a run
-    finally:
-        world.close()
-
-
 def test_the_deny_lists_are_the_shared_ones_and_not_a_local_copy(w):
     """They lived twice -- here and in `lua_host` -- with 46 names agreeing by
     hand and nothing comparing them."""
@@ -1030,12 +1015,11 @@ def test_every_handle_the_prelude_consumes_is_registered(w):
 
     w.run()
     # Fields, a metamethod and the prelude's own functions, not handles: a
-    # layer's id, canvas and edited mark, an image's id, and the `moybyte`
-    # table's fire, event and grant, which the console's chunks call. And the layer and scene natives are the RUNTIME's
+    # layer's id, canvas and edited mark, an image's id, and the window
+    # events' entry, which the console calls (moycore.call). And the layer and scene natives are the RUNTIME's
     # own C (moycore_layers.h, moycore_scene.h), installed by run_begin and
     # hl_new, never registered.
-    fields = {"__id", "__img", "__c", "__e", "__index",
-              "__moybyte_fire", "__moybyte_event", "__moybyte_grant"}
+    fields = {"__id", "__img", "__c", "__e", "__index", "__moybyte_event"}
     natives = {"__layer_canvas", "__layer_verb", "__layer_blit",
                "__layer_new", "__layer_spr_img", "__image_handle",
                "__scene_names", "__scene_rows", "__draw_scene"}
@@ -1043,7 +1027,9 @@ def test_every_handle_the_prelude_consumes_is_registered(w):
     gated = {n for n in wanted
              if n.startswith("__ed_") or n in ("__themes", "__files_badge")}
     assert gated, "the editor handles vanished from the prelude"
-    got = {n for n in w.core.registered if n.startswith("__")}
+    # `__moybyte_call` is the run's `moybyte` table's, which its C takes
+    # (moycore.own, native/moycore/moycore_moybyte.h), never the prelude's.
+    got = {n for n in w.core.registered if n.startswith("__")} - {"__moybyte_call"}
     assert wanted - gated == got, "an UNGATED handle is missing"
 
 
@@ -1290,11 +1276,11 @@ def test_a_run_with_no_cart_clock_leaves_the_time_slot_alone(w):
 
 
 def test_the_host_import_path_reads_the_same_clock():
-    """With no flat `ticks` the glue takes `runtime.ticks` -- the clock the
-    Player stamps with -- and still fills the slot: a tier that skipped it ran
-    every Lua and compiled cart's time() at 0 plus the tick's own ms."""
+    """The glue takes `ticks`, which is `runtime.ticks` on the host -- the
+    clock the Player stamps with -- and fills the slot: a tier that skipped it
+    ran every Lua and compiled cart's time() at 0 plus the tick's own ms."""
     from runtime import ticks
-    world = World(flat_ticks=False)
+    world = World(fake_ticks=False)
     try:
         assert world.mod._since_ms is ticks._since_ms
         run = world.run(ws=FakeWs(start=ticks._ticks_ms() - 5000))
@@ -1384,23 +1370,23 @@ def test_the_ui_room_crosses_and_a_game_reads_the_whole_canvas(w):
     ws = FakeWs(inp=FakeInput())
     run = w.run(ws=ws)
     room = [C_CONSTS["SNAP_ROOM_" + k] for k in "XYWH"]
-    ws.run.player.room = (0, 18, 320, 222)
+    ws.run.player.face.room = (0, 18, 320, 222)
     run._refresh()
     assert [run.snap[i] for i in room] == [0, 18, 320, 222]
-    ws.run.player.room = None
+    ws.run.player.face.room = None
     run._refresh()
     assert [run.snap[i] for i in room] == [0, 0, 0, 0]
 
 
 def test_the_ui_face_crosses_whole(w):
     """The Player's ui_face() is the snapshot's face word as it is: the RUN
-    face reads its bits and its font scale (moy_ui_wasm.h)."""
+    face reads its bits and its font scale (moy_ui_run.h)."""
     ws = FakeWs(inp=FakeInput())
     run = w.run(ws=ws)
-    ws.run.player.face = 1 | 2 | 4 | 3 << 8
+    ws.run.player.face.word = 1 | 2 | 4 | 3 << 8
     run._refresh()
     assert run.snap[C_CONSTS["SNAP_FACE"]] == 1 | 2 | 4 | 3 << 8
-    ws.run.player.face = 0
+    ws.run.player.face.word = 0
     run._refresh()
     assert run.snap[C_CONSTS["SNAP_FACE"]] == 0
 
@@ -1746,7 +1732,7 @@ def test_a_failing_pmem_write_still_closes_the_vm(w):
             raise KeyboardInterrupt
 
     run = w.run(ws=FakeWs(pmem=FakePmem()))
-    run.ws.pmem = Exploding()
+    run.ws.run.project.pmem = Exploding()
     with pytest.raises(KeyboardInterrupt):
         run.close()
     assert w.core.closes == 1
@@ -1938,7 +1924,7 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
     world = _wasm_world()
     try:
         ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
-        ws._with_sd = lambda fn: fn()
+        ws.with_sd = lambda fn: fn()
         run = world.mod.WasmRun(ws, make_ns(), None)
         assert world.core.verbs()[:2] == ["run_begin", "wasm_open"]
         assert world.core.rb("vm") is False
@@ -2304,7 +2290,7 @@ def test_the_runtime_reports_the_carts_footprint_by_the_engines_rule(tmp_path):
         engine = _Engine(world)
         gated = []
         ws = FakeWs(project=_CartProject(cart))
-        ws._with_sd = lambda fn: gated.append(fn) or fn()
+        ws.with_sd = lambda fn: gated.append(fn) or fn()
         rt = world.mod.make_wasm_runtime(ws)
         assert rt.footprint(cart) == (3 * 65536 + 3, 3 * 65536)
         assert engine.asked == [(3 * 65536, len(b"aot"))]
@@ -2690,8 +2676,8 @@ def test_a_tampered_module_or_a_trap_is_never_retried(tmp_path):
 
 
 def test_a_wasi_service_starts_on_its_module_and_is_reaped_through_the_engine(tmp_path):
-    """The scheduler's compiled-service contract (runtime/system/scheduler.py,
-    COMPILED SERVICES) over moy_wasm's service_*, which every board's engine
+    """The scheduler's compiled-service contract
+    (runtime/system/sched_compiled.py, COMPILED SERVICES) over moy_wasm's service_*, which every board's engine
     has: the module for this console where the cart carries one, main.wasm
     on the interpreter where it is refused."""
     world, cart, _calls = _command_world(tmp_path, ("esp32s3",), [])

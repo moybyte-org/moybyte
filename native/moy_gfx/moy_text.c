@@ -1,20 +1,19 @@
 // The one UI text path (moy_text.h).
 
+#include "moy_platform.h"
+
 #include <string.h>
 
+#include "moy_codec.h"
 #include "moy_text.h"
+#include "moy_gfx_base.h"
 #include "moy_gfx_kernels.h"
 #include "moy.h"
 
-#if __has_include("esp_heap_caps.h")
-#include "esp_heap_caps.h"
-#define FONT_ALLOC(n) heap_caps_malloc((n), MALLOC_CAP_SPIRAM)
-#define FONT_FREE(p) heap_caps_free(p)
-#else
-#include <stdlib.h>
-#define FONT_ALLOC(n) malloc(n)
-#define FONT_FREE(p) free(p)
-#endif
+#include "moy_kmem.h"
+
+#define FONT_ALLOC(n) moy_kalloc((n), MOY_KMEM_PSRAM)
+#define FONT_FREE(p) moy_kfree(p)
 
 #define FONT_GLYPHS 96
 #define FONT_FIRST 32
@@ -56,7 +55,6 @@ typedef struct {
 
 static font_slot_t s_fonts[MOY_FONT_SLOTS];
 static uint32_t s_print = MOY_FONT_PETME128;
-static int s_wire_swapped = 1;
 static uint32_t s_lanes[2];     // glyphs that read nothing, and that read
 
 static font_slot_t *slot_of(uint32_t font) {
@@ -301,14 +299,6 @@ void moy_text_vm_stop(void) {
     moy_font_reset();
 }
 
-void moy_text_wire(int swapped) {
-    s_wire_swapped = swapped ? 1 : 0;
-}
-
-int moy_text_wire_swapped(void) {
-    return s_wire_swapped;
-}
-
 void moy_text_lanes(uint32_t out[2]) {
     out[0] = s_lanes[0];
     out[1] = s_lanes[1];
@@ -372,26 +362,10 @@ static int cont(uint8_t b) {
 // The byte the codepoint at s[*i] draws at (moy_text.h), *i moved past it: a
 // malformed sequence is its first byte alone, at byte 0.
 static int next_byte(const uint8_t *s, size_t n, size_t *i) {
-    uint8_t b = s[(*i)++];
-    if (b < 0x80) {
-        return b;
+    int32_t cp = moy_utf8_next(s, n, i);
+    if (cp < 0x80) {
+        return cp < 0 ? 0 : cp;
     }
-    int len = b >= 0xC2 && b <= 0xDF ? 2 : b >= 0xE0 && b <= 0xEF ? 3
-              : b >= 0xF0 && b <= 0xF4 ? 4 : 0;
-    if (len == 0 || *i + (size_t)(len - 1) > n) {
-        return 0;
-    }
-    uint32_t cp = b & (0x7Fu >> len);
-    for (int k = 1; k < len; k++) {
-        if (!cont(s[*i + (size_t)k - 1])) {
-            return 0;
-        }
-        cp = cp << 6 | (s[*i + (size_t)k - 1] & 0x3Fu);
-    }
-    if ((len == 3 && cp < 0x800) || (len == 4 && (cp < 0x10000 || cp > 0x10FFFF))) {
-        return 0;       // an overlong form, or past Unicode
-    }
-    *i += (size_t)(len - 1);
     if (cp >= 0xA0 && cp <= 0xFF) {
         return (int)cp;
     }
@@ -748,7 +722,7 @@ static void draw2(const moy_text_target_t *t, const row_t *r, const uint8_t *s, 
                   const int k[4]) {
     pass_t p = {t, r, {0}, scale, k[0], k[1], k[2], k[3], INT32_MIN,
                 r->f2.bpp == 1 && alpha == 256};
-    mg_ink(&p.ink, col, r->f2.bpp, alpha, bg, s_wire_swapped);
+    mg_ink(&p.ink, col, r->f2.bpp, alpha, bg, moy_gfx_swapped);
     if (bg < 0) {
         p.kx0 = 1;
         p.kx1 = 0;
@@ -799,7 +773,7 @@ int moy_text_glyph(const moy_text_target_t *t, uint32_t font, int index, int x, 
     const font2_t *f = &r->f2;
     if (t != NULL && t->px != NULL) {
         pass_t p = {t, r, {0}, scale, 1, 0, 0, 0, INT32_MIN, f->bpp == 1};
-        mg_ink(&p.ink, col, f->bpp, 256, MOY_TEXT_BG_READ, s_wire_swapped);
+        mg_ink(&p.ink, col, f->bpp, 256, MOY_TEXT_BG_READ, moy_gfx_swapped);
         glyph2(&p, index, x, y);
     }
     return rec_of(f, index)[7] * scale;

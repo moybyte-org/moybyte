@@ -20,7 +20,7 @@ def _hero(tmp_path, config, theme, mode):
     try:
         cfg = dict(g.CONFIGS[config], variant=mode, theme=theme)
         ws = g._build(cfg, str(tmp_path / ("%s_%s_%s" % (config, theme, mode))))
-        ws.go_home()
+        ws.home.go_home()
         geom = ws.launcher._geom()
         assert ws.launcher.handheld(), config
         return geom[2], geom[1], geom[8]

@@ -130,7 +130,7 @@ BATCH6_SRAM = 80
 # Plus MOVED_SRAM, internal statics moved to PSRAM against them, each made at
 # its first use: the per-verb profiler's counters (native/moycore/
 # moycore_prof.c, 2304 bytes, made when LUAPROF installs), the compiled face's
-# shape scratch (native/moy_ui/moy_ui_wasm.c, 1236, made while a compiled
+# shape scratch (native/moy_ui/moy_ui_run.c, 1236, made while a compiled
 # app's theme names another shape) and the dev channel's `state` line while a
 # run is in front (native/moy_kernel/moy_devch.c, 1024): 4560 bytes by the
 # heap's start against 65e7e49ae, link maps, 2026-11-09. With them the
@@ -622,12 +622,12 @@ def test_a_cart_s_timed_lanes_run_and_a_runaway_is_struck(board, lanes_carts, ti
 def test_a_quiet_game_frame_rotates_one_rect(board):
     """The whole point of the rotated compositor: a running game pays ONE
     scale+rotate of the game canvas per frame, not a whole-frame rotate. Run
-    a cart (fullscreen: the ws.exit() calls first close the tour's windows),
+    a cart (fullscreen: the ws.spine.exit() calls first close the tour's windows),
     let it tick, and read the meters -- rect frames must have grown far more
     than full frames. Runs after the window tests on purpose: its exits leave
     the desk, which open_desk() at the end restores."""
     for _ in range(3):
-        board.cmd("py ws.exit()", wait_for="PY")
+        board.cmd("py ws.spine.exit()", wait_for="PY")
         board.drain(0.5)
     line = board.cmd("run star", wait_for="REMOTE run")
     assert line is not None and "no cart match" not in line, line
@@ -650,10 +650,10 @@ def test_a_quiet_game_frame_rotates_one_rect(board):
     strips = board.pyval("comp.strips()", strict=True)
     assert len(strips) == 1 and tuple(strips[0][:3]) == (0, 0, w), strips
     assert strips1[0] - strips0[0] <= 1, (strips0, strips1)
-    board.cmd("py ws.exit()", wait_for="PY")
+    board.cmd("py ws.spine.exit()", wait_for="PY")
     board.drain(1.5)
     assert not board.state().get("cart")
-    board.cmd("py ws.open_desk()", wait_for="PY")     # leave the desk for the next test
+    board.cmd("py ws.home.open_desk()", wait_for="PY")     # leave the desk for the next test
     board.drain(0.5)
 
 
@@ -668,6 +668,10 @@ def test_mem_reports_the_heap(board):
 
 def test_a_quiet_console_collects_its_garbage(board):
     on_glass.a_quiet_console_collects_its_garbage(board)
+
+
+def test_a_quiet_console_leaves_a_live_heap_alone(board):
+    on_glass.a_quiet_console_leaves_a_live_heap_alone(board)
 
 
 def test_the_saver_comes_and_its_wake_repaints(board):
@@ -702,8 +706,8 @@ def test_the_cart_store_is_the_card_when_one_mounted(board):
     on_glass.cart_store_follows_the_card(board)
 
 
-def test_the_web_console_is_baked_into_this_image(board):
-    on_glass.web_console_is_baked_into_the_image(board)
+def test_the_web_console_add_on_fits_this_image(board):
+    on_glass.web_console_add_on_fits_the_image(board)
 
 # -- the engine's radio guards (docs/history/wasm_tier_plan_2026-09.md, phase 1) ------
 # LAST in the file: both bring WiFi up (released again) and the second starts

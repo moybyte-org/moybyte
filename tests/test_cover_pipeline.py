@@ -403,14 +403,14 @@ def test_cover_file_read_budget(tmp_path):
         for c in mine:
             _land_cover(ws, c, div)
     reads = ws.costs.get("cover.blob.read", 0)
-    assert reads >= 1, "no file read counted -- is ws.note_cost still wired?"
+    assert reads >= 1, "no file read counted -- is ws.perf.note_cost still wired?"
     assert reads <= len(mine), (
         "read %d files for %d carts across three asks -- the file cache is not "
         "holding" % (reads, len(mine)))
 
 
 def test_the_cover_file_read_takes_the_storage_gate(tmp_path):
-    """A cover file is a STORE read, so it goes through `ws._with_sd`.
+    """A cover file is a STORE read, so it goes through `ws.with_sd`.
 
     On the T-Deck the gate drains the panel and brackets the session because
     the card shares the panel's SPI host, and an sdspi transaction overlapping
@@ -446,7 +446,7 @@ def test_the_cover_file_read_takes_the_storage_gate(tmp_path):
             reads.append(depth[0])
             return self._store.load_cover(*a, **kw)
 
-    ws._with_sd = gate
+    ws.with_sd = gate
     ws.carts_store = _Spy(ws.carts_store)
     for c in [c for c in ws.carts.all
               if c.get("path") in [x["path"] for x in carts]]:
@@ -577,7 +577,7 @@ def test_the_frame_loops_idle_branch_swallows_a_surprise(tmp_path):
 
     ws.covers.prefetch_tick = boom
     ws._quiet_frames = 20
-    ws._dirty = False
+    ws.frame_state.dirty = False
     for _ in range(5):
         ws.frame(0.05)                     # must not raise
     assert ws._idle_warned

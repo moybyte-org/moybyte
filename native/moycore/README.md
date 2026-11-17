@@ -40,8 +40,10 @@ compiled games run side by side the same way; the speaker's `snd` stream and
 the timed lanes, which a board holds one of, are the newest compiled run's.
 
 **A Lua service is a state of its own** (`moycore_svc.h`, the `svc_*`
-verbs): no console, no row of the runs, its timers, message wakes and
-`moybyte` names, its own counting allocator in PSRAM. Its start runs the
+verbs): no console, no row of the runs, the `moybyte` table a Lua app's
+run holds too (`moycore_moybyte.h`: its timers the kernel's, its message
+wakes on its event queue) over the tier's one sandbox
+(`moycore_lua_sandbox`), its own counting allocator in PSRAM. Its start runs the
 scripts it is handed in order, each its own chunk (`moycore_svc_chunk_t`),
 sharing through globals as a window's scripts do. On a board each runs on
 its own task (pinned to the P4s' core 0, or to the S3s' core 1 with its stack
@@ -120,7 +122,7 @@ console's clock and drops the samples, so the cart meets the same
 backpressure. `moy_audio.snd_counts()` is the stream from both ends -- frames
 the cart queued, frames the feeder played, frames it found none -- and the
 AUDIORATE line's `snd=` field prints it. Each
-`read` runs inside `gate(fn)`, the store's own gate (`ws._with_sd`), as every
+`read` runs inside `gate(fn)`, the store's own gate (`ws.with_sd`), as every
 other store access does: on the T-Deck that drains the panel's flush before
 the card, which shares its SPI bus, is touched. The run's own state (libmoy's
 per-run struct, about 4 KB), the table's

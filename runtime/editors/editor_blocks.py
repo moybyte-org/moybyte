@@ -22,10 +22,7 @@ the engine's while it is open."""
 
 from array import array
 
-try:
-    import ui
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui
+import ui
 
 # The menu's caption by its mode.
 MENU_TITLES = {"cat": "Pick a kind", "blk": "Pick a block", "dropdown": "Pick one",

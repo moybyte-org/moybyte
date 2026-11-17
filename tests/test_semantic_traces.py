@@ -522,7 +522,7 @@ def run_side(kind):
         proj.tilemap = tilemap
         ws.run.project = proj
         ws.input = inp
-        ws.pmem = pmem
+        ws.run.project.pmem = pmem
         ws.run.audio = audio                    # the run's session: the drain's target
         run = MoycoreRun(ws, ns, LUA_CART)
         inp.set_frame(0)
@@ -1013,12 +1013,12 @@ for junk in (None, "1"):
     say("junk", tried(t.get, junk), t.valid(junk))
 
 reg = sp.AppRegistry()
-for d in (("artwork", "Paint", False, None), ("files", "Files", True, (310, 230)),
-          ("calc", "Calc", False, None)):
+for d in (("artwork", "Paint", None), ("files", "Files", (310, 230)),
+          ("calc", "Calc", None)):
     say("register", d[0], h_(reg.register(*d)))
 fh = reg.find("files")
 say("find", h_(fh), reg.find("menu"), tried(reg.find, None))
-say("row", reg.app_id(fh), reg.title(fh), reg.text_mode(fh), reg.min_size(fh))
+say("row", reg.app_id(fh), reg.title(fh), reg.min_size(fh))
 say("refused", tried(reg.register, "files", "x"), tried(reg.register, "", "x"),
     tried(reg.register, "x" * 16, "x"), tried(reg.register, 5, "x"))
 say("stale app", tried(reg.title, fh + (1 << sp.GEN_SHIFT)), reg.valid(fh))
@@ -1134,7 +1134,7 @@ register artwork 1.0.1
 register files 1.1.1
 register calc 1.2.1
 find 1.1.1 0 TYPE
-row files Files True (310, 230)
+row files Files (310, 230)
 refused VALUE VALUE VALUE TYPE
 stale app STALE True
 apps 1.0.1 1.1.1 1.2.1 3
@@ -1581,26 +1581,26 @@ if DONE == [None]:
 '''
 
 LOOP_TRACE = """\
-frame 0 0 inputs pointer:click present hi hp frame:0 fence light=255 first_light tail:drew feed sleep=50 up 3/0/0/0/0/0 idle 0
-frame 1 0 inputs pointer:click present hi hp frame:100 tail:drew feed sleep=49 up 3/0/0/0/0/0 idle 0
-frame 2 0 inputs pointer:click present hi hp frame:100 tail:drew feed sleep=48 up 3/0/0/0/0/0 idle 0
-frame 3 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=47 up 3/0/0/0/0/0 idle 0
-frame 4 0 inputs pt=10,20,1,1 word:tap pointer present hi hp frame:100 tail:drew feed sleep=46 up 4/0/0/0/0/0 idle 0
-frame 5 0 inputs pt=10,20,0,0 pointer present hi hp frame:100 tail:drew feed sleep=45 up 3/0/0/0/0/0 idle 0
-frame 6 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=44 up 3/0/0/0/0/0 idle 0
-frame 7 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=43 up 3/0/0/0/0/0 idle 0
-frame 8 0 inputs pointer present hi hp frame:100 tail:drew say[PERF_cart=-_fps=4/4_net=-_tick=-_miss=-_busy=0ms_draw=-_flush=-_logic=-_render=-_chrome=-_wmr=-_wmw=-_wms=-_ppa=-_fence_ms=-_gfence_ms=-_home=-_gc=-_lock=-] say[LOOP_n=9_ms=0.0_inputs=0.0_dev=0.0_idle=0.0_pointer=0.0_present=0.0_frame=0.0_backlight=0.0_pump_tail=0.0_tail=0.0_sleep=46.0_other=0.0] feed sleep=42 up 3/0/0/0/0/0 idle 0
-frame 9 0 inputs light=48 say[Moybyte_power_save:_dim_(idle_1s)] pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 1
-frame 10 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 1
-frame 11 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 1
-frame 12 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 1
-frame 13 0 inputs say[Moybyte_power_save:_saver_(idle_2s)] pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 2
-frame 14 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 2
-frame 15 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 2
-frame 16 0 inputs pointer present hi hp frame:100 tail:drew say[PERF_cart=-_fps=4/4_net=-_tick=-_miss=-_busy=0ms_draw=-_flush=-_logic=-_render=-_chrome=-_wmr=-_wmw=-_wms=-_ppa=-_fence_ms=-_gfence_ms=-_home=-_gc=-_lock=-] say[LOOP_n=8_ms=0.0_inputs=0.0_dev=0.0_idle=0.0_pointer=0.0_present=0.0_frame=0.0_backlight=0.0_pump_tail=0.0_tail=0.0_sleep=42.0_other=0.0] feed sleep=42 up 3/0/0/0/0/0 idle 2
-frame 17 0 inputs light=0 say[Moybyte_power_save:_blank_(idle_3s)] pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 3
-frame 18 0 inputs light=255 repaint pointer:swallow present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 0
-frame 19 0 inputs pointer present hi hp frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 0
+frame 0 0 inputs pointer:click present hi hp landed frame:0 fence light=255 first_light tail:drew feed sleep=50 up 3/0/0/0/0/0 idle 0
+frame 1 0 inputs pointer:click present hi hp landed frame:100 tail:drew feed sleep=49 up 3/0/0/0/0/0 idle 0
+frame 2 0 inputs pointer:click present hi hp landed frame:100 tail:drew feed sleep=48 up 3/0/0/0/0/0 idle 0
+frame 3 0 inputs pointer present hi hp landed frame:100 tail:drew feed sleep=47 up 3/0/0/0/0/0 idle 0
+frame 4 0 inputs pt=10,20,1,1 word:tap pointer present hi hp landed frame:100 tail:drew feed sleep=46 up 4/0/0/0/0/0 idle 0
+frame 5 0 inputs pt=10,20,0,0 pointer present hi hp landed frame:100 tail:drew feed sleep=45 up 3/0/0/0/0/0 idle 0
+frame 6 0 inputs pointer present hi hp landed frame:100 tail:drew feed sleep=44 up 3/0/0/0/0/0 idle 0
+frame 7 0 inputs pointer present hi hp landed frame:100 tail:drew feed sleep=43 up 3/0/0/0/0/0 idle 0
+frame 8 0 inputs pointer present hi hp landed frame:100 tail:drew say[PERF_cart=-_fps=4/4_net=-_tick=-_miss=-_busy=0ms_draw=-_flush=-_logic=-_render=-_chrome=-_wmr=-_wmw=-_wms=-_ppa=-_fence_ms=-_gfence_ms=-_home=-_gc=-_lock=-] say[LOOP_n=9_ms=0.0_inputs=0.0_dev=0.0_idle=0.0_pointer=0.0_present=0.0_frame=0.0_backlight=0.0_pump_tail=0.0_tail=0.0_sleep=46.0_other=0.0] feed sleep=42 up 3/0/0/0/0/0 idle 0
+frame 9 0 inputs light=48 say[Moybyte_power_save:_dim_(idle_1s)] pointer present hi hp landed frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 1
+frame 10 0 inputs pointer present hi hp landed frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 1
+frame 11 0 inputs pointer present hi hp landed frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 1
+frame 12 0 inputs pointer present hi hp landed frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 1
+frame 13 0 inputs say[Moybyte_power_save:_saver_(idle_2s)] pointer present hi hp landed frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 2
+frame 14 0 inputs pointer present hi hp landed frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 2
+frame 15 0 inputs pointer present hi hp landed frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 2
+frame 16 0 inputs pointer present hi hp landed frame:100 tail:drew say[PERF_cart=-_fps=4/4_net=-_tick=-_miss=-_busy=0ms_draw=-_flush=-_logic=-_render=-_chrome=-_wmr=-_wmw=-_wms=-_ppa=-_fence_ms=-_gfence_ms=-_home=-_gc=-_lock=-] say[LOOP_n=8_ms=0.0_inputs=0.0_dev=0.0_idle=0.0_pointer=0.0_present=0.0_frame=0.0_backlight=0.0_pump_tail=0.0_tail=0.0_sleep=42.0_other=0.0] feed sleep=42 up 3/0/0/0/0/0 idle 2
+frame 17 0 inputs light=0 say[Moybyte_power_save:_blank_(idle_3s)] pointer present hi hp landed frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 3
+frame 18 0 inputs light=255 repaint pointer:swallow present hi hp landed frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 0
+frame 19 0 inputs pointer present hi hp landed frame:100 tail:drew feed sleep=42 up 3/0/0/0/0/0 idle 0
 meters inputs:20:0 dev:20:0 idle:20:0 pointer:20:0 present:20:0 frame:20:0 backlight:20:0 pump_tail:20:0 tail:20:None pace:20:0 account:20:0
 upcalls 61/0/0/0/0/0
 unregistered 3
@@ -1616,7 +1616,7 @@ try:
 except ImportError:                         # CPython: the C over ctypes
     sys.path.insert(0, @REPO@)
     from runtime import net_binding
-    net_binding.install()
+    sys.modules["moy_net"] = net_binding
     import moy_net
 import moy_sync
 import moy_ota_health
@@ -1805,8 +1805,8 @@ try:
     import moy_audio as na                  # the usermod, on a VM
 except ImportError:                         # CPython: the same C over ctypes
     sys.path.insert(0, @REPO@)
-    from runtime import audio_binding
-    na = audio_binding.install()
+    import runtime                          # noqa: F401  (faces.py registers it)
+    import moy_audio as na
 import json
 
 from audio import AudioBank
@@ -2237,26 +2237,22 @@ def roles_trace(ws):
     nv = ctx.nav
     say("nav", nv.is_system_app(cart), cart in nv.projects())
     say("open_app", nv.open_app("calc"), nv.open_app("nope"), ws.wm.top_kind())
-    ws.go_home()
+    ws.home.go_home()
     say("edit", nv.edit(cart, "code"), ws.wm.top_kind())
-    ws.go_home()
+    ws.home.go_home()
     say("edit_file", nv.edit_file(cart, "manifest.json"), ws.wm.top_kind())
-    ws.go_home()
+    ws.home.go_home()
     say("open_image", nv.open_image("pic", "drawings"), ws.wm.top_kind())
-    ws.go_home()
+    ws.home.go_home()
     say("open_text", nv.open_text("missing.md", "docs"), ws.wm.top_kind())
-    ws.go_home()
+    ws.home.go_home()
     say("run_script", _n(nv.run_script("docs", "nope.py")))
-    ws.go_home()
-    nv.text_mode(True)
-    t1 = ws.input.text_mode
-    nv.text_mode(False)
-    say("text_mode", t1, ws.input.text_mode)
+    ws.home.go_home()
     say("cover", nv.cover({"title": "Nowhere"}))
     say("cover_gen", isinstance(nv.cover_gen(), int))
     nv.play(cart)
     say("play", ws.wm.top_kind())
-    ws.go_home()
+    ws.home.go_home()
 
     # -- notify
     # award is a message to the achievements process, served at the start of
@@ -2316,6 +2312,12 @@ def roles_trace(ws):
     say("clip put", cl.put_text("hello"), cl.put_text("x" * 4097))
     say("clip", cl.text(), cl.kind(), cl.seq() - s0)
 
+    # -- Settings' radios and the USB drive
+    u = ctx.usb
+    say("radios", ctx.wifi.station() is getattr(ws, "wifi", None),
+        ctx.bt.keyboard() is None, u.drive() is None,
+        u.turn_on(), u.turn_off(), u.poll())
+
     # -- install
     i = ctx.install
     say("install", i.root() == ws.carts_root, i.writable(), i.can_pick(),
@@ -2325,6 +2327,8 @@ def roles_trace(ws):
     say("op", i.op(lambda: 7))
     say("wifi page", i.wifi_open(), i.wifi(), i.wifi_open())
     say("consent", i.consent() is ws.consent)
+    say("own", i.own() == ws.cart_own)
+    say("board", i.board() is ws.cart_board)
     ws.settings_layer.back()                # the panel goes back to where it was
     i.rescan()
     folder = cart["path"].replace("\\", "/").rsplit("/", 1)[1]
@@ -2359,7 +2363,8 @@ def roles_trace(ws):
 def roles_rows():
     """The role table's (role, verb) rows, in table order, of the roles an
     AppContext serves: not the toolkit's, a compiled app's alone
-    (tests/test_ui_wasm.py drives each), nor the console calls'."""
+    (tests/test_app_ui.py compares the tiers' pictures), nor the console
+    calls' (tests/test_every_row.py calls those on every tier)."""
     from tools import gen_os_table
     from runtime import app_context
     return [(r["role"], r["verb"]) for r in gen_os_table.role_table()
@@ -2441,7 +2446,9 @@ time.sleep_ms(50)
 '''
 
 
-def _roles_trace_board(exe, tmp_path, driver=None):
+def _roles_trace_board(exe, tmp_path, driver=None, carts=None):
+    """The roles driver's trace on the board model; `carts(folder)` adds
+    carts to the staged store's first."""
     import test_frame_alloc as fa
     sys.path.insert(0, str(ROOT / "tools"))
     try:
@@ -2449,6 +2456,8 @@ def _roles_trace_board(exe, tmp_path, driver=None):
     finally:
         sys.path.pop(0)
     fa._stage(tmp_path, exe)
+    if carts is not None:
+        carts(tmp_path / "carts")
     stage = tmp_path / "stage"
     (stage / "carts_data.mpy").unlink()
     (stage / "carts_data.py").write_text(gen_device_carts.render_packed_module(
@@ -2465,7 +2474,7 @@ def _roles_trace_board(exe, tmp_path, driver=None):
 
 
 ROLES_TRACE = """\
-roles artwork carts clipboard damage files install nav notify prefs surface theme wallpaper
+roles artwork bt carts clipboard damage files install nav notify prefs surface theme usb wallpaper wifi
 damage 1 2 0
 surface True True 1 1 False True True
 pointer True True
@@ -2507,7 +2516,6 @@ edit_file True desktop
 open_image True artwork
 open_text True desktop
 run_script [False,"CAN'T READ IT"]
-text_mode True False
 cover None
 cover_gen True
 play desktop
@@ -2526,11 +2534,14 @@ copies attach 'Trace Cart' True ['wall','game']
 clip empty ''
 clip put True False
 clip hello text 1
+radios True True True None None None
 install True True False None True True True
 lease True None
 op 7
 wifi page False None True
 consent True
+own True
+board True
 find None local.trace_cart.moy Trace Cart
 free True
 engine tuple True None 2
@@ -2735,7 +2746,7 @@ def _app_roles_trace(tmp_path, lua):
         ws.input.begin_frame()
         ws.frame(1.0 / 30.0)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
-    trace = (ws.run.player._lua.get_global("TRACE") if lua
+    trace = (ws.run.player.lua.get_global("TRACE") if lua
              else ws.run.player.ns["TRACE"])
     return trace.split("\n"), ws.look.theme_name
 
@@ -2755,17 +2766,17 @@ def roles_trace(ws):
     for name in files:
         with open(d + "/" + name, "w") as f:
             f.write(files[name])
-    ws.rescan_carts()
+    ws.carts.synced()
     cart = [c for c in ws.carts.all if c.get("title") == "Tracer"][0]
     __import__("app_perms").made_here(ws, cart)
-    ws.select_cart(cart)
+    ws.home.select_cart(cart)
     ws.open()
     for _ in range(6):
         moy_loop.step()
     if ws.run.player.cart_error is not None:
         print("T ERROR " + str(ws.run.player.cart_error))
         return
-    for line in ws.run.player._lua.get_global("TRACE").split("\n"):
+    for line in ws.run.player.lua.get_global("TRACE").split("\n"):
         print("T " + line)
     print("T theme " + ws.look.theme_name)
 '''

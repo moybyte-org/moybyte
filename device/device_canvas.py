@@ -291,12 +291,6 @@ except ImportError:
 # byte first -- the S3 boards, and the host and the browser, which keep that order
 # -- and False on the P4's DPI.
 WIRE_SWAPPED = PAL565_WIRE is PAL565_SW
-# The glyph lane blends in that order too (moy_text.h's moy_text_wire).
-try:
-    import moy_ui as _moy_ui_wire
-    _moy_ui_wire.text_wire(WIRE_SWAPPED)
-except (ImportError, AttributeError):
-    pass
 
 # Buffer form of PAL565_WIRE for the native blit_indices kernel (#63): the C reads the
 # palette via the BUFFER PROTOCOL (moy_gfx_buf_r), and a tuple has none ("object with
@@ -518,10 +512,7 @@ _DMA_FILL_MIN = 16384
 # Image comes from moy_image now -- ONE definition, shared with the host canvas
 # that used to carry the other copy. Re-exported because device_api and the cart
 # namespace import it from here by name.
-try:
-    from moy_image import Image         # noqa: F401
-except ImportError:  # pragma: no cover - host tree: the package-relative lane
-    from runtime.moy_image import Image  # noqa: F401
+from moy_image import Image         # noqa: F401
 
 
 # _decode_moyimg lived here until 2026-08-17; THE copy is
@@ -578,8 +569,8 @@ class DeviceCanvas:
         # None: one persistent buffer, shifted in place.
         self._comp_shift = getattr(compositor, "shift_last", None)
         self._comp_shift_fence = getattr(compositor, "shift_fence", None)
-        # The shapes blend over the buffer, so they read its word order.
-        self._gfx.shape_order(WIRE_SWAPPED)
+        # Text, shapes and paths blend over the buffer in its word order.
+        self._gfx.wire(WIRE_SWAPPED)
         # Native petme128 text (#62): the kernel's text op over the staged
         # moy_font glyph blob.
         self._gfx_text = self._gfx.text
@@ -832,7 +823,7 @@ class DeviceCanvas:
         self._clip_y0 = self._oy
         self._clip_x1 = self._ox + self.w
         self._clip_y1 = self._oy + self.h
-        # #75: this runs EVERY cart frame (ws._reset_canvas_state), and rebuilding the
+        # #75: this runs EVERY cart frame (ws.reset_canvas_state), and rebuilding the
         # two 64-byte tables was two heap allocations per frame. The tables are created
         # once (first call: the attributes don't exist yet) and afterwards restored
         # IN PLACE, and only when a pal()/palt() actually touched them (_pal_dirty) --

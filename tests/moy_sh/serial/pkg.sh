@@ -22,3 +22,9 @@ cat /sd/moybyte/installed.json
 settings
 pkg install kenny.jet
 pkg remove
+mkdir -p /sd/moybyte/carts/moybyte.sky_run.moy /sd/moybyte/carts/moybyte.files.moy
+printf '{"title": "Sky Run", "id": "moybyte.sky_run"}' > /sd/moybyte/carts/moybyte.sky_run.moy/manifest.json
+printf '{"title": "Files", "id": "moybyte.files"}' > /sd/moybyte/carts/moybyte.files.moy/manifest.json
+pkg remove moybyte.sky_run moybyte.files moybyte.gone
+cat /sd/moybyte/system/removed
+ls /sd/moybyte/carts

@@ -69,24 +69,14 @@ empty description is no panel: the item opens its app.
 
 try:
     import moy_log as _L
-except ImportError:  # pragma: no cover - an image without the kernel
-    try:
-        from runtime import moy_log as _L
-    except ImportError:
-        _L = None
-try:
-    import moy_evq as _E
-except ImportError:  # host: the runtime package
-    from runtime import moy_evq as _E
+except ImportError:
+    _L = None
+import moy_evq as _E
 try:
     import ui as _ui
     import ui_draw as _ui_draw
-except ImportError:  # host: the runtime package
-    try:
-        from runtime import ui as _ui
-        from runtime import ui_draw as _ui_draw
-    except ImportError:  # pragma: no cover - a headless image: nothing draws
-        _ui = _ui_draw = None
+except ImportError:  # pragma: no cover - a headless image: nothing draws
+    _ui = _ui_draw = None
 
 ON, PAUSED, ERROR = 0, 1, 2      # moy_status.h's MOY_STATUS_*
 STATES = (ON, PAUSED, ERROR)

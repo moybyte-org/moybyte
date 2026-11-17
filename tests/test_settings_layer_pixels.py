@@ -44,6 +44,8 @@ from pathlib import Path
 
 import pytest
 
+import pixel_goldens
+
 # The matrix lives in ONE place. pytest puts tests/ on sys.path, so this is a
 # plain module import; an ImportError here is a loud lockstep failure rather
 # than the silent divergence a copied dict would give.
@@ -163,12 +165,21 @@ _UPDATE_PHASES = ("checking", "nopublish", "uptodate", "confirm_online",
 # capture
 # ---------------------------------------------------------------------------
 
+# The digests the running test expects, and the frames of the shots that hash
+# to none of them (the moved ones, which a failure writes as PNGs).
+_HELD = set()
+_FRAMES = {}
+
+
 def _shot(ws, fn):
     """Draw ONE sub-surface onto a cleared canvas and hash it."""
     cv = ws.sys_canvas
     cv.cls(0)
     fn()
-    return hashlib.sha256(bytes(cv._buf)).hexdigest()
+    got = hashlib.sha256(bytes(cv._buf)).hexdigest()
+    if got not in _HELD:
+        _FRAMES[got] = (bytes(cv._buf), cv.w, cv.h)
+    return got
 
 
 def blank_digest(ws):
@@ -221,7 +232,7 @@ def capture(cfg, carts_dir):
     """{sub_surface: sha256} for one configuration."""
     ws = _build(cfg, carts_dir)
     if cfg.get("console"):
-        ws.open_library()          # the desk's PLAY: console mode
+        ws.home.open_library()          # the desk's PLAY: console mode
     blank = blank_digest(ws)
     ws.open_settings()
     sl = ws.settings_layer
@@ -251,7 +262,7 @@ def capture(cfg, carts_dir):
     out["row_wifi_off"] = page(focus="Wi-Fi")
     ws.wifi = _Wifi(True)
 
-    sl.open_wifi()
+    sl.open_page("wifi")
     sl.wifi_nets = [("MoyNet-5G-Long-Name", 88, True), ("Guest", 40, False),
                     ("cafe wifi", 12, True)]
     sl.wifi_known = ["MoyNet-5G-Long-Name"]
@@ -259,24 +270,24 @@ def capture(cfg, carts_dir):
     for sel in range(3):
         out["wifi_list_%d" % sel] = page(sl._sub, "net%d" % sel)
     sl.wifi_pick = "MoyNet-5G-Long-Name"
-    sl.wifi_pw.text = "hunter2hunter2"
+    sl.wifi_pw = "hunter2hunter2"
     out["wifi_password"] = page()
     sl.wifi_pick = None
     ws.wifi = _Wifi(False)
     out["wifi_offline"] = page()
     ws.wifi = _Wifi(True)
-    sl.close_wifi()
+    sl.close_page()
 
-    sl.open_bluetooth()
+    sl.open_page("bt")
     for sel in range(2):
         out["bt_%d" % sel] = page(sl._sub, "bt%d" % sel)
-    sl.close_bluetooth()
+    sl.close_page()
 
-    ws.set_time_zone("CET-1CEST,M3.5.0,M10.5.0/3", persist=False)
-    sl.open_tz()
+    ws.toggles.set_time_zone("CET-1CEST,M3.5.0,M10.5.0/3", persist=False)
+    sl.open_page("tz")
     out["tz_picker"] = page(sl._sub)
-    sl.close_tz()
-    ws.set_time_zone(None, persist=False)
+    sl.close_page()
+    ws.toggles.set_time_zone(None, persist=False)
 
     sl._draw_page()
 
@@ -288,7 +299,7 @@ def capture(cfg, carts_dir):
     ws.usb_drive = drive
     sl._draw_page()
     out["row_usb_drive"] = page(focus=say("USB DRIVE"))
-    sl.open_usb()
+    sl.open_page("usb")
     out["usb_off"] = page(sl._sub, "Turn on")
     drive.why = _usb.NO_CARD
     out["usb_refused"] = page(sl._sub, "Turn on")
@@ -297,15 +308,17 @@ def capture(cfg, carts_dir):
         drive.lever.st = st
         out["usb_on_%d" % st] = page(sl._sub, "Turn off")
     drive.turn_off(ws)
-    sl.close_usb()
+    sl.close_page()
     ws.usb_drive = None
     sl._draw_page()
 
-    ws.go_home()
+    ws.home.go_home()
     if cfg["windowed"]:
-        ws.open_library()
+        ws.home.open_library()
     ws.toggle_sysmenu()
     m = ws.sysmenu
+    for _ in range(2):              # its first frames lay its body out and cut it
+        ws.menu_ui._draw_sysmenu()
     for sel in range(len(m.items)):
         m.sel = sel
         out["sysmenu_%d" % sel] = _shot(ws, lambda: ws.menu_ui._draw_sysmenu())
@@ -314,7 +327,7 @@ def capture(cfg, carts_dir):
     for _ in range(2):              # its first frame lays its body out
         ws.menu_ui._draw_about()
     out["about"] = _shot(ws, lambda: ws.menu_ui._draw_about())
-    ws._about = False
+    ws.about = False
 
     # The Achievements page (locked AND found cards, the console's and a
     # game's, a goal under way) with a badge opened and a goal's bar, the
@@ -338,14 +351,14 @@ def capture(cfg, carts_dir):
     sl.open_page("licences")
     out["licences"] = page(sl._sub)
     sl.close_page()
-    ws.go_home()
+    ws.home.go_home()
     ws.ach.award("konami")
     settle_badges(ws)
-    ws._toast_at -= 10000
-    out["banner"] = _shot(ws, lambda: ws._draw_toast())
-    ws._notice = ("Moybyte updated", "Now 0.8", "ok")
-    out["notice"] = _shot(ws, lambda: ws._draw_notice())
-    ws._notice = None
+    ws.toast_at -= 10000
+    out["banner"] = _shot(ws, lambda: ws.notices._draw_toast())
+    ws.notice_up = ("Moybyte updated", "Now 0.8", "ok")
+    out["notice"] = _shot(ws, lambda: ws.notices._draw_notice())
+    ws.notice_up = None
 
     # The firmware-update screen: every phase it can be in.
     uu = ws.update_ui
@@ -394,7 +407,20 @@ def _write_goldens_on_teardown(request):
 
 @pytest.mark.parametrize("config_name", sorted(CONFIGS))
 def test_sub_surfaces_match_goldens(config_name, tmp_path, request):
-    got = capture(CONFIGS[config_name], tmp_path / "carts")
+    stored = json.loads(GOLDEN_FILE.read_text(encoding="utf-8")) \
+        if GOLDEN_FILE.exists() else {}
+    _HELD.clear()
+    if not pixel_goldens.dumping():
+        _HELD.update((stored.get(config_name) or {}).values())
+    _FRAMES.clear()
+    try:
+        got = capture(CONFIGS[config_name], tmp_path / "carts")
+    finally:
+        frames, _ = dict(_FRAMES), _FRAMES.clear()
+    if pixel_goldens.dumping():
+        for name, have in got.items():
+            buf, w, h = frames[have]
+            pixel_goldens.dump(name, lambda: pixel_goldens.rgb565_rows(buf, w, h), w, h)
 
     if _updating(request):
         assert not hasattr(request.config, "workerinput"), (
@@ -429,7 +455,14 @@ def test_sub_surfaces_match_goldens(config_name, tmp_path, request):
         lines.append("  If the change is INTENDED and you can say which pixel "
                      "moved and why, re-baseline deliberately:")
         lines.append("    " + REBASELINE_CMD)
-        raise AssertionError("\n".join(lines))
+        pngs = []
+        for name, want, have in moved:
+            if have in frames:
+                buf, w, h = frames[have]
+                pngs.append(pixel_goldens.check(
+                    name, have, want,
+                    lambda: pixel_goldens.rgb565_rows(buf, w, h), w, h))
+        raise AssertionError("\n".join(lines) + pixel_goldens.message(pngs))
 
 
 def test_goldens_file_covers_exactly_the_matrix(request):
@@ -539,7 +572,7 @@ def test_under_touch_the_name_row_reads_the_default_name_over_its_note(tmp_path,
     ui.info = lambda label, value, o=None: (infos.append((label, value)), real(label, value, o))
     try:
         for _ in range(3):
-            ws._dirty = True
+            ws.mark_dirty()
             drv.frame(_DT)
     finally:
         ui.info = real

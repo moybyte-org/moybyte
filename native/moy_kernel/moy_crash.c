@@ -4,13 +4,13 @@
 // its arguments: no tables, no library calls, so it runs with the flash cache
 // off.
 
+#include "moy_platform.h"
+
 #include <string.h>
 
 #include "moy_crash.h"
 
-// ESP_PLATFORM is not defined for a usermod's sources on the esp32 port, so a
-// board is known by its headers.
-#if __has_include("esp_attr.h")
+#ifdef MOY_ON_BOARD
 #include "esp_attr.h"
 #define MOY_CRASH_IRAM IRAM_ATTR
 #else
@@ -190,6 +190,8 @@ MOY_CRASH_IRAM int moy_kstate_open_id(const moy_kstate_t *st, const char **id) {
         *id = st->open_wallpaper;
         return MOY_ROLE_WALLPAPER;
     }
-    *id = "";
+    // The empty id is the state's own: the panic wrapper copies it with the
+    // flash cache possibly off, where a literal in flash is a second fault.
+    *id = st->open_app;
     return MOY_ROLE_NONE;
 }

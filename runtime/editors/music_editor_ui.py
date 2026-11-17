@@ -10,30 +10,14 @@ session the running cart uses). On the handheld the Music tab is the page
 `runtime/editors/editor_parts.py`'s.
 
 One instance lives on Workstation (`ws.music_ui`), with a back-reference to
-it for the cart's audio session and `save_sounds`. Workstation.go_home() does
+it for the cart's audio session and `save_sounds`. Home.go_home() does
 not reset musicedit/music_preview (blocks/map's go_home does reset their
 active editor). Ctrl+Z/Ctrl+Y walk the editor's undo (`_music_input`)."""
 
-try:
-    from editors_music import MusicEditor
-    from editors_base import KeyEdge
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_music import MusicEditor
-    from runtime.editors_base import KeyEdge
-try:
-    from audio import MusicTrack, SFX
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.audio import MusicTrack, SFX
-
-try:
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import ui_draw as _ui_draw
-
-try:
-    from layout_base import LayoutBase
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import LayoutBase
+from editors_music import MusicEditor
+from audio import MusicTrack, SFX
+import ui_draw as _ui_draw
+from layout_base import LayoutBase
 
 
 class MusicLayout(LayoutBase):
@@ -57,7 +41,6 @@ class MusicEditorUI:
         # and shows STOP; None when nothing is playing.
         self.musicedit = None         # MusicEditor while menu_view == "music"
         self.music_preview = None     # ("sfx", n) | ("song", track) | None (preview)
-        self._mkey = KeyEdge()        # Ctrl+Z/Y edge tracker (#92)
         self._page = None             # the handheld's page on the verbs (editor_music.py)
         sc = ws.sys_canvas
         self.layout = MusicLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
@@ -65,10 +48,7 @@ class MusicEditorUI:
     def page(self):
         """The handheld's Music page on the verbs, built at its first use."""
         if self._page is None:
-            try:
-                from editor_music import MusicPage
-            except ImportError:  # pragma: no cover - host fallback
-                from runtime.editor_music import MusicPage
+            from editor_music import MusicPage
             self._page = MusicPage(self, _ui_draw.AppHost("editor_music"))
         return self._page
 
@@ -77,10 +57,10 @@ class MusicEditorUI:
         page's."""
         ws = self.ws
         if self.page().point(px, py, click, ws.pointer.down):
-            ws._dirty = True
+            ws.mark_dirty()
 
     def relayout(self, w, h, fs, cs=None):
-        """Rebuild the responsive geometry (#39 step 3) -- called by ws._relayout on
+        """Rebuild the responsive geometry (#39 step 3) -- called by ws.relayout on
         a font-scale change."""
         self.layout = MusicLayout(w, h, fs, chrome_scale=cs)
 
@@ -90,7 +70,7 @@ class MusicEditorUI:
         by the preview AND by the cart on resume. The bank is the run's audio
         session's (ws.run.audio.bank); SFX/MusicTrack are injected as
         factories so the editor core stays import-free. Called from
-        Workstation.set_menu_view("music")."""
+        Text.set_menu_view("music")."""
         ws = self.ws
         if self.musicedit is None and ws.run.audio is not None:
             bank = ws.run.audio.bank
@@ -99,7 +79,7 @@ class MusicEditorUI:
 
     def reset(self):
         """Drop the active editor + preview flag -- called from Workstation.open()
-        (switching carts). NOTE: unlike blocks/map, Workstation.go_home() does NOT
+        (switching carts). NOTE: unlike blocks/map, Home.go_home() does NOT
         call this (pre-existing asymmetry, preserved as-is)."""
         self.musicedit = None
         self.music_preview = None
@@ -124,7 +104,7 @@ class MusicEditorUI:
         else:
             au.sfx(me.sfx_idx)
             self.music_preview = ("sfx", me.sfx_idx)
-        ws._dirty = True
+        ws.mark_dirty()
 
     def _stop_music_preview(self):
         """Stop any music-editor preview + clear the preview flag."""
@@ -133,7 +113,7 @@ class MusicEditorUI:
             ws.run.audio.sound_stop()
             ws.run.audio.music_stop()
         self.music_preview = None
-        ws._dirty = True
+        ws.mark_dirty()
 
     def _music_preview_active(self):
         """True while a music-editor preview is still producing sound (so the frame
@@ -148,7 +128,7 @@ class MusicEditorUI:
 
     def at_top(self):
         """The cursor on the first step or slot and no popover open: an up
-        goes on to the bar (Workstation._bar_keys)."""
+        goes on to the bar (InputRouter._bar_keys)."""
         me = self.musicedit
         page = self._page
         if me is None or (page is not None and page.pop is not None):
@@ -168,10 +148,10 @@ class MusicEditorUI:
         if page is not None:
             if page.pop is not None:
                 if page.keys(i):
-                    ws._dirty = True
+                    ws.mark_dirty()
                 if i.pressed("b"):
                     page.pop = None
-                    ws._dirty = True
+                    ws.mark_dirty()
                 return
             if page.owed():
                 changed = True
@@ -194,17 +174,11 @@ class MusicEditorUI:
                     self._stop_music_preview()
                 else:
                     self._play_music_preview()
-            # Ctrl+Z/Ctrl+Y (#92), the code editor's control bytes. Edge-detected against the previous frame's byte (the code editor's
-            # _ekey_prev pattern): a LEVEL key source that holds last_key across
-            # frames (e.g. a BLE keyboard) must fire ONE undo per press, not one
-            # per frame -- a held Ctrl+Z would otherwise drain the whole stack.
-            if self._mkey.undo_redo(i.last_key, me.undo, me.redo):
-                changed = True
         if i.pressed("b") or i.pressed("home"):
             changed = True
-        ws._leave_or_home(ws.exit)
+        ws.home.leave_or_home(ws.spine.exit)
         if changed:
-            ws._dirty = True
+            ws.mark_dirty()
 
     # -- drawing -------------------------------------------------------------------
 

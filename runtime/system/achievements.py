@@ -27,14 +27,8 @@ moves when the row's text does, so the process can hold the row in memory
 and read it again only after a write that is not its own (`seed`, a sync).
 """
 
-try:
-    import scheduler as _sched
-except ImportError:  # host: the runtime package
-    from runtime import scheduler as _sched
-try:
-    import app_perms as _perms
-except ImportError:  # host: the runtime package
-    from runtime import app_perms as _perms
+import scheduler as _sched
+import app_perms as _perms
 try:
     import json as _json
 except ImportError:  # pragma: no cover
@@ -201,7 +195,7 @@ class Link:
         self.key = PROC + "_" + PREFS_KEY   # the process's row of system/settings
         # The unlock banner's payload, (head, title, icon, secret), set when
         # the process's notification arrives; the banner's deadline is the
-        # console's own flat field (`ws._toast_until`).
+        # console's own flat field (`ws.toast_until`).
         self.toast = None
         self.mute = False       # the shell's own sends dropped (a one-cart player)
         self._rows_gen = -1     # the rows' generation `_doc` was read at
@@ -236,7 +230,7 @@ class Link:
 
     def env(self):
         """What the console hands the process, in its namespace."""
-        return {"game": self.game, "clock_day": self.ws._today_ymd,
+        return {"game": self.game, "clock_day": self.ws.notices.today_ymd,
                 "row_stamp": self.stamp}
 
     def game(self, app):
@@ -425,7 +419,7 @@ class Link:
         return self._total
 
     def today(self):
-        return self.ws._today_ymd()
+        return self.ws.notices.today_ymd()
 
 
 def _badges(decl, rec):

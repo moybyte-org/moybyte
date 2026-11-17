@@ -10,8 +10,10 @@ There is no host canvas CLASS to export any more: the raster is the boards' own
 (`make_canvas` / `make_system_canvas`).
 """
 
+import importlib as _importlib
 import os as _os
 import sys as _sys
+from importlib.machinery import ModuleSpec as _ModuleSpec
 
 
 def _folders():
@@ -33,102 +35,115 @@ def _folders():
 __path__.extend(_folders())
 
 
-def _native_spine():
-    """The kernel's spine is C on every tier (docs/history/kernel_spine_2026-10.md):
-    on the CPython host it is native/moy_spine in the host's one library
-    (runtime/host/host_native.py) over ctypes
-    (`runtime/host/moy_spine_binding.py`), registered as `moy_spine` and
-    `runtime.moy_spine` before anything imports either name. Its Python twin
-    is the suites' oracle (tests/spine_twin.py), never the host's."""
-    if "moy_spine" in _sys.modules:
-        mod = _sys.modules["moy_spine"]
-    else:
-        from . import moy_spine_binding
-        mod = moy_spine_binding.binding()
-        if mod is None:
-            raise ImportError("the host's spine needs a C compiler "
-                              "(native/moy_spine over ctypes)")
-        _sys.modules["moy_spine"] = mod
-    _sys.modules["runtime.moy_spine"] = mod
-    return mod
+def _flat_names():
+    """Every module's basename across the folders."""
+    return frozenset(f[:-3] for folder in __path__ for f in _os.listdir(folder)
+                     if f.endswith(".py") and f != "__init__.py")
 
 
-moy_spine = _native_spine()
+class _SameModule:
+    """Hands the import machinery the module `runtime.<name>` is. It imports
+    that module at create time, not while the finder looks: a module whose
+    own imports reach its flat name again then meets itself half-built, as
+    any circular import does, and is never executed a second time."""
+
+    def __init__(self, name):
+        self._name = "runtime." + name
+        self._spec = None
+
+    def create_module(self, spec):
+        module = _importlib.import_module(self._name)
+        self._spec = module.__spec__
+        return module
+
+    def exec_module(self, module):
+        if getattr(self._spec, "name", None) == self._name:
+            module.__spec__ = self._spec      # it stays `runtime.<name>`
 
 
-def _native_app():
-    """The app ABI's C rows (native/moy_app) over the host's one library,
-    registered as `moy_app` like the spine."""
-    if "moy_app" in _sys.modules:
-        return _sys.modules["moy_app"]
-    from . import moy_app_binding
-    mod = moy_app_binding.binding()
+class FlatFinder:
+    """`import console` is `runtime.console`, one module object, as a board's
+    flat image has one: the boards and the browser freeze every runtime file
+    by basename, and here a bare runtime name resolves to the package's
+    module. It sits first on `sys.meta_path`, so a build-staged copy on
+    `sys.path` never stands in for the source."""
+
+    names = frozenset()
+
+    def find_spec(self, fullname, path=None, target=None):
+        if path is not None or fullname not in self.names:
+            return None
+        return _ModuleSpec(fullname, _SameModule(fullname))
+
+
+FlatFinder.names = _flat_names()
+_sys.meta_path[:] = [f for f in _sys.meta_path
+                     if type(f).__qualname__ != "FlatFinder"]
+_sys.meta_path.insert(0, FlatFinder())
+
+
+def _register(name, face, binding):
+    """The native module `name` on the CPython host: its face in
+    runtime/host (`face`), or what that face's binding() builds, registered
+    as `name` and `runtime.<name>`."""
+    mod = _sys.modules.get(name)
     if mod is None:
-        raise ImportError("the host's app ABI needs a C compiler "
-                          "(native/moy_app over ctypes)")
-    _sys.modules["moy_app"] = mod
+        mod = _importlib.import_module("." + face, __name__)
+        if binding:
+            mod = mod.binding()
+            if mod is None:
+                raise ImportError("the host's %s needs a C compiler" % name)
+        _sys.modules[name] = mod
+    _sys.modules["runtime." + name] = mod
+    globals()[name] = mod
     return mod
 
 
-moy_app = _native_app()
+class _LazyFace:
+    """Registers a lazy face (`_register`) when its module is first
+    imported, by either name."""
+
+    def __init__(self, name, face, binding):
+        self._args = (name, face, binding)
+        self._spec = None
+
+    def create_module(self, spec):
+        module = _register(*self._args)
+        self._spec = getattr(module, "__spec__", None)
+        return module
+
+    def exec_module(self, module):
+        if self._spec is not None:
+            module.__spec__ = self._spec      # a face file stays `runtime.<file>`
 
 
-def _native_ufiles():
-    """The user-files layer (native/moy_store/moy_ufiles.h) over ctypes,
-    registered as `moy_ufiles` like the boards' module. Its library is built at
-    the first verb a caller uses (runtime/host/moy_ufiles_binding.py)."""
-    if "moy_ufiles" in _sys.modules:
-        return _sys.modules["moy_ufiles"]
-    from . import moy_ufiles_binding
-    mod = moy_ufiles_binding.binding()
-    _sys.modules["moy_ufiles"] = mod
-    return mod
+class FaceFinder:
+    """The lazy faces of runtime/host/faces.py: `import moy_audio` (or
+    `runtime.moy_audio`) builds the face then, not at `import runtime`."""
+
+    lazy = {}
+
+    def find_spec(self, fullname, path=None, target=None):
+        name = fullname[len("runtime."):] if fullname.startswith("runtime.") else fullname
+        if name not in self.lazy or (path is not None and name == fullname):
+            return None
+        if name != fullname and self.lazy[name][0] == name:
+            return None             # runtime.<file>: the face file itself
+        return _ModuleSpec(fullname, _LazyFace(name, *self.lazy[name]))
 
 
-moy_ufiles = _native_ufiles()
+# The host faces, from native/*/face.json (runtime/host/faces.py, generated):
+# the spine first, which every other's imports may reach; a lazy face at its
+# first import.
+from .faces import FACES as _FACES  # noqa: E402
 
-def _native_ui():
-    """The toolkit's C (native/moy_ui) over the host's one library,
-    registered as `moy_ui` like the boards' module (runtime/host/moy_ui_binding.py)."""
-    if "moy_ui" in _sys.modules:
-        return _sys.modules["moy_ui"]
-    from . import moy_ui_binding
-    mod = moy_ui_binding.binding()
-    if mod is None:
-        raise ImportError("the host's toolkit needs a C compiler "
-                          "(native/moy_ui over ctypes)")
-    _sys.modules["moy_ui"] = mod
-    return mod
+FaceFinder.lazy = {name: (face, binding) for name, face, binding, lazy in _FACES if lazy}
+_sys.meta_path[:] = [f for f in _sys.meta_path if type(f).__qualname__ != "FaceFinder"]
+_sys.meta_path.insert(0, FaceFinder())
+for _name, _face, _binding, _lazy in _FACES:
+    if not _lazy:
+        _register(_name, _face, _binding)
 
-
-moy_ui = _native_ui()
-
-
-def _native_log():
-    """The OS log (native/moy_kernel/moy_log.h) over the host's one library,
-    registered as `moy_log` like the boards' module (runtime/host/moy_log.py)."""
-    if "moy_log" in _sys.modules:
-        return _sys.modules["moy_log"]
-    from . import moy_log as mod
-    _sys.modules["moy_log"] = mod
-    return mod
-
-
-moy_log = _native_log()
-
-
-def _native_evq():
-    """The service model's queues and supervisor (native/moy_kernel/moy_evq.h,
-    moy_super.h, moy_vmq.h) over the host's one library, registered as
-    `moy_evq` like the boards' module (runtime/host/moy_evq.py)."""
-    if "moy_evq" in _sys.modules:
-        return _sys.modules["moy_evq"]
-    from . import moy_evq as mod
-    _sys.modules["moy_evq"] = mod
-    return mod
-
-
-moy_evq = _native_evq()
 
 from .editors_code import CodeEditor  # noqa: E402
 from .editors_paint_map import PaintEditor  # noqa: E402

@@ -2,7 +2,7 @@
 roll is the W A S D press it matches and the click is Enter, and no cursor
 shows -- the home and every fullscreen surface; a running game keeps the
 pointer, and a caret takes it as the arrows
-(`Workstation.ball`). The host's arrows-as-trackball (`ConsoleDriver.pan`,
+(`InputRouter.ball`). The host's arrows-as-trackball (`ConsoleDriver.pan`,
 `ball_click`) spend it the way the T-Deck's handle_input does.
 """
 
@@ -31,7 +31,7 @@ def _drv(tmp_path):
 def _roll(drv, dx, dy, pulses):
     """`pulses` frames of a one-pulse roll, then a few frames after it.
     Each is a roll of its own, after the last one stopped."""
-    drv.ws._ball_axis_at -= drv.ws.BALL_ROLLING_MS + 1
+    drv.ws._ball_axis_at -= drv.ws.router.BALL_ROLLING_MS + 1
     drv.pan(dx, dy)
     for _ in range(pulses):
         drv.frame(1 / 30)
@@ -44,7 +44,7 @@ def test_a_roll_over_the_power_popover_steps_and_changes_the_volume(tmp_path):
     ws, drv = _drv(tmp_path)
     ws.toggle_popover("battery")
     drv.frame(1 / 30)
-    assert ws.sysmenu.open and ws.ball_steps()
+    assert ws.sysmenu.open and ws.input_policy.ball_steps()
     sl = ws.settings_layer
     before = sl.level("volume")[0]
     _roll(drv, -1, 0, 2)                      # one step left: quieter
@@ -61,7 +61,7 @@ def test_a_roll_over_the_power_popover_steps_and_changes_the_volume(tmp_path):
 
 def test_a_step_is_two_pulses_of_one_roll(tmp_path):
     ws, drv = _drv(tmp_path)
-    ws.BALL_IDLE_MS = 10 ** 6                 # the test's frames are no pause
+    ws.router.BALL_IDLE_MS = 10 ** 6                 # the test's frames are no pause
     seen = []
     real = ws.input.add_steps
 
@@ -108,7 +108,7 @@ def _home(tmp_path):
 
 def test_a_roll_on_the_home_moves_its_selection(tmp_path):
     ws, drv = _home(tmp_path)
-    assert ws.screen == "launcher" and ws.ball_steps()
+    assert ws.screen == "launcher" and ws.input_policy.ball_steps()
     first = ws.launcher.selected()
     x = ws.pointer.x
     _roll(drv, 1, 0, 2)
@@ -133,7 +133,7 @@ def test_a_running_cart_keeps_the_pointer(tmp_path):
     drv.ball_click()
     for _ in range(3):
         drv.frame(1 / 30)
-    assert ws.screen == "desktop" and not ws.ball_steps()
+    assert ws.screen == "desktop" and not ws.input_policy.ball_steps()
     x = ws.pointer.x
     drv.pan(1, 0)
     drv.frame(1 / 30)
@@ -149,9 +149,9 @@ def _code_tab(tmp_path):
     select_first_game(ws)
     drv.press("run")
     drv.frame(1 / 30)
-    ws._open_menu()
+    ws.text.open_menu()
     if ws.menu_view == "cards":
-        ws.set_menu_view("code")
+        ws.text.set_menu_view("code")
     ws.editor.set_text("\n".join("r%02d" % i for i in range(20)))
     drv.frame(1 / 30)
     return ws, drv
@@ -159,7 +159,7 @@ def _code_tab(tmp_path):
 
 def test_a_caret_takes_the_roll(tmp_path):
     ws, drv = _code_tab(tmp_path)
-    assert not ws.ball_steps()
+    assert not ws.input_policy.ball_steps()
     x, row = ws.pointer.x, ws.editor.row
     _roll(drv, 0, 1, 1)
     assert ws.editor.row == row + 1, "a pulse is a caret step"

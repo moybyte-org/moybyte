@@ -18,3 +18,7 @@ statement; this file is Moybyte's record of where the bytes came from.
 driver (`modmoy_dsi.c`, one directory up) is Moybyte's own code under the
 repository licence; it overrides `num_fbs` and `use_dma2d` at runtime rather
 than editing the vendor macros.
+
+## The pin
+
+Every file's hash: `native/p4/moy_dsi/jd9365_vendor.json` (re-stamped by `tools/vendor_stamp.py`).

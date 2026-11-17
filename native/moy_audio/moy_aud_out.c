@@ -22,27 +22,32 @@
 // each as two at twice the rate, so its ring is twice as many frames of four
 // bytes where a mono one's are two: the same time, four times the bytes.
 //
-// The board names its output in mpconfigboard.h:
-//   MOY_AUDIO_I2S_BCK, _WS, _DOUT       the I2S pins (required)
-//   MOY_AUDIO_I2S_MCLK                  the master clock pin, where a codec needs one
+// The board names its output in board.toml's `speaker` row (the pins) and
+// mpconfigboard.h (the rest):
+//   MOY_HW_SPEAKER_BCK, _WS, _DOUT      the I2S pins (required)
+//   MOY_HW_SPEAKER_MCLK                 the master clock pin, where a codec needs one
 //   MOY_AUDIO_CODEC_ES8311              the codec on the kernel's I2C bus (moy_codec_es8311.c)
-//   MOY_AUDIO_PA_GPIO                   the amplifier's enable, driven high once the codec is up
+//   MOY_HW_SPEAKER_PA                   the amplifier's enable, driven high once the codec is up
 //   MOY_AUDIO_RATE                      the output rate, 22050 unless named
 //   MOY_AUDIO_STEREO                    16-bit stereo at MOY_AUDIO_RATE, twice the
 //                                       mix's (moy_aud_render_st); mono otherwise
 //   MOY_AUDIO_DAC_MONO                  the codec reads one slot: both carry the mean
 //   MOY_AUDIO_CORE                      the feeder's core, 1 (the VM's) unless named
 
+#include "moy_tasks.h"
+
+#include "moy_platform.h"
+
 #include <stdio.h>
 #include <string.h>
 
 #include "moy_aud.h"
 
-#if MOY_AUD_BOARD
+#if MOY_ON_BOARD
 #include "py/mpconfig.h"        // the board's MOY_AUDIO_* (mpconfigboard.h)
 #endif
 
-#if MOY_AUD_BOARD && defined(MOY_AUDIO_I2S_BCK)
+#if MOY_ON_BOARD && defined(MOY_HW_SPEAKER_BCK)
 
 #include "driver/gpio.h"
 #include "driver/i2s_std.h"
@@ -60,19 +65,8 @@
 #ifndef MOY_AUDIO_RATE
 #define MOY_AUDIO_RATE 22050
 #endif
-#ifndef MOY_AUDIO_CORE
-#define MOY_AUDIO_CORE 1
-#endif
-// Near the top, but under the esp_timer task where the two share a core: at
-// its priority a block's render held every timer callback for its length.
-#if (MOY_AUDIO_CORE == 0 && defined(CONFIG_ESP_TIMER_TASK_AFFINITY_CPU0)) \
-    || (MOY_AUDIO_CORE == 1 && defined(CONFIG_ESP_TIMER_TASK_AFFINITY_CPU1))
-#define FEEDER_PRIO (ESP_TASK_TIMER_PRIO - 1)
-#else
-#define FEEDER_PRIO (configMAX_PRIORITIES - 3)
-#endif
-#ifndef MOY_AUDIO_I2S_MCLK
-#define MOY_AUDIO_I2S_MCLK (-1)
+#ifndef MOY_HW_SPEAKER_MCLK
+#define MOY_HW_SPEAKER_MCLK (-1)
 #endif
 
 #if defined(MOY_AUDIO_STEREO) && MOY_AUDIO_STEREO
@@ -134,7 +128,7 @@ void moy_aud_unlock(void) {
 }
 
 uint64_t moy_aud_now_us(void) {
-    return (uint64_t)esp_timer_get_time();
+    return (uint64_t)moy_now_us();
 }
 
 int moy_aud_out_plays(void) {
@@ -192,10 +186,10 @@ static int chan_open(int desc, int frames) {
                                                     I2S_SLOT_MODE_MONO),
 #endif
         .gpio_cfg = {
-            .mclk = (gpio_num_t)MOY_AUDIO_I2S_MCLK,
-            .bclk = (gpio_num_t)MOY_AUDIO_I2S_BCK,
-            .ws = (gpio_num_t)MOY_AUDIO_I2S_WS,
-            .dout = (gpio_num_t)MOY_AUDIO_I2S_DOUT,
+            .mclk = (gpio_num_t)MOY_HW_SPEAKER_MCLK,
+            .bclk = (gpio_num_t)MOY_HW_SPEAKER_BCK,
+            .ws = (gpio_num_t)MOY_HW_SPEAKER_WS,
+            .dout = (gpio_num_t)MOY_HW_SPEAKER_DOUT,
             .din = I2S_GPIO_UNUSED,
             .invert_flags = {.mclk_inv = false, .bclk_inv = false, .ws_inv = false},
         },
@@ -391,10 +385,10 @@ int moy_aud_out_start(void) {
         return s_state;
     }
 #endif
-#ifdef MOY_AUDIO_PA_GPIO
-    gpio_config_t pa = {.pin_bit_mask = 1ULL << MOY_AUDIO_PA_GPIO, .mode = GPIO_MODE_OUTPUT};
+#ifdef MOY_HW_SPEAKER_PA
+    gpio_config_t pa = {.pin_bit_mask = 1ULL << MOY_HW_SPEAKER_PA, .mode = GPIO_MODE_OUTPUT};
     gpio_config(&pa);
-    gpio_set_level(MOY_AUDIO_PA_GPIO, 1);
+    gpio_set_level(MOY_HW_SPEAKER_PA, 1);
 #endif
     s_mutex = xSemaphoreCreateMutex();
     if (s_mutex == NULL) {
@@ -405,8 +399,7 @@ int moy_aud_out_start(void) {
         return s_state;
     }
     s_running = 1;
-    if (xTaskCreatePinnedToCore(feeder, "moy_audio", 4096 + OUT_SAMPLES * 2, NULL,
-                                FEEDER_PRIO, &s_task, MOY_AUDIO_CORE) != pdPASS) {
+    if (!moy_task_spawn_as(MOY_TASK_AUDIO, NULL, 4096 + OUT_SAMPLES * 2, 0, 0, feeder, NULL, &s_task)) {
         s_running = 0;
         s_task = NULL;
         s_why = "no memory for the feeder task";
@@ -441,21 +434,13 @@ int moy_aud_trylock(void) {
 void moy_aud_unlock(void) {
 }
 
-#if MOY_AUD_BOARD
-#include "esp_timer.h"
-uint64_t moy_aud_now_us(void) {
-    return (uint64_t)esp_timer_get_time();
-}
-#elif defined(__EMSCRIPTEN__)
+#ifdef __EMSCRIPTEN__
 uint64_t moy_aud_now_us(void) {
     return 0;
 }
 #else
-#include <time.h>
 uint64_t moy_aud_now_us(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000000u + (uint64_t)ts.tv_nsec / 1000u;
+    return (uint64_t)moy_now_us();
 }
 #endif
 
@@ -463,7 +448,7 @@ uint64_t moy_aud_now_us(void) {
 // which plays a compiled cart's stream as it mixes it; a board without pins
 // has nothing that would.
 int moy_aud_out_plays(void) {
-#if MOY_AUD_BOARD
+#if MOY_ON_BOARD
     return 0;
 #else
     return 1;
@@ -492,7 +477,7 @@ int moy_aud_out_start(void) {
 }
 
 int moy_aud_out_rate(void) {
-#if MOY_AUD_BOARD
+#if MOY_ON_BOARD
     return moy_aud_rate();
 #else
     return moy_aud_out_rate_get();

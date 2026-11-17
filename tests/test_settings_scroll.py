@@ -125,7 +125,7 @@ def test_a_drag_scrolls_the_page_and_is_no_tap(tmp_path):
     x = lay.cx + lay.cw // 2
     _drag(ws, drv, x, lay.cy + lay.ch * 2 // 3, -lay.ch // 2, still=4)
     assert _band(ws) != top, "the rows moved under the finger"
-    assert not (sl.wifi_view or sl.bt_view or sl.crash_view or sl.tz_view), \
+    assert not (sl.showing("wifi") or sl.showing("bt") or sl.showing("crash") or sl.showing("tz")), \
         "letting go of a drag opened nothing"
     moved = _band(ws)
     for _ in range(10):
@@ -150,7 +150,7 @@ def test_a_fling_coasts_the_page_and_the_gate_recloses(tmp_path):
     drv.frame(_DT)
     assert _band(ws) != at, "the page coasts on with no finger"
     _settle(ws, drv)
-    assert not (sl.wifi_view or sl.bt_view or sl.crash_view or sl.tz_view)
+    assert not (sl.showing("wifi") or sl.showing("bt") or sl.showing("crash") or sl.showing("tz"))
     drv.frame(_DT)
     drawn = ws.frame_state.frames_drawn
     for _ in range(5):
@@ -168,7 +168,7 @@ def test_a_tap_on_a_row_activates_it(tmp_path):
     _feed(ws, drv, lay.cx + lay.cw // 2, y, press=True)
     _feed(ws, drv, lay.cx + lay.cw // 2, y, down=False)
     drv.frame(_DT)
-    assert sl.wifi_view, "the tapped Wi-Fi row opened its panel"
+    assert sl.showing("wifi"), "the tapped Wi-Fi row opened its panel"
 
 
 def test_the_windowed_page_scrolls(tmp_path):
@@ -177,7 +177,7 @@ def test_the_windowed_page_scrolls(tmp_path):
     ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2, windowed=True)
     _force_ota_rows(ws)
     drv = _drv(ws)
-    win = ws.wm._wins["settings"]
+    win = ws.wm.windows["settings"]
     lay = win.ctx.layout
     ox, oy = win.x + 1, win.y + 1 + win.title_h
     sl = ws.settings_layer
@@ -185,7 +185,7 @@ def test_the_windowed_page_scrolls(tmp_path):
     _drag(ws, drv, ox + lay.cx + lay.cw // 2, oy + lay.cy + lay.ch * 2 // 3, -lay.ch // 2)
     after = hashlib.sha1(bytes(ws.sys_canvas._buf)).hexdigest()
     assert after != before
-    assert not sl.wifi_view
+    assert not sl.showing("wifi")
 
 
 # -- the row set is memoized (P4 allocation, 2026-07-26) ------------------------

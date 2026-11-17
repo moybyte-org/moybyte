@@ -11,18 +11,12 @@ _CHROME_ROLES = ("bar", "bar_edge", "chrome_ink", "chrome_ink_dim", "surface",
                  "border", "ink", "ink_dim", "play", "panel", "edge")
 _mp_chrome = []
 
-try:
-    import ui_draw as _ui_draw
-except ImportError:                         # CPython: the runtime package's
-    from runtime import ui_draw as _ui_draw
+import ui_draw as _ui_draw
 
 
 def _moy_play():
     if not _mp_chrome:
-        try:
-            import moy_play
-        except ImportError:                 # CPython: the host's ctypes module
-            from runtime import moy_play
+        import moy_play
         _mp_chrome.append(moy_play)
     return _mp_chrome[0]
 
@@ -43,7 +37,7 @@ def chrome_inks(th, names):
 
 def replay(ops, cv, ws=None):
     """Draw a chrome display list through `cv`: rect, rectb, print, a 12x12
-    glyph (`ws._glyph`) and a bar icon (`ws._icon`), the scale 0 meaning the
+    glyph (`ui_draw.glyph`) and a bar icon (`ws.icon`), the scale 0 meaning the
     canvas's own."""
     for op, c, sc, x, y, w, h, t in ops:
         if op == 1:
@@ -53,9 +47,9 @@ def replay(ops, cv, ws=None):
         elif op == 3:
             cv.print(t, x, y, c, sc)
         elif op == 4:
-            ws._glyph(t, (x, y, w, h), c, cv, sc or None)
+            _ui_draw.glyph(cv, t, (x, y, w, h), c, sc or None)
         elif op == 5:
-            ws._icon(t, x, y, cv, sc or None)
+            ws.icon(t, x, y, cv, sc or None)
 
 
 # The panels' words (#143): moy_chrome.h's one table, whichever tier draws.

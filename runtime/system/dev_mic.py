@@ -31,10 +31,7 @@ if _N is None:
     except ImportError:  # a console whose image has no audio: no microphone
         _N = None
 
-try:
-    import devices as _D
-except ImportError:  # host: the runtime package
-    from runtime import devices as _D
+import devices as _D
 
 
 def _held():

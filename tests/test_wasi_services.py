@@ -1,5 +1,5 @@
-"""A WASI service run by the scheduler (runtime/system/scheduler.py, COMPILED
-SERVICES; native/moy_wasm/moy_wasi.h, A SERVICE; docs/os_2026-11/processes.md
+"""A WASI service run by the scheduler (runtime/system/sched_compiled.py,
+COMPILED SERVICES; native/moy_wasm/moy_wasi.h, A SERVICE; docs/os_2026-11/processes.md
 section 1, the service model): started under its consent on a thread of its
 own with no shell session, listed with the other services, its moybyte.os
 `send` to the VM's processes served at the next frame's start, its end by
@@ -85,12 +85,14 @@ def svc(tmp_path, built):
     assert wasm_binding.services_live() == 0
 
 
-def _polled(s, cond, secs=5.0):
-    """The scheduler's poll run until cond() holds or `secs` pass."""
+def _polled(s, cond, secs=15.0):
+    """The scheduler's poll run until cond() holds or `secs` pass; cond is read
+    once more after the deadline, so a starved worker's last poll still counts."""
     t0 = time.monotonic()
     while not cond():
         if time.monotonic() - t0 >= secs:
-            return False
+            s.poll()
+            return bool(cond())
         s.poll()
         time.sleep(0.01)
     return True
@@ -370,7 +372,8 @@ def test_a_wasi_service_opens_shares_and_picks_through_the_front(svc, perms, mon
     picked reaches the service as "moy_open" (moybyte.hand_item), its handle
     what `item_read` and `item_write` take, read and written on its own
     task (native/moy_kernel/moy_items.h: no console call), and a handle it
-    was never given NOENT, the console's answer. In the background without `front`, the share and the pick wait
+    was never given NOENT, the console's answer. What goes through runs at the
+    console's next frame start. In the background without `front`, the share and the pick wait
     as the process's notification (its latest request), the picker not up."""
     from runtime import intents as I
     from runtime import notifications
@@ -390,6 +393,7 @@ def test_a_wasi_service_opens_shares_and_picks_through_the_front(svc, perms, mon
     assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "wake", '["front"]')[0] == 1)
     assert _polled(s, lambda: any(t.startswith("pick ") for t in _texts(since, pid))), \
         _texts(since, pid)
+    ws.frame(1 / 30)        # what the front let through runs at the frame's start
     docs = ws.carts_store.list_files("docs", ws.carts_root)
     if perms:
         assert _texts(since, pid)[-3:] == [
@@ -465,6 +469,23 @@ def test_a_wasi_service_talks_on_a_port_of_the_radio_link_by_handle(svc, perms):
     assert _texts(since, pid)[-1] == "exit 0", "its stop answered the read its tick hopped with"
     assert link.ports_open() == 0
     assert not link.active
+
+
+def test_a_wasi_service_poll_whose_deadline_is_due_answers_its_clock(svc):
+    """poll_oneoff with a timeout already due (a service late for its tick
+    polls with 0) answers the clock's event at once, with no event queued:
+    a deadline passed before the wait on the event queue begins is not a
+    wait with no deadline, which would hold the service's ticks until
+    something is sent to it."""
+    ws, s, cart, peer = svc
+    since = L.next()
+    pid = S.start_cart(ws, cart, s)
+    assert pid is not None
+    assert _polled(s, lambda: moy_evq.send(peer, "wasi.svc", "wake", '["due"]')[0] == 1)
+    assert _polled(s, lambda: any(t.startswith("due ") for t in _texts(since, pid))), \
+        _texts(since, pid)
+    assert [t for t in _texts(since, pid) if t.startswith("due ")] == ["due 1000 of 1000"]
+    assert s.stop(pid)
 
 
 def test_the_fixture_is_a_service():

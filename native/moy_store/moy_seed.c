@@ -1,9 +1,11 @@
 // The seed (moy_seed.h has the contract; runtime/carts/moy_seed.py's seed_builtins
-// is the reference every branch below follows).
+// documents its rules).
 
 #include <stdio.h>
 #include <string.h>
 
+#include "moy_sb.h"
+#include "moy_codec.h"
 #include "moy_cat.h"
 #include "moy_json.h"
 #include "moy_seed.h"
@@ -15,61 +17,19 @@
 #define MOY_SEED_INFLATE 1
 #endif
 #if MOY_SEED_INFLATE
+#if defined(__has_include)
+#if __has_include("lib/uzlib/uzlib.h")
+#include "lib/uzlib/uzlib.h"
+#else
+#include "uzlib.h"
+#endif
+#else
 #include "lib/uzlib/uzlib.h"
 #endif
+#endif
 
-size_t moy_seed_folder(const char *title, size_t n, const char *ns, char *out,
-                       size_t cap) {
-    size_t k = 0;
-    char c;
-#define PUT(ch) do { c = (ch); if (k + 1u < cap) { out[k] = c; } k++; } while (0)
-    size_t start = 0;
-    if (ns != NULL && ns[0]) {
-        for (const char *p = ns; *p; p++) {
-            unsigned char u = (unsigned char)*p;
-            if (u >= 'A' && u <= 'Z') {
-                PUT((char)(u + 32));
-            } else if ((u >= 'a' && u <= 'z') || (u >= '0' && u <= '9')) {
-                PUT((char)u);
-            } else if (u == ' ' || u == '-' || u == '_') {
-                PUT('_');
-            }
-        }
-        if (k == 0) {
-            PUT('c');
-            PUT('a');
-            PUT('r');
-            PUT('t');
-        }
-        PUT('.');
-    }
-    start = k;
-    for (size_t i = 0; i < n; i++) {
-        unsigned char u = (unsigned char)title[i];
-        if (u >= 'A' && u <= 'Z') {
-            PUT((char)(u + 32));
-        } else if ((u >= 'a' && u <= 'z') || (u >= '0' && u <= '9')) {
-            PUT((char)u);
-        } else if (u == ' ' || u == '-' || u == '_') {
-            PUT('_');
-        }
-    }
-    if (k == start) {
-        PUT('c');
-        PUT('a');
-        PUT('r');
-        PUT('t');
-    }
-    PUT('.');
-    PUT('m');
-    PUT('o');
-    PUT('y');
-#undef PUT
-    if (cap) {
-        out[k < cap ? k : cap - 1u] = 0;
-    }
-    return k;
-}
+// What a builder here grows in: the store's call scratch.
+static const moy_htab_mem_t STORE_MEM = { moy_store_alloc, moy_store_free };
 
 int moy_seed_inflate(const uint8_t *blob, size_t n, moy_buf_t *out) {
     out->p = NULL;
@@ -149,43 +109,7 @@ int moy_seed_inflate(const uint8_t *blob, size_t n, moy_buf_t *out) {
 
 // -- writing -------------------------------------------------------------------------
 
-typedef struct {
-    char *p;
-    size_t n, cap;
-    int failed;
-} sb_t;
-
-static void sb_put(sb_t *b, const char *s, size_t n) {
-    if (b->failed) {
-        return;
-    }
-    if (b->n + n + 1u > b->cap) {
-        size_t cap = b->cap ? b->cap : 256u;
-        while (cap < b->n + n + 1u) {
-            cap *= 2u;
-        }
-        char *p = moy_store_alloc(cap);
-        if (p == NULL) {
-            b->failed = 1;
-            return;
-        }
-        if (b->n) {
-            memcpy(p, b->p, b->n);
-        }
-        moy_store_free(b->p, b->cap);
-        b->p = p;
-        b->cap = cap;
-    }
-    memcpy(b->p + b->n, s, n);
-    b->n += n;
-    b->p[b->n] = 0;
-}
-
-static void sb_str(sb_t *b, const char *s) {
-    sb_put(b, s, strlen(s));
-}
-
-static void sb_canon(sb_t *b, const char *v, const char *ve) {
+static void sb_canon(moy_sb_t *b, const char *v, const char *ve) {
     size_t n = moy_json_canon(v, ve, NULL, 0);
     char *t = n == MOY_JSON_DEEP ? NULL : moy_store_alloc(n + 1u);
     if (t == NULL) {
@@ -193,13 +117,8 @@ static void sb_canon(sb_t *b, const char *v, const char *ve) {
         return;
     }
     moy_json_canon(v, ve, t, n);
-    sb_put(b, t, n);
+    moy_sb_put(b, t, n);
     moy_store_free(t, n + 1u);
-}
-
-static void sb_free(sb_t *b) {
-    moy_store_free(b->p, b->cap);
-    memset(b, 0, sizeof *b);
 }
 
 typedef struct {
@@ -274,54 +193,11 @@ static int put_str(const char *dir, const char *name, span_t s) {
 }
 
 static int put_json(const char *dir, const char *name, span_t s) {
-    sb_t b = { NULL, 0, 0, 0 };
+    moy_sb_t b = moy_sb_grown(&STORE_MEM);
     sb_canon(&b, s.v, s.e);
     int rc = b.failed ? MOY_ENOMEM : put_file(dir, name, b.p, b.n, 0);
-    sb_free(&b);
+    moy_sb_free(&b);
     return rc;
-}
-
-static int b64v(unsigned char c) {
-    if (c >= 'A' && c <= 'Z') {
-        return c - 'A';
-    }
-    if (c >= 'a' && c <= 'z') {
-        return c - 'a' + 26;
-    }
-    if (c >= '0' && c <= '9') {
-        return c - '0' + 52;
-    }
-    if (c == '+') {
-        return 62;
-    }
-    if (c == '/') {
-        return 63;
-    }
-    return -1;
-}
-
-// binascii.a2b_base64's reading: characters outside the alphabet skipped, the
-// first pad ends the data.
-static size_t b64_decode(const char *s, size_t n, uint8_t *out) {
-    uint32_t acc = 0;
-    int bits = 0;
-    size_t k = 0;
-    for (size_t i = 0; i < n; i++) {
-        if (s[i] == '=') {
-            break;
-        }
-        int v = b64v((unsigned char)s[i]);
-        if (v < 0) {
-            continue;
-        }
-        acc = (acc << 6) | (uint32_t)v;
-        bits += 6;
-        if (bits >= 8) {
-            bits -= 8;
-            out[k++] = (uint8_t)(acc >> bits);
-        }
-    }
-    return k;
 }
 
 // The members of a `{name: text}` object, each written as `sub`/name + ext.
@@ -397,60 +273,60 @@ static const char *i64(int64_t v, char *buf) {
     return p;
 }
 
-// The manifest seed_builtins writes, in its key order: the spec's fields, then
+// The manifest a seed writes, in its key order: the spec's fields, then
 // Moybyte's own under "moybyte". `folder` is the cart's folder, whose name
 // without the extension is its id.
-static void manifest(sb_t *b, const char *c, const char *ce, int64_t ver,
+static void manifest(moy_sb_t *b, const char *c, const char *ce, int64_t ver,
                      const char *folder) {
     span_t f;
-    sb_str(b, "{\"format\": ");
+    moy_sb_str(b, "{\"format\": ");
     f = get(c, ce, "format");
     if (f.v != NULL) {
         sb_canon(b, f.v, f.e);
     } else {
-        sb_str(b, "\"" MOY_CAT_FORMAT "\"");
+        moy_sb_str(b, "\"" MOY_CAT_FORMAT "\"");
     }
-    sb_str(b, ", \"title\": ");
+    moy_sb_str(b, ", \"title\": ");
     f = get(c, ce, "title");
     sb_canon(b, f.v, f.e);
     size_t fn = strlen(folder);
     if (fn >= 4u && memcmp(folder + fn - 4u, ".moy", 4u) == 0) {
         fn -= 4u;
     }
-    sb_str(b, ", \"id\": \"");
-    sb_put(b, folder, fn);              // the store's own name: [a-z0-9_.] only
-    sb_str(b, "\"");
-    sb_str(b, ", \"runtime\": ");
+    moy_sb_str(b, ", \"id\": \"");
+    moy_sb_put(b, folder, fn);              // the store's own name: [a-z0-9_.] only
+    moy_sb_str(b, "\"");
+    moy_sb_str(b, ", \"runtime\": ");
     f = get(c, ce, "runtime");
     if (f.v != NULL) {
         sb_canon(b, f.v, f.e);
     } else {
-        sb_str(b, "\"python\"");
+        moy_sb_str(b, "\"python\"");
     }
     span_t main = get(c, ce, "main");
-    sb_str(b, ", \"main\": ");
+    moy_sb_str(b, ", \"main\": ");
     if (main.v != NULL) {
         sb_canon(b, main.v, main.e);
     } else {
-        sb_str(b, "\"main.py\"");
+        moy_sb_str(b, "\"main.py\"");
     }
     char num[24];
-    sb_str(b, ", \"version\": ");
-    sb_str(b, i64(ver, num));
+    moy_sb_str(b, ", \"version\": ");
+    moy_sb_str(b, i64(ver, num));
     span_t pre = get(c, ce, "src_before"), post = get(c, ce, "src_after");
     if (truthy(pre) || truthy(post)) {
         int first = 1;
-        sb_str(b, ", \"sources\": [");
+        moy_sb_str(b, ", \"sources\": [");
         for (int part = 0; part < 3; part++) {
             if (part == 1) {
                 if (!first) {
-                    sb_str(b, ", ");
+                    moy_sb_str(b, ", ");
                 }
                 first = 0;
                 if (main.v != NULL) {
                     sb_canon(b, main.v, main.e);
                 } else {
-                    sb_str(b, "\"main.py\"");
+                    moy_sb_str(b, "\"main.py\"");
                 }
                 continue;
             }
@@ -470,27 +346,27 @@ static void manifest(sb_t *b, const char *c, const char *ce, int64_t ver,
                     continue;
                 }
                 if (!first) {
-                    sb_str(b, ", ");
+                    moy_sb_str(b, ", ");
                 }
                 first = 0;
                 sb_canon(b, nm, nme);
             }
         }
-        sb_str(b, "]");
+        moy_sb_str(b, "]");
     }
     f = get(c, ce, "fps");
     if (truthy(f)) {
-        sb_str(b, ", \"fps\": ");
+        moy_sb_str(b, ", \"fps\": ");
         sb_canon(b, f.v, f.e);
     }
     f = get(c, ce, "icon");
     if (truthy(f)) {
-        sb_str(b, ", \"icon\": ");
+        moy_sb_str(b, ", \"icon\": ");
         sb_canon(b, f.v, f.e);
     }
     f = get(c, ce, "canvas");
     if (f.v != NULL && *f.v != 'n') {
-        sb_str(b, ", \"canvas\": ");
+        moy_sb_str(b, ", \"canvas\": ");
         moy_json_iter_t it;
         const char *x, *xe, *y, *ye, *z, *ze;
         int64_t w, h;
@@ -500,11 +376,11 @@ static void manifest(sb_t *b, const char *c, const char *ce, int64_t ver,
                 && moy_json_next(&it, NULL, NULL, &y, &ye)
                 && !moy_json_next(&it, NULL, NULL, &z, &ze)
                 && moy_json_int(x, xe, &w) == 1 && moy_json_int(y, ye, &h) == 1) {
-                sb_str(b, "\"");
-                sb_str(b, i64(w, num));
-                sb_str(b, "x");
-                sb_str(b, i64(h, num));
-                sb_str(b, "\"");
+                moy_sb_str(b, "\"");
+                moy_sb_str(b, i64(w, num));
+                moy_sb_str(b, "x");
+                moy_sb_str(b, i64(h, num));
+                moy_sb_str(b, "\"");
             } else {
                 sb_canon(b, f.v, f.e);
             }
@@ -514,66 +390,70 @@ static void manifest(sb_t *b, const char *c, const char *ce, int64_t ver,
     }
     f = get(c, ce, "input");
     if (f.v != NULL && *f.v != 'n') {
-        sb_str(b, ", \"input\": ");
+        moy_sb_str(b, ", \"input\": ");
         sb_canon(b, f.v, f.e);
     }
     static const char *const listing[] = { "description", "genre", "tags" };
     for (size_t i = 0; i < 3u; i++) {                  // SPEC.md 3.7 list fields
         f = get(c, ce, listing[i]);
         if (truthy(f)) {
-            sb_str(b, ", \"");
-            sb_str(b, listing[i]);
-            sb_str(b, "\": ");
+            moy_sb_str(b, ", \"");
+            moy_sb_str(b, listing[i]);
+            moy_sb_str(b, "\": ");
             sb_canon(b, f.v, f.e);
         }
     }
-    sb_str(b, ", \"moybyte\": {\"type\": ");
+    moy_sb_str(b, ", \"moybyte\": {\"type\": ");
     f = get(c, ce, "type");
     sb_canon(b, f.v, f.e);
-    sb_str(b, ", \"edit\": ");
+    moy_sb_str(b, ", \"edit\": ");
     f = get(c, ce, "edit");
     if (f.v != NULL) {
         sb_canon(b, f.v, f.e);
     } else {
-        sb_str(b, "[]");
+        moy_sb_str(b, "[]");
     }
     f = get(c, ce, "permissions");
     if (f.v != NULL && *f.v != 'n') {
-        sb_str(b, ", \"permissions\": ");
+        moy_sb_str(b, ", \"permissions\": ");
         sb_canon(b, f.v, f.e);
     }
     f = get(c, ce, "handles");              // the MIME types its app opens
     if (f.v != NULL && *f.v != 'n') {
-        sb_str(b, ", \"handles\": ");
+        moy_sb_str(b, ", \"handles\": ");
         sb_canon(b, f.v, f.e);
     }
     f = get(c, ce, "receives");             // the message names other apps may send it
     if (f.v != NULL && *f.v != 'n') {
-        sb_str(b, ", \"receives\": ");
+        moy_sb_str(b, ", \"receives\": ");
         sb_canon(b, f.v, f.e);
     }
     f = get(c, ce, "entries");              // its entry points beside main
     if (f.v != NULL && *f.v != 'n') {
-        sb_str(b, ", \"entries\": ");
+        moy_sb_str(b, ", \"entries\": ");
         sb_canon(b, f.v, f.e);
     }
     f = get(c, ce, "achievements");         // the badges it declares
     if (f.v != NULL && *f.v != 'n') {
-        sb_str(b, ", \"achievements\": ");
+        moy_sb_str(b, ", \"achievements\": ");
         sb_canon(b, f.v, f.e);
     }
     f = get(c, ce, "glass");                // a per-glass wallpaper
     if (f.v != NULL && f.e - f.v == 4 && memcmp(f.v, "true", 4) == 0) {
-        sb_str(b, ", \"glass\": true");
+        moy_sb_str(b, ", \"glass\": true");
+    }
+    f = get(c, ce, "animates");             // an app drawn every frame
+    if (f.v != NULL && f.e - f.v == 4 && memcmp(f.v, "true", 4) == 0) {
+        moy_sb_str(b, ", \"animates\": true");
     }
     f = get(c, ce, "pictures");             // a picture wallpaper
     if (f.v != NULL && *f.v != 'n') {
-        sb_str(b, ", \"pictures\": ");
+        moy_sb_str(b, ", \"pictures\": ");
         sb_canon(b, f.v, f.e);
     }
     span_t scenes = get(c, ce, "scenes");
     if (truthy(scenes) && *scenes.v == '{') {
-        sb_str(b, ", \"assets\": {\"scenes\": ");
+        moy_sb_str(b, ", \"assets\": {\"scenes\": ");
         f = get(c, ce, "scene_order");
         if (truthy(f)) {
             sb_canon(b, f.v, f.e);
@@ -583,7 +463,7 @@ static void manifest(sb_t *b, const char *c, const char *ce, int64_t ver,
             const char *k, *ke, *v, *ve;
             const char *last = NULL, *last_e = NULL;
             int first = 1;
-            sb_str(b, "[");
+            moy_sb_str(b, "[");
             for (;;) {
                 const char *best = NULL, *best_e = NULL;
                 size_t bn = 0;
@@ -635,18 +515,18 @@ static void manifest(sb_t *b, const char *c, const char *ce, int64_t ver,
                 }
                 moy_store_free(bs, bn + 1u);
                 if (!first) {
-                    sb_str(b, ", ");
+                    moy_sb_str(b, ", ");
                 }
                 first = 0;
                 sb_canon(b, best, best_e);
                 last = best;
                 last_e = best_e;
             }
-            sb_str(b, "]");
+            moy_sb_str(b, "]");
         }
-        sb_str(b, "}");
+        moy_sb_str(b, "}");
     }
-    sb_str(b, "}}");
+    moy_sb_str(b, "}}");
 }
 
 // What a re-seed keeps of the cart it replaces: the kid's saves and config
@@ -835,8 +715,8 @@ int moy_seed_write(const char *root, const char *folder, const char *json,
         if (bytes == NULL) {
             rc = t == NULL ? MOY_EINVAL : MOY_ENOMEM;
         } else {
-            size_t bn = b64_decode(t, tn, bytes);
-            rc = put_file(d, "cover.png", (const char *)bytes, bn, 1);
+            long bn = moy_b64_decode(t, tn, bytes);
+            rc = bn < 0 ? MOY_EINVAL : put_file(d, "cover.png", (const char *)bytes, (size_t)bn, 1);
         }
         moy_store_free(bytes, tn + 1u);
         if (t != NULL) {
@@ -856,13 +736,13 @@ int moy_seed_write(const char *root, const char *folder, const char *json,
     // whole, and a cut before it leaves the older version's (or none), which
     // the next boot's seed writes again.
     if (rc == 0) {
-        sb_t m = { NULL, 0, 0, 0 };
+        moy_sb_t m = moy_sb_grown(&STORE_MEM);
         size_t pn;
         char *p = path3(d, "manifest.json", NULL, &pn);
         manifest(&m, c, ce, ver, folder);
         rc = m.failed || p == NULL ? MOY_ENOMEM : moy_fs_publish(p, m.p, m.n);
         moy_store_free(p, pn);
-        sb_free(&m);
+        moy_sb_free(&m);
     }
     moy_store_free(d, dn);
     moy_store_free(main, main_n + 1u);

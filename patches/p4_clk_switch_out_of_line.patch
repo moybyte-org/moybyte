@@ -1,0 +1,18 @@
+--- a/components/esp_system/port/soc/esp32p4/clk.c
++++ b/components/esp_system/port/soc/esp32p4/clk.c
+@@ -96,8 +96,14 @@
+  * the external-memory cache for the duration of the switch keeps the CPU off
+  * the XIP path, isolating the two.
+  * Must be IRAM-resident because it runs while the external cache is suspended.
++ *
++ * Moybyte P4: the isolated switch stays out of line. Its one caller,
++ * esp_clk_init, is in flash, and inlined there the code between the suspend
++ * and the resume ran from flash too: an instruction fetch that missed the L1
++ * cache in that window was a cache error at the first boot step, before any
++ * console, on an image whose layout put a cache line boundary there.
+  */
+-static void IRAM_ATTR esp_clk_cpu_freq_set_config_isolated(const rtc_cpu_freq_config_t *config)
++static void IRAM_ATTR NOINLINE_ATTR esp_clk_cpu_freq_set_config_isolated(const rtc_cpu_freq_config_t *config)
+ {
+     /* esp_cache_utils.c is not built for pure-ram apps. */
+ #if !CONFIG_APP_BUILD_TYPE_PURE_RAM_APP

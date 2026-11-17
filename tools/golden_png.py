@@ -19,23 +19,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
-
-
-def rgb565be_rows(buf, w, h):
-    """RGB888 rows from a big-endian RGB565 buffer."""
-    rows = []
-    for y in range(h):
-        row = bytearray(w * 3)
-        o = y * w * 2
-        for x in range(w):
-            v = buf[o] << 8 | buf[o + 1]
-            o += 2
-            j = x * 3
-            row[j] = (v >> 11 & 31) * 255 // 31
-            row[j + 1] = (v >> 5 & 63) * 255 // 63
-            row[j + 2] = (v & 31) * 255 // 31
-        rows.append(bytes(row))
-    return rows
+sys.path.insert(0, str(ROOT / "tests"))
 
 
 class _Dump:
@@ -45,6 +29,7 @@ class _Dump:
     def pytest_collection_modifyitems(self, session, config, items):
         import pngwrite
         import test_shell_goldens as t
+        from pixel_goldens import rgb565_rows
         orig = t._render
 
         def render(ws, surface, config_name):
@@ -53,7 +38,7 @@ class _Dump:
                 cv = ws.glass_canvas
                 path = self.out / ("%s.png" % surface)
                 pngwrite.write_png(str(path),
-                                   rgb565be_rows(bytes(cv._buf), cv.w, cv.h),
+                                   rgb565_rows(cv._buf, cv.w, cv.h),
                                    cv.w, cv.h)
                 self.written.append(path)
             return digest

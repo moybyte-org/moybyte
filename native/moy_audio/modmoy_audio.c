@@ -18,7 +18,7 @@
 #include "moy_audio.h"
 #include "moy_audio_snd.h"
 
-#if MOY_AUD_BOARD && MOY_AUDIO_CODEC_ES8311
+#if MOY_ON_BOARD && MOY_AUDIO_CODEC_ES8311
 #include "moy_codec_es8311.h"
 #endif
 
@@ -206,7 +206,7 @@ static mp_obj_t mod_render(mp_obj_t buf, mp_obj_t nobj) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_render_obj, mod_render);
 
-#if !MOY_AUD_BOARD
+#if !MOY_ON_BOARD
 // set_out_rate(rate): the output's rate where no feeder runs (moy_aud.h, THE
 // OUTPUT RATE), the browser's AudioContext's; render_out(buf, n) -> frames:
 // the next `n` frames of the mix at it.
@@ -319,7 +319,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_trace_obj, 0, 1, mod_trace);
 
 // codec() -> (chip_id, mismatches) on a board with a codec, else None.
 static mp_obj_t mod_codec(void) {
-#if MOY_AUD_BOARD && MOY_AUDIO_CODEC_ES8311
+#if MOY_ON_BOARD && MOY_AUDIO_CODEC_ES8311
     uint16_t id = 0;
     int bad = -1;
     moy_es8311_check(&id, &bad);
@@ -415,7 +415,7 @@ static const mp_rom_map_elem_t moy_audio_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_rate),     MP_ROM_PTR(&mod_set_rate_obj) },
     { MP_ROM_QSTR(MP_QSTR_rate),         MP_ROM_PTR(&mod_rate_obj) },
     { MP_ROM_QSTR(MP_QSTR_render),       MP_ROM_PTR(&mod_render_obj) },
-#if !MOY_AUD_BOARD
+#if !MOY_ON_BOARD
     { MP_ROM_QSTR(MP_QSTR_set_out_rate), MP_ROM_PTR(&mod_set_out_rate_obj) },
     { MP_ROM_QSTR(MP_QSTR_render_out),   MP_ROM_PTR(&mod_render_out_obj) },
 #endif

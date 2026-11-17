@@ -345,7 +345,13 @@ def _stage_artifacts(tmp_path):
     publish = _load_publish()
     folder = tmp_path / "artifacts" / "moybyte-firmware-tdeck"
     folder.mkdir(parents=True)
-    (folder / publish.OTA_IMAGES["tdeck"]).write_bytes(b"\xe9APP" * 64)
+    import gen_web_blob
+    page = folder / "page.html"
+    page.write_bytes(b"<p>")
+    data, named = gen_web_blob.pack([("index.html.gz", str(page), 3, "-")])
+    page.unlink()
+    (folder / "moybyte_web.pack").write_bytes(data)
+    (folder / publish.OTA_IMAGES["tdeck"]).write_bytes(b"\xe9APP" * 64 + named)
     (folder / publish.OTA_STAMP).write_text(json.dumps(
         {"channel": "unstable", "version": 1785659788, "label": "beta",
          "board": "tdeck"}))

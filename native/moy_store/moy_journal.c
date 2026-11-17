@@ -1,12 +1,16 @@
-// The journal (moy_journal.h has the contract; runtime/carts/moy_journal.py is the
-// reference every branch below follows).
+// The journal (moy_journal.h has the contract; runtime/carts/moy_journal.py's
+// header documents the format).
 
 #include <stdio.h>
 #include <string.h>
 
+#include "moy_sb.h"
 #include "moy_arena.h"
 #include "moy_journal.h"
 #include "moy_json.h"
+
+// What a builder here grows in: the store's call scratch.
+static const moy_htab_mem_t STORE_MEM = { moy_store_alloc, moy_store_free };
 
 #define JDIR "journal"
 #define LOG "journal.jsonl"
@@ -277,43 +281,7 @@ static int64_t total_len(const jr_t *j) {
 
 // -- writing -----------------------------------------------------------------------
 
-typedef struct {
-    char *p;
-    size_t n, cap;
-    int failed;
-} sb_t;
-
-static void sb_put(sb_t *b, const char *s, size_t n) {
-    if (b->failed) {
-        return;
-    }
-    if (b->n + n + 1u > b->cap) {
-        size_t cap = b->cap ? b->cap : 256u;
-        while (cap < b->n + n + 1u) {
-            cap *= 2u;
-        }
-        char *p = moy_store_alloc(cap);
-        if (p == NULL) {
-            b->failed = 1;
-            return;
-        }
-        if (b->n) {
-            memcpy(p, b->p, b->n);
-        }
-        moy_store_free(b->p, b->cap);
-        b->p = p;
-        b->cap = cap;
-    }
-    memcpy(b->p + b->n, s, n);
-    b->n += n;
-    b->p[b->n] = 0;
-}
-
-static void sb_str(sb_t *b, const char *s) {
-    sb_put(b, s, strlen(s));
-}
-
-static void sb_quote(sb_t *b, const char *s, size_t n) {
+static void sb_quote(moy_sb_t *b, const char *s, size_t n) {
     size_t k = moy_json_quote(s, n, NULL, 0);
     char *t = moy_store_alloc(k + 1u);
     if (t == NULL) {
@@ -321,11 +289,11 @@ static void sb_quote(sb_t *b, const char *s, size_t n) {
         return;
     }
     moy_json_quote(s, n, t, k);
-    sb_put(b, t, k);
+    moy_sb_put(b, t, k);
     moy_store_free(t, k + 1u);
 }
 
-static void sb_canon(sb_t *b, const char *v, const char *ve) {
+static void sb_canon(moy_sb_t *b, const char *v, const char *ve) {
     size_t k = moy_json_canon(v, ve, NULL, 0);
     char *t = k == MOY_JSON_DEEP ? NULL : moy_store_alloc(k + 1u);
     if (t == NULL) {
@@ -333,13 +301,8 @@ static void sb_canon(sb_t *b, const char *v, const char *ve) {
         return;
     }
     moy_json_canon(v, ve, t, k);
-    sb_put(b, t, k);
+    moy_sb_put(b, t, k);
     moy_store_free(t, k + 1u);
-}
-
-static void sb_free(sb_t *b) {
-    moy_store_free(b->p, b->cap);
-    memset(b, 0, sizeof *b);
 }
 
 // `_journal_write_cursors`: the map published, or removed when it says what
@@ -371,35 +334,35 @@ static int write_cursors(jr_t *j) {
         moy_fs_forget_bak(j->cur);
         return 0;
     }
-    sb_t b = { NULL, 0, 0, 0 };
+    moy_sb_t b = moy_sb_grown(&STORE_MEM);
     char num[24];
-    sb_str(&b, "{\"cursors\": {");
+    moy_sb_str(&b, "{\"cursors\": {");
     for (size_t i = 0; i < j->nc; i++) {
         if (i) {
-            sb_str(&b, ", ");
+            moy_sb_str(&b, ", ");
         }
         sb_quote(&b, j->c[i].file, j->c[i].file_n);
-        sb_str(&b, ": ");
-        sb_str(&b, i64(j->c[i].seq, num));
+        moy_sb_str(&b, ": ");
+        moy_sb_str(&b, i64(j->c[i].seq, num));
     }
-    sb_str(&b, "}, \"seq\": ");
-    sb_str(&b, i64(top, num));
-    sb_str(&b, "}");
+    moy_sb_str(&b, "}, \"seq\": ");
+    moy_sb_str(&b, i64(top, num));
+    moy_sb_str(&b, "}");
     int rc = b.failed ? MOY_ENOMEM : moy_fs_publish(j->cur, b.p, b.n);
-    sb_free(&b);
+    moy_sb_free(&b);
     return rc;
 }
 
 // `_journal_rewrite`: the log as the kept entries, published whole.
 static int rewrite(jr_t *j) {
-    sb_t b = { NULL, 0, 0, 0 };
-    sb_put(&b, "", 0);
+    moy_sb_t b = moy_sb_grown(&STORE_MEM);
+    moy_sb_put(&b, "", 0);
     for (size_t i = 0; i < j->n; i++) {
         sb_canon(&b, j->e[i].line, j->e[i].line_e);
-        sb_str(&b, "\n");
+        moy_sb_str(&b, "\n");
     }
     int rc = b.failed ? MOY_ENOMEM : moy_fs_publish(j->log, b.p, b.n);
-    sb_free(&b);
+    moy_sb_free(&b);
     return rc;
 }
 
@@ -789,37 +752,37 @@ static int append(jr_t *j, const char *file, const char *data, size_t n, int gra
             return rc;
         }
     }
-    sb_t b = { NULL, 0, 0, 0 };
-    sb_str(&b, "{\"seq\": ");
-    sb_str(&b, i64(seq, num));
-    sb_str(&b, ", \"ts\": ");
-    sb_str(&b, i64(ts, num));
-    sb_str(&b, ", \"file\": ");
+    moy_sb_t b = moy_sb_grown(&STORE_MEM);
+    moy_sb_str(&b, "{\"seq\": ");
+    moy_sb_str(&b, i64(seq, num));
+    moy_sb_str(&b, ", \"ts\": ");
+    moy_sb_str(&b, i64(ts, num));
+    moy_sb_str(&b, ", \"file\": ");
     sb_quote(&b, file, fn);
-    sb_str(&b, ", \"snap\": ");
+    moy_sb_str(&b, ", \"snap\": ");
     sb_quote(&b, snap, strlen(snap));
-    sb_str(&b, ", \"len\": ");
-    sb_str(&b, i64(chars, num));
-    sb_str(&b, ", \"crc\": ");
-    sb_str(&b, i64(crc, num));
+    moy_sb_str(&b, ", \"len\": ");
+    moy_sb_str(&b, i64(chars, num));
+    moy_sb_str(&b, ", \"crc\": ");
+    moy_sb_str(&b, i64(crc, num));
     if (stamped) {
-        sb_str(&b, ", \"stamped\": 1");
+        moy_sb_str(&b, ", \"stamped\": 1");
     }
     if (grad >= 0) {
-        sb_str(&b, ", \"grad\": ");
-        sb_str(&b, i64(grad, num));
+        moy_sb_str(&b, ", \"grad\": ");
+        moy_sb_str(&b, i64(grad, num));
     }
     if (ops != NULL && ops_n) {
         const char *s = moy_json_ws(ops, ops + ops_n);
         const char *e = moy_json_value(s, ops + ops_n, 1u);
         if (e != NULL && moy_json_truthy(s, e)) {
-            sb_str(&b, ", \"ops\": ");
+            moy_sb_str(&b, ", \"ops\": ");
             sb_canon(&b, s, e);
         }
     }
-    sb_str(&b, "}\n");
+    moy_sb_str(&b, "}\n");
     if (b.failed) {
-        sb_free(&b);
+        moy_sb_free(&b);
         return MOY_ENOMEM;
     }
     moy_vol_t v;
@@ -838,7 +801,7 @@ static int append(jr_t *j, const char *file, const char *data, size_t n, int gra
     }
     // the new entry, as the rest of the call reads it
     char *line = rc == 0 ? moy_arena_dup(&j->a, b.p, b.n - 1u) : NULL;
-    sb_free(&b);
+    moy_sb_free(&b);
     if (rc != 0) {
         return rc;
     }

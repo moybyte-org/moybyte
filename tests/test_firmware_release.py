@@ -34,6 +34,9 @@ def _load(path, name):
 
 
 publish = _load("tools/publish_firmware_release.py", "_moy_publish")
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+import gen_web_blob as gwb  # noqa: E402
+import web_pack  # noqa: E402
 fetch = _load("tools/fetch_ci_firmware.py", "_moy_fetch")
 build = _load("site/build.py", "_moy_site_build")
 
@@ -78,8 +81,9 @@ def released(tmp_path, monkeypatch):
     for board in build.BOARDS:
         folder = artifacts / ("moybyte-firmware-%s" % board["id"])
         folder.mkdir(parents=True)
-        (folder / board["images"][0]).write_bytes(
-            b"IMAGE:" + board["id"].encode() + bytes(range(256)))
+        for _kind, name in build.downloads(board):
+            (folder / name).write_bytes(
+                b"IMAGE:" + board["id"].encode() + bytes(range(256)))
         (folder / "decoy.bin").write_bytes(b"\xff" * 32)
 
     release = tmp_path / "release"
@@ -108,7 +112,8 @@ def test_board_ids_survive_being_an_asset_prefix():
 def test_the_publisher_names_assets_the_fetcher_can_read(released):
     names = sorted(os.listdir(str(released)))
     for board in build.BOARDS:
-        assert "%s-%s" % (board["id"], board["images"][0]) in names
+        for _kind, name in build.downloads(board):
+            assert "%s-%s" % (board["id"], name) in names
         assert "%s-source.json" % board["id"] in names
     src = json.load(open(os.path.join(str(released), "tdeck-source.json")))
     assert src["commit"] == ENV["GITHUB_SHA"]
@@ -124,7 +129,7 @@ def test_round_trip_to_the_page_the_browser_reads(released, tmp_path):
 
     # Unflattened: the per-board tree site/build.py expects.
     for board in build.BOARDS:
-        image = out / board["id"] / board["images"][0]
+        image = out / board["id"] / build.downloads(board)[0][1]
         assert image.exists(), "release asset did not land as %s" % image
         assert image.read_bytes().startswith(b"IMAGE:" + board["id"].encode())
         src = json.load(open(str(out / board["id"] / "source.json")))
@@ -137,7 +142,7 @@ def test_round_trip_to_the_page_the_browser_reads(released, tmp_path):
     manifest = json.load(open(str(site / "firmware" / "manifest.json")))
     assert [b["id"] for b in manifest["boards"]] == [b["id"] for b in build.BOARDS]
     for entry, board in zip(manifest["boards"], build.BOARDS):
-        assert entry["file"] == board["images"][0]
+        assert entry["file"] == build.downloads(board)[0][1]
         assert entry["offset"] == board["offset"]
         assert entry["commit"] == ENV["GITHUB_SHA"]
         assert entry["size"] == os.path.getsize(str(site / entry["url"]))
@@ -151,7 +156,7 @@ def test_a_board_missing_from_the_release_is_left_alone(tmp_path, monkeypatch):
     only = build.BOARDS[1]
     folder = artifacts / ("moybyte-firmware-%s" % only["id"])
     folder.mkdir(parents=True)
-    (folder / only["images"][0]).write_bytes(b"one board only")
+    (folder / build.downloads(only)[0][1]).write_bytes(b"one board only")
     release = tmp_path / "release"
     release.mkdir()
     for k, v in ENV.items():
@@ -225,8 +230,14 @@ def _artifacts_with_ota(tmp_path, stamp=STAMP, board="tdeck", app=True):
     spec = next(b for b in build.BOARDS if b["id"] == board)
     (folder / spec["images"][0]).write_bytes(b"IMAGE:" + board.encode())
     if app:
+        # The page its build writes beside it, named in the image.
+        asset = folder / "page.html"
+        asset.write_bytes(b"<p>" + board.encode())
+        data, named = gwb.pack([("index.html.gz", str(asset), 4 + len(board), "-")])
+        asset.unlink()
+        (folder / web_pack.PACK_FILE).write_bytes(data)
         (folder / publish.OTA_IMAGES[board]).write_bytes(
-            b"\xe9APP:" + board.encode() * 8)
+            b"\xe9APP:" + board.encode() * 8 + named)
     if stamp is not None:
         (folder / publish.OTA_STAMP).write_text(json.dumps(dict(stamp, board=board)))
     return tmp_path / "artifacts"

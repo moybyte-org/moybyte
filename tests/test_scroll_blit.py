@@ -362,10 +362,10 @@ def test_a_window_drag_takes_the_band_frame(tmp_path):
                                     sys_size=(1024, 600), font_scale=2,
                                     windowed=True)
     drv = host_app.ConsoleDriver(ws)
-    ws.open_projects()
+    ws.home.open_projects()
     for _ in range(80):                      # settle covers
         drv.frame(1 / 30)
-    win = ws.wm._wins["projects"]
+    win = ws.wm.windows["projects"]
     home = ws.projects_layer
     took = []
     real = home._try_band_frame
@@ -390,13 +390,13 @@ def test_set_layout_keeps_the_bands_record(tmp_path):
 
     ws = _ws_with_carts(tmp_path, 14)
     drv = host_app.ConsoleDriver(ws)
-    ws.set_home_arrangement("grid")
+    ws.home.set_home_arrangement("grid")
     for _ in range(60):
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     grid = ws.launcher
     grid.set_layout(grid.layout)             # the per-frame context swap
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     assert grid.floor == [], "set_layout voided the band's record"
     key = ws.launcher_layer._statics_key(ws.sys_canvas)

@@ -1,0 +1,23 @@
+# Moybyte Zero (ESP32-C3) partition table: 4 MB of in-package flash.
+#
+# ONE APP SLOT, no OTA (owner, 2026-11-17). The browser console is not in
+# the image: it is an add-on cart in the store (native/moy_net/moy_page.h),
+# about 1.9 MB, which a cable flash installs (tools/board_flash.py). The
+# factory slot is sized to the image without it, with room to grow -- the
+# build's #168 guard prints the headroom -- and everything after it is the
+# store.
+#
+#   0x000000  bootloader      (the C3's sits at 0x0)
+#   0x008000  partition table
+#   0x009000  nvs              24 KB   WiFi credentials, the kernel's crash record
+#   0x00F000  phy_init          4 KB
+#   0x010000  factory      1.8125 MB   the app image
+#   0x1E0000  vfs           2.125 MB   the store: /moy/carts (the add-on among
+#                                      them) and the files tree
+#   0x400000  end of flash
+#
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x6000,
+phy_init, data, phy,     0xF000,   0x1000,
+factory,  app,  factory, 0x10000,  0x1D0000,
+vfs,      data, fat,     0x1E0000, 0x220000,

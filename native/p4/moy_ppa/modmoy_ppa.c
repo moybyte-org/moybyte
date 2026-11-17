@@ -16,6 +16,8 @@
 // SRM = Scale-Rotate-Mirror. blit_scale() is the integer-upscale composite that
 // mirrors moy_gfx.blit565_scale so run_ppa_smoke can A/B them on glass.
 
+#include "moy_ppa.h"
+
 #include <string.h>
 #include "py/obj.h"
 #include "py/runtime.h"
@@ -33,7 +35,7 @@
 #include "freertos/semphr.h"
 #include "freertos/idf_additions.h"
 
-// The ONE nearest-neighbour expand kernel (blit_crisp below). Staged sibling:
+// The ONE nearest-neighbour expand kernel (moy_ppa_k_crisp below). Staged sibling:
 // build.sh places the shared moy_gfx at ../.staged/moy_gfx, and this module's
 // micropython.cmake adds that include dir -- so the compiler checks the
 // signature and the linker joins the single body; no transcribed twin.
@@ -370,11 +372,12 @@ static esp_err_t srm_do(void *dbuf, size_t dlen, mp_int_t dw, mp_int_t dh, mp_in
 
 // The kernel's scale (a run in the loop's foreground, native/moy_play): the
 // whole `src` picture, `scale` times, into `dst` at (dx, dy), blocking and
-// bilinear (the PPA's scaler). 0, or the driver's error; -1 before init.
+// bilinear (the PPA's scaler). 0, or the driver's error; MOY_PPA_K_OFF before
+// init.
 int moy_ppa_k_scale(uint16_t *dst, int dw, int dh, int dx, int dy, const uint16_t *src,
                     int sw, int sh, int scale) {
     if (s_srm == NULL) {
-        return -1;
+        return MOY_PPA_K_OFF;
     }
     mp_int_t blk[4] = {0, 0, sw, sh};
     return (int)srm_do(dst, (size_t)dw * (size_t)dh * 2u, dw, dh, dx, dy, src, sw, sh,
@@ -1677,11 +1680,11 @@ static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_shift_in_stats_obj, moy_ppa_shift_in_st
 
 // The kernel's front (native/moy_glass's front ops): a compiled cart's frame
 // scaled from its memory, queued (moy_ppa_k_sync fences it); 0, the driver's
-// error, or -1 before init.
+// error, or MOY_PPA_K_OFF before init.
 int moy_ppa_k_scale_nb(uint16_t *dst, int dw, int dh, int dx, int dy, const void *src,
                        int sw, int sh, int scale) {
     if (s_srm == NULL) {
-        return -1;
+        return MOY_PPA_K_OFF;
     }
     mp_int_t blk[4] = {0, 0, sw, sh};
     return (int)srm_do(dst, (size_t)dw * (size_t)dh * 2u, dw, dh, dx, dy, src, sw, sh,
@@ -1757,7 +1760,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_blit_async_obj, 9, 13,
 // internal-SRAM band costs 7.7ms, and a 1:1 PPA ship of the bands is
 // ~100MB/s and byte-exact.
 //
-// So blit_crisp pipelines: expand band i on the CPU (into SRAM -- cheap
+// So moy_ppa_k_crisp pipelines: expand band i on the CPU (into SRAM -- cheap
 // writes) while band i-1's 1:1 PPA DMA ships to the framebuffer. The dest of
 // each ship is a BAND-SCOPED picture (the strip's first row, not the whole
 // framebuffer), because the driver invalidates the whole out-picture buffer
@@ -1767,7 +1770,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_blit_async_obj, 9, 13,
 // Bands are allocated LAZILY on the first crisp composite and freed by
 // crisp_release() (the Settings toggle turning crisp off): internal SRAM is
 // the Lua allocator's preferred pool, so a mode nobody enabled must not tax
-// it. Any refusal (no PPA / no SRAM / geometry) returns False and the caller
+// it. Any refusal (no PPA / no SRAM / geometry) answers -1 and the caller
 // falls back to the CPU kernel -- identical pixels, slower.
 
 #define CRISP_BAND_BYTES (64 * 1024)
@@ -1794,56 +1797,48 @@ static mp_obj_t moy_ppa_crisp_release(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_crisp_release_obj,
                                  moy_ppa_crisp_release);
 
-// blit_crisp(dst, dw, dh, dx, dy, src, sw, sh, scale, defer) -> bool
-//   Nearest-neighbour sibling of blit_scale/blit_async. defer != 0 returns
-//   with the LAST band's DMA still in flight (the caller sets the
-//   compositor's composite-pending flag; present_pending's sync() is the
-//   fence, exactly the blit_async contract); defer == 0 fences before
-//   returning so following CPU chrome can never race the DMA.
-static mp_obj_t moy_ppa_blit_crisp(size_t n_args, const mp_obj_t *args) {
-    (void)n_args;
+// The kernel's crisp composite (moy_glass's game composite,
+// native/moy_glass/moy_present_game.c): the whole `src` picture, `scale`
+// times, nearest-neighbour, into `dst` at (dx, dy). With `defer` it returns
+// with the LAST band's DMA still in flight (the caller holds the show for
+// it, the blit_async contract); without, it fences before returning so
+// following CPU chrome can never race the DMA. 0 when it took the
+// composite; -1 on any refusal (no PPA, no SRAM bands, a block that does not
+// fit, an engine error), and the caller takes the CPU kernel, whose bytes
+// are the same.
+int moy_ppa_k_crisp(uint16_t *dst_px, int dw, int dh, int dx, int dy, const uint16_t *src_px,
+                    int sw, int sh, int scale, bool defer) {
     if (s_srm == NULL || s_band_failed) {
-        return mp_const_false;
+        return -1;
     }
-    mp_buffer_info_t dst, src;
-    mp_get_buffer_raise(args[0], &dst, MP_BUFFER_WRITE);
-    mp_int_t dw = mp_obj_get_int(args[1]);
-    mp_int_t dh = mp_obj_get_int(args[2]);
-    mp_int_t dx = mp_obj_get_int(args[3]);
-    mp_int_t dy = mp_obj_get_int(args[4]);
-    mp_get_buffer_raise(args[5], &src, MP_BUFFER_READ);
-    mp_int_t sw = mp_obj_get_int(args[6]);
-    mp_int_t sh = mp_obj_get_int(args[7]);
-    mp_int_t scale = mp_obj_get_int(args[8]);
-    bool defer = mp_obj_is_true(args[9]);
     if (scale < 1 || sw <= 0 || sh <= 0) {
-        return mp_const_false;
+        return -1;
     }
     int out_w = sw * scale, out_h = sh * scale;
     // Same fit gate as the bilinear path: the scaled block must land inside
     // the picture (the PPA cannot clip); a non-fit falls to the CPU kernel.
     if (dx < 0 || dy < 0 || dx + out_w > dw || dy + out_h > dh) {
-        return mp_const_false;
+        return -1;
     }
     // Each ship's out picture starts at a ROW of dst: that address and the
     // strip size must be cache-line aligned or the driver rejects the op.
     // (dw*2 == 2048 on the DSI framebuffer, so rows inherit its alignment.)
-    if (((uintptr_t)dst.buf & 63u) != 0 || (((size_t)dw * 2u) & 63u) != 0) {
-        return mp_const_false;
+    if (((uintptr_t)dst_px & 63u) != 0 || (((size_t)dw * 2u) & 63u) != 0) {
+        return -1;
     }
     int band_rows = (int)(CRISP_BAND_BYTES / 2 / (size_t)out_w);
     band_rows -= band_rows % scale;          // bands align to whole src rows
     if (band_rows < scale) {
-        return mp_const_false;
+        return -1;
     }
     for (int i = 0; i < 2; i++) {
         if (s_band[i] == NULL) {
             s_band[i] = heap_caps_aligned_alloc(
                 64, CRISP_BAND_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
             if (s_band[i] == NULL) {
-                s_band_failed = true;        // latch: don't re-probe per frame
                 crisp_free_bands();
-                return mp_const_false;
+                s_band_failed = true;        // latch: don't re-probe per frame
+                return -1;
             }
         }
     }
@@ -1854,13 +1849,13 @@ static mp_obj_t moy_ppa_blit_crisp(size_t n_args, const mp_obj_t *args) {
         // bands ago -- wait until at most ONE transaction is in flight. Giving
         // up must NOT overwrite a band still being read, so bail to the CPU.
         if (!ppa_wait(1)) {
-            return mp_const_false;
+            return -1;
         }
         mg_blit565_scale(band, CRISP_BAND_BYTES / 2, out_w, bh, 0, 0,
-                         (const uint16_t *)src.buf + (size_t)(y / scale) * (size_t)sw,
+                         src_px + (size_t)(y / scale) * (size_t)sw,
                          (size_t)(bh / scale) * (size_t)sw,
                          sw, bh / scale, scale);
-        uint16_t *strip = (uint16_t *)dst.buf + (size_t)(dy + y) * (size_t)dw;
+        uint16_t *strip = dst_px + (size_t)(dy + y) * (size_t)dw;
         size_t strip_len = (size_t)dw * (size_t)bh * 2u;
         ppa_srm_oper_config_t op = {
             .in = {
@@ -1902,16 +1897,14 @@ static mp_obj_t moy_ppa_blit_crisp(size_t n_args, const mp_obj_t *args) {
         if (ppa_submit_srm(&op) != ESP_OK) {
             s_submitted--;
             ppa_wait(0);                        // fence what already flew
-            return mp_const_false;              // caller repaints via the CPU
+            return -1;              // caller repaints via the CPU
         }
     }
     if (!defer && !ppa_wait(0)) {
-        return mp_const_false;                  // incomplete -> CPU repaint
+        return -1;                  // incomplete -> CPU repaint
     }
-    return mp_const_true;
+    return 0;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_blit_crisp_obj, 10, 10,
-                                           moy_ppa_blit_crisp);
 
 
 // The (x, y, w, h) block of an RGB565 picture (`len` bytes, dw x dh) filled
@@ -2001,7 +1994,6 @@ static const mp_rom_map_elem_t moy_ppa_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_blit_scale), MP_ROM_PTR(&moy_ppa_blit_scale_obj) },
     { MP_ROM_QSTR(MP_QSTR_fill), MP_ROM_PTR(&moy_ppa_fill_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_async), MP_ROM_PTR(&moy_ppa_blit_async_obj) },
-    { MP_ROM_QSTR(MP_QSTR_blit_crisp), MP_ROM_PTR(&moy_ppa_blit_crisp_obj) },
     { MP_ROM_QSTR(MP_QSTR_rotate), MP_ROM_PTR(&moy_ppa_rotate_obj) },
     { MP_ROM_QSTR(MP_QSTR_rotate_scale), MP_ROM_PTR(&moy_ppa_rotate_scale_obj) },
     { MP_ROM_QSTR(MP_QSTR_rotate_bounce), MP_ROM_PTR(&moy_ppa_rotate_bounce_obj) },

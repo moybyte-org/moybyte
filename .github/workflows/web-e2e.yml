@@ -206,12 +206,12 @@ jobs:
         run: make setup
 
       # firmware-build.yml's cache: emsdk + the micropython clone, ~1.8 GB,
-      # keyed on the build script that pins them.
+      # keyed on the build script and the pin file that pin them.
       - name: Cache the wasm toolchain
         uses: actions/cache@v4
         with:
           path: firmware/web_runner/.build
-          key: web-runner-${{ runner.os }}-${{ hashFiles('firmware/web_runner/build.sh') }}
+          key: web-runner-${{ runner.os }}-${{ hashFiles('firmware/web_runner/build.sh', 'tools/upstream_pins.env') }}
           restore-keys: web-runner-${{ runner.os }}-
 
       # NOT continue-on-error, unlike pages.yml. There a failed player still

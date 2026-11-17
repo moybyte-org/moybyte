@@ -5,7 +5,7 @@
 """About on the console (docs/history/look_2026-10.md step 32): Settings'
 Licences page on the public UI API's verbs, and the words About says (the
 version, the board) that the system menu's About card
-(`console_notices.AboutCard`) and Settings' About rows share.
+(`shell_cards.AboutCard`) and Settings' About rows share.
 
 * Licences is a page of Settings (its About group's last row): Moybyte's
   licence in a line, then `ui.group`s of `ui.link` rows -- Moybyte's parts,
@@ -18,23 +18,12 @@ version, the board) that the system menu's About card
 The page reaches the shell through its AppContext (`LicencesPage.NEEDS`).
 """
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-    import layout_base as _lb
-    import licences as _lic
-    import achievements_ui as _ach
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-    from runtime import layout_base as _lb
-    from runtime import licences as _lic
-    from runtime import achievements_ui as _ach
-
-try:
-    from moy_input import KEY_PGUP, KEY_PGDN
-except ImportError:  # pragma: no cover - host fallback
-    from runtime.moy_input import KEY_PGUP, KEY_PGDN
+import ui as _ui
+import ui_draw as _ui_draw
+import layout_base as _lb
+import licences as _lic
+import achievements_ui as _ach
+from moy_input import KEY_PGUP, KEY_PGDN
 
 _LEAD = {"tone": "dim", "wrap": True, "lines": 3, "inset": True}
 _LEAD_DESK = {"tone": "dim", "wrap": True, "lines": 3}
@@ -132,7 +121,6 @@ class LicencesPage:
         self._gen = -1                # ... in this look
         self._top = 0                 # the first line shown
         self._rows = 0                # the lines that show
-        self._key = 0                 # the key typed last frame (a press is its change)
         self._foot_of = None          # the desk foot's entry, and what it says
         self._foot_status = ""
         self._focus = None
@@ -161,14 +149,10 @@ class LicencesPage:
     def keys(self, i):
         """The text's scroll: the arrows on a handheld's text page, PgUp and
         PgDn on the desk. True where it took the keys."""
-        k = getattr(i, "last_key", 0) or 0
-        if not isinstance(k, int):
-            k = 0
-        typed = k != 0 and k != self._key
-        self._key = k
+        k = getattr(i, "typed", 0)
         step = 0
         if _desk():
-            if typed and k in (KEY_PGUP, KEY_PGDN):
+            if k in (KEY_PGUP, KEY_PGDN):
                 step = (self._rows - 2) * (1 if k == KEY_PGDN else -1)
         elif self.entry is not None:
             if i.steps("down"):

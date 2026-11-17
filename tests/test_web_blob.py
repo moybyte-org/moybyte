@@ -1,19 +1,15 @@
-"""The browser console, baked into the firmware image (tools/gen_web_blob.py).
+"""The browser console's pack and the digest the image names (tools/gen_web_blob.py).
 
-The board serves the wasm console over WiFi, and it used to serve it ONLY from
-a copy somebody had put on the board's storage. That copy drifts with nothing
-to detect it -- on 2026-08-15 a board served a bundle old enough to still carry
-a desktop-blackout bug fixed in dist/ hours earlier -- and the T-Deck could not
-even be pushed to, because the push tool hands the board a url over serial and
-that board's USB-CDC RX is dead under the desktop. So the image carries the
-bundle.
+The console is an add-on cart (native/moy_net/moy_page.h): every board's build
+packs the web bundle into `moybyte_web.pack` and bakes into the image the
+digest of that pack and the stamp of the bundle in it, so a board serves only
+the page its firmware was built with and says "needs its page updated" for any
+other.
 
-The generated C file is the drift-prone half of that: it is build output nobody
-reads, it carries absolute `.incbin` paths, and if it silently emitted the
-wrong lengths the board would serve a truncated wasm that a browser refuses to
-instantiate with nothing useful in its console. So this compiles it -- with the
-HOST compiler, which is the same `.incbin` mechanism the two cross toolchains
-use -- and reads the bytes back out.
+The generated C file is the drift-prone half: build output nobody reads, and
+if it named a digest other than the pack's, every board would call its own
+page stale. So this compiles it with the HOST compiler and reads it back
+against the pack the same run wrote.
 """
 
 import gzip
@@ -68,20 +64,23 @@ def _generate(tmp_path, dist, **kw):
 
 # -- the list, and the one that must equal it --------------------------------
 
-def test_what_is_baked_is_what_the_server_serves():
+def test_what_is_packed_is_what_the_server_serves(tmp_path):
     """Two lists would be one 404 on a board that has the bytes, or dead weight
-    in an app slot. The generator reads the webhost's own table
-    (native/moy_net/moy_webhost.c); this pins that every name it bakes is one
-    the server answers with its bytes."""
+    in the pack. The generator reads the webhost's own table
+    (native/moy_net/moy_webhost.c); this pins that every name it packs is one
+    the server answers with its bytes, from the installed add-on."""
     from runtime import net_binding as nb
     assert "micropython.wasm" in ASSETS and "moy_store.mjs" in ASSETS
-    nb._bake({n + ".gz": n.encode() for n in ASSETS})
+    carts = tmp_path / "carts"
+    path = nb._bake({n + ".gz": n.encode() for n in ASSETS}, carts=carts)
+    tag = Path(path).parent.name[len("web_console_"):-len(".moy")]
     try:
-        nb.web_start(0, "/nonexistent", None, None, None, ())
+        nb.web_start(0, str(carts), None, None, None, ())
         for n in ASSETS:
-            r, _ = nb.web_handle("GET", "/" + n, b"")
+            r, _ = nb.web_handle("GET", "/p/%s/%s" % (tag, n), b"")
             assert r.startswith(b"HTTP/1.1 200") and r.endswith(n.encode()), n
     finally:
+        nb.web_stop()
         nb._bake({})
 
 
@@ -108,12 +107,8 @@ def test_a_raw_only_bundle_still_bakes(tmp_path):
 # -- the generated C, compiled -----------------------------------------------
 
 def _compile_and_read(tmp_path, gen_c):
-    """Compile the generated file with the host compiler and dump the table.
-
-    This is the only place the baked bundle is exercised as CODE. `.incbin` is
-    an assembler feature, so what the host toolchain does here is what the
-    Xtensa and RISC-V ones do on the boards.
-    """
+    """Compile the generated file with the host compiler and read back what
+    the image names: (named, stamp, want hex)."""
     cc = shutil.which("cc") or shutil.which("gcc")
     if cc is None:                       # pragma: no cover -- toolchain-less CI
         pytest.skip("no host C compiler")
@@ -122,13 +117,9 @@ def _compile_and_read(tmp_path, gen_c):
         '#include <stdio.h>\n'
         '#include "moy_web_blob.h"\n'
         'int main(void) {\n'
-        '    printf("%s|%u\\n", moy_web_stamp, moy_web_asset_count);\n'
-        '    for (unsigned i = 0; i < moy_web_asset_count; i++) {\n'
-        '        const moy_web_asset_t *a = &moy_web_assets[i];\n'
-        '        printf("%s|%u|%lu\\n", a->name, a->len,\n'
-        '               (unsigned long)((size_t)a->data & 3u));\n'
-        '        fwrite(a->data, 1, a->len, stderr);\n'
-        '    }\n'
+        '    printf("%u|%s|", moy_web_named, moy_web_stamp);\n'
+        '    for (int i = 0; i < 32; i++) printf("%02x", moy_web_want[i]);\n'
+        '    printf("\\n");\n'
         '    return 0;\n'
         '}\n')
     exe = tmp_path / "drv"
@@ -137,53 +128,62 @@ def _compile_and_read(tmp_path, gen_c):
          str(drv), str(gen_c), "-o", str(exe)],
         capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
-    run = subprocess.run([str(exe)], capture_output=True)
+    run = subprocess.run([str(exe)], capture_output=True, text=True)
     assert run.returncode == 0, run.stderr[:400]
-    lines = run.stdout.decode().strip().split("\n")
-    stamp, count = lines[0].split("|")
-    table = [ln.split("|") for ln in lines[1:]]
-    return stamp, int(count), table, run.stderr
+    named, stamp, want = run.stdout.strip().split("|")
+    return int(named), stamp, want
 
 
-def test_the_baked_bytes_come_back_byte_for_byte(tmp_path):
-    """The whole point. A wrong length here is a wasm the browser refuses to
-    instantiate, and it fails only in a real browser on a real board."""
+def _read_pack(path):
+    """The pack's head (native/moy_net/moy_page.h): its digest and {name: bytes}."""
+    import hashlib
+    import struct
+    data = Path(path).read_bytes()
+    assert data[:8] == b"MOYWEB01"
+    count, size = struct.unpack_from("<II", data, 8)
+    digest = data[16:48]
+    assert len(data) == size
+    assert hashlib.sha256(data[4096:]).digest() == digest
+    out = {}
+    for i in range(count):
+        name, off, n = struct.unpack_from("<40sII", data, 48 + i * 48)
+        assert off % 4 == 0, "%r is not 4-byte aligned" % name
+        out[name.rstrip(b"\0").decode()] = data[off:off + n]
+    return digest.hex(), out
+
+
+def test_the_image_names_the_pack_its_build_wrote(tmp_path):
+    """The whole point. A digest that is not the pack's is a board that calls
+    its own add-on stale; a wrong length in the pack is a wasm the browser
+    refuses to instantiate, and it fails only in a real browser."""
     d = _dist(tmp_path)
-    rc, gen_c = _generate(tmp_path, d)
-    assert rc == 0
-    stamp, count, table, blob = _compile_and_read(tmp_path, gen_c)
-
-    assert count == len(ASSETS)
-    expect = b""
+    pack = tmp_path / "out" / "moybyte_web.pack"
+    out = tmp_path / "moy_web_blob.gen.c"
+    assert gwb.main(["--dist", str(d), "--out", str(out), "--pack", str(pack)]) == 0
+    named, stamp, want = _compile_and_read(tmp_path, out)
+    digest, assets = _read_pack(pack)
+    assert named == 1 and want == digest
+    assert list(assets) == [n + ".gz" for n in ASSETS]
     for name in ASSETS:
-        expect += (d / (name + ".gz")).read_bytes()
-    assert blob == expect, "the embedded bytes are not the bundle's"
-    assert [row[0] for row in table] == [n + ".gz" for n in ASSETS]
-    for row, name in zip(table, ASSETS):
-        assert int(row[1]) == (d / (name + ".gz")).stat().st_size
-        assert row[2] == "0", "%s is not 4-byte aligned" % row[0]
-    assert stamp.startswith("%d %d " % (count, len(expect)))
+        assert assets[name + ".gz"] == (d / (name + ".gz")).read_bytes(), name
+    total = sum(len(v) for v in assets.values())
+    assert stamp.startswith("%d %d " % (len(ASSETS), total))
 
 
-def test_an_image_with_no_bundle_still_compiles_and_reports_nothing(
+def test_an_image_with_no_bundle_still_compiles_and_names_nothing(
         tmp_path, monkeypatch):
     """A firmware built with no web bundle available must still LINK -- the
-    module exists and says it has nothing, so moy_webhost falls through to its
-    404. An ImportError in the middle of a request is the other design, and it
-    fails at the worst moment.
-
-    This is the LOCAL path, so the levers that flip it strict are cleared: a
-    real CI runner exports CI=true, which would turn this into a second copy of
-    the require tests below and fail exactly there."""
+    module exists and names no page, so the webhost answers its 404 and no
+    add-on fits. This is the LOCAL path, so the levers that flip it strict are
+    cleared: a real CI runner exports CI=true."""
     monkeypatch.delenv("CI", raising=False)
     monkeypatch.delenv("MOYBYTE_REQUIRE_WEB_BUNDLE", raising=False)
     empty = tmp_path / "empty"
     empty.mkdir()
     rc, gen_c = _generate(tmp_path, empty)
     assert rc == 0, "a missing bundle must not fail a local build"
-    stamp, count, table, blob = _compile_and_read(tmp_path, gen_c)
-    assert count == 0 and blob == b""
-    assert stamp == "0 0 none"
+    named, stamp, want = _compile_and_read(tmp_path, gen_c)
+    assert named == 0 and stamp == "0 0 none" and want == "00" * 32
 
 
 def test_a_half_built_bundle_is_no_bundle(tmp_path):
@@ -239,7 +239,7 @@ def test_a_missing_bundle_is_never_quiet(tmp_path, capsys, monkeypatch):
 
 def _empty_table(gen_c):
     text = gen_c.read_text()
-    return '"0 0 none"' in text and ".incbin" not in text
+    return '"0 0 none"' in text and "moy_web_named = 0u" in text
 
 
 def test_a_gz_left_behind_by_a_removed_bundle_is_not_a_bundle(
@@ -308,7 +308,7 @@ def test_a_removed_bundle_rewrites_the_baked_file(tmp_path, monkeypatch):
     monkeypatch.delenv("MOYBYTE_REQUIRE_WEB_BUNDLE", raising=False)
     d = _dist(tmp_path)
     _, gen_c = _generate(tmp_path, d)
-    assert not _empty_table(gen_c) and ".incbin" in gen_c.read_text()
+    assert not _empty_table(gen_c)
     future = gen_c.stat().st_mtime + 3600
     os.utime(gen_c, (future, future))
     shutil.rmtree(d)
@@ -319,8 +319,8 @@ def test_a_removed_bundle_rewrites_the_baked_file(tmp_path, monkeypatch):
 # -- the stamp, and why it is code ------------------------------------------
 
 def test_the_stamp_is_a_string_in_the_source_not_a_comment(tmp_path):
-    """ccache hashes the PREPROCESSED source -- comments are gone by then, and
-    `.incbin` content was never in the hash at all. If the bundle's digest rode
+    """ccache hashes the PREPROCESSED source -- comments are gone by then. If
+    the bundle's digest rode
     only in a comment, a rebuild after a new web build would be a cache HIT and
     the image would keep serving the old console. Which is the exact bug this
     whole feature exists to end, reintroduced one level down.
@@ -459,17 +459,6 @@ def test_the_two_build_twins_name_the_same_sources():
         assert src in cm, "%s missing from micropython.cmake" % src
 
 
-def test_the_native_module_hands_out_a_read_only_view():
-    """Zero-copy is the design: the blob is flash-mapped rodata and a `bytes`
-    per request would be ~523KB on a board with ~23KB of internal SRAM free in
-    play (#66). Read-only because a write to flash would fault -- moy_alloc's
-    `typecode |= 0x80` is the opposite case, and copying that line here would
-    turn a Python TypeError into a hardware exception."""
-    c = (MODULE / "modmoy_web.c").read_text()
-    assert "mp_obj_new_memoryview" in c
-    assert "typecode |= 0x80" not in c, "the baked bundle must not be writable"
-
-
 BOARDS = (
     ("lilygo_t_deck_plus_mainline", TDECK),
     ("esp32_p4_wifi6_touch_lcd_7b", P4),
@@ -510,8 +499,7 @@ def test_the_p4_usermod_list_includes_the_module():
 
 @pytest.mark.parametrize("name,path", BOARDS, ids=[b for b, _ in BOARDS])
 def test_an_image_too_big_for_its_slot_fails_the_build(name, path):
-    """The baked browser console is a large share of every app image. An
-    overflow used to be a WARNING that still produced a full set of artifacts
+    """An overflow used to be a WARNING that still produced a full set of artifacts
     -- an image esptool refuses and no board can take over OTA. It fails now,
     on both boards (the P4 had no guard at all).
     """
@@ -583,10 +571,8 @@ def test_make_test_refreshes_the_binary_the_next_section_reads():
 def _mp():
     from unix_mp import require_unix_mp
     return require_unix_mp("moy_web", why=(
-        "moy_web is the browser console baked into the firmware image. Its "
-        "memoryview points at flash-mapped rodata and must stay READ-ONLY -- "
-        "a write there is a hardware exception on a board, and this is the "
-        "only lane that runs the module rather than reading it."))
+        "moy_web names the browser console page this image serves. It "
+        "is the only lane that runs the module rather than reading it."))
 
 
 def _mp_run(code):
@@ -597,68 +583,22 @@ def _mp_run(code):
     return r.stdout.strip()
 
 
-def test_the_native_module_serves_the_bytes_it_baked():
-    """The compiled article, driven by a real VM: the table it exposes and the
-    bytes behind it are the ones the generator recorded.
-
-    This is a live-tree check -- it reads whatever bundle the local
-    `firmware/web_runner/dist` last produced, which is exactly what the boards
-    bake. With no bundle built the module reports zero assets, which is also a
-    correct state and is asserted as such.
-    """
-    # binascii.hexlify, not hexdigest(): MicroPython's hashlib has no such
-    # method, and this runs on the real VM, not CPython.
-    out = _mp_run(
-        "import moy_web, hashlib, binascii\n"
-        "print(moy_web.stamp())\n"
-        "for n in moy_web.assets():\n"
-        "    b = moy_web.asset(n)\n"
-        "    h = binascii.hexlify(hashlib.sha256(bytes(b)).digest())\n"
-        "    print(n, len(b), h.decode()[:16])\n")
-    lines = out.split("\n")
-    count, total = int(lines[0].split()[0]), int(lines[0].split()[1])
-    assert len(lines) == count + 1
-    if count == 0:
-        assert total == 0 and lines[0] == "0 0 none"
+def test_the_native_module_names_the_bundle_it_was_built_with():
+    """The compiled article, driven by a real VM: the digest and stamp it
+    answers are those of the bundle the local `firmware/web_runner/dist` last
+    produced, which is exactly what the boards are built with. With no bundle
+    built the module names none, which is also a correct state."""
+    out = _mp_run("import moy_web\nprint(moy_web.stamp())\nprint(moy_web.page_want())\n")
+    stamp, want = out.split("\n")
+    if want == "None":
+        assert stamp == "0 0 none"
         return
-    assets, _ = gwb.collect(str(ROOT / "firmware" / "web_runner" / "dist"))
-    baked = {a[0]: (a[2], a[3][:16]) for a in assets}
-    # THE BINARY IS CACHED AND THE BUNDLE IS NOT. `require_unix_mp` returns
-    # whatever `make unix-micropython` last built and never rebuilds it, so
-    # rebuilding the web bundle alone leaves a binary carrying the PREVIOUS
-    # blob -- and the bare size mismatch that produces reads like a generator
-    # bug rather than a stale artifact, which is an afternoon lost. Say it.
+    assets, missing = gwb.collect(str(ROOT / "firmware" / "web_runner" / "dist"))
+    # THE BINARY IS CACHED AND THE BUNDLE IS NOT: `require_unix_mp` returns
+    # whatever `make unix-micropython` last built and never rebuilds it.
     stale = ("this binary was built against a DIFFERENT bundle than "
              "firmware/web_runner/dist holds now -- re-run `make "
-             "unix-micropython` after building the bundle. (If they were "
-             "built together, the generator really is dropping bytes.)")
-    assert sum(v[0] for v in baked.values()) == total, stale
-    for line in lines[1:]:
-        name, size, sha = line.split()
-        assert baked[name] == (int(size), sha), "%s: %s" % (name, stale)
-
-
-def test_the_native_module_refuses_a_write_to_flash():
-    """Read-only is not a nicety: `data` is a pointer into memory-mapped flash,
-    so a store through that view is a fault on a board rather than a Python
-    error. moy_alloc marks its views writable (`typecode |= 0x80`) and copying
-    that line here is the mistake this pins."""
-    out = _mp_run(
-        "import moy_web\n"
-        "n = moy_web.assets()\n"
-        "if not n:\n"
-        "    print('EMPTY')\n"
-        "else:\n"
-        "    try:\n"
-        "        moy_web.asset(n[0])[0] = 1\n"
-        "        print('WRITABLE')\n"
-        "    except TypeError:\n"
-        "        print('READONLY')\n")
-    assert out in ("READONLY", "EMPTY"), out
-
-
-def test_an_unknown_asset_is_none_not_an_exception():
-    """moy_webhost falls THROUGH on a miss (to the pushed copy, then to a 404
-    that explains itself). An exception there would take out a request that has
-    a perfectly good answer."""
-    assert _mp_run("import moy_web\nprint(moy_web.asset('nope.gz'))") == "None"
+             "unix-micropython` after building the bundle.")
+    assert assets and not missing, stale
+    assert gwb.pack(assets)[1].hex() == want, stale
+    assert stamp == gwb.stamp_of(assets), stale

@@ -18,10 +18,7 @@ label is its `card` text up to its value, as a kid reads it ("Run at").
 A change is the config's and the undo history's, as a stepper's was
 (`Project.record_config`)."""
 
-try:
-    import ui
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui
+import ui
 
 
 def card_label(f):
@@ -74,7 +71,7 @@ class SettingsPage:
             return
         ws.run.project.config[f["key"]] = v
         ws.run.project.record_config(f["key"], old, v)
-        ws._dirty = True
+        ws.mark_dirty()
 
     # -- drawing -----------------------------------------------------------------
 
@@ -118,7 +115,7 @@ class SettingsPage:
             n = 0
             try:
                 kind = ws.carts_store.project_kind(path)
-                n = len(ws._with_sd(lambda: ws.carts_store.list_files(kind, ws.carts_root)))
+                n = len(ws.with_sd(lambda: ws.carts_store.list_files(kind, ws.carts_root)))
             except Exception:  # noqa: BLE001 -- an unreadable folder counts none
                 pass
             self._count = (path, n)

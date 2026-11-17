@@ -31,7 +31,7 @@ def _frames(ws, n, dirty=True):
     for _ in range(n):
         g._quiesce(ws)
         if dirty:
-            ws._dirty = True
+            ws.mark_dirty()
         ws.frame(g._DT)
         out.append(bytes(ws.glass_canvas._buf))
     return out
@@ -82,25 +82,25 @@ def _check_menu(ws, frames):
 
 def test_the_handheld_home_dims_under_the_system_menu(tmp_path):
     ws = _ws(tmp_path, HANDHELD)
-    ws.go_home()
+    ws.home.go_home()
     _check_menu(ws, 3)
 
 
 def test_the_desk_dims_under_the_system_menu_once(tmp_path):
     ws = _ws(tmp_path, DESK)
-    ws.open_desk()
-    ws.open_app(ws._apps_by_id["files"])
+    ws.home.open_desk()
+    ws.spine.open_app(ws.app("files"))
     _frames(ws, 2)
-    ws.open_app(ws._apps_by_id["calc"])   # Files behind it: a window the desk may retain
+    ws.spine.open_app(ws.app("calc"))   # Files behind it: a window the desk may retain
     _frames(ws, 6)
     _check_menu(ws, 4)
 
 
 def test_the_paused_game_dims_once_and_comes_back_whole(tmp_path):
     ws = _ws(tmp_path, HANDHELD, "dark")
-    ws.go_home()
-    ws._open_workspace(g._cart_by_title(ws, "Star Catcher"))
-    ws.play(ws.launcher_layer)
+    ws.home.go_home()
+    ws.open_workspace(g._cart_by_title(ws, "Star Catcher"))
+    ws.spine.play(ws.launcher_layer)
     _frames(ws, 6, dirty=False)
     cv = ws.glass_canvas
     frozen = bytes(cv._buf)               # the frame the pause holds
@@ -141,7 +141,7 @@ def test_the_home_strip_stays_unwashed_under_its_menus(tmp_path, theme, mode, me
     cfg = dict(g.CONFIGS[HANDHELD], variant=mode)
     cfg["theme"] = theme
     ws = g._build(cfg, tmp_path / "carts")
-    ws.go_home()
+    ws.home.go_home()
     _frames(ws, 2)
     ws._golden_popover = True
     if menu == "system":
@@ -170,8 +170,8 @@ def _projects_own(tmp_path, theme, mode):
     cfg["theme"] = theme
     ws = g._build(cfg, tmp_path / "carts")
     ws.carts.dup(g._cart_by_title(ws, "Star Catcher"))
-    ws.open_desk()
-    ws.open_projects()
+    ws.home.open_desk()
+    ws.home.open_projects()
     _frames(ws, 2)
     grid = ws.projects_grid
     grid.sel = next(i for i, it in enumerate(grid.items)

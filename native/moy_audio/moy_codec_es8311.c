@@ -4,13 +4,13 @@
 // Waveshare's demo's).
 
 #include "moy_codec_es8311.h"
-#include "moy_aud.h"            // MOY_AUD_BOARD
+#include "moy_aud.h"            // MOY_ON_BOARD
 
-#if MOY_AUD_BOARD
+#if MOY_ON_BOARD
 #include "py/mpconfig.h"        // the board's MOY_AUDIO_CODEC_ES8311
 #endif
 
-#if MOY_AUD_BOARD && MOY_AUDIO_CODEC_ES8311
+#if MOY_ON_BOARD && MOY_AUDIO_CODEC_ES8311
 
 #include <stddef.h>
 

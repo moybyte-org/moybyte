@@ -1,24 +1,11 @@
 // The console a cart runs against (moycore_run.h has the contract).
 
-// The board's clock is the IDF's; every other tier's is POSIX's
-// CLOCK_MONOTONIC, which -std=c99 hides unless asked for before any include.
-#if defined(__has_include)
-#if __has_include("esp_timer.h")
-#define MOYCORE_RUN_ESP 1
-#endif
-#endif
-#if !defined(MOYCORE_RUN_ESP) && !defined(_POSIX_C_SOURCE)
-#define _POSIX_C_SOURCE 200809L
-#endif
+#include "moy_kmem.h"
+
+#include "moy_platform.h"
 
 #include <stdlib.h>
 #include <string.h>
-
-#ifdef MOYCORE_RUN_ESP
-#include "esp_timer.h"
-#else
-#include <time.h>
-#endif
 
 #include "moycore_run.h"
 
@@ -27,13 +14,7 @@ moycore_run_t *moycore_run_cur;
 static uint32_t g_tick_ms;
 
 uint32_t moycore_run_now_ms(void) {
-#ifdef MOYCORE_RUN_ESP
-    return (uint32_t)(esp_timer_get_time() / 1000);
-#else
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint32_t)((uint64_t)ts.tv_sec * 1000u + (uint64_t)(ts.tv_nsec / 1000000));
-#endif
+    return (uint32_t)moy_now_ms();
 }
 
 // The ticks begun and the runs opened: what the public UI API's RUN face
@@ -70,13 +51,7 @@ const int32_t *moycore_ui_snap(uint32_t *tick, uint32_t *serial) {
 }
 
 uint32_t moycore_run_now_us(void) {
-#ifdef MOYCORE_RUN_ESP
-    return (uint32_t)esp_timer_get_time();
-#else
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint32_t)((uint64_t)ts.tv_sec * 1000000u + (uint64_t)(ts.tv_nsec / 1000));
-#endif
+    return (uint32_t)moy_now_us();
 }
 
 static uint32_t g_split[2];
@@ -315,7 +290,7 @@ int moycore_run_set_cfg(moycore_run_t *c, const char *blob, size_t len) {
     if (!blob || len == 0) {
         return 0;
     }
-    c->cfg = (char *)malloc(len + 1);
+    c->cfg = (char *)moy_kalloc(len + 1, MOY_KMEM_LIBC);
     if (c->cfg == NULL) {
         return -1;
     }

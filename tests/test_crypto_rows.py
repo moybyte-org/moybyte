@@ -213,7 +213,7 @@ def test_a_lua_app_s_moybyte_table_answers_the_known_answers(tmp_path):
     ws.input.begin_frame()
     ws.frame(DT)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
-    g = ws.run.player._lua.get_global
+    g = ws.run.player.lua.get_global
     assert g("SHA") == V.SHA256_ABC
     assert g("HMAC") == V.HMAC[1][2]
     assert g("RND") == 16
@@ -266,12 +266,12 @@ def test_a_compiled_app_s_imports_answer_the_known_answers(tmp_path):
     open_cart(ws, "Crypto Wasm")
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
     pid = ws.run.player.pid
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(DT)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
     lines = [t for _s, _t, _l, q, t in os_log.records(since, 256)
              if q == pid and not t.startswith("start ")]
-    ws.exit()
+    ws.spine.exit()
     assert lines == [
         "random 16", "random.short -2",
         "sha256 " + V.SHA256_ABC, "sha256.short -2",

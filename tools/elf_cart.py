@@ -67,16 +67,18 @@ LIBMOY_SOURCES = ("moy_canvas.c", "moy_sprite.c", "moy_data.c")
 # RGB565, behind the SDK's front (sdk/src/moyui_link.c). An app's module
 # takes it before libmoyos, so its libmoy is this RGB565 one.
 NATIVE = os.path.join(ROOT, "native")
-UI_DIRS = [os.path.join(NATIVE, d) for d in ("moy_ui", "moy_gfx", "moy_glass", "moy_spine")]
+UI_DIRS = [os.path.join(NATIVE, d) for d in (
+    "moy_ui", "moy_gfx", "moy_glass", "moy_spine", "moy_kernel")]
 UI_SOURCES = (
     [os.path.join(NATIVE, "moy_ui", n) for n in (
         "moy_ui.c", "moy_ui_glyph.c", "moy_ui_draw.c", "moy_ui_paint.c", "moy_ui_depth.c",
         "moy_ui_parts.c", "moy_ui_interact.c", "moy_ui_api.c", "moy_ui_api_text.c",
         "moy_ui_api_kept.c", "moy_ui_api_table.c", "moy_ui_api_pop.c", "moy_ui_api_host.c",
-        "moy_ui_text.c", "moy_ui_tables.c", "moy_theme.c", "moy_ui_wasm.c")]
+        "moy_ui_text.c", "moy_ui_tables.c", "moy_theme.c", "moy_ui_run.c", "moy_ui_wasm.c")]
     + [os.path.join(NATIVE, "moy_gfx", n) for n in (
-        "moy_text.c", "moy_shape.c", "moy_gfx_kernels.c")]
-    + [os.path.join(NATIVE, "moy_spine", n) for n in ("moy_str.c", "moy_str_table.c")]
+        "moy_text.c", "moy_shape.c", "moy_gfx_kernels.c", "moy_gfx_base.c")]
+    + [os.path.join(NATIVE, "moy_spine", n) for n in ("moy_str.c", "moy_str_table.c",
+                                                       "moy_json.c")]
     + [os.path.join(LIBMOY, n) for n in LIBMOY_SOURCES]
     + [os.path.join(SDK_SRC, "moyui_link.c")])
 CACHE = os.path.join(ROOT, ".build", "sdk")

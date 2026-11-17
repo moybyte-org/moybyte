@@ -246,6 +246,95 @@ def test_the_map_cache_patch_REFUSES_a_tree_that_is_not_repr_C(tmp_path):
     assert f.read_text(encoding="utf-8").count(_MAP_C_STOCK) == 1
 
 
+# -- the split-heap growth reserve ----------------------------------------------
+#
+# The port's hook as v1.28 ships it, and a harness that compiles the patched
+# function against stub heaps: what a growth may take is arithmetic, so it is
+# run, on both pools the patch picks between.
+
+_GCCOLLECT_STOCK = """\
+size_t gc_get_max_new_split(void) {
+    return heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);
+}
+"""
+
+_GC_SPLIT_HARNESS = """\
+#include <stddef.h>
+#include <stdio.h>
+#define MALLOC_CAP_DEFAULT 1u
+#define MALLOC_CAP_SPIRAM 2u
+static size_t s_largest, s_default, s_spiram;
+static size_t heap_caps_get_largest_free_block(unsigned c) { (void)c; return s_largest; }
+static size_t heap_caps_get_free_size(unsigned c) {
+    return c == MALLOC_CAP_SPIRAM ? s_spiram : s_default;
+}
+#include "gccollect.c"
+int main(int argc, char **argv) {
+    (void)argc;
+    sscanf(argv[1], "%zu", &s_largest);
+    sscanf(argv[2], "%zu", &s_default);
+    sscanf(argv[3], "%zu", &s_spiram);
+    printf("%zu\\n", gc_get_max_new_split());
+    return 0;
+}
+"""
+
+
+@pytest.fixture
+def split_reserve(tmp_path):
+    """The patched hook, compiled per (CONFIG_SPIRAM, reserve): a callable
+    (largest, internal free, PSRAM free) -> what one growth may take."""
+    if shutil.which("gcc") is None:
+        pytest.skip("no host C compiler")
+    port = tmp_path / "ports" / "esp32"
+    port.mkdir(parents=True)
+    (port / "gccollect.c").write_text(_GCCOLLECT_STOCK, encoding="utf-8")
+    r = sh("moybyte_patch_gc_split_reserve", MPY_DIR=str(tmp_path))
+    assert r.returncode == 0, r.stderr
+    (port / "sdkconfig.h").write_text("", encoding="utf-8")
+    (port / "harness.c").write_text(_GC_SPLIT_HARNESS, encoding="utf-8")
+
+    def build(spiram, reserve):
+        exe = port / ("h_%d_%d" % (spiram, reserve))
+        defs = ["-DMOYBYTE_GC_SPLIT_RESERVE=%d" % reserve] if reserve else []
+        defs += ["-DCONFIG_SPIRAM=1"] if spiram else []
+        subprocess.run(["gcc", "-I", str(port)] + defs + ["-o", str(exe), str(port / "harness.c")],
+                       check=True)
+        return lambda largest, internal, psram: int(subprocess.run(
+            [str(exe), str(largest), str(internal), str(psram)],
+            capture_output=True, text=True, check=True).stdout)
+    return build
+
+
+def test_the_split_reserve_keeps_psram_where_the_board_has_it(split_reserve):
+    grow = split_reserve(spiram=True, reserve=3 << 20)
+    assert grow(4 << 20, 1 << 20, 5 << 20) == 2 << 20      # PSRAM free less the reserve
+    assert grow(1 << 20, 1 << 20, 5 << 20) == 1 << 20      # the largest block, when smaller
+    assert grow(4 << 20, 9 << 20, 3 << 20) == 0            # at the reserve: no growth
+
+
+def test_the_split_reserve_keeps_the_internal_heap_on_a_board_without_psram(split_reserve):
+    grow = split_reserve(spiram=False, reserve=48 << 10)
+    assert grow(60 << 10, 100 << 10, 0) == 52 << 10        # internal free less the reserve
+    assert grow(30 << 10, 100 << 10, 0) == 30 << 10
+    assert grow(40 << 10, 40 << 10, 0) == 0
+
+
+def test_no_reserve_defined_is_the_stock_hook(split_reserve):
+    assert split_reserve(spiram=False, reserve=0)(60 << 10, 100 << 10, 0) == 60 << 10
+
+
+def test_the_split_reserve_patch_is_idempotent(tmp_path):
+    port = tmp_path / "ports" / "esp32"
+    port.mkdir(parents=True)
+    f = port / "gccollect.c"
+    f.write_text(_GCCOLLECT_STOCK, encoding="utf-8")
+    assert sh("moybyte_patch_gc_split_reserve", MPY_DIR=str(tmp_path)).returncode == 0
+    once = f.read_text(encoding="utf-8")
+    assert sh("moybyte_patch_gc_split_reserve", MPY_DIR=str(tmp_path)).returncode == 0
+    assert f.read_text(encoding="utf-8") == once
+
+
 # -- size-class run hints for gc_alloc -----------------------------------------
 #
 # The stock lines tools/patch_gc_run_hints.py anchors on, in stock order, so a
@@ -610,7 +699,7 @@ def test_the_stdin_ring_patch_sizes_the_array_the_ring_is_built_over(tmp_path):
     r = _stdin_ring(tmp_path)
     assert r.returncode == 0, r.stderr
     c = f.read_text(encoding="utf-8")
-    assert "static uint8_t TCM_DRAM_ATTR stdin_ringbuf_array[4096];" in c
+    assert "static uint8_t SPM_DRAM_ATTR stdin_ringbuf_array[4096];" in c
     assert "#include \"esp_attr.h\"" in c
     assert "[260]" not in c
     assert "{stdin_ringbuf_array, sizeof(stdin_ringbuf_array), 0, 0}" in c
@@ -973,6 +1062,153 @@ def test_the_native_code_free_patch_skips_an_already_patched_tree(tmp_path):
            MPY_DIR=str(tmp_path), REPO_ROOT=str(ROOT))
     assert r.returncode == 0 and r.stdout.strip() == ""
     assert "moybyte_native_code_free" in f.read_text(encoding="utf-8")
+
+
+# -- the ESP-IDF checkout -------------------------------------------------------
+
+
+def _idf(path, version):
+    """An ESP-IDF checkout in the two shapes the resolver reads."""
+    major, minor, patch = version.lstrip("v").split(".")
+    (path / "tools" / "cmake").mkdir(parents=True)
+    (path / "export.sh").write_text("return 0\n", encoding="utf-8")
+    (path / "tools" / "cmake" / "version.cmake").write_text(
+        "set(IDF_VERSION_MAJOR %s)\nset(IDF_VERSION_MINOR %s)\n"
+        "set(IDF_VERSION_PATCH %s)\n\n"
+        'set(ENV{IDF_VERSION} "${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}")\n'
+        % (major, minor, patch), encoding="utf-8")
+    return path
+
+
+def _pinned():
+    r = sh('echo "$MOYBYTE_IDF_VER"')
+    assert r.returncode == 0, r.stderr
+    return r.stdout.strip()
+
+
+def test_the_idf_version_is_read_from_the_checkout_not_its_tags(tmp_path):
+    idf = _idf(tmp_path / "esp-idf", "v5.5.6")
+    r = sh("moybyte_idf_version '%s'" % idf)
+    assert r.returncode == 0 and r.stdout.strip() == "v5.5.6"
+
+
+def test_a_sibling_checkout_at_the_pinned_release_is_reused(tmp_path):
+    sib = _idf(tmp_path / "sibling" / "esp-idf", _pinned())
+    r = sh("moybyte_resolve_idf '%s' && echo \"IDF=$IDF_DIR\"" % sib,
+           BUILD_DIR=str(tmp_path / "own"))
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip().endswith("IDF=%s" % sib)
+    assert not (tmp_path / "own").exists()
+
+
+def test_a_checkout_at_another_release_STOPS_the_build(tmp_path):
+    """A warm tree at the old release would compile, with the IDF patches cut
+    against other sources, and the image would say nothing about it."""
+    sib = _idf(tmp_path / "sibling" / "esp-idf", "v5.5.1")
+    r = sh("moybyte_resolve_idf '%s'" % sib, BUILD_DIR=str(tmp_path / "own"))
+    assert r.returncode != 0
+    assert "is ESP-IDF v5.5.1" in r.stderr and _pinned() in r.stderr
+    assert not (tmp_path / "own").exists()
+
+
+def test_an_explicit_IDF_DIR_is_held_to_the_pin_too(tmp_path):
+    old = _idf(tmp_path / "mine", "v5.4.2")
+    r = sh("moybyte_resolve_idf", IDF_DIR=str(old), BUILD_DIR=str(tmp_path))
+    assert r.returncode != 0 and "is ESP-IDF v5.4.2" in r.stderr
+
+
+@pytest.mark.parametrize("chip,cc", [("esp32s3", "xtensa-esp32s3-elf-gcc"),
+                                     ("esp32p4", "riscv32-esp-elf-gcc"),
+                                     ("esp32c6", "riscv32-esp-elf-gcc")])
+def test_the_tools_probe_asks_for_the_chips_own_compiler(chip, cc):
+    """idf.py on PATH says nothing about the chip: the P4's build installs
+    the RISC-V compiler only, and an S3 build after it must still install
+    Xtensa rather than configure against a compiler that is not there."""
+    r = sh("moybyte_idf_compiler %s" % chip)
+    assert r.returncode == 0 and r.stdout.strip() == cc
+
+
+_WLAN = """\
+    #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)
+    { MP_ROM_QSTR(MP_QSTR_SEC_WPA_ENT), MP_ROM_INT(WIFI_AUTH_WPA_ENTERPRISE) },
+    #endif
+};
+static MP_DEFINE_CONST_DICT(wlan_if_locals_dict, wlan_if_locals_dict_table);
+
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)
+_Static_assert(WIFI_AUTH_MAX == 17, "Synchronize");
+#elif ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 4, 0)
+_Static_assert(WIFI_AUTH_MAX == 16, "Synchronize");
+#endif
+"""
+
+
+def _wlan(tmp_path, text=_WLAN):
+    f = tmp_path / "ports" / "esp32" / "network_wlan.c"
+    f.parent.mkdir(parents=True)
+    f.write_text(text, encoding="utf-8")
+    return f
+
+
+def test_the_wlan_auth_max_edit_takes_v5_5_6s_appended_mode(tmp_path):
+    f = _wlan(tmp_path)
+    for _ in range(2):
+        r = sh("moybyte_mpy_wlan_auth_max", MPY_DIR=str(tmp_path))
+        assert r.returncode == 0, r.stderr
+    c = f.read_text(encoding="utf-8")
+    assert c.count("VERSION_VAL(5, 5, 6)") == 1
+    assert "WIFI_AUTH_MAX == 17 || WIFI_AUTH_MAX == 18" in c
+    assert "#elif ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)\n" \
+           "_Static_assert(WIFI_AUTH_MAX == 17, " in c
+    assert c.startswith("    #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)\n")
+
+
+def test_a_wlan_auth_max_line_that_changed_shape_FAILS(tmp_path):
+    f = _wlan(tmp_path, _WLAN.replace("== 17", "== 19"))
+    r = sh("moybyte_mpy_wlan_auth_max", MPY_DIR=str(tmp_path))
+    assert r.returncode != 0 and "changed shape" in r.stderr
+    assert "Moybyte" not in f.read_text(encoding="utf-8")
+
+
+_USJ = """\
+void usb_serial_jtag_init(void) {
+    usb_serial_jtag_ll_clr_intsts_mask(USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT |
+        USB_SERIAL_JTAG_INTR_SOF);
+    usb_serial_jtag_ll_ena_intr_mask(USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT |
+        USB_SERIAL_JTAG_INTR_SOF | USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);
+    ESP_ERROR_CHECK(esp_intr_alloc(ETS_USB_SERIAL_JTAG_INTR_SOURCE, ESP_INTR_FLAG_LEVEL1,
+        usb_serial_jtag_isr_handler, NULL, NULL));
+}
+"""
+
+
+def _usj_sof(tmp_path, text=_USJ):
+    f = tmp_path / "ports" / "esp32" / "usb_serial_jtag.c"
+    f.parent.mkdir(parents=True)
+    f.write_text(text, encoding="utf-8")
+    return f
+
+
+def test_the_usj_console_leaves_the_sof_bit_to_esp_idfs_monitor(tmp_path):
+    """ESP-IDF v5.5.6's console VFS drops every write while its connection
+    monitor has not seen the raw SOF bit in a tick; an ISR enabled for SOF
+    clears it each millisecond, so the edit keeps SOF out of the enable mask
+    (the stale-bit clear before it stays)."""
+    f = _usj_sof(tmp_path)
+    for _ in range(2):
+        r = sh("moybyte_mpy_usj_sof", MPY_DIR=str(tmp_path))
+        assert r.returncode == 0, r.stderr
+    c = f.read_text(encoding="utf-8")
+    enable = c.split("usb_serial_jtag_ll_ena_intr_mask(", 1)[1].split(";", 1)[0]
+    assert "SOF" not in enable and "SERIAL_IN_EMPTY" in enable
+    assert c.count("Moybyte: no SOF interrupt") == 1
+
+
+def test_a_usj_enable_that_changed_shape_FAILS(tmp_path):
+    f = _usj_sof(tmp_path, _USJ.replace("INTR_SOF | USB", "INTR_SOF |  USB"))
+    r = sh("moybyte_mpy_usj_sof", MPY_DIR=str(tmp_path))
+    assert r.returncode != 0 and "changed shape" in r.stderr
+    assert "Moybyte" not in f.read_text(encoding="utf-8")
 
 
 # -- the OTA identity stamp -----------------------------------------------------
@@ -1603,6 +1839,25 @@ def test_a_flipped_take_or_denial_starts_genhdr_afresh(tmp_path):
     assert _config_guard(bd, out) is True
     (bd / "board.toml").write_text(toml, encoding="utf-8")
     assert _config_guard(bd, out) is False          # deny -> take
+
+
+def test_a_flipped_denial_drops_the_frozen_content_too(tmp_path):
+    """frozen_content.c cites the qstrs the C provided, a module's own name
+    among them, so a denial left it naming `MP_QSTR_moy_ssh` after genhdr had
+    forgotten it, and the build stopped there."""
+    bd, out = _config_board(tmp_path)
+    _config_guard(bd, out)
+    frozen = out / "frozen_content.c"
+    frozen.write_text("// cites MP_QSTR_moy_kernel\n", encoding="utf-8")
+    _config_guard(bd, out)
+    assert frozen.exists()                            # the same configuration keeps it
+    toml = (bd / "board.toml").read_text(encoding="utf-8")
+    take = '[[native.shared.take]]\nmodule = "moy_kernel"'
+    (bd / "board.toml").write_text(
+        toml.replace(take, '[[native.shared.deny]]\nmodule = "moy_kernel"'),
+        encoding="utf-8")
+    _config_guard(bd, out)
+    assert not frozen.exists()
 
 
 def test_a_changed_impl_hook_starts_genhdr_afresh(tmp_path):

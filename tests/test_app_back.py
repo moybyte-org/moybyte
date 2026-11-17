@@ -31,13 +31,13 @@ def _press(ws, name):
     i.begin_frame()
     ws.input = i
     try:
-        ws.handle_input()
+        ws.router.handle_input()
     finally:
         ws.input = was
 
 
 def _open(ws, app_id):
-    ws.open_app(ws._apps_by_id[app_id])
+    ws.spine.open_app(ws.app(app_id))
 
 
 def _tap_back(ws, drv, where):
@@ -59,7 +59,7 @@ def test_every_app_bar_is_moy_back_and_title_with_no_x(tmp_path, app_id):
     assert bl.cell("app", "close") is None, "the console bar places no X"
     assert bl.cell("app", "menu") is not None, "the Moy button stays"
     assert bl.draws_back("app")
-    assert not bl._zone_is_game("app"), "the look's bar, on the responsive layout"
+    assert not bl.zone_is_game("app"), "the look's bar, on the responsive layout"
     assert bl.content_rect("app")[1] == ws.layout.cy, "the app lays out under it"
 
 
@@ -84,7 +84,7 @@ def test_back_steps_an_apps_own_page_before_leaving_it(tmp_path):
     drv = make_drv(ws)
     _open(ws, "appearance")
     _frames(drv)
-    app = ws._apps_by_id["appearance"]
+    app = ws.app("appearance")
     app.view = "walls"
     _tap_back(ws, drv, "app")
     _frames(drv)
@@ -153,10 +153,10 @@ def _desk_app(tmp_path, app_id, theme=None):
     if theme is not None:
         use_theme(ws, *theme)
     drv = make_drv(ws)
-    ws.open_desk()
+    ws.home.open_desk()
     _open(ws, app_id)
     _frames(drv)
-    return ws, drv, ws._apps_by_id[app_id], ws.wm._wins[app_id]
+    return ws, drv, ws.app(app_id), ws.wm.windows[app_id]
 
 
 def _strip(ws, win):
@@ -169,7 +169,7 @@ def test_a_desk_window_shows_its_back_only_on_a_page(tmp_path, theme):
     assert "back" not in _strip(ws, win), "the rows are the app's first page"
     icon = _ui_draw.frame_icon((win.x, win.y, win.w, win.h), win.title_h)
     app.view = "walls"
-    ws._dirty = True
+    ws.mark_dirty()
     _frames(drv)
     btns = ws.wm._frame_buttons(win)
     assert btns[0][0] == "back" and not btns[0][2], "the chevron heads the strip"
@@ -181,7 +181,7 @@ def test_a_desk_window_shows_its_back_only_on_a_page(tmp_path, theme):
     drv.click(bx + bw // 2, by + bh // 2)
     _frames(drv)
     assert app.view == "rows", "the chevron steps out of the page"
-    assert "appearance" in ws.wm._wins, "and never closes the window"
+    assert "appearance" in ws.wm.windows, "and never closes the window"
     assert "back" not in _strip(ws, win)
 
 
@@ -190,7 +190,7 @@ def test_the_window_chrome_repaints_when_its_back_comes_and_goes(tmp_path):
     whose app opens a page paints its strip again."""
     ws, drv, app, win = _desk_app(tmp_path, "appearance")
     _frames(drv, 6)
-    cv = ws.wm._root_canvas
+    cv = ws.wm.root_canvas
 
     def strip():
         out = bytearray()
@@ -200,11 +200,11 @@ def test_the_window_chrome_repaints_when_its_back_comes_and_goes(tmp_path):
 
     rest = strip()
     app.view = "walls"
-    ws._dirty = True
+    ws.mark_dirty()
     _frames(drv)
     assert strip() != rest, "the chevron drew"
     app.back()
-    ws._dirty = True
+    ws.mark_dirty()
     _frames(drv)
     assert strip() == rest, "and went with the page"
 
@@ -217,11 +217,11 @@ def test_esc_and_b_in_a_focused_window_are_its_back(tmp_path, key):
     assert ws.app_has_page("files")
     _press(ws, key)
     _frames(drv)
-    assert app.level == "places" and "files" in ws.wm._wins
+    assert app.level == "places" and "files" in ws.wm.windows
     assert not ws.app_has_page("files")
     _press(ws, "stop")
     _frames(drv)
-    assert "files" in ws.wm._wins, "with no page open Esc leaves the window be"
+    assert "files" in ws.wm.windows, "with no page open Esc leaves the window be"
 
 
 def test_the_settings_window_shows_its_back_on_a_page(tmp_path):
@@ -230,13 +230,13 @@ def test_the_settings_window_shows_its_back_on_a_page(tmp_path):
     closes the page, never the window."""
     ws = build_desktop_ws(tmp_path)
     drv = make_drv(ws)
-    ws.open_desk()
+    ws.home.open_desk()
     ws.open_settings()
     _frames(drv)
-    sl, win = ws.settings_layer, ws.wm._wins["settings"]
+    sl, win = ws.settings_layer, ws.wm.windows["settings"]
     assert not ws.app_has_page("settings")
     assert "back" not in _strip(ws, win)
-    sl.open_tz()
+    sl.open_page("tz")
     _frames(drv)
     assert ws.app_has_page("settings")
     btns = ws.wm._frame_buttons(win)
@@ -244,18 +244,18 @@ def test_the_settings_window_shows_its_back_on_a_page(tmp_path):
     bx, by, bw, bh = btns[0][1]
     drv.click(bx + bw // 2, by + bh // 2)
     _frames(drv)
-    assert not sl.tz_view, "the chevron closes the page"
-    assert "settings" in ws.wm._wins, "and never the window"
+    assert not sl.showing("tz"), "the chevron closes the page"
+    assert "settings" in ws.wm.windows, "and never the window"
     assert "back" not in _strip(ws, win)
 
 
 def test_the_hosts_esc_steps_a_desk_windows_page(tmp_path):
     ws, drv, app, win = _desk_app(tmp_path, "storybook")
-    assert not drv.takes_escape()
+    assert not ws.app_has_page("storybook")
     app.page = "deck"
-    assert drv.takes_escape()
+    assert ws.app_has_page("storybook")
     drv.escape()
-    assert app.page == "stories" and "storybook" in ws.wm._wins
+    assert app.page == "stories" and "storybook" in ws.wm.windows
 
 
 @pytest.mark.parametrize("app_id,page", [
@@ -270,7 +270,7 @@ def test_every_app_with_pages_answers_has_page(tmp_path, app_id, page):
     ws = build_ws(tmp_path)
     _open(ws, app_id)
     _frames(make_drv(ws))
-    app = ws._apps_by_id[app_id]
+    app = ws.app(app_id)
     assert not app.has_page() and not app.back(), "the first page is no page"
     page(app)
     assert app.has_page()

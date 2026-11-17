@@ -1,0 +1,1058 @@
+# Map (grep -n a name to jump there):
+#   identity                    this board's name and write PIN (/moy/zero.json)
+#   seed_carts                  the image's carts seeded as a console seeds them; seed_room
+#   recover_installs            an install a reset cut short, finished before the seed
+#   connect                     join the first saved network that answers
+#   ZeroUpdate                  the OTA flow, one slice per poll; make_updater builds it
+#   make_addon                  the release's add-on (and the XIAO's official carts) brought to the store; tend_addon runs it, way_back undoes a removal
+#   make_official               /official: the page's Get Carts, this board installing
+#   host_class                  the store host: the boards' WebHost
+#   serve                       bring the store host up and pump it forever
+"""The Zero: a pocketable cart-store the browser console pairs with (#41).
+
+This is the re-based Zero (moycore plan 3.2, owner call 2026-08-12): no panel,
+no console, no canvas -- the BROWSER runs the whole console (the wasm head),
+and this board contributes exactly what a browser cannot: the kid's cart store
+on its own flash, served and SYNCED over WiFi, and its PINS (#9). It is
+deliberately the smallest possible host of the 3.4 sync RPC:
+
+    boot -> join WiFi (creds in /moy/wifi.json, the console's own shape)
+         -> WebHost(/moy/carts)                      [the SAME class the boards
+         -> poll() forever                           inject; /gpio is the C's]
+
+    ...no joinable network
+         -> zero_setup.run()  the SoftAP + form a first boot is configured
+                              through, which reboots back into the line above
+
+`moy_webhost` serves the wasm bundle, streams the store as carts.json, and
+applies POST /sync batches back into /moy/carts. A cart made in the browser
+lands on this flash about a second after its commit, and is still there --
+served back -- on the next visit. That is the whole product: a console in your
+pocket whose screen is whatever browser is nearby.
+
+The bundle is the browser console add-on cart (native/moy_net/moy_page.h),
+in the store the website's flasher writes, installed by a cable flash or
+provisioning, and served only when it is the page this image names; after an
+update, or where there is none and its owner did not remove it, `make_addon`'s
+step installs the one that fits from this board's release. A removal holds
+(moy_seed.ADDON_LINE), and the root then links the way back (`tend_addon`).
+
+`POST /gpio` is the second half of the same idea: the cart in the browser
+calls `pin_write`, the page batches it here, and this board -- which has the
+pins -- does the driving. The route is the kernel webhost's
+(native/moy_net/moy_gpio.c) over this board's allowlist table (the `gpio`
+lease row of its board.toml).
+
+`GET/POST /update` is the third (ZeroUpdate, below). The ROUTES are
+`moy_webhost`'s now, on every board (2026-08-29); what is this board's own is
+the BACKEND behind them -- the OTA flow every other board runs off its own
+Settings screen, driven here by a state machine in the poll loop because this
+board has no screen to put it on. The browser console this board serves is
+where a person triggers it and watches it, which is the whole point of the
+endpoints being sealed JSON rather than a UI.
+
+`GET/POST /official` is the fourth (make_official, below): the browser
+console's Get Carts lists the official carts of this board's own release and
+asks the board to install or remove one, and the board fetches it from its
+release and writes its own store, as it installs its firmware.
+
+A browser signs in with a device key it got by pairing once with this board's
+password (the setup form sets it; native/moy_net/moy_webhost.c's header and
+docs/os_2026-11/system.md section 3), and every route but the bundle and the
+marker is sealed to its session.
+
+Runs on the board's own frozen image (`build.sh` -> MOYBYTE_ZERO). STA is the
+SERVING mode: the SoftAP lane measured too weak for the old streaming view and
+is not re-attempted for serving megabyte bundles -- setup is the one thing it
+does, because a board nobody can configure is worse than a board that serves
+slowly for a minute.
+"""
+
+import json
+import os
+import time
+
+try:
+    import moy_net
+except ImportError:                  # host: this module is import-only there
+    moy_net = None
+
+ROOT = "/moy"
+CARTS_DIR = ROOT + "/carts"
+WIFI_STORE = ROOT + "/wifi.json"
+ZERO_STORE = ROOT + "/zero.json"   # this board's own name (setup)
+SYSTEM_DIR = ROOT + "/system"      # the sign-in's: `password` (setup), `webkeys`
+# The OTA directory (the pending marker; the image streams into the inactive
+# slot). On the internal VFS because there is no card
+# slot on this board at all -- moy_ota's default names /sd/update, which every
+# path in that module reads off the instance instead, precisely so two boards'
+# updaters cannot look at each other's directory.
+UPDATE_DIR = ROOT + "/update"
+HOSTNAME = "moybyte-zero"          # mDNS: a headless board needs a findable name
+
+
+def _mkdir(path):
+    try:
+        os.mkdir(path)
+    except OSError:
+        pass
+
+
+def _networks():
+    """The known-networks list out of /moy/wifi.json -- the same document the
+    console's WiFi panel writes ({"networks": [{"ssid", "password"}]}), so a
+    card/creds file moved from a console board just works."""
+    try:
+        with open(WIFI_STORE) as f:
+            doc = json.load(f)
+    except (OSError, ValueError):
+        return []
+    nets = doc.get("networks") if isinstance(doc, dict) else doc
+    return [n for n in (nets or []) if isinstance(n, dict) and n.get("ssid")]
+
+
+def identity():
+    """This board's own name and write PIN (/moy/zero.json), or {}.
+
+    Written by first-run setup and by nothing else. Absent on a board whose
+    credentials were pushed over USB, which is why every reader defaults: the
+    provisioning path is not going away just because the AP path exists.
+    """
+    try:
+        with open(ZERO_STORE) as f:
+            doc = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return doc if isinstance(doc, dict) else {}
+
+
+# -- the seed roster, carried by the image (2026-08-30) ----------------------
+#
+# The image carries its seed carts (board.toml's `[roster] image`: the XIAO's
+# the core carts, every app and five games; the C3's the core alone) as one
+# raw-deflate stream each, `carts_data.CARTS_Z`, and this function inflates
+# them, so a Zero flashed from the website's flasher (site/build.py's BOARDS)
+# has a working console with no second, cabled step. Every other system cart
+# is an OFFICIAL cart its release publishes, which the page this board serves
+# installs (`/official`, make_official) and a cable flash refreshes
+# (tools/board_flash.py's install_carts).
+#
+# THE CONSOLES' RULE (owner, 2026-11-17). A seed cart is in the store unless
+# the kid removed it -- the removal is recorded in `system/removed`
+# (moy_seed.note_removed: the page's delete and Get Carts' remove write it),
+# and a core cart is never removed -- and a newer one in the image replaces
+# the store's copy, its saves and config kept (#47). The image's roster is
+# stamped in `system/seeded` once a seed ends, so a warm boot of the same
+# image lists the store once and writes only a seed cart that is missing; a
+# new image, or a seed a power cut stopped, reads each seed cart's version.
+#
+# SEED_RESERVE is the room a seed leaves: it stops while that much of the store
+# is still free, so the system folder (the password, the SSH host key, the
+# browsers' keys) and a kid's own carts always fit. The installs of the
+# official carts keep the same reserve.
+SEED_RESERVE = 96 * 1024
+# Beside it, a store with no browser console add-on keeps the room the add-on
+# that fits this image will take (its pack, as the image's stamp counts it,
+# plus the pack's head and the cart's other files), so the install that
+# brings it after the seed (make_addon's step, or a cable flash) finds it free.
+ADDON_FILES = 16 * 1024
+SEEDED = "system/seeded"            # beside the carts folder: the roster the store was seeded from
+# The room a missing seed cart is guessed to take before a warm boot tries
+# it: four times its packed bytes (the roster packs about 3.6 times) and a
+# folder's blocks.
+SEED_RATIO = 4
+SEED_FOLDER = 32 * 1024
+
+
+def _seeded_path(root):
+    return root.rsplit("/", 1)[0] + "/" + SEEDED
+
+
+def _exists(path):
+    try:
+        os.stat(path)
+        return True
+    except OSError:
+        return False
+
+
+def _free_bytes(root):
+    try:
+        st = os.statvfs(root)
+    except (OSError, AttributeError):
+        return None
+    return st[0] * st[3]
+
+
+def addon_room(root):
+    """The bytes the browser console add-on this image names needs in `root`,
+    0 while an add-on folder is there or the image names none."""
+    try:
+        if any(n.startswith("web_console_") for n in os.listdir(root)):
+            return 0
+    except OSError:
+        pass
+    try:
+        import moy_web
+        return int(moy_web.stamp().split()[1]) + ADDON_FILES if moy_web.page_want() else 0
+    except (ImportError, AttributeError, ValueError, IndexError):
+        return 0
+
+
+def seed_room(root=ROOT, reserve=None):
+    """True while more than `reserve` (SEED_RESERVE) bytes of the store are
+    free; a store whose free space cannot be read is not held back."""
+    if reserve is None:
+        reserve = SEED_RESERVE
+    free = _free_bytes(root)
+    return free is None or free > reserve
+
+
+def _space_note(root):
+    """What a failed seed says about the store's room: a full littlefs refuses
+    `mkdir` with ENOSPC, `moy_fs._mkdir` swallows every OSError, and the first
+    write into the missing folder then raises a bare ENOENT -- which names no
+    cause. Free blocks of zero or less ARE the cause."""
+    try:
+        st = os.statvfs(root)
+    except (OSError, AttributeError):
+        return ""
+    if st[3] <= 0:
+        return "-- the store is FULL (%d of %d blocks free)" % (st[3], st[2])
+    return "(%d of %d blocks free)" % (st[3], st[2])
+
+
+def roster_stamp(packed):
+    """The `system/seeded` text of the packed roster `packed`: each seed's
+    title and version, a line each."""
+    return "".join("%s %d\n" % (t, int(v)) for t, v, _b in packed)
+
+
+def _read_stamp(path):
+    try:
+        with open(path) as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def seed_carts(root=CARTS_DIR):
+    """The image's baked carts seeded into the store (the consoles' rule,
+    above), up to SEED_RESERVE.
+
+    Returns the count written -- 0 on the ordinary warm boot, which is one
+    listing of the store and one read of the stamp, and inflates nothing.
+
+    Best-effort in every direction, because none of the ways this can fail may
+    cost the board its job -- which is serving whatever carts it DOES have. An
+    image built without a roster (the module is generated, so a hand-assembled
+    tree may have none), a full filesystem, a corrupt blob: each prints one
+    `ZERO seed:` line and returns, because serial is this board's only display.
+    """
+    try:
+        from carts_data import CARTS_Z
+    except ImportError:
+        print("ZERO seed: no roster baked into this image")
+        return 0
+    try:
+        import moy_carts
+        # `ticks` and not `time.ticks_ms` directly: this module is import-only
+        # on the host and the host suites drive this function, where
+        # MicroPython's clock does not exist. One shim, the tree's own
+        # (runtime/toolkit/ticks.py), which this board already freezes for the
+        # transport's blocking budgets.
+        import ticks
+
+        moy_carts.ensure_dirs(root)
+        stamp_path = _seeded_path(root)
+        stamp = roster_stamp(CARTS_Z)
+        same = _read_stamp(stamp_path) == stamp
+        seed = moy_carts.unremoved(CARTS_Z, root)
+        try:
+            names = os.listdir(root)
+        except OSError:
+            names = []
+        missing = [e for e in seed
+                   if moy_carts.cart_folder(e[0], moy_carts.BUILTIN_NS) not in names]
+        reserve = SEED_RESERVE + addon_room(root)
+        if same:
+            # Only the missing carts, and of them only one whose guessed room
+            # is free above the reserve: a store kept near its reserve is not
+            # written and taken back on every boot.
+            free = _free_bytes(root)
+            seed = [e for e in missing if free is None
+                    or free - reserve > SEED_RATIO * len(e[2]) + SEED_FOLDER]
+            if not seed:
+                return 0
+            # Unstamped while it writes: a cart a power cut leaves half
+            # written is a folder with no manifest, which only the versions'
+            # read (an unstamped store's) writes again.
+            os.remove(stamp_path)
+        # SAID BEFORE it starts, not only after. This runs before the radio and
+        # writes the roster to the internal VFS, so on a first boot it is the
+        # longest silence in the log -- and on a board with no screen a
+        # silence is what a hang looks like.
+        print("ZERO seed: %s from the image"
+              % ("inflating %d carts" % len(missing) if missing
+                 else "checking the seed carts' versions"))
+        started = ticks._ticks_ms()
+        written = moy_carts.seed_packed(seed, root, only_new=same,
+                                        room=lambda: seed_room(root, reserve))
+        elapsed = ticks._ticks_diff(ticks._ticks_ms(), started)
+        _mkdir(stamp_path.rsplit("/", 1)[0])
+        with open(stamp_path, "w") as f:
+            f.write(stamp)
+    except Exception as exc:             # noqa: BLE001 -- a partial store beats none
+        print("ZERO seed: FAILED (the store may be partly seeded):", exc,
+              _space_note(root))
+        return 0
+    if not written:
+        return 0
+    left = len(missing) - written
+    print("ZERO seed: %d carts inflated from the image in %d ms %s%s"
+          % (written, elapsed, _space_note(root),
+             " -- %d left out, the store's reserve" % left if left > 0 else ""))
+    return written
+
+
+def recover_installs(root=CARTS_DIR):
+    """An install a reset cut short (the add-on's step, `/official`'s, a cable
+    install's) finished or taken away (cart_index.recover), so its stage in
+    `install/` beside the carts folder holds no room the seed counts. One
+    listing on a boot with nothing there."""
+    try:
+        import cart_index
+        n = cart_index.recover(root)
+    except Exception as exc:             # noqa: BLE001 -- the store serves regardless
+        print("ZERO install: the stage was not cleared:", exc)
+        return 0
+    if n:
+        print("ZERO install: %d entries an install left were finished" % n)
+    return n
+
+
+def connect(wait_ms=15000, hostname=None):
+    """Join the first known network that answers, over the kernel's WiFi
+    driver, and answer to `hostname`.local. Returns the STA IP or None. The
+    wait is per-network and generous for the same reason moy_ota's DIAL_MS
+    is: cold association routinely outlives a short poll. The Zero is
+    headless, so this blocking wait holds no frame."""
+    moy_net.wifi_on()
+    st = moy_net.wifi_status()
+    if st[2] and st[4]:
+        moy_net.wifi_mdns(hostname or HOSTNAME)
+        return st[4]
+    for net in _networks():
+        try:
+            moy_net.wifi_connect(net["ssid"],
+                                 net.get("password") or net.get("key") or "")
+        except OSError:
+            continue
+        for _ in range(wait_ms // 250):
+            st = moy_net.wifi_status()
+            if st[2] and st[4]:
+                print("ZERO wifi:", net["ssid"], st[4])
+                if not moy_net.wifi_mdns(hostname or HOSTNAME):
+                    print("ZERO mDNS unavailable")
+                return st[4]
+            time.sleep_ms(250)
+        print("ZERO wifi: no answer from", net["ssid"])
+    moy_net.wifi_disconnect()
+    return None
+
+
+# -- OTA on a board with no screen (#53 / #41, 2026-08-29) -------------------
+#
+# Every other board triggers and reports an update on its own glass: Settings ->
+# UPDATE ONLINE draws a CHECKING screen, a progress bar, and the verdict of the
+# last install. This board has no glass, so the SAME OtaUpdater is driven by the
+# state machine below and reported as JSON on two sealed endpoints.
+#
+# THE DECISION, stated here because the README points at it: the TRIGGER is a
+# request, not a timer. A boot-time CHECK runs (once, after the running image
+# has certified itself) and its result is printed on serial and cached for
+# `GET /update`; it does not install. Installing is `POST /update` from a paired
+# browser -- the same act of consent that gates every other write to this board.
+#
+# THERE IS NO EXCEPTION, and there was one until 2026-08-29 (owner call): an
+# `"ota_auto": true` in /moy/zero.json made the boot check install what it
+# found. It is deleted. No other board in this tree has any auto-install
+# concept -- a console board takes two deliberate human acts, opening the
+# update screen in Settings and confirming -- so this was a one-board
+# divergence, on the board holding the only local copy of a kid's carts,
+# down a path that had never run on hardware. Nothing wrote the flag either:
+# reaching it meant hand-editing a JSON file over the cable.
+#
+# WHERE THE REQUEST COMES FROM instead (landed 2026-08-29): the browser
+# console this board serves. The browser IS this board's screen, so it is
+# where "update this board" belongs, and it POSTs the same /update this file
+# already gated -- now through moy_webhost, which serves the route on every
+# board. On a board WITH glass that POST hands the glass back instead
+# (moy_webhost.ConsoleUpdate); this board is the one that genuinely needs the
+# browser to display the progress, because it has no other display.
+#
+# HOW A HUMAN LEARNS IT HAPPENED, all three ways, none of them a UI:
+#   * serial -- every transition prints a `ZERO ota:` line, and the boot line
+#     names the running label.
+#   * `GET /update` from a paired page -- the running version/label/channel/slot, the
+#     PREVIOUS install's verdict (moy_ota.boot_check: installed, or rolled back
+#     by the bootloader), and live progress.
+#   * the page itself -- the board serves only the browser console add-on its
+#     image names and installs that one after the confirm (make_addon), so a
+#     board that updated is serving a different console the next time it is
+#     opened.
+
+
+class _ZeroWifi:
+    """The two-method wifi service `moy_ota` asks for, over this board's own
+    `connect()`.
+
+    NOT `device_wifi.DeviceWifi`: that class is the console's WiFi FEATURE --
+    scanning, saved-network management, the credentials a Settings panel
+    writes -- and it reads its store through `moy_carts`' system store, which
+    is not where this board keeps `/moy/wifi.json`. Everything moy_ota needs is
+    `status()[0]` (is the link up) and something to call when it is not. Both
+    already exist here; this is the adapter, not a second implementation.
+    """
+
+    def status(self):
+        """(connected, ssid, ip) -- the shape moy_ota.wifi_online() indexes."""
+        st = moy_net.wifi_status()
+        if not st[2]:
+            return (False, None, None)
+        return (True, st[3], st[4])
+
+
+class ZeroUpdate:
+    """The OTA flow as a state machine driven one slice per poll iteration.
+
+    Why a state machine and not a blocking install: `POST /update` has to
+    ANSWER. A 2MB download plus a flash write is tens of seconds, and a socket
+    held open across it would make every failure look identical (a browser
+    timeout) whether the board died, the manifest was refused, or it worked.
+    So the POST queues, returns immediately, and `GET /update` is where the
+    answer lives -- which is also the only shape that can report a board that
+    is about to reboot out from under the connection.
+
+    States: idle -> checking -> {offer | none | error}
+                             -> downloading -> ready -> installing -> reboot
+
+    `ready` is the pause between the two acts of consent (2026-08-29). The
+    browser console this board serves runs the SHARED update screen, which asks
+    once before the download and again before the flash -- so the board has to
+    be able to stop in between, or the second confirm would gate nothing.
+    """
+
+    def __init__(self, updater):
+        self.ota = updater
+        self.state = "idle"
+        self.error = None
+        self.manifest = None
+        # Was the fetched manifest actually OFFERED? Kept apart from `manifest`
+        # because a manifest that was judged not-newer is still what the check
+        # FOUND, and the screen draws "UP TO DATE" from it.
+        self.offered = False
+        self.staged = None         # the downloaded image, waiting for `install`
+        self._channel = None       # the channel the request asked us to check
+        # "nothing is published on this channel for this board yet" -- the
+        # normal state of a channel before its first release. Carried
+        # separately from `state` because "none" covers it AND "up to date",
+        # and those are two different sentences to say to a person.
+        self.nothing_published = False
+        self._want = None          # queued action, applied by the next step()
+        self._checked = False      # has the once-per-boot check run?
+        self._reboot_in = 0        # poll iterations left before machine.reset()
+
+    # -- the request side -----------------------------------------------------
+
+    def request(self, action, channel=None):
+        """Queue `check`, `download`, `install` or `cancel`. (ok, message).
+
+        THREE VERBS, ONE PER ACT (2026-08-29). `install` used to mean the whole
+        job -- check, download and flash off one request -- which is the one
+        shape the shared update screen cannot mirror: that screen asks TWICE,
+        once before the download and again before the flash, and a board that
+        did both off the first tap would leave the second confirm gating
+        nothing. So `download` fetches and STOPS at `ready`, and `install`
+        flashes what is staged. `download` still checks first when it has to,
+        which is the convenience the old chained form existed for.
+
+        THE STATE MOVES HERE, not in step(). The WORK still happens in the poll
+        loop and this still answers immediately -- but a status read landing in
+        between would otherwise report the state the request has not been
+        applied to yet, and a remote screen polling that reads it as an answer.
+
+        `channel` is what the caller asked us to look at (the browser's CHANNEL
+        row). None keeps the running build's own channel, which is what every
+        boot check and every curl without one means.
+        """
+        if action not in ("check", "download", "install", "cancel"):
+            return False, "action must be check, download, install or cancel"
+        if action == "cancel":
+            self._cancel()
+            return True, "cancelled"
+        if self.state in ("checking", "downloading", "installing", "reboot"):
+            return False, "busy: " + self.state
+        if action == "install":
+            if self.state != "ready":
+                return False, "nothing downloaded yet -- ask for download first"
+            self._want = "install"
+            self.state = "installing"
+            return True, "queued"
+        self._channel = channel or None
+        if action == "download" and self.state == "offer":
+            self._want = "download"
+            self.state = "downloading"
+            return True, "queued"
+        self._want = "check+download" if action == "download" else "check"
+        self.state = "checking"
+        return True, "queued"
+
+    def boot_check(self):
+        """Read the previous install's verdict and say it out loud. Runs once,
+        at boot, before anything is served."""
+        try:
+            verdict = self.ota.boot_check()
+        except Exception as exc:         # noqa: BLE001
+            print("ZERO ota: boot check failed:", exc)
+            return None
+        if verdict:
+            print("ZERO ota: last update %s -- %s" % verdict)
+        return verdict
+
+    # -- the pumped side ------------------------------------------------------
+
+    def step(self):
+        """One slice. Called every poll iteration; returns True if it did work.
+
+        The check and the manifest fetch BLOCK (a socket round trip), which is
+        acceptable here and would not be on a console: this loop's only other
+        duty is `host.poll()`, and a store request arriving during a 300ms
+        manifest fetch is a store request served 300ms late.
+        """
+        if self._reboot_in:
+            self._reboot_in -= 1
+            if self._reboot_in == 0:
+                print("ZERO ota: rebooting into the new slot")
+                self.ota.reset()
+            return True
+        want, self._want = self._want, None
+        if want in ("check", "check+download"):
+            found = self._check()
+            if found is None:
+                self._want = want          # the link is dialled: ask next iteration
+                return True
+            if found and want == "check+download":
+                self._begin_download()
+            return True
+        if want == "download":
+            self._begin_download()
+            return True
+        if want == "install":
+            self._begin_install()
+            return True
+        if self.state == "downloading":
+            return self._download_slice()
+        if self.state == "installing":
+            return self._install_slice()
+        return False
+
+    def boot_check_once(self):
+        """Queue the once-per-boot manifest check. It LOOKS and never installs
+        -- installing takes a paired browser's request, and there is no setting
+        that changes that (see the ota_auto note in this module's header).
+
+        Deliberately called only after the running image has been CONFIRMED
+        (see serve()): looking for the next firmware before the current one has
+        certified itself is how a board chases a bad update round a rollback
+        loop."""
+        if self._checked:
+            return False
+        self._checked = True
+        self._want = "check"
+        self.state = "checking"
+        return True
+
+    # -- the phases -----------------------------------------------------------
+
+    def _check(self):
+        self.state = "checking"
+        self.error = None
+        self.manifest = None
+        self.offered = False
+        self.staged = None
+        self.nothing_published = False
+        m = self.ota.check_online(self._channel)
+        if m is None and getattr(self.ota, "pending", False):
+            return None
+        if m is None:
+            if self.ota.absent:
+                self.state = "none"
+                self.nothing_published = True
+                print("ZERO ota: no build published on this channel yet")
+            else:
+                self.state = "error"
+                self.error = self.ota.error or "check failed"
+                print("ZERO ota: check failed --", self.error)
+            return False
+        # KEPT EITHER WAY. A manifest that was fetched and judged not-newer
+        # is still what the check found, and it is what the screen draws "UP TO
+        # DATE" from -- `offered` is the verdict, `manifest` is the evidence.
+        self.manifest = m
+        if not self.ota.offers(m, self._channel):
+            self.state = "none"
+            print("ZERO ota: up to date (%s)" % self.ota.version_label())
+            return False
+        self.offered = True
+        self.state = "offer"
+        print("ZERO ota: %s available (%s, %d bytes)"
+              % (m.get("label", "?"), m.get("channel", "?"),
+                 int(m.get("size", 0) or 0)))
+        return True
+
+    def _begin_download(self):
+        if not self.manifest or not self.offered:
+            self.state = "error"
+            self.error = "nothing to install"
+            return
+        try:
+            # The updater streams STRAIGHT INTO THE SLOT, which this board
+            # needs: the whole filesystem is smaller than the image (896KB
+            # against ~3.5MB), so a staged copy cannot fit on an EMPTY volume
+            # and fails with OSError 28 (ENOSPC). The inactive slot is 3.5MB.
+            self.ota.begin_download(self.manifest)
+        except Exception as exc:         # noqa: BLE001 -- bad url / non-200
+            self.state = "error"
+            self.error = self.ota.error or str(exc)
+            print("ZERO ota: download refused --", self.error)
+            return
+        self.state = "downloading"
+        print("ZERO ota: downloading %d bytes" % self.ota.dl_total)
+
+    def _download_slice(self):
+        if self.ota.download_step():
+            return True
+        path = self.ota.download_finish()
+        if path is None:
+            self.state = "error"
+            self.error = self.ota.error or "download failed"
+            print("ZERO ota: download failed --", self.error)
+            return True
+        # STOP HERE. The ACTIVATION is the second act of consent and it has not
+        # been given yet: the verified image sits in the INACTIVE slot until an
+        # `install` request arrives, and the running slot is untouched until
+        # then. This is where the browser's update screen draws its second
+        # confirm, exactly as a board's does with an image found on a card.
+        #
+        # What the second consent gates moved with the streaming download, from
+        # "write the bytes" to "point the bootloader at them" -- which is the
+        # one that matters. Writing an inactive slot changes nothing a board
+        # runs; set_boot is what makes the new image the next one to boot.
+        self.staged = path
+        self.state = "ready"
+        print("ZERO ota: downloaded and verified -- waiting for install")
+        return True
+
+    def _begin_install(self):
+        path = self.staged
+        if not path:
+            self.state = "error"
+            self.error = "nothing downloaded"
+            return
+        if self.ota.staged_in_slot():
+            # Already written and verified, page by page, as it came off the
+            # wire. Nothing to flash -- the whole install is the set_boot that
+            # _install_slice's finish() does, so go there with no work queued.
+            self.state = "installing"
+            print("ZERO ota: image already in the inactive slot -- activating")
+            return
+        try:
+            total = self.ota.begin(path)
+        except Exception as exc:         # noqa: BLE001 -- not an app image
+            self.state = "error"
+            self.error = str(exc)
+            print("ZERO ota: image refused --", self.error)
+            return
+        self.state = "installing"
+        print("ZERO ota: writing %d bytes into the inactive slot" % total)
+
+    def _install_slice(self):
+        # step() returns True WHILE MORE REMAINS (.claude/rules/ota.md: an
+        # inverted read here writes a truncated image whose set_boot is then
+        # correctly refused).
+        if self.ota.step():
+            return True
+        if self.ota.error:
+            self.state = "error"
+            self.error = self.ota.error
+            print("ZERO ota: install failed --", self.error)
+            return True
+        if not self.ota.finish():
+            self.state = "error"
+            self.error = self.ota.error or "set_boot failed"
+            print("ZERO ota: could not point the bootloader --", self.error)
+            return True
+        self.state = "reboot"
+        # A short grace before the reset, in poll iterations rather than a
+        # sleep: it keeps serving, so the GET that asked for this can still
+        # read `"state": "reboot"` and know the board is not simply gone. The
+        # bootloader's rollback is the net on the other side -- the new image
+        # has to confirm itself (moy_ota.confirm_when_serving) or the next
+        # reset puts this one back.
+        self._reboot_in = 200
+        print("ZERO ota: installed -- rebooting shortly")
+        return True
+
+    def _cancel(self):
+        try:
+            self.ota.download_cancel()
+            self.ota.cancel()
+        except Exception:                # noqa: BLE001
+            pass
+        self.state = "idle"
+        self.manifest = None
+        self.offered = False
+        self.staged = None
+        self.error = None
+        self.nothing_published = False
+        self._channel = None
+        self._reboot_in = 0
+
+    # -- what a human reads ---------------------------------------------------
+
+    def status(self):
+        """This board's half of the shared /update document.
+
+        Built through `moy_webhost.update_status`, which both backends call:
+        the page reads ONE shape, and the fields that mean the same thing on
+        every board (the running firmware, the previous install's verdict)
+        cannot drift between them. What is this board's own is the state word,
+        the progress numbers -- which come from a DIFFERENT pair of counters in
+        each phase -- and `screen=False`, the hardware fact that makes this
+        document the only progress report that exists here.
+
+        The import is local because importing this module must stay free of
+        everything that only works on a board (moy_webhost pulls in the socket
+        transport); this runs at most once per poll answering a request.
+        """
+        from moy_webhost import update_status
+
+        ota = self.ota
+        offer = None
+        if self.manifest:
+            offer = {
+                "version": self.manifest.get("version"),
+                "label": self.manifest.get("label"),
+                "channel": self.manifest.get("channel"),
+                "size": self.manifest.get("size"),
+            }
+        progress = None
+        if self.state in ("downloading", "ready"):
+            # `ready` reports the FINISHED transfer, not a fresh zero: the
+            # screen's second confirm prints how big the thing it is about to
+            # install is, and that number is this one.
+            progress = {"done": ota.dl_done, "total": ota.dl_total}
+        elif self.state in ("installing", "reboot"):
+            progress = {"done": ota.done, "total": ota.total}
+        return update_status(ota, self.state, False, error=self.error,
+                             offer=offer, progress=progress,
+                             absent=self.nothing_published,
+                             staged=self.staged)
+
+
+def _frozen_or_pushed(names=("zero_host", "zero_setup", "zero_shell",
+                             "moy_webhost", "moy_sync", "moy_carts")):
+    """Which of the image's own modules a PUSHED copy is shadowing.
+
+    MicroPython searches the filesystem root before `.frozen`, so a stale
+    `/moy_sync.py` left over from the pre-image provisioning arrangement wins
+    silently and forever. That is the same bug the web bundle has one level
+    down -- storage wins, so `start()` says which copy it is serving -- and it
+    is worth one line at boot for exactly the same reason.
+    """
+    out = []
+    for name in names:
+        try:
+            os.stat("/" + name + ".py")
+            out.append(name)
+        except OSError:
+            pass
+    return out
+
+
+def _has_password():
+    try:
+        with open(SYSTEM_DIR + "/password") as f:
+            return f.read(6) == "$moy2$"
+    except OSError:
+        return False
+
+
+def host_class():
+    """The store host: the boards' own `WebHost`, whose kernel answers /gpio
+    over this board's pin table. Imported here, not at the top: importing this
+    module must stay free of everything that only works on the board."""
+    from moy_webhost import WebHost
+    return WebHost
+
+
+def make_updater(me):
+    """This board's OtaUpdater + the ZeroUpdate driving it, or (None, None).
+
+    `with_sd` is a plain call-through: there is no card on this board, so the
+    T-Deck's mount-and-drain bracket has nothing to bracket. `update_dir` is on
+    the internal VFS for the same reason -- the P4 arrangement, and moy_ota
+    reads the instance's directory everywhere rather than its module constant,
+    so the two boards' updaters cannot look at each other's staging area.
+
+    A failure here costs the update endpoints and NOTHING ELSE: a board that
+    cannot construct an updater must still serve the kid's carts.
+    """
+    try:
+        import moy_ota
+
+        ota = moy_ota.OtaUpdater(lambda fn: fn(), update_dir=UPDATE_DIR)
+        ota.set_wifi(_ZeroWifi(),
+                     go_online=lambda: connect(hostname=me.get("name")
+                                               or HOSTNAME))
+        task = ZeroUpdate(ota)
+        return ota, task
+    except Exception as exc:             # noqa: BLE001
+        print("ZERO ota: updater unavailable:", exc)
+        return None, None
+
+
+class _ZeroInstall:
+    """The install role's server for the browser console add-on's step
+    (runtime/carts/web_addon.py): this board's store, its station (always
+    up while it serves, so nothing to hold), the kernel's client."""
+
+    def __init__(self, net):
+        self._net = net
+
+    def net(self):
+        return self._net
+
+    def root(self):
+        return CARTS_DIR
+
+    def op(self, fn):
+        return fn()
+
+    def chip(self):
+        return None, None
+
+    def hold(self):
+        return True
+
+    def release(self):
+        pass
+
+    def rescan(self, folder=None):
+        pass
+
+
+def make_addon(ota):
+    """The step that brings this image's release to the store once the
+    image has confirmed itself: the browser console add-on that fits it (the
+    page this board exists to serve), installed over one that does not fit
+    and where there is none unless its owner removed it (web_addon.
+    AddonStep's `absent`: a wiped store, a cable flash whose add-on step
+    failed); and on a board with OTA slots
+    (the XIAO) the official carts the store holds that its image does not
+    carry, which the page installed (`carts`; the image's own are current by
+    its seed). The C3, with no OTA slot, takes a new image by cable, and the
+    flash brings its official carts (tools/board_flash.py). None where the
+    image names no release index (no updater)."""
+    if ota is None:
+        return None
+    try:
+        import web_addon
+        from cart_net import CartNet
+        return web_addon.AddonStep(_ZeroInstall(CartNet(_ZeroWifi())), ota.own_index,
+                                   carts=ota.available(), absent=True)
+    except Exception as exc:             # noqa: BLE001 -- the store serves regardless
+        print("ZERO addon: unavailable:", exc)
+        return None
+
+
+def make_official(ota, addon=None):
+    """The backend of the webhost's `/official` (web_addon.OfficialCarts):
+    the official carts of this image's release, which the browser console
+    this board serves lists in its Get Carts and asks this board to install
+    or remove; the board fetches from its release over its own network and
+    writes its own store, its one writer, keeping SEED_RESERVE free. While
+    `addon`'s step brings the store to a new release it holds a request
+    back. None where the image names no release index (no updater) or does
+    not carry the install: the route is then absent, and the page says this
+    console gets no carts. The C3 has no OTA slot but a release all the
+    same, so it serves the route too."""
+    if ota is None:
+        return None
+    try:
+        import web_addon
+        from cart_net import CartNet
+    except ImportError as exc:           # an image without the install
+        print("ZERO carts: unavailable:", exc)
+        return None
+    busy = None if addon is None else addon.busy
+    return web_addon.OfficialCarts(_ZeroInstall(CartNet(_ZeroWifi())), ota.own_index,
+                                   busy=busy, reserve=SEED_RESERVE)
+
+
+ADDON_SLICE_MS = 40                     # the add-on's install per loop iteration
+
+
+# What a Zero's root answers while it has no browser console (moy_page_say):
+# the board fetches it by itself, or its owner removed it, and the root links
+# the way back. A Zero has no other face, so a removal there is undone from
+# the page's own address: the link (moy_page.h's MOY_PAGE_ASK) is counted,
+# and the next turn drops the record and fetches the console.
+PAGE_FETCHING = ("This board is fetching its browser console from its release. "
+                 "Reload this page in a minute.")
+PAGE_REMOVED = "The browser console was removed from this board."
+_PAGE = [None, 0]                       # the removal the root last said, the asks seen
+
+
+def tend_addon(addon, official):
+    """The serving loop's turn of `addon` (make_addon's step), once the
+    image has confirmed itself: a slice of a running step, or a start where
+    the store wants one and `official` (make_official's) is idle. The page is
+    this board's whole use, so an add-on that does not fit, or is not there
+    and was not removed, is asked for again while it serves (the step's
+    back-off apart), and a removed one when the root's link asks for it
+    (`way_back`). The first turn takes the add-ons that do not fit off the
+    store where the one that fits is there (`AddonStep.tidy`). True while
+    the step runs."""
+    if addon is None:
+        return False
+    if addon.phase is not None:
+        return addon.tick(ADDON_SLICE_MS)
+    if official is not None and official.busy():
+        return False
+    if addon.tidy():
+        return True
+    way_back(addon)
+    return addon.start(retry=True)
+
+
+def way_back(addon):
+    """While the page is absent: what the root says (PAGE_FETCHING, or
+    PAGE_REMOVED with the link), and the link followed restores the
+    console (`AddonStep.restore`)."""
+    try:
+        import moy_net
+        import web_addon
+    except ImportError:
+        return
+    say = getattr(moy_net, "page_say", None)
+    if say is None or web_addon.page_state() != web_addon.STATE_ABSENT:
+        return
+    removed = addon.removed()
+    if removed != _PAGE[0]:
+        _PAGE[0] = removed
+        say(PAGE_REMOVED if removed else PAGE_FETCHING, 1 if removed else 0)
+    asked = moy_net.page_asked()
+    if asked != _PAGE[1]:
+        _PAGE[1] = asked
+        if removed:
+            print("ZERO addon: the page asked for the browser console again")
+            addon.restore()
+            _PAGE[0] = None
+
+
+def serve():
+    """Bring the store host up and pump it forever. Ctrl-C drops to the REPL
+    (which is how provision.sh and mpremote get the board back)."""
+    _mkdir(ROOT)
+    _mkdir(CARTS_DIR)
+    # BEFORE the radio, on purpose: seeding is local, and a board that cannot
+    # find a network still ends up with a store -- it goes on to host the setup
+    # AP, and the first page served after that form is answered has carts behind
+    # it rather than an empty shelf.
+    recover_installs(CARTS_DIR)
+    seed_carts(CARTS_DIR)
+    me = identity()
+    name = me.get("name") or HOSTNAME
+    ip = connect(hostname=name)
+    if ip is None:
+        # NO WAY IN: host the setup AP instead of printing and giving up. This
+        # is the one branch that never returns -- a filled-in form resets the
+        # board, and a board nobody fills in stays reachable until someone does.
+        print("ZERO no wifi -- hosting the setup AP")
+        import zero_setup
+        zero_setup.run(WIFI_STORE, ZERO_STORE, SYSTEM_DIR)
+        return
+    _mkdir(SYSTEM_DIR)
+    host = host_class()(CARTS_DIR, auth=SYSTEM_DIR)
+    ota, task = make_updater(me)
+    addon = make_addon(ota)
+    official = make_official(ota, addon)
+    host.update = task
+    host.official = official
+    if task is not None:
+        # BEFORE the first poll: the marker names the slot the last install
+        # pointed the bootloader at, and reading it is how a rollback stops
+        # being silent. It is also the one thing a human plugging in a cable
+        # after an unattended update wants to see first.
+        task.boot_check()
+    host.start(ip)
+    # Built by `url()` rather than reassembled here: that is the one body that
+    # knows a port is spelled only when it is not 80. A browser pairs with the
+    # password the setup form set; with none, nothing can (no screen for a
+    # pairing code), so the line says so.
+    has_pw = _has_password()
+    print("ZERO serving %s  (mDNS %s.local)%s"
+          % (host.url(), name,
+             "" if has_pw else "  [no password: no browser can pair -- run the setup "
+                               "form again, or provision.sh --password]"))
+    if ota is not None:
+        print("ZERO firmware %s (%s, %s)"
+              % (ota.version_label(), ota.channel(), ota.slot()))
+    shadowed = _frozen_or_pushed()
+    if shadowed:
+        # Loud, because it is invisible otherwise and it inverts what the image
+        # guarantees: these modules are running from /, not from this build.
+        print("ZERO NOTE: pushed copies are SHADOWING the image for:",
+              ", ".join(shadowed))
+    # The terminal over SSH (zero_shell): the server where a password is set,
+    # its sessions' hops served by this loop's `tail()`.
+    try:
+        import zero_shell
+        zero_shell.start(CARTS_DIR, name, host)
+        tail = zero_shell.tail
+    except Exception as exc:             # noqa: BLE001 -- the store serves regardless
+        print("ZERO ssh: unavailable:", exc)
+        tail = None
+    while True:
+        # The console boards poll between frames; this board HAS no frames, so
+        # a short sleep is its whole duty cycle. 10ms keeps a page load snappy
+        # while idling at ~zero.
+        host.poll()
+        if tail is not None:
+            tail()
+        if task is not None:
+            # THE ROLLBACK CONFIRM, on the only evidence this board has: the
+            # host is up and the loop is still going round. `serving` is the
+            # headless stand-in for "something reached the glass" -- see
+            # moy_ota.confirm_when_serving, and note that an image whose host
+            # never comes up never confirms, which is exactly the image the
+            # bootloader should take back.
+            if ota is not None and not ota.confirmed:
+                if ota.confirm_when_serving(host.serving):
+                    print("ZERO ota: this image confirmed itself -- rollback "
+                          "cancelled")
+                    # Only NOW go looking for the next one. A board that checks
+                    # for firmware before certifying its own can chase a bad
+                    # image round a rollback loop forever.
+                    task.boot_check_once()
+        if ota is not None and ota.confirmed:
+            # ...and only now install the browser console add-on this image
+            # fits: an image the bootloader takes back never touched the
+            # add-on its predecessor serves.
+            tend_addon(addon, official)
+        # ...and `task.step()` is NOT called here: `WebHost.poll()` pumps the
+        # injected update backend, which is the one place every board's does
+        # its slice. A second call here would double this board's install rate
+        # for no reason and put the two boards' pumps in different files again.
+        time.sleep_ms(10)

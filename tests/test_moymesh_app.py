@@ -28,6 +28,7 @@ import crypto_vectors as V
 from runtime import moybyte, scheduler as S
 from runtime import moy_lora as N
 from runtime.host import lora_sim
+from runtime.host import moy_evq
 
 from ws_helpers import build_desktop_ws, build_ws, make_drv, open_cart, select_on_home
 
@@ -575,7 +576,7 @@ class _Window:
     """The window's Lua state: its globals read, its functions called."""
 
     def __init__(self, pl):
-        self.lua = pl._lua
+        self.lua = pl.lua
         assert self.lua is not None, pl.cart_error
 
     def get(self, name):
@@ -616,7 +617,7 @@ def _open_mesh(tmp_path, tweak=None, name=None):
 
 def _close_mesh(svc, ws=None):
     if ws is not None:
-        ws.go_home()            # the window's run ends, and its process's queue
+        ws.home.go_home()            # the window's run ends, and its process's queue
     S.SCHED.stop(svc.pid)
     S.SCHED.poll()
     while N.owner():
@@ -638,15 +639,22 @@ def _frames(drv, n=4):
         S.SCHED.poll()
 
 
-def _sent(drv):
+def _sent(drv, quiet=3):
     """Every transmission the service makes now, each one's air time done
-    before the next."""
+    before the next. The scheduler's slice is time-budgeted, so under load a
+    service's send can take more frames to come: nothing is concluded until
+    the radio stays quiet for `quiet` rounds in a row."""
     out = []
-    for _ in range(16):
+    empty = 0
+    for _ in range(16 + quiet):
         _frames(drv)
         got = lora_sim.sent()
         if got is None:
-            return out
+            empty += 1
+            if empty >= quiet:
+                return out
+            continue
+        empty = 0
         out.append(got)
         N.step(0)
     return out
@@ -941,9 +949,25 @@ def test_the_log_keeps_its_budget_and_every_thread(mesh):
     ws, pl, drv, svc = mesh
     _sent(drv)
     me = _me(pl)
-    _hear(drv, _node_packet(b"a direct one", THEM, 7, to=me))
+    def logged(packet, text):
+        # Each packet once the service has logged it: the lease queues a few,
+        # and under load the service's time-budgeted slice can fall behind.
+        # The supervisor charges wall time, so a loaded host can strike the
+        # service past its slice and suspend it; that is not what this test
+        # asks about, so a suspension here is resumed.
+        _hear(drv, packet)
+        for _ in range(50):
+            log = _prefs(pl, "log") or ()
+            if log and log[-1]["text"] == text:
+                return
+            if moy_evq.held(svc.pid):
+                moy_evq.resume(svc.pid)
+            _frames(drv)
+        raise AssertionError("the service never logged %r" % text)
+
+    logged(_node_packet(b"a direct one", THEM, 7, to=me), "a direct one")
     for i in range(40):
-        _hear(drv, _node_packet(b"chatter %d" % i, 0x0BADCAFE, 100 + i))
+        logged(_node_packet(b"chatter %d" % i, 0x0BADCAFE, 100 + i), "chatter %d" % i)
     log = _prefs(pl, "log")
     assert len(log) == 30 and log[0]["text"] == "a direct one"
     assert log[-1]["text"] == "chatter 39"
@@ -986,12 +1010,12 @@ def test_without_a_radio_mesh_is_no_run_tile_but_stays_a_project(tmp_path):
     def titles(rows):
         return [c.get("title") for c in rows if c]
     desk = ws.wm._backdrop_layer
-    assert TITLE not in titles(ws._runnable_items())
+    assert TITLE not in titles(ws.home.runnable_items())
     assert TITLE not in titles(c for _k, _l, c in desk._icon_catalog())
-    assert TITLE in titles(ws._launcher_items(ws.carts.all, "make"))
+    assert TITLE in titles(ws.home.launcher_items(ws.carts.all, "make"))
     lora_sim.install()
     try:
-        assert TITLE in titles(ws._launcher_items(ws.carts.all, "apps"))
+        assert TITLE in titles(ws.home.launcher_items(ws.carts.all, "apps"))
         assert ("moymesh", TITLE) in [(k, lb) for k, lb, _c in desk._icon_catalog()], \
             "its tile is the mesh icon slot"
     finally:
@@ -1034,7 +1058,7 @@ def test_on_the_desk_mesh_is_a_window_laid_out_for_its_room(tmp_path):
     lora_sim.install()
     ws = build_desktop_ws(tmp_path)
     try:
-        ws.open_desk()
+        ws.home.open_desk()
         _install(ws)
         open_cart(ws, TITLE)
         pl = ws.run.player
@@ -1516,7 +1540,7 @@ def test_every_page_and_state_renders_on_every_board(tmp_path, board):
     ws = host_app.build_workstation(str(tmp_path / "carts"), **BOARDS[board])
     try:
         if board == "desk":
-            ws.open_desk()
+            ws.home.open_desk()
         _install(ws)
         open_cart(ws, TITLE)
         pl = ws.run.player
@@ -1535,7 +1559,7 @@ def test_every_page_and_state_renders_on_every_board(tmp_path, board):
             seen.add(bytes(cv._buf))
         assert len(seen) == len(_states(0)), "every state draws its own picture"
     finally:
-        ws.go_home()
+        ws.home.go_home()
         S.SCHED.reset()
         while N.owner():
             moybyte.end(N.owner())
@@ -1565,10 +1589,10 @@ def test_mic_gives_a_channel_name_back(window):
     window.run("__R = setup().channels[1].name")
     name = window.get("__R")
     window.type("xy")
-    assert window.ws.cancel_field(), "an edit in progress: Mic cancels it"
+    assert window.ws.input_policy.cancel(), "an edit in progress: Mic cancels it"
     window.frames()
     window.run("__R = stack[#stack].name or setup().channels[1].name")
     assert window.get("__R") == name
     window.run("__R = setup().channels[1].name")
     assert window.get("__R") == name, "nothing was saved"
-    assert not window.ws.cancel_field(), "no edit now: Mic is the console's key"
+    assert not window.ws.input_policy.cancel(), "no edit now: Mic is the console's key"

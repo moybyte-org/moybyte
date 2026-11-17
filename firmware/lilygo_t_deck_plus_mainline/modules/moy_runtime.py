@@ -83,7 +83,7 @@ SERIAL_CMDS = True
 POWER_SAVE_MS = 300000          # 5 minutes; 0 disables
 # The inputs as the hints know them (Workstation.use_inputs): the C3 keyboard
 # writes "kbd", in use from boot, and the trackball's presses where a surface
-# takes the keys "ball" (Workstation.ball); a paired BLE keyboard is a desk
+# takes the keys "ball" (InputRouter.ball); a paired BLE keyboard is a desk
 # keyboard; the GT911 is touch, under which the hints keep the keys used last.
 INPUT_KINDS = (("kbd", "tdeck"), ("ball", "tdeck"), ("ble", "keys"), ("touch", "touch"))
 
@@ -243,7 +243,7 @@ def run_desktop(fps_cap=60):
 
     def _before_slim(_ws):
         # Set BEFORE slim_carts so the store can reload what the diet drops.
-        _ws._with_sd = store.session
+        _ws.with_sd = store.session
         store.ws = _ws
 
     def _after_services(ws):

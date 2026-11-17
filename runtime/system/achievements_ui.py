@@ -32,12 +32,8 @@ AppContext's `notify` role.
   and the confetti's burst named here.
 """
 
-try:
-    import ui as _ui
-    import layout_base as _lb
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import ui as _ui
-    from runtime import layout_base as _lb
+import ui as _ui
+import layout_base as _lb
 
 
 TITLE = "Achievements"

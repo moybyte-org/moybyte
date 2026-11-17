@@ -121,7 +121,7 @@ def test_the_middle_button_drags_the_page_as_far_as_a_finger(tmp_path):
     _drag(ws2, d2, x2, y2, -30, steps=6)
     _frames(d2)
     assert by_middle == _band(ws2)
-    assert not (ws.settings_layer.wifi_view or ws.settings_layer.bt_view), "and taps nothing"
+    assert not (ws.settings_layer.showing("wifi") or ws.settings_layer.showing("bt")), "and taps nothing"
 
 
 # -- the autoscroll, an exact trajectory ------------------------------------------
@@ -202,7 +202,7 @@ def _code(tmp_path, text):
     ws = build_ws(tmp_path)
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ed = ws.editor
     ed.set_text(text)
     d = make_drv(ws)
@@ -347,14 +347,14 @@ def test_the_code_window_autoscrolls_in_its_own_space(tmp_path):
     ws = build_desktop_ws(tmp_path)
     ws.launcher.sel = 0
     ws.open_in_editor()
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ed = ws.editor
     ed.set_text("\n".join("v%d = 1" % i for i in range(300)))
     d = make_drv(ws)
     for _ in range(3):
         d.frame(DT)
     lay = ws.code_layout
-    cx, cy, _w, _h = ws.wm._wins[ws.wm._focus].content_rect()
+    cx, cy, _w, _h = ws.wm.windows[ws.wm.focus_key].content_rect()
     x, y = cx + ws.code_layer._text_x0(lay, ed) + 10, cy + lay.y0 + 4 * lay.lh
     d.hover(x, y)
     d.frame(DT)
@@ -381,7 +381,7 @@ def _desk_files(tmp_path, n=60):
         _seed_drawing(str(tmp_path / "carts"), "pic%02d" % i, 8, 8, i % 16)
     _app, d = _files(ws)
     _press(d, "down", "down", "a")
-    cr = ws.wm._wins[ws.wm._focus].content_rect()
+    cr = ws.wm.windows[ws.wm.focus_key].content_rect()
     x, y = cr[0] + cr[2] // 2, cr[1] + cr[3] * 3 // 4
     d.hover(x, y)
     _frames(d)
@@ -437,7 +437,7 @@ def test_a_window_bound_app_lays_out_in_its_window_and_scrolls_to_its_end(tmp_pa
     open_cart(ws, "Notes")
     for _ in range(4):
         d.frame(DT)
-    cx, cy, cw, ch = ws.wm._wins["desktop"].content_rect()
+    cx, cy, cw, ch = ws.wm.windows["desktop"].content_rect()
     assert tuple(ws.run.player.ns["content_rect"]()[2:]) == (cw, ch)
     x, y = cx + 60, cy + ch // 2
     d.hover(x, y)
@@ -446,5 +446,5 @@ def test_a_window_bound_app_lays_out_in_its_window_and_scrolls_to_its_end(tmp_pa
         d.wheel(0, 1)
         d.frame(DT)
         d.frame(DT)
-    bx, by, bw, bh = ui_draw._C.api_box(ws.run.player._ui[0], "vault")
+    bx, by, bw, bh = ui_draw._C.api_box(ws.run.player.ui[0], "vault")
     assert by + bh <= ch, "the list runs on under the window's bottom"

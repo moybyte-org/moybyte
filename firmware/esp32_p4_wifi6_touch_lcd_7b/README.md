@@ -33,9 +33,10 @@ The console's own USB keyboard and mouse are #83's.
 
 **The hardware PPA (Pixel-Processing Accelerator) is wired for the game
 composite** (`moy_ppa`, ESP-IDF `esp_driver_ppa` SRM client, patched into
-IDF_COMPONENTS like `esp_lcd`; `P4SystemCanvas.blit_game` uses it, CPU fallback,
-and `present_frame` scales a compiled cart's direct-colour frame from the cart's
-memory).
+IDF_COMPONENTS like `esp_lcd`; `P4SystemCanvas.blit_game` and the kernel's front
+take it through the one game composite, `native/moy_glass/moy_present_game.c`,
+CPU fallback, and `present_frame` scales a compiled cart's direct-colour frame
+from the cart's memory).
 Colors verified pixel-identical via framebuffer readback. Two findings on
 record:
 - **The PPA only wins on UPSCALE composites.** The game→window scale is 2.6×
@@ -44,7 +45,7 @@ record:
   vs the DSI scan-out), and **sprite draws lose ~10× to `spr_batch`** even queued
   non-blocking (64× 16×16 = 4.57ms PPA vs 0.70ms CPU; per-op submit dwarfs a tiny
   blit). So both copies and sprites stay on the CPU — the PPA is scale-only.
-- **Async-composite overlap** (`blit_async` + `moy_ppa.sync` fence + a done-ISR
+- **Async-composite overlap** (a queued scale + `moy_ppa.sync` fence + a done-ISR
   counter): a quiet game frame defers the scan-out switch to the next loop
   (`P4Compositor.present_pending`), overlapping the PPA DMA with the input poll.
   +2–5fps; full paints stay blocking (`blit_game(defer=not full)`) so chrome
@@ -59,7 +60,7 @@ canvas**, was reverted the day it was built — `26e1f9f`, whose verdict survive
 as a NOTE at the defer site in `device/p4_canvas.py`, which is the copy to read
 before re-proposing it. And #159's L2 bump (`1665425`) then reached the target
 the whole lever existed for. Why, with numbers:
-`docs/perf_native_gap_v1.md` §6; per-cart fps: #58 and #66, never here.
+`docs/perf_native_gap_v1.md` §6; per-cart fps: `docs/perf/ledger.md`, never here.
 
 OTA is wired on this board like every other. The high-speed USB OTG port is
 the `usb` device API's host (`native/p4/moy_usb/moy_usb.h`: HID reports,
@@ -138,10 +139,10 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
 esp32p4 --port /dev/ttyACM0 --baud 3000000 write_flash 0x2000
 dist/p4/moybyte_p4.bin`; board.toml's `[flash]` has why that rate and stub.)
 
-- `build.sh` clones MicroPython v1.28.0 into `.build/`, reuses the T-Deck
-  build's ESP-IDF v5.5.1 checkout when present (clones its own otherwise),
-  patches `esp_lcd` into the port's `IDF_COMPONENTS` (see below), and builds
-  with `BOARD_DIR=boards/MOYBYTE_P4`.
+- `build.sh` clones MicroPython v1.28.0 into `.build/` and ESP-IDF v5.5.6
+  (`MOYBYTE_IDF_VER` in `tools/upstream_pins.env`) into `.build/esp-idf`,
+  the checkout every other board reuses, patches `esp_lcd` into the port's
+  `IDF_COMPONENTS` (see below), and builds with `BOARD_DIR=boards/MOYBYTE_P4`.
 - Serial is the CH343 USB-UART bridge (`/dev/ttyACM0`); `mpremote` works, and
   unlike the T-Deck there is no native-takeover USB starvation — the REPL stays
   available.
@@ -150,10 +151,10 @@ dist/p4/moybyte_p4.bin`; board.toml's `[flash]` has why that rate and stub.)
 
 - `boards/MOYBYTE_P4/` — out-of-tree board def: the `C6_WIFI` variant's
   sdkconfig fragments + `sdkconfig.board` (PSRAM @ 200MHz, 32MB flash, the
-  custom partition table) + `partitions-moybyte-p4.csv` (OTA-shaped 2×8 MiB app
+  custom partition table) + `partitions-moybyte-p4.csv` (OTA-shaped 2×6.5 MiB app
   slots — the default 4MiBplus table's ~1.94MB app can't hold the frozen
   console — then the 128 KiB coredump partition a panic writes its ESP-IDF
-  core dump to (`tools/coredump.py` reads it), with the tail from 0x1030000
+  core dump to (`tools/coredump.py` reads it), with the tail from 0xD30000
   left unlisted so mainline auto-builds the vfs over it; a cable flash that moves it erases the new store's first
   blocks and the store re-seeds, see the CSV).
 - `native/p4/moy_dsi/` (repo root — the P4 SILICON tier since 2026-09-06, shared
@@ -175,10 +176,10 @@ dist/p4/moybyte_p4.bin`; board.toml's `[flash]` has why that rate and stub.)
   whose S3-only pieces are include-guarded, so they compile unchanged on the
   P4's RISC-V). `moy_gfx` grew `blit565_scale` for this port — the ONE-call
   integer-upscale composite the windowed presentation needs. `moy_web` is
-  staged the same way: it is the **browser console baked into the image**
-  (the pre-gzipped `firmware/web_runner/dist`, `.incbin`'d by
-  `tools/gen_web_blob.py`, handed out as read-only memoryviews into flash), so
-  a flashed board always serves a console current with its own firmware
+  staged the same way: it names the **browser console this image serves**
+  (the digest of `firmware/web_runner/dist`'s pack, `tools/gen_web_blob.py`),
+  and the webhost serves only the add-on cart whose pack has that digest, so
+  a flashed board never serves a console older or newer than its own firmware
   (`.claude/rules/web.md` carries the rule and what follows from it).
 - `modules/` — the P4-authored device backend (tracked) + build-staged copies
   (gitignored; see `.gitignore`'s whitelist):
@@ -293,9 +294,10 @@ dist/p4/moybyte_p4.bin`; board.toml's `[flash]` has why that rate and stub.)
   default low-priority completion interrupt; ESP-Hosted SDIO bursts during BLE
   connection could delay that restart past vertical blank and briefly turn the
   panel blue even though both framebuffers were valid (#106). The build's
-  `esp_lcd_dsi_underrun_hook.patch` backports the dedicated DSI bridge interrupt
-  used by current ESP-IDF and raises only the scan-out DMA restart interrupt to
-  priority 3. `CONFIG_LCD_DSI_ISR_IRAM_SAFE` keeps that path in IRAM. Repeated
+  `patches/p4_esp_lcd_dsi_underrun_hook.patch` raises ESP-IDF's dedicated DSI
+  bridge interrupt and the scan-out DMA restart interrupt to priority 3 and
+  counts each underrun through `moy_dsi_note_underrun`.
+  `CONFIG_LCD_DSI_ISR_CACHE_SAFE` keeps that path in IRAM. Repeated
   hardware connects produced no blue frames and left the bridge-underrun counter
   at zero. Keep
   `CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=64` in `sdkconfig.board`: the
@@ -392,7 +394,9 @@ below, so re-check against those, not against it.
 ## Board map (from the factory xiaozhi boot log + Waveshare/xiaozhi sources)
 
 - Panel: **EK79007**, 2-lane MIPI-DSI @ 900Mbps, 1024×600 RGB565, DPI clock
-  52MHz; LCD reset GPIO33; **panel mounted 180° rotated**; DSI PHY power =
+  60MHz, a 69.7Hz refresh (the vendor's 52MHz is no whole divisor of the
+  240MHz PLL; `MOY_DSI_DPI_MHZ` in `native/p4/moy_dsi/modmoy_dsi.c` says why
+  the image sets 60); LCD reset GPIO33; **panel mounted 180° rotated**; DSI PHY power =
   LDO chan 3 @ 2500mV; **backlight GPIO32, active-low**.
 - Touch: **GT911** (same chip as the T-Deck) on I2C **SDA=7 / SCL=8** @ 0x5D,
   INT/RST not wired; self-configured for 1024×600; plain status-register

@@ -30,10 +30,12 @@ derived from what a FRESH build produces -- every target's `board.toml`
 from `modules/` on disk, which is precisely where the staleness hides.
 
 The rule is deliberately weak enough not to be noisy: for each import site, at
-least ONE branch of its try/except-ImportError ladder must resolve. That accepts
-both ladder orderings -- most shared modules put the bare device name in `try`
-and `from runtime import ...` in `except`, `moy_webserver.py` does the opposite
--- while still failing when no branch can possibly work.
+least ONE branch of its try/except-ImportError ladder must resolve, so an
+optional module a board lacks may fall back to something it has, while an
+import with no branch that can possibly work still fails. A shared module
+imports a sibling by its device name alone (`runtime.FlatFinder` makes that
+name the runtime module on the host), so a `from runtime import ...` branch
+never resolves here and never needs to.
 
 What it CANNOT see is a ladder whose branches all resolve on the tier running
 the test and none of them on device, which is how the wallpaper preview stayed
@@ -63,9 +65,11 @@ P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 GUITION = ROOT / "firmware" / "guition_jc3248w535"
 GUITION_P4 = ROOT / "firmware" / "guition_jc8012p4a1c"
 ZERO = ROOT / "firmware" / "seeed_xiao_esp32s3_zero"
+C3_ZERO = ROOT / "firmware" / "esp32c3_zero"
 WEB = ROOT / "firmware" / "web_runner"
 BOARD_DIR = {"tdeck-mainline": TDECK_MAINLINE, "p4": P4,
-             "guition-s3": GUITION, "zero": ZERO, "guition-p4": GUITION_P4}
+             "guition-s3": GUITION, "zero": ZERO, "guition-p4": GUITION_P4,
+             "c3-zero": C3_ZERO}
 
 # What MicroPython itself provides. Explicit and module-level on purpose: adding
 # a name here is a visible diff that says "the port supplies this", which is a
@@ -90,7 +94,7 @@ NATIVE = {
     # moy_index, the store's native index, and moy_spine, the kernel's spine
     # (the handle table moy_index shares), stage on every target but the
     # Zero, which denies the index (its board.toml says why): the index
-    # compiles unless MOY_INDEX_IMPL=py (tools/moy_index_spike.py), the spine
+    # compiles unless MOY_INDEX_IMPL=py (tools/native_check.py), the spine
     # everywhere. moy_kernel, the
     # kernel's entry, crash record and recovery floor, is TAKEN by every
     # board, the Zero's floor serial only (each board.toml says why). moy_glass,
@@ -243,8 +247,8 @@ GENERATED = {
     # `carts_data` too since 2026-08-30, and it is a DIFFERENT file here: the
     # console boards freeze the plain `CARTS = [...]` (732 KB of source, the
     # fallback for a missing card), and this board freezes the PACKED form
-    # (`CARTS_Z`, 202 KB of raw-deflate blobs) that `zero_host.seed_carts`
-    # inflates into an empty store on first boot. It did not carry one at all
+    # (`CARTS_Z`, raw-deflate blobs of the carts its `[roster] image` names)
+    # that `zero_host.seed_carts` inflates into its store. It did not carry one at all
     # until that day -- the plain roster left 51 KB of a 2.8 MB slot, under the
     # board's headroom floor -- so a flashed Zero came up an empty console and its
     # carts arrived over a USB cable, or never.
@@ -262,6 +266,12 @@ GENERATED = {
 PACKAGES = {"tdeck-mainline": {"moybyte"}, "p4": {"moybyte"},
             "guition-s3": {"moybyte"}, "zero": set(), "web": set(),
             "guition-p4": {"moybyte"}}
+
+# The C3 Zero is the Zero on another chip (firmware/esp32c3_zero/board.toml):
+# its declared sets are the Zero's, so its rows ARE the Zero's rows, and a
+# declaration that drifts from them fails here as the Zero's own would.
+for _table in (NATIVE, HOST_ONLY, GENERATED, PACKAGES):
+    _table["c3-zero"] = _table["zero"]
 
 # Real, reproduced defects that are not fixed here because the FIX is a decision
 # someone has to make, not a line someone forgot. An entry is a tracked gap, not
@@ -464,7 +474,7 @@ def import_groups(src, path):
     return groups
 
 
-TARGETS = ("tdeck-mainline", "p4", "guition-s3", "zero", "web", "guition-p4")
+TARGETS = ("tdeck-mainline", "p4", "guition-s3", "zero", "web", "guition-p4", "c3-zero")
 
 # The floor each target's extraction must clear -- a smoke test on the
 # EXTRACTION, not on the board: a parser that silently found nothing would
@@ -472,7 +482,7 @@ TARGETS = ("tdeck-mainline", "p4", "guition-s3", "zero", "web", "guition-p4")
 # the consoles (they freeze the whole shared tree) and a much smaller one for
 # the Zero, whose thirteen-module allowlist is the point of it. A specific
 # number rather than `> 0`, so the Zero losing half its set still fails here.
-MIN_MODULES = {"zero": 12}
+MIN_MODULES = {"zero": 12, "c3-zero": 12}
 DEFAULT_MIN_MODULES = 40
 
 
@@ -537,7 +547,7 @@ def test_no_known_gap_has_quietly_been_fixed():
         "KNOWN_GAPS entries that no longer reproduce -- delete them: %s" % stale)
 
 
-BOARDS = ("tdeck-mainline", "p4", "guition-s3", "zero", "guition-p4")
+BOARDS = ("tdeck-mainline", "p4", "guition-s3", "zero", "guition-p4", "c3-zero")
 # The boards whose `[modules.shared]` is a DENYLIST. The Zero's is an
 # allowlist, on the argument its board.toml makes in full: a denylist is right
 # when the source tree's default answer is YES, and `runtime/` IS the console,
@@ -848,7 +858,8 @@ def test_the_native_tripwire_agrees_with_the_native_declaration():
     is structurally different) and stays hand-listed."""
     for target, board_dir in (("tdeck-mainline", TDECK_MAINLINE), ("p4", P4),
                               ("guition-s3", GUITION),
-                              ("guition-p4", GUITION_P4), ("zero", ZERO)):
+                              ("guition-p4", GUITION_P4), ("zero", ZERO),
+                              ("c3-zero", C3_ZERO)):
         shared = set(board_config.native_modules(board_dir, ROOT))
         authored = {p.name for p in (board_dir / "native").iterdir()
                     if p.is_dir() and not p.name.startswith(".")
@@ -932,6 +943,9 @@ def test_the_web_build_reaches_no_board_only_name_unprobed():
             "the web variant no longer sets %s=0" % flag)
         assert flag in (path.parent / "micropython.mk").read_text(encoding="utf-8")
         absent[mod] = _gated_table_names(path.read_text(encoding="utf-8"), flag)
+        face = path.with_name(path.stem + "_face.h")       # its generated rows
+        if face.exists():
+            absent[mod] |= _gated_table_names(face.read_text(encoding="utf-8"), flag)
     assert {"DsiCompositor", "RotatedCompositor", "front"} <= absent["moy_glass"]
     assert {"web_start", "wc_park", "ota_verify", "dns_start"} <= absent["moy_net"]
     assert not absent["moy_net"] & {"encode_batch", "sync_batch", "sync_apply"}

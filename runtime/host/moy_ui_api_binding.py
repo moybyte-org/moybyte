@@ -10,9 +10,14 @@ interaction verbs returned. Host only.
 
 import ctypes as c
 
-from runtime.moy_ui_binding import (OK, _Box, _Depth, _I, _LINE_FN, _Lines, _Over,
-                                    _Span, _Surface, _TXO_DEFAULTS, _TXO_LEN, _check,
-                                    _layout_type, _names, _nested, _shape_type)
+from runtime import moy_ui_face
+from runtime.moy_ui_binding import (OK, _Depth, _I, _Lines, _Over, _Span, _Surface,
+                                    _TXO_DEFAULTS, _TXO_LEN, _check, _names, _nested,
+                                    moy_theme_layout_t, moy_ui_shape_t)
+from runtime.moy_ui_face import (moy_theme_cell_t, moy_theme_leaf_t, moy_theme_look_t,
+                                 moy_ui_mark_t)
+
+_LINE_FN = dict(_Lines._fields_)["get"]
 
 
 def install(m, lib, h, counts, glyphs, kinds, states, tokens):
@@ -57,114 +62,25 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         _check(lib.moy_ui_over_block(c.byref(ov), raw, len(o)))
         return c.byref(ov), (ov, raw)
 
-    def api_size():
-        return int(lib.moy_ui_api_size())
 
     def api_begin(ctx, inp, rect, flags, fs):
         p, _k = _ctx(ctx)
         ib = None if inp is None else _buf(inp)
         return bool(lib.moy_ui_api_begin(p, ib, box_of(rect), int(flags), int(fs)))
 
-    def api_page(ctx, cv, look, title, o):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        t, keep = span(title)
-        ov, ok = _over(o)
-        out = _Box()
-        lib.moy_ui_api_page(p, c.byref(s), t, ov, c.byref(out))
-        return (out.x, out.y, out.w, out.h)
 
-    def api_label(ctx, cv, look, text, o):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        t, keep = span(text)
-        ov, ok = _over(o)
-        lib.moy_ui_api_label(p, c.byref(s), t, ov)
 
-    def api_button(ctx, cv, look, label, kind_, o):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        t, keep = span(label)
-        ov, ok = _over(o)
-        return bool(lib.moy_ui_api_button(p, c.byref(s), t, int(kind_), ov))
 
-    def api_toggle(ctx, cv, look, label, on, o):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        t, keep = span(label)
-        ov, ok = _over(o)
-        return bool(lib.moy_ui_api_toggle(p, c.byref(s), t, 1 if on else 0, ov))
 
-    def api_slider(ctx, cv, look, label, v, lo, hi, o):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        t, keep = span(label)
-        ov, ok = _over(o)
-        return int(lib.moy_ui_api_slider(p, c.byref(s), t, int(v), int(lo), int(hi), ov))
 
-    def api_icon(ctx, name):
-        p, _k = _ctx(ctx)
-        t, keep = span(name)
-        return bool(lib.moy_ui_api_icon(p, t))
 
-    def api_box(ctx, id_):
-        p, _k = _ctx(ctx)
-        t, keep = span(id_)
-        v = (c.c_int32 * 4)()
-        if not lib.moy_ui_api_box(p, t, v):
-            return None
-        return tuple(v)
 
-    def api_progress(ctx, cv, look, label, v, hi, o):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        t, keep = span(label)
-        ov, ok = _over(o)
-        lib.moy_ui_api_progress(p, c.byref(s), t, int(v), int(hi), ov)
 
-    def api_list(ctx, cv, look, label, items, cur, o):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        t, keep = span(label)
-        ov, ok = _over(o)
-        b = bytes(items)
-        return int(lib.moy_ui_api_list(p, c.byref(s), t, b, len(b), int(cur), ov))
 
-    def api_group(ctx, cv, look, caption, o):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        t, keep = span(caption)
-        ov, ok = _over(o)
-        lib.moy_ui_api_group(p, c.byref(s), t, ov)
 
-    def api_value(ctx, cv, look, kind_, label, value, o):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        t, keep = span(label)
-        v, keep2 = span(value)
-        ov, ok = _over(o)
-        return bool(lib.moy_ui_api_value(p, c.byref(s), int(kind_), t, v, ov))
 
-    def api_choice(ctx, cv, look, kind_, label, opts, cur, o):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        t, keep = span(label)
-        ov, ok = _over(o)
-        b = bytes(opts)
-        return int(lib.moy_ui_api_choice(p, c.byref(s), int(kind_), t, b, len(b), int(cur), ov))
 
-    def api_hints(ctx, cv, look, items, o):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        ov, ok = _over(o)
-        b = bytes(items)
-        lib.moy_ui_api_hints(p, c.byref(s), b, len(b), ov)
 
-    def api_hints_w(ctx, cv, look, items):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        b = bytes(items)
-        return int(lib.moy_ui_api_hints_w(p, c.byref(s), b, len(b)))
 
     def api_table(ctx, cv, look, label, cols, cells, cur, o):
         p, _k = _ctx(ctx)
@@ -176,73 +92,14 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         lib.moy_ui_api_table(p, c.byref(s), t, cb, len(cb), eb, len(eb), int(cur), ov, out)
         return int(out[0]), bool(out[1])
 
-    def api_scroll(ctx, cv, look, id_, o):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        t, keep = span(id_)
-        if not t.n:
-            keep = c.create_string_buffer(b"", 1)
-            t = _Span(c.addressof(keep), 0)
-        ov, ok = _over(o)
-        _nested(lib.moy_ui_api_scroll(p, c.byref(s), t, ov))
 
-    def api_field(ctx, cv, look, label, buf, n, o):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        t, keep = span(label)
-        ov, ok = _over(o)
-        raw = (c.c_uint8 * max(1, len(buf))).from_buffer(buf) if len(buf) else (c.c_uint8 * 1)()
-        return int(lib.moy_ui_api_field(p, c.byref(s), t, raw, len(buf), int(n), ov))
 
-    def api_dialog(ctx, cv, look, title, buttons, kind_, o):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        t, keep = span(title)
-        if not t.n:
-            keep = c.create_string_buffer(b"", 1)
-            t = _Span(c.addressof(keep), 0)
-        ov, ok = _over(o)
-        b = bytes(buttons)
-        return _nested(int(lib.moy_ui_api_dialog(p, c.byref(s), t, b, len(b), int(kind_), ov)))
 
-    def api_wash(ctx, cv, look):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        lib.moy_ui_api_wash(p, c.byref(s))
 
-    def api_wash_box(ctx):
-        p, _k = _ctx(ctx)
-        b = lib.moy_ui_api_wash_box(p)
-        return (b.x, b.y, b.w, b.h)
 
-    def api_popover(ctx, cv, look, id_, w, o):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        t, keep = span(id_)
-        if not t.n:
-            keep = c.create_string_buffer(b"", 1)
-            t = _Span(c.addressof(keep), 0)
-        ov, ok = _over(o)
-        return _nested(int(lib.moy_ui_api_popover(p, c.byref(s), t, int(w), ov)))
 
-    def api_menu(ctx, cv, look, label, items, icons, o):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        t, keep = span(label)
-        if not t.n:
-            keep = c.create_string_buffer(b"", 1)
-            t = _Span(c.addressof(keep), 0)
-        ov, ok = _over(o)
-        b, ib = bytes(items), bytes(icons)
-        return int(lib.moy_ui_api_menu(p, c.byref(s), t, b, len(b), ib, len(ib), ov))
 
-    def api_menu_danger(ctx, rows):
-        p, _k = _ctx(ctx)
-        lib.moy_ui_api_menu_danger(p, int(rows) & 0xFFFFFFFF)
 
-    def api_text(ctx, lines, centre, tone, role):
-        p, _k = _ctx(ctx)
-        lib.moy_ui_api_text(p, int(lines), int(centre), int(tone), int(role))
 
     def _span0(text):
         t, keep = span(text)
@@ -251,71 +108,14 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
             t = _Span(c.addressof(keep), 0)
         return t, keep
 
-    def api_card_mark(ctx, badge, tone, blank):
-        p, _k = _ctx(ctx)
-        t, keep = _span0(badge)
-        u, keep2 = _span0(blank)
-        lib.moy_ui_api_card_mark(p, t, int(tone), u)
 
-    def api_grid_spread(ctx, cols, foot, top, margin, wrap=0):
-        p, _k = _ctx(ctx)
-        lib.moy_ui_api_grid_spread(p, int(cols), int(foot), int(top), int(margin), int(wrap))
 
-    def api_group_card(ctx, cv, look):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        lib.moy_ui_api_group_card(p, c.byref(s))
 
-    def api_empty(ctx, cv, look, icon, title, lines):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        t, keep = _span0(icon)
-        u, keep2 = _span0(title)
-        b = bytes(lines)
-        return int(lib.moy_ui_api_empty(p, c.byref(s), t, u, b, len(b)))
 
-    def api_note(ctx, cv, look, icon, lines):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        t, keep = _span0(icon)
-        b = bytes(lines)
-        return int(lib.moy_ui_api_note(p, c.byref(s), t, b, len(b)))
 
-    def api_bubble(ctx, cv, look, text, head, status, opt, o):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        t, keep = _span0(text)
-        h, keep2 = _span0(head)
-        u, keep3 = _span0(status)
-        words = (c.c_int32 * len(opt))(*opt)
-        ov, ok = _over(o)
-        out = (c.c_int32 * 5)()
-        lib.moy_ui_api_bubble(p, c.byref(s), t, h, u, words, len(opt), ov, out)
-        return tuple(out)
 
-    def api_month(ctx, cv, look, title, days, first, n, today):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        t, keep = _span0(title)
-        u, keep2 = _span0(days)
-        return int(lib.moy_ui_api_month(p, c.byref(s), t, u, int(first), int(n), int(today)))
 
-    def api_toast(ctx, cv, look, text, kind, flat):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        t, keep = _span0(text)
-        u, keep2 = _span0(kind)
-        out = (c.c_int32 * 4)()
-        lib.moy_ui_api_toast(p, c.byref(s), t, u, 1 if flat else 0, out)
-        return tuple(out)
 
-    def api_tool(ctx, cv, look, icon, label, o):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        i, keep = span(icon)
-        t, keep2 = span(label)
-        ov, ok = _over(o)
-        return bool(lib.moy_ui_api_tool(p, c.byref(s), i, t, ov))
 
     def api_bar(ctx, cv, look, title, tools, off, back=False):
         p, _k = _ctx(ctx)
@@ -342,27 +142,11 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
                 tuple(slots[i] for i in range(n.value)), off.value,
                 (chip or b"").decode("utf-8", "replace"))
 
-    def api_rule(ctx, cv, look):
-        p, _k = _ctx(ctx)
-        lib.moy_ui_api_rule(p, c.byref(sink(cv, look)))
 
-    def api_bar_tap(ctx, i):
-        p, _k = _ctx(ctx)
-        lib.moy_ui_api_bar_tap(p, int(i))
 
-    def api_back(ctx, take):
-        p, _k = _ctx(ctx)
-        return bool(lib.moy_ui_api_back(p, 1 if take else 0))
 
-    def api_run_back(take):
-        return bool(lib.moy_ui_run_back(1 if take else 0))
 
-    def api_cancel(ctx, take):
-        p, _k = _ctx(ctx)
-        return bool(lib.moy_ui_api_cancel(p, 1 if take else 0))
 
-    def api_run_cancel(take):
-        return bool(lib.moy_ui_run_cancel(1 if take else 0))
 
     def api_run_bar_lent():
         title = c.c_char_p()
@@ -377,55 +161,22 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
                 tuple(slots[i] for i in range(n.value)), off.value,
                 (chip.value or b"").decode("utf-8", "replace"))
 
-    def api_run_bar_tap(i):
-        lib.moy_ui_run_bar_tap(int(i))
 
-    def api_paste(ctx, text):
-        p, _k = _ctx(ctx)
-        b = bytes(text)
-        lib.moy_ui_api_paste(p, b, len(b))
 
-    def api_run_paste(text):
-        b = bytes(text)
-        lib.moy_ui_run_paste(b, len(b))
 
-    def api_run_steps(rep, keyrep):
-        lib.moy_ui_run_steps(int(rep), int(keyrep))
 
-    def api_run_typing():
-        return bool(lib.moy_ui_run_typing())
 
-    def api_owes(ctx):
-        p, _k = _ctx(ctx)
-        return bool(lib.moy_ui_api_owes(p))
 
-    def api_moved(ctx):
-        p, _k = _ctx(ctx)
-        return bool(lib.moy_ui_api_moved(p))
 
-    def api_moving(ctx):
-        p, _k = _ctx(ctx)
-        return bool(lib.moy_ui_api_moving(p))
 
     def api_busy(ctx):
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_owes(p) or lib.moy_ui_api_moving(p))
 
-    def api_offset(ctx, x, y):
-        p, _k = _ctx(ctx)
-        return int(lib.moy_ui_api_offset(p, int(x), int(y)))
 
-    def api_fades(reset):
-        return int(lib.moy_ui_api_fades(None, 1 if reset else 0))
 
-    def api_shift_plan(ctx, out):
-        p, _k = _ctx(ctx)
-        w = (c.c_int32 * 8).from_buffer(out)
-        return int(lib.moy_ui_api_shift_plan(p, c.addressof(w)))
 
-    def api_shift_break(ctx):
-        p, _k = _ctx(ctx)
-        lib.moy_ui_api_shift_break(p)
+
 
     def api_shift_drawn(ctx):
         p, _k = _ctx(ctx)
@@ -440,21 +191,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
             return None
         return tuple(v) if r is None else r
 
-    def api_floor(ctx):
-        p, _k = _ctx(ctx)
-        v = (c.c_int32 * 96)()
-        n = int(lib.moy_ui_api_floor(p, v, 24))
-        if n < 0:
-            return None
-        return tuple(tuple(v[4 * i:4 * i + 4]) for i in range(n))
 
-    def api_floor_box(ctx, out):
-        p, _k = _ctx(ctx)
-        return bool(lib.moy_ui_api_floor_box(p, (c.c_int32 * 4).from_buffer(out)))
-
-    def api_change_box(ctx, out):
-        p, _k = _ctx(ctx)
-        return bool(lib.moy_ui_api_change_box(p, (c.c_int32 * 8).from_buffer(out)))
 
     def api_lag_note(ctx, hist, bands, f, kind):
         p, _k = _ctx(ctx)
@@ -475,21 +212,9 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
                                              (c.c_int32 * len(pf)).from_buffer(pf),
                                              (c.c_int32 * len(hp)).from_buffer(hp)))
 
-    def api_host_arm(ctx):
-        p, _k = _ctx(ctx)
-        return int(lib.moy_ui_api_host_arm(p))
 
-    def api_host_whole(ctx):
-        p, _k = _ctx(ctx)
-        lib.moy_ui_api_host_whole(p)
 
-    def api_keys_back(ctx):
-        p, _k = _ctx(ctx)
-        lib.moy_ui_api_keys_back(p)
 
-    def api_pop_box(ctx, out):
-        p, _k = _ctx(ctx)
-        return bool(lib.moy_ui_api_pop_box(p, (c.c_int32 * 4).from_buffer(out)))
 
     def api_card_clip(ctx, r):
         p, _k = _ctx(ctx)
@@ -497,104 +222,25 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         lib.moy_ui_api_card_clip(p, c.addressof(v))
         return r
 
-    def api_keep(ctx, cv, look, id_, h):
-        p, _k = _ctx(ctx)
-        t, keep = span(id_)
-        return int(lib.moy_ui_api_keep(p, c.byref(sink(cv, look)), t, int(h)))
 
-    def api_audit(on):
-        return int(lib.moy_ui_api_audit(None, int(on)))
 
-    def api_end(ctx, cv, look):
-        p, _k = _ctx(ctx)
-        lib.moy_ui_api_end(p, c.byref(sink(cv, look)))
 
-    def api_table_pics(ctx, cv, look):
-        p, _k = _ctx(ctx)
-        lib.moy_ui_api_table_pics(p, c.byref(sink(cv, look)))
 
-    def api_table_dist(ctx):
-        p, _k = _ctx(ctx)
-        return int(lib.moy_ui_api_table_dist(p))
 
-    def api_table_part(ctx, cv, look, r):
-        p, _k = _ctx(ctx)
-        v = (c.c_int32 * 8).from_buffer(r)
-        return int(lib.moy_ui_api_table_part(p, c.byref(sink(cv, look)), c.addressof(v)))
 
-    def api_table_floor(ctx, r):
-        p, _k = _ctx(ctx)
-        v = (c.c_int32 * 4).from_buffer(r)
-        return int(lib.moy_ui_api_table_floor(p, c.addressof(v)))
 
-    def api_table_copy(ctx, r, back):
-        p, _k = _ctx(ctx)
-        v = (c.c_int32 * 4).from_buffer(r)
-        return int(lib.moy_ui_api_table_copy(p, c.addressof(v), 1 if back else 0))
 
-    def api_table_shift(ctx, r, back):
-        p, _k = _ctx(ctx)
-        v = (c.c_int32 * 5).from_buffer(r)
-        return int(lib.moy_ui_api_table_shift(p, c.addressof(v), 1 if back else 0))
 
-    def api_held(ctx, id_, key):
-        p, _k = _ctx(ctx)
-        t, keep = span(id_)
-        if not t.n:
-            keep = c.create_string_buffer(b"", 1)
-            t = _Span(c.addressof(keep), 0)
-        return bool(lib.moy_ui_api_held(p, t, int(key)))
 
-    def api_held_last(ctx, id_, key):
-        p, _k = _ctx(ctx)
-        t, keep = span(id_)
-        if not t.n:
-            keep = c.create_string_buffer(b"", 1)
-            t = _Span(c.addressof(keep), 0)
-        return bool(lib.moy_ui_api_held_last(p, t, int(key)))
 
-    def api_held_all(ctx):
-        p, _k = _ctx(ctx)
-        return bool(lib.moy_ui_api_held_all(p))
 
-    def api_slots(ctx, cap, key):
-        p, _k = _ctx(ctx)
-        return int(lib.moy_ui_api_slots(p, int(cap), int(key)))
 
-    def api_slot(ctx, name, gen, mint):
-        p, _k = _ctx(ctx)
-        t, keep = span(name)
-        if not t.n:
-            keep = c.create_string_buffer(b"", 1)
-            t = _Span(c.addressof(keep), 0)
-        return int(lib.moy_ui_api_slot(p, t, int(gen), 1 if mint else 0))
 
-    def api_slot_next(ctx):
-        p, _k = _ctx(ctx)
-        return int(lib.moy_ui_api_slot_next(p))
 
-    def _block(name):
-        t, keep = span(name)
-        if not t.n:
-            keep = c.create_string_buffer(b"", 1)
-            t = _Span(c.addressof(keep), 0)
-        return t, keep
 
-    def api_block_set(name, field, value):
-        t, _keep = _block(name)
-        return bool(lib.moy_ui_api_block_set(None, t, int(field), int(value) & 0xffffffff))
 
-    def api_block_gen(name):
-        t, _keep = _block(name)
-        return int(lib.moy_ui_api_block_gen(None, t))
 
-    def api_block_since(name, gen):
-        t, _keep = _block(name)
-        return int(lib.moy_ui_api_block_since(None, t, int(gen)))
 
-    def api_block_key(name):
-        t, _keep = _block(name)
-        return int(lib.moy_ui_api_block_key(None, t))
 
     def api_table_rows(ctx):
         p, _k = _ctx(ctx)
@@ -603,34 +249,8 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
             return None
         return (v[0], v[1], (v[2], v[3], v[4], v[5]), v[6], v[7])
 
-    def api_grid(ctx, cv, look, id_, w, h, o):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        t, keep = span(id_)
-        if not t.n:
-            keep = c.create_string_buffer(b"", 1)
-            t = _Span(c.addressof(keep), 0)
-        ov, ok = _over(o)
-        lib.moy_ui_api_grid(p, c.byref(s), t, int(w), int(h), ov)
 
-    def api_card(ctx, cv, look, title, sub, o):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        t, keep = span(title)
-        u, keep2 = span(sub)
-        ov, ok = _over(o)
-        out = (c.c_int32 * 5)()
-        lib.moy_ui_api_card(p, c.byref(s), t, u, ov, out)
-        return tuple(out)
 
-    def api_part(ctx, cv, look, id_, w, h, o):
-        p, _k = _ctx(ctx)
-        s = sink(cv, look)
-        t, keep = span(id_)
-        ov, ok = _over(o)
-        out = (c.c_int32 * 5)()
-        lib.moy_ui_api_part(p, c.byref(s), t, int(w), int(h), ov, out)
-        return tuple(out)
 
     def api_split(ctx, cv, look, id_, sizes, n, mins, opt, out):
         p, _k = _ctx(ctx)
@@ -643,9 +263,6 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
                                         None if mv is None else c.addressof(mv),
                                         c.addressof(ov), c.addressof(wv)))
 
-    def api_split_at(ctx, x, y):
-        p, _k = _ctx(ctx)
-        return bool(lib.moy_ui_api_split_at(p, int(x), int(y)))
 
     def api_split_frame(ctx, words, out):
         p, _k = _ctx(ctx)
@@ -654,17 +271,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
                                               c.addressof(v) + 16,
                                               (c.c_int32 * 4).from_buffer(out)))
 
-    def api_split_toward(ctx, x, y, dx, dy, out):
-        p, _k = _ctx(ctx)
-        return bool(lib.moy_ui_api_split_toward(p, int(x), int(y), int(dx), int(dy),
-                                                (c.c_int32 * 4).from_buffer(out)))
 
-    def api_part_at(ctx):
-        p, _k = _ctx(ctx)
-        v = (c.c_int32 * 2)()
-        if not lib.moy_ui_api_part_at(p, v):
-            return None
-        return (v[0], v[1])
 
     def api_focus(ctx, id_=None):
         p, _k = _ctx(ctx)
@@ -679,42 +286,13 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         n = lib.moy_ui_api_focus(p, t, buf, 64)
         return None if n < 0 else buf.value.decode("utf-8", "replace")
 
-    def api_focus_ahead(ctx, id_):
-        p, _k = _ctx(ctx)
-        t, keep = span(id_)
-        if not t.n:
-            keep = c.create_string_buffer(b"", 1)
-            t = _Span(c.addressof(keep), 0)
-        lib.moy_ui_api_focus_ahead(p, t)
 
-    def api_keys_taken(ctx):
-        p, _k = _ctx(ctx)
-        return bool(lib.moy_ui_api_keys_taken(p))
 
-    def api_typing(ctx):
-        p, _k = _ctx(ctx)
-        return bool(lib.moy_ui_api_typing(p))
 
-    def api_edge(ctx):
-        p, _k = _ctx(ctx)
-        return bool(lib.moy_ui_api_edge(p))
 
-    def api_tap_armed(ctx):
-        p, _k = _ctx(ctx)
-        return bool(lib.moy_ui_api_tap_armed(p))
 
-    def api_at(ctx, x, y, w, h):
-        p, _k = _ctx(ctx)
-        lib.moy_ui_api_at(p, int(x), int(y), int(w), int(h))
 
-    def api_lost(ctx):
-        p, _k = _ctx(ctx)
-        return int(lib.moy_ui_api_lost(p))
 
-    def api_dup(ctx):
-        p, _k = _ctx(ctx)
-        d = lib.moy_ui_api_dup(p)
-        return None if d is None else d.decode("utf-8", "replace")
 
 
     # -- text views (native/moy_ui/moy_ui_text.h, ui.text_view) ---------------------
@@ -756,23 +334,8 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
             return into
         return (out[0], out[1])
 
-    def api_text_at(ctx, id_, px, py):
-        p, _k = _ctx(ctx)
-        t, keep = span(id_)
-        out = (c.c_int32 * 2)()
-        if not lib.moy_ui_api_text_at(p, t, int(px), int(py), c.addressof(out)):
-            return None
-        return (out[0], out[1])
 
-    def api_text_cover(ctx, id_, y0, y1):
-        p, _k = _ctx(ctx)
-        t, keep = span(id_)
-        lib.moy_ui_api_text_cover(p, t, int(y0), int(y1))
 
-    def api_text_aim(ctx, id_, line, lines):
-        p, _k = _ctx(ctx)
-        t, keep = span(id_)
-        return bool(lib.moy_ui_api_text_aim(p, t, int(line), int(lines)))
 
     def api_text_reveal(ctx, id_, lines, line, col):
         p, _k = _ctx(ctx)
@@ -811,36 +374,14 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         p, k = _ctx(ctx)
         return p, sink(cv, look), k
 
-    for f in (api_text_view, api_text_at, api_text_cover, api_text_aim, api_text_reveal,
-              text_tones, text_words, text_runs, api_native):
+    for f in (api_text_view, api_text_reveal, text_tones, text_words, text_runs, api_native):
         setattr(m, f.__name__, f)
 
-    for f in (api_size, api_begin, api_page, api_label, api_button, api_toggle, api_slider,
-              api_list, api_group, api_value, api_choice, api_hints, api_hints_w, api_icon,
-              api_progress,
-              api_box, api_table, api_scroll, api_field, api_dialog, api_wash, api_wash_box,
-              api_owes, api_moved, api_moving, api_busy, api_offset, api_fades,
-              api_shift_plan, api_shift_break,
-              api_shift_drawn, api_band, api_floor, api_floor_box, api_change_box,
-              api_lag_note, api_lag, api_host_begin, api_host_arm,
-              api_host_whole, api_keys_back,
-              api_pop_box,
-              api_card_clip, api_keep, api_audit,
-              api_end,
-              api_table_rows, api_table_pics, api_table_part, api_table_dist,
-              api_table_floor, api_table_copy, api_table_shift, api_held, api_held_last,
-              api_held_all,
-              api_slots, api_slot, api_slot_next,
-              api_block_set, api_block_gen, api_block_since, api_block_key,
-              api_grid,
-              api_card, api_part, api_part_at, api_split, api_split_at, api_split_frame,
-              api_split_toward, api_popover, api_menu, api_menu_danger,
-              api_text, api_card_mark, api_grid_spread, api_group_card, api_empty, api_note, api_bubble, api_month, api_toast,
-              api_tool, api_bar, api_bar_lent, api_bar_tap, api_back, api_run_back, api_cancel, api_run_cancel, api_run_bar_lent,
-              api_run_bar_tap, api_paste, api_run_paste, api_run_steps, api_run_typing, api_rule,
-              api_focus, api_focus_ahead, api_keys_taken, api_typing, api_edge, api_tap_armed, api_at,
-              api_dup, api_lost):
+    for f in (api_begin, api_table, api_busy, api_shift_drawn, api_band, api_lag_note, api_lag,
+              api_host_begin, api_card_clip, api_table_rows, api_split, api_split_frame, api_bar,
+              api_bar_lent, api_run_bar_lent, api_focus):
         setattr(m, f.__name__, f)
+    moy_ui_face.install(m, lib, _ctx, sink, _span0, _over, box_of)
     m.calls = lambda: lib.moy_ui_calls()
     m.glyph_names = lambda: glyphs
     m.glyph_id = glyph_id
@@ -891,7 +432,6 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
     m.themes = lambda: seeds
     n_roles = c.c_int.in_dll(lib, "moy_theme_n_roles").value
     roles = _names(lib, "moy_theme_role_names", n_roles)
-    metric_n = c.c_int.in_dll(lib, "moy_theme_n_metrics").value
     effect_names = _names(lib, "moy_theme_effect_names",
                           c.c_int.in_dll(lib, "moy_theme_n_effects").value)
     m.theme_roles = lambda: roles
@@ -899,7 +439,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
     parts = _names(lib, "moy_theme_part_names", c.c_int.in_dll(lib, "moy_theme_n_parts").value)
     th_states = _names(lib, "moy_theme_state_names",
                        c.c_int.in_dll(lib, "moy_theme_n_states").value)
-    Shape = _shape_type(metric_n, len(parts), len(th_states), 64)
+    Shape = moy_ui_shape_t
     assert c.sizeof(Shape) == c.c_int.in_dll(lib, "moy_ui_shape_size").value
     m.parts = lambda: parts
     m.theme_states = lambda: th_states
@@ -972,10 +512,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         b = _b(name)
         return int(lib.moy_theme_modes(b, len(b)))
 
-    class _Mark(c.Structure):
-        _fields_ = [("mark", c.c_int8), ("w", c.c_int8), ("gap", c.c_int8),
-                    ("key_w", c.c_int8), ("c", c.c_int16), ("ink", c.c_int16),
-                    ("alpha", c.c_uint8), ("declared", c.c_uint8), ("key_c", c.c_int32)]
+    _Mark = moy_ui_mark_t
 
     def theme_marks(name, light):
         b = _b(name)
@@ -1009,9 +546,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
 
     sdims = tuple((c.c_int * 6).in_dll(lib, "moy_theme_sheet_dims"))
 
-    class _CellRec(c.Structure):
-        _fields_ = [(n, c.c_uint8) for n in ("part", "state", "sub", "x", "y", "w", "h",
-                                             "nine")]
+    _CellRec = moy_theme_cell_t
 
     cell_recs = (_CellRec * sdims[4]).in_dll(lib, "moy_theme_cells")
     cells = tuple((parts[r.part], th_states[r.state], r.sub, r.x, r.y, r.w, r.h, bool(r.nine))
@@ -1047,7 +582,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
     m.sheet_caps = lambda: (w_, sr, ir, sr * (w_ + 2), ir * (w_ + 2))
 
     dims = (c.c_int * 7).in_dll(lib, "moy_theme_layout_dims")
-    Layout = _layout_type(*dims[:5])
+    Layout = moy_theme_layout_t
     assert c.sizeof(Layout) == dims[6]
     bar_edges = _names(lib, "moy_theme_bar_edges", dims[0])
     widgets = _names(lib, "moy_theme_widget_names", dims[5])
@@ -1079,26 +614,12 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
     ld = tuple((c.c_int * 10).in_dll(lib, "moy_theme_look_dims"))
     n_leaves, stops, paints_cap, tiles_cap, ab_cap, btn_n, map_max, text_max, n_texts, btn0 = ld
 
-    class _Paint(c.Structure):
-        _fields_ = [("n", c.c_uint8), ("mode", c.c_uint8), ("steps", c.c_uint8),
-                    ("pad", c.c_uint8), ("t", c.c_int16 * stops), ("c", c.c_int32 * stops)]
-
-    class _Map(c.Structure):
-        _fields_ = [("name", c.c_char * (map_max + 1)), ("section", c.c_uint8),
-                    ("kind", c.c_uint8), ("v", c.c_int32 * btn_n)]
-
-    class _Look(c.Structure):
-        _fields_ = [("v", c.c_int32 * n_leaves), ("n_paints", c.c_uint8),
-                    ("n_tiles", c.c_uint8), ("n_appbtn", c.c_uint8), ("n_text", c.c_uint8),
-                    ("paint", _Paint * paints_cap), ("tile", _Map * tiles_cap),
-                    ("appbtn", _Map * ab_cap), ("text", (c.c_char * (text_max + 1)) * n_texts)]
+    _Look = moy_theme_look_t
 
     if c.sizeof(_Look) != c.c_size_t.in_dll(lib, "moy_theme_look_bytes").value:
         raise RuntimeError("moy_ui_binding: moy_theme_look_t does not match")
 
-    class _Leaf(c.Structure):
-        _fields_ = [("kind", c.c_uint8), ("lo", c.c_int32), ("hi", c.c_int32),
-                    ("def_", c.c_int32)]
+    _Leaf = moy_theme_leaf_t
 
     leaf_rows = (_Leaf * n_leaves).in_dll(lib, "moy_theme_leaves")
     leaf_names = _names(lib, "moy_theme_leaf_names", n_leaves)
@@ -1277,14 +798,6 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
     m.font_load = font_load
     m.font_file = font_file
     m.font_reset = lib.moy_ui_font_reset
-
-    def text_wire(*swapped):
-        was = bool(lib.moy_text_wire_swapped())
-        if swapped:
-            lib.moy_text_wire(1 if swapped[0] else 0)
-        return was
-
-    m.text_wire = text_wire
 
     def text_lanes():
         n = (c.c_uint32 * 2)()

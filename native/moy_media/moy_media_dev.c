@@ -11,9 +11,7 @@
 // first, so no ".." leaves them; a relative one is its cart folder's. A
 // playlist naming a file outside them is refused once read, before it plays.
 
-#if defined(__has_include) && !__has_include("esp_heap_caps.h") && !defined(_POSIX_C_SOURCE)
-#define _POSIX_C_SOURCE 200809L     // clock_gettime under -std=c99 (moy_sync.h)
-#endif
+#include "moy_platform.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -29,12 +27,21 @@
 // The grant's places (native/moy_app) and the user-files layer's paths
 // (native/moy_store's moy_ufiles); weak, for an image without either: a file
 // is then outside every folder.
-bool moy_app_dev_places(uint32_t pid, char *folder, size_t fcap, char *root, size_t rcap,
-                        int *kind) __attribute__((weak));
-const char *moy_app_kind_name(int kind) __attribute__((weak));
-int moy_uf_path(int which, const char *root, const char *kind, const char *name,
-                moy_buf_t *out) __attribute__((weak));
-void moy_buf_free(moy_buf_t *b) __attribute__((weak));
+#if __has_include("moy_app.h")
+#include "moy_app.h"
+#else
+bool moy_app_dev_places(uint32_t pid, char *folder, size_t fcap, char *root, size_t rcap, int *kind);
+const char *moy_app_kind_name(int kind);
+#endif
+#pragma weak moy_app_dev_places
+#pragma weak moy_app_kind_name
+#pragma weak moy_uf_path
+#if __has_include("moy_fs.h")
+#include "moy_fs.h"
+#else
+void moy_buf_free(moy_buf_t *b);
+#endif
+#pragma weak moy_buf_free
 
 #define PATH_MAX_ MOY_MEDIA_SRC_MAX
 #define TAG "media"

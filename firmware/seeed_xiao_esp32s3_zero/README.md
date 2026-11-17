@@ -32,11 +32,12 @@ What ended the no-build arrangement is that the board stopped being a spike and
 became the thing a kid's carts actually live on. Three properties a pushed tree
 cannot have started to matter:
 
-- **The browser console rides the image.** `native/moy_web` bakes the gzipped
-  bundle into the firmware so the page a board serves cannot drift behind the
-  board serving it. That has been true of every console board since 2026-08-15;
-  this board had no image, so it was the last place the drift survived — its
-  bundle was only ever a copy somebody pushed.
+- **The browser console is the page the image names.** The image carries
+  the digest of the bundle it was built with, and the board serves only the
+  add-on cart whose pack has that digest (`native/moy_net/moy_page.h`), so the
+  page a board serves cannot drift behind the board serving it. This board had
+  no image, so it was the last place the drift survived — its bundle was only
+  ever a copy somebody pushed.
 - **A second app slot**, so the board can be updated by anyone who is not
   holding a cable. It is headless and lives on a shelf; a cable is a real cost.
 - **One declaration of what it runs.** The module set was a `cp` list in a shell
@@ -49,10 +50,14 @@ cannot have started to matter:
   net every console board rides.
 
 `provision.sh` survives and **changed jobs**: it provisions the credentials and,
-with `--password`, the password browsers pair with, and keeps the module push as an opt-in dev loop. The CARTS
-stopped being its job on 2026-08-30 — the image carries a compressed seed
-roster and inflates it on first boot — so what is left there is a safety net and
-a re-push flag. See "Provisioning" below.
+with `--password`, the password browsers pair with, installs the browser
+console add-on and the official carts, and keeps the module push as an opt-in
+dev loop. The image carries its seed carts (the core carts, every app and
+five games) and seeds them as a console seeds its own; every other system
+cart is an official cart its release publishes, which the browser console
+the board serves adds and removes: its Get Carts asks the board through the
+sealed `/official` (`zero_host.make_official`), and the board fetches the
+cart from its release and writes its own store. See "Provisioning" below.
 
 ## Build, flash, look
 
@@ -71,11 +76,9 @@ the slot the cable flash just wrote.
 same table to publish the asset the page serves. Both tables read the reset
 pair off this board's `[flash]` block, so the page asks for the default reset
 (esptool-js takes its USB-Serial/JTAG path off the `303a:1001` PID and drives
-this board into the loader exactly as it does the Guition) and asks for no
-reset afterwards, because the `watchdog_reset` that gets it out is not one
-of the line sequences the page plays (`site/build.py` `HARD_RESET_LINES`). So the browser's gesture is a replug when the
-write finishes, and holding BOOT while plugging in is the escape hatch on the
-card.
+this board into the loader exactly as it does the Guition) and the hard
+reset after it (`site/build.py` `HARD_RESET_LINES`), so nobody replugs the
+board; holding BOOT while plugging in is the escape hatch on the card.
 
 **A table-changing flash WIPES THE STORE.** The partition table puts `vfs` at
 `0x720000` (since 2026-11-07; `0x6A0000` from 2026-10-18, `0x620000` from
@@ -85,8 +88,10 @@ the new image comes up on a freshly formatted store (`tools/board_flash.py`
 erases the moved store's first blocks and says so). A table change needs a USB
 flash, and an OTA'd Zero keeps the table it was last cabled with: OTA writes
 the app slot, never the table. Run
-`./provision.sh` afterwards to put the credentials and the password back; the seed
-roster the image carries seeds itself on the next boot. A kid's browser-made
+`./provision.sh` afterwards to put the credentials and the password back; the
+carts the image carries seed themselves on the next boot, and the cable flash
+(or the script) installs the add-on, which a board with none also fetches
+from its release once it is on a network, unless its owner removed it. A kid's browser-made
 carts are not lost by this — the browser keeps its own copy in OPFS and syncs
 them back on the next visit — but anything that existed *only* here is.
 
@@ -130,10 +135,31 @@ them back on the next visit — but anything that existed *only* here is.
   `[roster]`), and the seed stops while `zero_host.SEED_RESERVE` (96 KiB) is
   still free, so
   the system folder (`/moy/system`: the password, the SSH host key, the
-  browsers' keys) and a kid's carts always fit. The seed is the EMPTY store's
-  only: a cart the kid deletes stays deleted (`zero_host.seed_carts`). The CSV carries the byte arithmetic and what would falsify it; the build prints the headroom on every run and fails on an
+  browsers' keys) and a kid's carts always fit. The CSV carries the byte arithmetic and what would falsify it; the build prints the headroom on every run and fails on an
   overflow (#168); the board's headroom floor (`[image] headroom_floor_kib` in
   `board.toml`) is 0 since 2026-11-03 (owner), and the board.toml says why.
+  On 2026-11-17 the browser console left the image for its add-on cart and
+  the slots became **2 MiB** (`0x200000`, at `0x20000` and `0x220000`), the
+  store the **3,968 KiB** `vfs` at `0x420000`, which holds the add-on (one
+  pack, about 1.9 MB) beside the carts; provisioning installs the add-on.
+  The image's roster is the core carts (`moy_seed.CORE`), every app and the
+  five games (board.toml's `[roster] image`; owner, 2026-11-17), seeded as a
+  console seeds its own (`zero_host.seed_carts`): present unless the kid
+  removed one (`system/removed`, which the page's delete and Get Carts'
+  remove write), a newer one in a new image replacing the store's with its
+  saves and config kept. The other system carts are official carts the
+  release publishes in `carts-xiao_zero.json`, which the page this board
+  serves installs (`/official`); after an update the board brings the ones
+  it holds to the new release (`runtime/carts/web_addon.py`). The website's
+  install writes the store with the add-on in it (`tools/store_image.py`);
+  a board with none (a wiped store) installs the one its image fits from its
+  release once the image confirms itself (`zero_host.make_addon`), and one
+  that holds add-ons of other builds beside the one that fits takes them off
+  then (`AddonStep.tidy`). A removal
+  of it is recorded (`system/removed`'s console line) and holds; the root
+  then says so and links `/?console=install`, which brings it back
+  (`zero_host.way_back`). The image's headroom is in
+  `docs/perf/image.md`.
 - **The seed roster is in the image, COMPRESSED** (2026-08-30). This board
   carried no carts at all until then, and both forms were **built** to find out
   why. With the plain `carts_data.py` the console boards freeze, this image is
@@ -142,9 +168,9 @@ them back on the next visit — but anything that existed *only* here is.
   the same 35 carts as one raw-deflate stream each it is **2,399,232 B — 473 KB
   left**, against **2,194,112 B / 673 KB** for the image that carried no roster
   at all. `tools/gen_device_carts.py --packed` emits it (201,716 B of blobs
-  against 731,592 B of plain source); `zero_host.seed_carts()` inflates it into
-  an **empty** store on first boot, one cart at a time, through MicroPython's
-  built-in `deflate`.
+  against 731,592 B of plain source); `zero_host.seed_carts()` inflates it
+  into the store one cart at a time, through MicroPython's built-in
+  `deflate`.
 - **The frozen set is `board.toml`.** This is the one board whose
   `[modules.shared]` is an ALLOWLIST rather than a denylist, and its board file
   argues the case at length: a denylist is right when the source tree's default
@@ -153,24 +179,27 @@ them back on the next visit — but anything that existed *only* here is.
   `moy_web` and the terminal (`moy_sh`, `moy_tty`, `moy_ssh`).** Every other one is denied with the hardware or the workload that
   is missing. The driver halves with no caller here are off in the board's own
   files: wired Ethernet, WPA-Enterprise, ESP-NOW and I2S (`sdkconfig.board`,
-  `mpconfigboard.h`), because the image's growth is the browser console it
-  bakes and the headroom floor is not the lever.
+  `mpconfigboard.h`), because every slot byte comes off the store twice and
+  the headroom floor is not the lever.
 
 ## Provisioning (the store, not the modules)
 
 ```bash
-./provision.sh [--modules] [--carts] [--clean] [--password] [/dev/ttyACM0] [wifi.json]
+./provision.sh [--modules] [--no-carts] [--no-console] [--clean] [--password] [/dev/ttyACM0] [wifi.json]
 ```
 
-Default: make the directories, optionally write the credentials and (`--password`) the
-board's password, reboot, and print where to pair. Every write is checked on
-the board: one it refuses (a full store) stops the script, non-zero, with what
-the board said. It pushes no carts by default, because the image seeds an
-empty store on the reboot it ends with; `--carts` pushes the image's roster
-(`system_carts/` less board.toml's `[roster] skip`), for a roster that moved
-since the image was built, and writes the repo's copy of a cart over whatever
-is on the board, which on the one board that is the store *of record* is a
-real thing to mean.
+Default: make the directories, install the browser console add-on that fits
+the image this checkout built (`dist/zero`; `--no-console` skips it) and the
+official carts (`--no-carts` skips them), optionally write the credentials and
+(`--password`) the board's password, reboot, and print where to pair. Every
+write is checked on the board: one it refuses (a full store) stops the script,
+non-zero, with what the board said. The official carts are
+`tools/board_flash.py`'s `install_carts`, which a cable flash runs too: every
+official cart the store holds at an older version that the image does not
+carry (the image's own are its seed's), the kid's saves and config kept; the
+store's reserve (`zero_host.SEED_RESERVE`) stays free, and a cart it does not
+fit is named. Every `mpremote` call it makes has a deadline, and a board that
+stops answering is named with the cure (unplug and replug it).
 
 `wifi.json` is the console's own store shape
 (`{"networks": [{"ssid", "password"}]}`) and is a secret — never in the repo.
@@ -188,10 +217,9 @@ keeps it.
 
 ### The flags, and the one hazard they exist for
 
-`--modules` pushes the image's own module set as plain files and `--carts`
-re-pushes the seed roster. Both are **dev loops**: a push is a second, a
-reflash is minutes. The wasm bundle is not among them — it is served from the
-image and changes only when the board is reflashed.
+`--modules` pushes the image's own module set as plain files: a **dev loop**,
+a push is a second, a reflash is minutes. The browser console is not among
+them — it is the add-on cart that fits the image.
 
 The hazard is that MicroPython searches `/` before `.frozen`, so a pushed `.py`
 outranks the image's own copy **on every boot after it**, silently and forever,
@@ -267,8 +295,9 @@ glass.
   `rolled_back` (the bootloader gave up on it). That is the headless replacement
   for the console's notice banner, and it is why the pending marker is cleared
   at the CONFIRM rather than at the read.
-- **the page itself** — the console is baked into the image, so a board that
-  updated is serving a different console the next time it is opened.
+- **the page itself** — the board serves only the add-on that fits its image
+  and installs that one after the confirm (`zero_host.make_addon`), so a board
+  that updated is serving a different console the next time it is opened.
 
 **The rollback confirm is the one piece of OTA that could not be reused.**
 `confirm_when_healthy` waits for frames on the glass, and this board paints
@@ -310,11 +339,13 @@ because a board either serves or hosts this AP and never both. It is a plain
 `<form>` — the page's only script fills the network list, offers the reveal on
 the password field and tells you what the scan found, so a phone with a broken
 script still has a page with a correct static state to type into. The AP is
-**open on purpose**: there is nothing behind it but the form, it exists only
-while the board is unconfigured, and the secrets that cross it belong to the
-person standing next to the board. What it costs is that a neighbour in
-range during that minute could configure the board first; what it buys is a
-setup that needs no printed key and no instructions.
+**open on purpose**: there is nothing behind it but the form, it comes up
+whenever no saved network answers, and the secrets that cross it belong to the
+person standing next to the board. On a board with no password yet, what it
+costs is that a neighbour in range during that minute could configure the board
+first; what it buys is a setup that needs no printed key and no instructions. A
+board that already has a password asks for it on the form too, and takes five
+wrong answers a boot (`zero_setup.CURRENT_TRIES`).
 
 **It is a captive portal since 2026-08-29, reversing this port's own recorded
 decline** (the argument, its price and what would reverse it back live in
@@ -422,8 +453,10 @@ radio's SPI, with `38–42` behind the board-to-board connector: see LoRa
 below), `43/44` (`D6`/`D7`, UART0,
 where MicroPython keeps the REPL that is the recovery path), `0/45/46`
 (boot-mode and VDD_SPI strapping) and `3` (`D2`, JTAG-source strapping — the
-one *exposed* pad held back, on the strict reading; `MOY_NET_GPIO_PINS` in
+one *exposed* pad held back, on the strict reading; the allowlist's comment in
 `boards/MOYBYTE_ZERO/mpconfigboard.h` carries the argument for re-admitting it).
+The list itself is board.toml's `gpio` lease row, which the build emits as
+`MOY_LEASE_GPIO_PINS`.
 
 Two behaviours worth knowing, both in `moy_gpio.c`'s header: **a read never
 reconfigures a pin** (so `pin_write(21, 0)` then `pin_read(21)` answers 0 and
@@ -525,7 +558,7 @@ update state machine and one whole first run end to end), plus
 below used to hold:
 
 - **The image, end to end.** The authored dual-OTA table boots — no silent
-  bootloader loop — and the board comes up on WiFi, serves the baked bundle, and
+  bootloader loop — and the board comes up on WiFi, serves the bundle, and
   answers `GET /update` with a real verdict (`no build published on this channel
   yet`, which is the correct answer to a channel with nothing on it, and proves
   the endpoint rather than the install).
@@ -540,7 +573,7 @@ below used to hold:
   (`carts_data.CARTS_Z`) inflated on first boot with no cable step: 36 carts
   served from `GET /carts.json` on a board that had just been erased. This was
   the last thing standing between "flashed" and "usable" and it is gone.
-- **The seed adds what is missing and rewrites nothing.** A later image carrying
+- **The seed adds what is missing and leaves a kid's carts alone.** A later image carrying
   one new cart (`Pin Light`) was flashed onto a board holding 43: all 36 roster
   carts ended up present, the new one among them, and the eight browser-made
   carts beside them — an imported PICO-8 Celeste included — were untouched.
@@ -681,7 +714,7 @@ a cart that calls `pin_write(21, 0)` (step 5's `Pin Light` does).
 *Pass:* the on-board user LED **lights** on `v:0` and goes out on `v:1` —
 that is active-low, and it means a cart writing 1 to "turn it on" turns it off.
 *Fail:* the opposite, in which case this board differs from the one this was
-measured on and `MOY_NET_GPIO_PINS`' note about pin 21 needs correcting. Note
+measured on and the allowlist's note about pin 21 needs correcting. Note
 `pin_write(21, 0)` then `pin_read(21)` answers 0 and leaves the LED as it is —
 a read never reconfigures a pin.
 
@@ -762,23 +795,24 @@ new image's host did not come up.
     changed in the store stays changed, and the old image is not running to
     undo it — but it means the board is off the network until it is power-cycled.
   - **So do store surgery over HTTP, not over the cable.** The sync protocol has
-    a whole-cart delete, which is the one store edit this board actually needs
-    (replacing a built-in that shipped broken — the seed never writes into a
-    store with carts, so a new image will not replace it): deleting the cart
-    from a paired page's launcher sends it, and it takes the journal with it.
-    The seed does not bring it back: the page's sync pushes its own copy, or
-    `./provision.sh --carts` the repo's. No stopped console, and nothing that
-    can wedge USB.
+    a whole-cart delete, which is the one store edit this board needs:
+    deleting the cart from a paired page's launcher sends it, it takes the
+    journal with it, and a seed cart's removal is recorded, so the seed does
+    not bring it back (Get Carts installs it again). A built-in that shipped
+    broken is replaced by the next image's seed, a newer version. No stopped
+    console, and nothing that can wedge USB.
 - **`mpremote` of any kind STOPS the console.** `exec`, `fs cat`, `fs cp` all
   interrupt `main.py`, which kills `zero_host.serve()` — the board then answers
   nothing on the network and looks dead while being perfectly healthy. Follow
   any `mpremote` with `mpremote connect <port> reset`. This is how a
   "moybyte-zero.local refused to connect" was self-inflicted twice.
-- **Getting OUT of the ROM loader needs no replug** (2026-08-25):
-  `esptool --after watchdog_reset` exits download mode cleanly on this board.
-  The old note ("only a physical replug exits ROM mode") predates it — that
-  was `hard_reset`, which indeed does nothing here. Getting IN is esptool's
-  default reset, since the USB-Serial/JTAG promotion; `machine.bootloader()` is
+- **Getting OUT of the ROM loader is esptool's `hard_reset`** (2026-11-17),
+  an RTS pulse through the USB-Serial/JTAG that boots the app with the USB
+  device kept. `--after watchdog_reset`, this board's exit since its CDC days
+  (when `hard_reset` did nothing), resets the USB too: the host enumerates
+  the board again under a new ttyACM number while it boots, and a port
+  opened in that window wedged the USB until a replug, twice on 2026-11-17.
+  Getting IN is esptool's default reset, since the USB-Serial/JTAG promotion; `machine.bootloader()` is
   an endless loop on this chip and is never the way. The BOOT button is the last
   resort: hold it while powering on.
 - **The console dual-OTA partition table does not fit this 8MB flash**, and the

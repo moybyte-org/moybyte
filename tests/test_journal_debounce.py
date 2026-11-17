@@ -6,6 +6,7 @@ invisible").
 """
 
 from pathlib import Path
+from tests import journal_files as jf
 
 from ws_helpers import build_ws_with_cart
 
@@ -18,11 +19,11 @@ def _make_ws_with_cart(tmp_path, src, title="Debounced"):
 
 def _entries(cart_path):
     from runtime import moy_carts
-    return moy_carts._journal_load_entries(cart_path + "/journal/journal.jsonl")
+    return jf.entries(cart_path + "/journal/journal.jsonl")
 
 
 def _open_code(ws, text=None):
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.screen = "menu"
     if text is not None:
         ws.editor.set_text(text)
@@ -34,6 +35,8 @@ def test_keystroke_in_code_editor_arms_the_debounce(tmp_path):
     ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(1)\n")
     drv = host_app.ConsoleDriver(ws)
     _open_code(ws)
+    drv.frame(1 / 30)                               # the tab's first frame
+    ws.history.edit_ms = None
     assert ws.history.edit_ms is None               # no pending edit yet
 
     drv.type_char(ord("x"))
@@ -70,7 +73,7 @@ def test_idle_debounce_autosaves_and_journals_invisibly(tmp_path):
     ents = [e for e in _entries(path) if e["file"] == "main.py"]
     assert ents, "the idle debounce must journal a durable step"
     from runtime import moy_journal
-    assert moy_journal._journal_read_snap(path + "/journal", ents[-1]) == new
+    assert jf.read_snap(path + "/journal", ents[-1]) == new
 
 
 def test_autosave_skips_unparseable_source_without_nagging(tmp_path):
@@ -105,7 +108,7 @@ def test_manual_save_still_awards_achievement(tmp_path):
     _open_code(ws, "def _draw():\n    cls(5)\n")
     notes = []
     ws.ach.award = lambda *a, **k: notes.append(a)
-    assert ws.save_code() is True                    # explicit SAVE
+    assert ws.saves.save_code() is True                    # explicit SAVE
     assert any(a and a[0] == "first_code" for a in notes)  # awards "Code Wizard"
 
 

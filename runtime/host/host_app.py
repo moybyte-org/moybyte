@@ -9,82 +9,12 @@ the canvas backend, the cart store's filesystem, and the input source differ.
 
 import json
 import os
-import sys
 
-# The shell imports `audio`, `blocks` and the editor cores by their frozen device
-# names (console.py, chrome.py, code_layer.py). Register the canonical runtime/
-# modules under those bare names so they import on the host too.
-from . import audio as _audio
-from . import blocks as _blocks
-from . import editors_base as _editors_base
-from . import editors_code as _editors_code
-from . import editors_sheet as _editors_sheet
-from . import editors_paint_map as _editors_paint_map
-sys.modules.setdefault("editors_base", _editors_base)
-sys.modules.setdefault("editors_code", _editors_code)
-sys.modules.setdefault("editors_sheet", _editors_sheet)
-sys.modules.setdefault("editors_paint_map", _editors_paint_map)
-sys.modules.setdefault("audio", _audio)
-sys.modules.setdefault("blocks", _blocks)   # moy_carts.save_blocks does `import blocks`
-# block_editor_ui.py / map_editor_ui.py / music_editor_ui.py are the block/map/
-# music editors' UI (issues #29 Part 2 / #32 / #50, extracted from console.py);
-# each imports its editor core (`editors_block`/`editors_paint_map`/
-# `editors_music`, bare or under `runtime.`; music_editor_ui.py also does
-# `from audio import ...`, which needs the alias above) and console.py
-# does `from block_editor_ui import BlockEditorUI, ...` / `from map_editor_ui
-# import MapEditorUI, ...` / `from music_editor_ui import MusicEditorUI, ...`
-# (their own frozen device names), so they need the same bare-name aliasing --
-# imported only after the editors/audio/blocks aliases above are in place.
-from . import block_editor_ui as _block_editor_ui
-from . import map_editor_ui as _map_editor_ui
-from . import music_editor_ui as _music_editor_ui
-sys.modules.setdefault("block_editor_ui", _block_editor_ui)
-sys.modules.setdefault("map_editor_ui", _map_editor_ui)
-sys.modules.setdefault("music_editor_ui", _music_editor_ui)
-# layers.py is the Layer protocol + the self-contained surface adapters; bar_layer.py
-# is the top-bar surface + the single source of the bar geometry constants
-# (extracted from console.py). console.py does `from layers import ...` / `from
-# bar_layer import ...` (its frozen device names). Both are dependency-free leaves, so
-# they only need the same bare-name alias.
-from . import ui as _ui
-sys.modules.setdefault("ui", _ui)   # the shared widget toolkit: editor_app + the
-                                    # apps do `import ui` (their frozen device name)
-from . import calc_app as _calc_app
-sys.modules.setdefault("calc_app", _calc_app)   # app_decls names it bare; console resolves it by data
-from . import bar_layer as _bar_layer
-from . import cards_layer as _cards_layer
-from . import paint_layer as _paint_layer
-from . import settings_layer as _settings_layer
-from . import code_layer as _code_layer
-from . import widgets as _widgets
-from . import wallpaper as _wallpaper
-from . import launcher_layer as _launcher_layer
-from . import project as _project
-from . import player as _player
-from . import editor_app as _editor_app
-from . import wm as _wm
-from . import layers as _layers
-sys.modules.setdefault("layers", _layers)
-sys.modules.setdefault("bar_layer", _bar_layer)
-sys.modules.setdefault("cards_layer", _cards_layer)
-sys.modules.setdefault("paint_layer", _paint_layer)
-sys.modules.setdefault("settings_layer", _settings_layer)
-sys.modules.setdefault("code_layer", _code_layer)
-sys.modules.setdefault("widgets", _widgets)
-sys.modules.setdefault("wallpaper", _wallpaper)
-sys.modules.setdefault("launcher_layer", _launcher_layer)
-sys.modules.setdefault("project", _project)   # console.py does `from project import Project`
-sys.modules.setdefault("player", _player)     # console.py does `from player import Player`
-sys.modules.setdefault("editor_app", _editor_app)  # console.py does `from editor_app import EditorApp`
-sys.modules.setdefault("wm", _wm)             # console.py does `from wm import FullscreenStackWM`
-from . import players as _players             # #65 multiplayer: PlayerRouter + net seam
-sys.modules.setdefault("players", _players)   # console.py does `from players import PlayerRouter`
-
-from . import console  # noqa: E402  (after the editors/audio aliases above)
+from . import players as _players
+from . import console
 from . import moy_carts  # noqa: E402  (shared .moy store; host-clean)
 from . import moy_store_base as _store_base  # noqa: E402
 from . import moy_catalogue  # noqa: E402  (the store's carts-by-handle interface)
-sys.modules.setdefault("moy_catalogue", moy_catalogue)   # ONE index per process
 # The RASTER is the boards' (`device_canvas.DeviceCanvas`, RGB565), reached
 # through the two factories in host_canvas.py. There is no host-only canvas
 # class any more -- runtime/canvas.py, the second raster, is deleted.
@@ -206,7 +136,7 @@ class HostCartNet:
     """The network Get Carts fetches through on the host (#124):
     `runtime/carts/cart_index.py`'s transport over urllib, which follows redirects
     and checks certificates.
-    The board's twin is device/wire_links.CartNet; both answer `dial()`,
+    The board's twin is device/cart_net.CartNet; both answer `dial()`,
     `ready()` and `open(url)` -> status / length / readinto / close (and this
     one `online()`, the shape a transport with no `ready()` keeps).
     The PC is already on a network, so there is nothing to dial."""
@@ -360,10 +290,7 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     # WAMR) is an absent key.
     host_canvas.install()
     import moycore_glue                 # device/, on the path host_canvas puts it
-    try:
-        from runtime import wasm_host
-    except ImportError:  # pragma: no cover
-        import wasm_host
+    import wasm_host
 
     runtimes = {}
     lua = moycore_glue.make_moycore_runtime(ws)
@@ -391,7 +318,7 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     ws.net = _players.LoopbackNet()
     # The Picotron-style windowed WM (#73): swap the presentation tier in before
     # the first frame. Only meaningful with a distinct (big) system canvas.
-    if windowed and ws._sys_canvas is not None:
+    if windowed and ws.bound_sys_canvas is not None:
         from runtime.wm_windowed import WindowedWM
         # A windowed composite must NOT letterbox: `blit_game` is asked to put a
         # cart inside a WINDOW here, and the fullscreen meaning of the same verb
@@ -401,7 +328,7 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
         # the wasm head's twin of this line -- web_boot.boot -- clears the same
         # one) -- the tier is chosen here, so this is where the canvas is told
         # which meaning it serves.
-        ws._sys_canvas.letterbox_composite = False
+        ws.bound_sys_canvas.letterbox_composite = False
         ws.wm = WindowedWM(ws)
-        ws.open_desk()                 # boot onto the DESK (desktop mode)
+        ws.home.open_desk()                 # boot onto the DESK (desktop mode)
     return ws

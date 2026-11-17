@@ -48,6 +48,7 @@ import sys
 import pytest
 
 from runtime import host_app
+import pixel_goldens
 from ws_helpers import open_cart, settle_badges
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -101,8 +102,8 @@ def _ws(tmp_path, jet, cart="teapot", title=TITLE, **config):
     ws.look.set_theme_variant("dark", persist=False)
     open_cart(ws, title)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
-    assert type(ws.run.player._lua).__name__ == "WasmHostRun"
-    ws.run.player.uncap_mode(True)           # every frame draws: one tick, one frame
+    assert type(ws.run.player.lua).__name__ == "WasmHostRun"
+    ws.run.player.pace.uncap_mode(True)           # every frame draws: one tick, one frame
     return ws
 
 
@@ -110,12 +111,12 @@ def _frames(ws, n, hold=(), dt=DT):
     for _ in range(n):
         ws.pointer.visible = False
         settle_badges(ws)
-        ws._toast_until = 0
+        ws.toast_until = 0
         ws.show_fps = ws.perf_hud = ws.perf_capture = False
         for b in CART_BUTTONS:
             ws.input.set_held(b, b in hold)
         ws.input.begin_frame()
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(dt)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
 
@@ -132,7 +133,7 @@ def _rgb565(ws, x, y):
 
 
 def _pmem(ws):
-    return ws.run.player._lua._run.pmem()[1]
+    return ws.run.player.lua._run.pmem()[1]
 
 
 # -- the module ------------------------------------------------------------------
@@ -231,13 +232,14 @@ def _golden_frame(tmp_path, jet, width, pose):
     for frames, hold in legs:
         _frames(ws, frames, hold)
     assert (ws.sys_canvas.w, ws.sys_canvas.h) == (W, H)
-    return hashlib.sha256(bytes(ws.sys_canvas._buf)).hexdigest()
+    return bytes(ws.sys_canvas._buf)
 
 
-def _check_golden(request, path, key, got, test):
-    """`got` against the committed table at `path`. Re-baseline deliberately,
-    as the shell goldens are: `MOYBYTE_UPDATE_GOLDENS=1` or
-    `--update-goldens`."""
+def _check_golden(request, path, key, buf, test):
+    """The frame `buf` (the system canvas's RGB565) against the committed table
+    at `path`. Re-baseline deliberately, as the shell goldens are:
+    `MOYBYTE_UPDATE_GOLDENS=1` or `--update-goldens`."""
+    got = hashlib.sha256(buf).hexdigest()
     update = (os.environ.get(UPDATE_ENV)
               or request.config.getoption("--update-goldens", default=False))
     table = {}
@@ -251,10 +253,13 @@ def _check_golden(request, path, key, got, test):
             f.write("\n")
         return
     assert key in table, "no golden for %s; record it with %s=1" % (key, UPDATE_ENV)
+    png = pixel_goldens.check(key, got, table[key],
+                              lambda: pixel_goldens.rgb565_rows(buf, W, H), W, H)
     assert got == table[key], (
         "the frame %s moved (%s != %s). Re-baseline only if you can say "
         "which pixel moved and why: %s=1 .venv/bin/python -m pytest "
-        "tests/test_jet_cart.py -k %s" % (key, got, table[key], UPDATE_ENV, test))
+        "tests/test_jet_cart.py -k %s%s"
+        % (key, got, table[key], UPDATE_ENV, test, pixel_goldens.message([png])))
 
 
 @pytest.mark.parametrize("width", WIDTHS)
@@ -428,8 +433,7 @@ def test_the_film_frame_golden(tmp_path, request, jet, pose):
     row = 2 * W
     assert not any(buf[:FILM_TOP * row]) and not any(buf[(FILM_TOP + FILM_H) * row:])
     assert any(buf[FILM_TOP * row:(FILM_TOP + FILM_H) * row])
-    _check_golden(request, FILM_GOLDEN_FILE, name, hashlib.sha256(buf).hexdigest(),
-                  "film_frame")
+    _check_golden(request, FILM_GOLDEN_FILE, name, buf, "film_frame")
 
 
 def test_the_film_s_buttons_step_the_cuts_and_show_the_hud(tmp_path, jet):

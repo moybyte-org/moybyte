@@ -2,7 +2,7 @@
 // moy_settings.h) as the module runtime/moy_spine.py is, name for name -- Table,
 // AppRegistry, BackStack, Returns, Settings, StaleHandle and the
 // constants. The same binding serves the interface suite and the spine trace;
-// which build takes it is MOY_SPINE_IMPL (tools/moy_index_spike.py's header).
+// which build takes it is MOY_SPINE_IMPL (tools/native_check.py's header).
 //
 // It registers EXTENSIBLE, so a moy_spine.py on the import path wins over it. A
 // build that takes the native module stages no such file
@@ -36,14 +36,7 @@
 #include "py/objmodule.h"
 #include "py/runtime.h"
 
-// ESP_PLATFORM is not defined for a usermod's sources on the esp32 port, so a
-// board is recognised by the header it has.
-#if __has_include("esp_heap_caps.h")
-#define MOY_SPINE_BOARD 1
-#include "esp_heap_caps.h"
-#else
-#include <stdlib.h>
-#endif
+#include "moy_kmem.h"
 
 #include "moy_htab.h"
 #include "moy_ledger.h"
@@ -52,45 +45,18 @@
 
 // -- the allocator -------------------------------------------------------------
 
-// The kernel's small-block pool (moy_kernel.h), where the image has it.
-void *moy_kpool_alloc(size_t n) __attribute__((weak));
-bool moy_kpool_free(void *p) __attribute__((weak));
-
-#ifdef MOY_SPINE_BOARD
-// PSRAM, zeroed. A board with no PSRAM at all takes the default heap; one whose
-// PSRAM is merely full refuses, rather than spend internal SRAM.
+// The kernel's small-block pool first (moy_kernel.h), then PSRAM, zeroed. A
+// board with no PSRAM at all takes the default heap; one whose PSRAM is
+// merely full refuses, rather than spend internal SRAM.
 static void *spine_alloc(size_t n) {
-    n = n ? n : 1u;
-    if (moy_kpool_alloc != NULL) {
-        void *q = moy_kpool_alloc(n);
-        if (q != NULL) {
-            return q;
-        }
-    }
-    void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (p == NULL && heap_caps_get_total_size(MALLOC_CAP_SPIRAM) == 0) {
-        p = heap_caps_calloc(1, n, MALLOC_CAP_8BIT);
-    }
-    return p;
+    return moy_kalloc(n ? n : 1u,
+                      MOY_KMEM_SMALL | MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_IF_NONE | MOY_KMEM_ZERO);
 }
 
 static void spine_release(void *p, size_t n) {
     (void)n;
-    if (moy_kpool_free != NULL && moy_kpool_free(p)) {
-        return;
-    }
-    heap_caps_free(p);
+    moy_kfree(p);
 }
-#else
-static void *spine_alloc(size_t n) {
-    return calloc(1, n ? n : 1u);
-}
-
-static void spine_release(void *p, size_t n) {
-    (void)n;
-    free(p);
-}
-#endif
 
 static const moy_htab_mem_t spine_mem = { spine_alloc, spine_release };
 
@@ -173,8 +139,37 @@ static const char *kind_arg(mp_obj_t o, size_t *len) {
     return s;
 }
 
+// The qstr each kind was last made into: the back-stack is read several times
+// a frame (`top`, `kinds`), and a kind is found in the qstr pools once, not on
+// every read. An entry is checked against the pools before it is used, so one
+// a VM restart left behind is looked up again, never trusted.
+#define KIND_QS 8
+static struct {
+    qstr q;
+    uint8_t len;
+    char s[MOY_ID_MAX];
+} s_kq[KIND_QS];
+static uint8_t s_kq_next;
+
 static mp_obj_t kind_obj(const moy_kind_t *k) {
-    return MP_OBJ_NEW_QSTR(qstr_from_strn(k->s, k->len));
+    const qstr_pool_t *pool = MP_STATE_VM(last_pool);
+    size_t total = pool->total_prev_len + pool->len;
+    for (int i = 0; i < KIND_QS; i++) {
+        if (s_kq[i].len == k->len && s_kq[i].q != MP_QSTRnull && s_kq[i].q < total
+                && memcmp(s_kq[i].s, k->s, k->len) == 0) {
+            size_t n;
+            const byte *d = qstr_data(s_kq[i].q, &n);
+            if (n == k->len && memcmp(d, k->s, n) == 0) {
+                return MP_OBJ_NEW_QSTR(s_kq[i].q);
+            }
+        }
+    }
+    qstr q = qstr_from_strn(k->s, k->len);
+    int i = s_kq_next++ % KIND_QS;
+    s_kq[i].q = q;
+    s_kq[i].len = k->len;
+    memcpy(s_kq[i].s, k->s, k->len);
+    return MP_OBJ_NEW_QSTR(q);
 }
 
 static mp_obj_t kind_or_none(const moy_kind_t *k) {
@@ -375,11 +370,10 @@ static int32_t int32_arg(mp_obj_t o) {
 
 static mp_obj_t apps_register(size_t n_args, const mp_obj_t *pos_args,
                               mp_map_t *kw_args) {
-    enum { ARG_app_id, ARG_title, ARG_text_mode, ARG_min_size };
+    enum { ARG_app_id, ARG_title, ARG_min_size };
     static const mp_arg_t allowed[] = {
         { MP_QSTR_app_id, MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_obj = MP_OBJ_NULL } },
         { MP_QSTR_title, MP_ARG_REQUIRED | MP_ARG_OBJ, { .u_obj = MP_OBJ_NULL } },
-        { MP_QSTR_text_mode, MP_ARG_OBJ, { .u_obj = mp_const_false } },
         { MP_QSTR_min_size, MP_ARG_OBJ, { .u_obj = mp_const_none } },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
@@ -409,9 +403,7 @@ static mp_obj_t apps_register(size_t n_args, const mp_obj_t *pos_args,
     size_t title_len;
     const char *t = mp_obj_str_get_data(title, &title_len);
     uint32_t handle;
-    int rc = moy_apps_register(a, id, id_len, t, title_len,
-                               mp_obj_is_true(args[ARG_text_mode].u_obj), has_min,
-                               w, h, &handle);
+    int rc = moy_apps_register(a, id, id_len, t, title_len, has_min, w, h, &handle);
     if (rc != MOY_ROUTE_OK) {
         raise_alloc(rc);
     }
@@ -437,11 +429,6 @@ static mp_obj_t apps_title(mp_obj_t self, mp_obj_t h) {
                                app->title_len);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(apps_title_obj, apps_title);
-
-static mp_obj_t apps_text_mode(mp_obj_t self, mp_obj_t h) {
-    return bool_obj(app_row(self, h)->text_mode);
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(apps_text_mode_obj, apps_text_mode);
 
 static mp_obj_t apps_min_size(mp_obj_t self, mp_obj_t h) {
     const moy_app_t *app = app_row(self, h);
@@ -494,7 +481,6 @@ static const mp_rom_map_elem_t apps_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_find), MP_ROM_PTR(&apps_find_obj) },
     { MP_ROM_QSTR(MP_QSTR_app_id), MP_ROM_PTR(&apps_app_id_obj) },
     { MP_ROM_QSTR(MP_QSTR_title), MP_ROM_PTR(&apps_title_obj) },
-    { MP_ROM_QSTR(MP_QSTR_text_mode), MP_ROM_PTR(&apps_text_mode_obj) },
     { MP_ROM_QSTR(MP_QSTR_min_size), MP_ROM_PTR(&apps_min_size_obj) },
     { MP_ROM_QSTR(MP_QSTR_valid), MP_ROM_PTR(&apps_valid_obj) },
     { MP_ROM_QSTR(MP_QSTR_handles), MP_ROM_PTR(&apps_handles_obj) },

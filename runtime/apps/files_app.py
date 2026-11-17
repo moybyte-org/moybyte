@@ -35,35 +35,12 @@ packages, whose rows open the Appearance app.
 
 from array import array
 
-try:
-    from layout_base import bar_rows, content_of, metric_class, DESK
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import bar_rows, content_of, metric_class, DESK
-
-try:
-    from picture_copies import PictureCopies
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.picture_copies import PictureCopies
-
-try:
-    from app_shell import ListShellApp
-except ImportError:  # pragma: no cover - direct host import
-    from runtime.app_shell import ListShellApp
-
-try:
-    import text_modes as _modes
-except ImportError:  # pragma: no cover - direct host import
-    from runtime import text_modes as _modes
-
-try:
-    import ui
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui
-
-try:
-    import intents as _intents
-except ImportError:  # pragma: no cover - direct host import
-    from runtime import intents as _intents
+from layout_base import bar_rows, content_of, metric_class, DESK
+from picture_copies import PictureCopies
+from app_shell import ListShellApp
+import text_modes as _modes
+import ui
+import intents as _intents
 
 
 # The carts root, as a place beside the user-files kinds. NOT a
@@ -284,7 +261,6 @@ class FilesAppLayer(ListShellApp):
         self.used_cur = -1
         self._focus = None            # the id focus moves to on the next frame
         self._focused = None          # the focused id as the last frame left it
-        self._key = 0
         # The lists' override tables and what their gens were moved for
         # (docs/history/scroll_and_text_2026-10.md §3.3): a gen moves exactly when
         # what its list draws does, so a frame that only scrolls or steps
@@ -450,9 +426,11 @@ class FilesAppLayer(ListShellApp):
         a mode name -- or None when nothing here can open it, which is what
         the status line reports.
 
-        Every door goes through ctx.nav by REGISTERED ID, so Files holds no
-        reference to another app's class and a build without one degrades to
-        the status line instead of an AttributeError."""
+        A user file (a drawing, a note) goes to the app that opens its type,
+        by the intents' route "Open with" takes; a project and its own files
+        go through ctx.nav by REGISTERED ID. Files holds no reference to
+        another app's class, and a build without one degrades to the status
+        line instead of an AttributeError."""
         door, subject = self.door(name, kind, cart)
         if door == "editor":
             return self._to_editor(subject)
@@ -467,7 +445,9 @@ class FilesAppLayer(ListShellApp):
             # file reaches the Editor.
             return self._to_editor(subject, tab="code")
         if door == "paint":
-            return self._to_paint(subject, kind, cart)
+            if cart is None:
+                return self._to_app(subject, kind, door)
+            return self._to_paint(subject, cart)
         return self._to_text(name, kind, door, cart)
 
     def door(self, name, kind=None, cart=None):
@@ -506,15 +486,24 @@ class FilesAppLayer(ListShellApp):
             return None
         return "code" if tab else "editor"
 
-    def _to_paint(self, name, kind=None, cart=None):
-        """Open a picture in Paint -- a gallery drawing, or a cart's OWN image
-        (`cart` set), which Paint reads and writes on that project's kind: the
-        same file, in place, so an edited cover is the cover."""
-        if not self._nav.open_image(name, None if cart is not None else kind,
-                                    cart):
+    def _to_paint(self, name, cart):
+        """Open a cart's OWN image in Paint, which reads and writes it on that
+        project's kind: the same file, in place, so an edited cover is the
+        cover."""
+        if not self._nav.open_image(name, None, cart):
             self.status = "No Paint app"
             return None
         return "paint"
+
+    def _to_app(self, name, kind, door):
+        """A user file to the app that opens its type: the intents' route,
+        the one "Open with" takes (runtime/system/intents.py), asked as the
+        shell, as Files is."""
+        item = _intents.item_of(kind, name)
+        if item is None or not _intents.INTENTS.open_with(_intents.SHELL, item, False):
+            self.status = "No app opens it"
+            return None
+        return door
 
     def _to_text(self, name, kind, mode, cart=None):
         if kind is None:
@@ -528,10 +517,7 @@ class FilesAppLayer(ListShellApp):
                 self.status = "Can't open"
                 return None
             return mode
-        if not self._nav.open_text(name, kind, mode):
-            self.status = "No text app"
-            return None
-        return mode
+        return self._to_app(name, kind, mode)
 
     def _open_row(self, i):
         """The open gesture on row i: its door, or the Trash's restore."""
@@ -673,12 +659,7 @@ class FilesAppLayer(ListShellApp):
 
     @dialog.setter
     def dialog(self, d):
-        # Rename's field types, so the keyboard is in text mode while it
-        # shows, and only then: on the T-Deck W A S D step the rows.
-        was = getattr(self, "_up", None) == "rename"
         self._up = d
-        if (d == "rename") != was:
-            self._nav.text_mode(d == "rename")
 
     def _close_dialog(self):
         self.dialog = None
@@ -688,14 +669,10 @@ class FilesAppLayer(ListShellApp):
     # -- input ----------------------------------------------------------------
 
     def handle_input(self, inp):
-        k = getattr(inp, "last_key", 0) or 0
-        if not isinstance(k, int):
-            k = ord(k[0]) if k else 0
-        if k != self._key and k in (8, 127) and self.dialog is None \
+        if getattr(inp, "typed", 0) in (8, 127) and self.dialog is None \
                 and self._focused == "files" and self._row() is not None \
                 and "DEL" in self._action_labels():
             self._act("DEL")
-        self._key = k
         if inp.pressed("b"):
             self.back()
         if self._ui.keys(inp):

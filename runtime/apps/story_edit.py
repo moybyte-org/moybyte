@@ -25,19 +25,10 @@ where the console is a desk.
             baked beside it then.
 """
 
-try:
-    import ui
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui
-
-try:
-    import story_doc as D
-    import story_render as R
-    from ticks import _ticks_ms, _ticks_diff
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import story_doc as D
-    from runtime import story_render as R
-    from runtime.ticks import _ticks_ms, _ticks_diff
+import ui
+import story_doc as D
+import story_render as R
+from ticks import _ticks_ms, _ticks_diff
 
 KIND = "stories"
 STEP, GRID = 2, 16
@@ -177,14 +168,12 @@ class Editor:
         st = self.app.story
         st.record(self.app.cur)
         self.writing = True
-        self.app._nav.text_mode(True)
         self.app._damage.all()
 
     def stop_writing(self):
         if not self.writing:
             return
         self.writing = False
-        self.app._nav.text_mode(False)
         st = self.app.story
         if st is not None and self._new and self.app.cur == 0:
             objs = st.objects(0)
@@ -1656,8 +1645,5 @@ def D_DOT():
 
 
 def _zw(n, d):
-    try:
-        from storybook_app import zoom_word
-    except ImportError:  # pragma: no cover - host fallback
-        from runtime.storybook_app import zoom_word
+    from storybook_app import zoom_word
     return zoom_word(n, d)

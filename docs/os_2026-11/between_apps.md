@@ -22,8 +22,8 @@ the **"open with" menu** asks: OS chrome, the console's one question
 last chosen first and focused, then Cancel, under keys, a pad or touch alone.
 There is no per-type "always": `open_with(item, choose=True)` opens the menu
 whatever was chosen, and the row picked becomes the choice. The verbs answer
-True where the item went to an app, the menu is up or the request waits in a
-notification (below), False where no app opens it.
+True where the item went to an app, the menu is up or the request waits for
+the frame's end or in a notification (below), False where no app opens it.
 
 **Taking the screen is one gate (owner, 2026-11-08).** Every way a process
 brings an app to the front passes `runtime/system/front.py`'s `take`:
@@ -35,6 +35,11 @@ calls, a Lua app's `open_app` and a compiled app's through the ROLE door.
 The request goes through where its process is the run on screen (the front
 run, its window holding the input) or holds the **`front`** permission
 (`processes.md` §2); the shell and the user's own input are never gated.
+A process's request that goes through runs at the start of the console's
+next frame, outside the call that made it: the open starts a run in the
+console's one Player, and a cart asking from its load, its init or its
+frame would otherwise have its own run replaced under it. The verb answers
+True for it, and the asking run ends there as any switch ends it.
 Any other process's request becomes a notification under its title ("Wants
 to open todo.md in Notes", `processes.md` §7) whose act does what it asked,
 the route read as it is opened; the verb answers as though it went. An alarm
@@ -123,7 +128,7 @@ page pulls `GET /apps.json` and pushes what a cart wrote in the tab as `apps`
 batches, the board being of record; a site page leaves its OPFS `apps/` to
 the keeper alone (`moy_store.commitWritten`, a write whole or not at all,
 moy-spec SPEC.md §16.12), and no sweep seeds or watches that root there. A
-cart's session reads its folder once, when it opens (`cart_files.py`), so a
+cart's session reads its folder once, when it opens (`native/moy_store/moy_files.h`), so a
 batch that lands while the same cart plays on the board's glass is what
 that session finds the next time it opens. A board-served page edits the
 board's tree, a site page its OPFS copy; SFTP mounts it from a computer
@@ -230,7 +235,7 @@ stack (Reticulum, Meshtastic) can be an app on any tier. Decisions
   beside the sign-in's `moy_seal.c`, whose random source it shares
   (`moy_seal_random`: an HMAC-DRBG a board seeds at boot with the SAR ADC's
   noise mixed into its RNG, the host and the browser from `getentropy`;
-  `moy_seal.h`, THE RANDOM SOURCE). A board compiles it against the ESP-IDF's mbedTLS 3.6.4 (AES and
+  `moy_seal.h`, THE RANDOM SOURCE). A board compiles it against the ESP-IDF's mbedTLS 3.6.7 (AES and
   SHA in hardware), the host's library and the browser's wasm against the
   vendored copy of the same release (`native/moy_net/mbedtls/README.md`), so
   every tier runs the same code; Python reaches it through the module

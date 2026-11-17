@@ -32,48 +32,19 @@ card shows as well (`Stream.follow`, from the label each play() names).
 A console with no media service (the Guition S3) shows the no-audio page.
 """
 
-try:
-    import ui
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui
-
-try:
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui_draw as _ui_draw
-
-try:
-    from layout_base import bar_rows, content_of, metric_class, DESK
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import bar_rows, content_of, metric_class, DESK
-
-try:
-    from moy_store_base import builtin_name, files_root
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import builtin_name, files_root
-
-try:
-    import moybyte as _moybyte
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import moybyte as _moybyte
-
-try:
-    import devices as _devices
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import devices as _devices
-
-try:
-    import status_items as _status
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import status_items as _status
+import ui
+import ui_draw as _ui_draw
+from layers import AppLayer
+from layout_base import bar_rows, content_of, metric_class, DESK
+from moy_store_base import builtin_name, files_root
+import moybyte as _moybyte
+import devices as _devices
+import status_items as _status
 
 try:
     import moy_log as _L
-except ImportError:  # host: the runtime package
-    try:
-        from runtime import moy_log as _L
-    except ImportError:  # pragma: no cover - an image without the kernel
-        _L = None
+except ImportError:  # pragma: no cover - an image without the kernel
+    _L = None
 
 from array import array
 
@@ -452,15 +423,17 @@ def what_of(n):
     return kind, n.get("title") or n.get("who") or _stem(src), src
 
 
-def follow(ws=None):
+def follow(nav_of=None):
     """A run of the media service the face found (dev_media.listen: any
     client's play that started one, or the run a VM stop left playing)
-    shown in the bar, its section opening the app."""
+    shown in the bar, its section opening the app. `nav_of()` makes the nav
+    role the section opens the app through, asked only when no app built
+    the section."""
     s = STREAM
-    if s.section is None and ws is not None:
+    if s.section is None and nav_of is not None:
         nav = None
         try:
-            nav = ws.app_context(MusicAppLayer.id, ("nav",)).nav
+            nav = nav_of()
         except Exception:  # noqa: BLE001 -- a section with no head still shows the card
             nav = None
         s.section = MusicSection(s, nav)
@@ -960,7 +933,7 @@ def _scan(folder):
 
 # -- the app ------------------------------------------------------------------------
 
-class MusicAppLayer:
+class MusicAppLayer(AppLayer):
     """The Music content Layer and app protocol (see the module docstring)."""
 
     id = "jukebox"            # "music" is the Editor's Music tab
@@ -1006,7 +979,6 @@ class MusicAppLayer:
         self._first = True          # a page or tab opened: its first draw is owed
         self._fresh = False         # this draw is its first
         self._r = array("i", [0] * 4)
-        self._key = 0
         self._load_stations()
 
     # -- the app protocol ------------------------------------------------------
@@ -1038,8 +1010,6 @@ class MusicAppLayer:
 
     def close(self):
         self.shown = False
-        if self.page == "add":
-            self._nav.text_mode(False)
 
     def page_title(self):
         return {"now": "Now playing", "add": "Add a station"}.get(self.page)
@@ -1052,14 +1022,12 @@ class MusicAppLayer:
         playing step back to the list. False on the list: the host leaves."""
         if self.page == "list":
             return False
-        if self.page == "add":
-            self._nav.text_mode(False)
         self.page = "list"
         self._first = True
         self._damage.all()
         return True
 
-    def cancel_field(self):
+    def cancel(self):
         """The T-Deck's Mic in a field: Add a station cancelled."""
         if self.page != "add":
             return False
@@ -1193,7 +1161,6 @@ class MusicAppLayer:
     def _go(self, page):
         self.page = page
         self._first = True
-        self._nav.text_mode(page == "add")
         if page == "add":
             self.url, self.name, self.err = "", "", None
         self._damage.all()
@@ -1626,11 +1593,7 @@ class MusicAppLayer:
     # -- input -------------------------------------------------------------------
 
     def handle_input(self, i):
-        k = getattr(i, "last_key", 0) or 0
-        if not isinstance(k, int):
-            k = ord(k[0]) if k else 0
-        edge = k if k != self._key else 0
-        self._key = k
+        edge = getattr(i, "typed", 0)
         acted = False
         if self.page == "now" and self.stream.card is not None:
             acted = self._now_keys(i, edge)

@@ -1,5 +1,5 @@
 # Map (grep -n a name to jump there):
-#   Pointer                      the screen-space cursor (moy_input_ptr_t)
+#   Pointer                      the screen-space cursor (_moy_input_ptr_t)
 #   InputSource                  one producer's held set, key and pointer sample
 #   InputTable                   the merged table every surface reads
 #   HostInputTable               the same table over the host's eight names
@@ -12,16 +12,15 @@
 #   map_point                    a raw point onto the glass
 #   HidMachine                   the BLE keyboard central's machine over a fake stack
 #   event                        a key event: its code and modifiers
-#   typed                        the byte a key event types
 #   InputTable.reader            the event rings' readers (moy_event.h): events, pending
 #   RingSource                   a source that is its ring alone: a lease's, a device API's
-#   pin_clock                    the records' clock, held for a test
-#   hid_usage                    a key event as its HID usage and modifiers
 """The input table (native/moy_input) on CPython, by ctypes: the module
 `moy_input` as the boards and the browser import it, name for name
 (docs/history/kernel_survival_2026-10.md section 4.1). A VM's `import moy_input` is the
 native module (native/moy_input/modmoy_input.c), which always wins over this
-file; CPython has no such module, so this is what it finds.
+file; CPython has no such module, so this is what it finds. The names are
+those native/moy_input/face.json lists: the rows here are the hand ones, the
+rest are runtime/host/moy_input_face.py's, generated.
 
   NAMES            the buttons, in libmoy's moy_button order with the console's
                    own names after it; HOST_NAMES is the host's prefix of it
@@ -45,13 +44,19 @@ from __future__ import annotations
 import ctypes
 import os
 
-try:                                    # the host's runtime package
-    from . import host_native, native_build
-    from .ticks import _ticks_ms, _ticks_us
-except ImportError:                     # loaded flat, runtime/ on sys.path
-    import host_native
-    import native_build
-    from ticks import _ticks_ms, _ticks_us
+import host_native
+import native_build
+from moy_input_face import *  # noqa: F401,F403
+from moy_input_face import (
+    SOURCES, UNION, CURSOR_IDLE_MS, P_NONE, P_LIVE, P_HELD, P_CLICK, MODS_AT, EV_FIELDS,
+    EV_T, EV_SRC, EV_KIND, EV_PROV, EV_A, EV_ID, EV_B, EV_ALL, PROV_ISR, EV_DEPTH)
+from ticks import _ticks_ms, _ticks_us
+from moy_input_face import (
+    moy_event_t as _Event, moy_hid_addr_t as _Addr, moy_hid_ops_t as _HidOps,
+    moy_input_ptr_t as _moy_input_ptr_t,
+    moy_i2c_t as _Ops, moy_input_isr_t as _Isr, moy_input_ring_info_t as _Ring,
+    moy_kbd_t as _Kbd, moy_touch_held_t as _Held, moy_touch_map_t as _Map,
+    moy_touch_pt_t as _Pt, moy_touchdev_t as _Touch)
 
 _INPUT = os.path.join(native_build.ROOT, "native", "moy_input")
 _SPINE = os.path.join(native_build.ROOT, "native", "moy_spine")
@@ -64,50 +69,9 @@ NAMES = ("left", "right", "up", "down", "a", "b", "run", "home",
 HOST_NAMES = NAMES[:8]
 _BIT = {n: i for i, n in enumerate(NAMES)}
 
-SOURCES = 8
-RING_SOURCES = 8              # sources that are a ring alone (moy_input.h)
-PLAYERS = 8
-UNION = 0xFF
 _TICKS_MASK = (1 << 30) - 1     # the VM's ticks_ms period
 _TICKS_US_MASK = (1 << 30) - 1  # and its ticks_us period: an event's stamp
 OK, STALE, FULL, NOMEM, BAD = range(5)
-
-CURSOR_IDLE_MS = 2000   # hide the trackball cursor after this long with no movement
-# How long a touchscreen pointer OUTLIVES the finger that made it: a cart wants
-# a mouse, and a released drag must not read as "no pointer" on the next frame.
-POINTER_LINGER_MS = 1500
-
-# A key event (moy_input.h): the code in the low 16 bits, the modifiers held
-# with it above MODS_AT; `typed` is the byte it types.
-MODS_AT = 16
-CTRL, SHIFT, ALT, SUPER = 1, 2, 4, 8
-KEY_F1 = 0x101                  # ... KEY_F1 + 11 is F12
-KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN = 0x110, 0x111, 0x112, 0x113
-KEY_PGUP, KEY_PGDN = 0x114, 0x115
-# The pointer's buttons, a bit each.
-PB_PRIMARY, PB_MIDDLE, PB_SECONDARY = 1, 2, 4
-
-# The event records (native/moy_input/moy_event.h): a record's fields in an
-# events() buffer, its kinds, the kind masks a reader takes, its provenance.
-EV_VERSION = 1
-EV_T, EV_SRC, EV_KIND, EV_PROV, EV_A, EV_ID, EV_B = range(7)
-EV_FIELDS = 7
-(EV_KEY_DOWN, EV_KEY_UP, EV_TEXT, EV_BTN, EV_TOUCH_DOWN, EV_TOUCH_MOVE, EV_TOUCH_UP,
- EV_EDGE, EV_UART, EV_LINK, EV_MEDIA, EV_NET, EV_BLE, EV_LORA, EV_WINCH, EV_USB,
- EV_MIDI) = range(1, 18)
-EV_LOST = 18
-EV_KEYS = (1 << EV_KEY_DOWN) | (1 << EV_KEY_UP) | (1 << EV_TEXT)
-EV_TOUCH = (1 << EV_TOUCH_DOWN) | (1 << EV_TOUCH_MOVE) | (1 << EV_TOUCH_UP)
-EV_PAD = 1 << EV_BTN
-EV_ALL = (1 << 17) - 2
-PROV_ISR, PROV_FIFO, PROV_POLL = 0, 1, 2
-EV_DEPTH = 32
-EV_ISR_DEPTH_MAX = 64         # an ISR ring's ceiling unless a board raises it
-
-P_NONE = 0
-P_LIVE = 1                     # there is a pointer at all
-P_HELD = 2                     # the finger/button is down this frame
-P_CLICK = 4                    # ...and it went down THIS frame (the press edge)
 
 _U8 = ctypes.c_uint8
 _U32 = ctypes.c_uint32
@@ -118,18 +82,13 @@ _B = ctypes.c_bool
 _PU32 = ctypes.POINTER(_U32)
 
 
-class Pointer(ctypes.Structure):
-    """A screen-space cursor (moy_input_ptr_t). The trackball drives it
+class Pointer(_moy_input_ptr_t):
+    """A screen-space cursor (_moy_input_ptr_t). The trackball drives it
     relatively and shows it; touch places it absolutely and keeps it hidden;
     it auto-hides after `idle_ms` without trackball movement. `hovers` is set
     by a source that reports a position with nothing held (a mouse): such a
     pointer never expires, a touched one lingers POINTER_LINGER_MS, and one nothing has touched is dead. `fresh` says
     this frame's sample came from the hardware rather than a repeat."""
-
-    _fields_ = [("w", _I32), ("h", _I32), ("x", _I32), ("y", _I32),
-                ("idle_ms", _I32), ("_sampled", _U32), ("_last_move", _U32),
-                ("click", _B), ("down", _B), ("hovers", _B), ("fresh", _B),
-                ("visible", _B), ("touched", _B), ("div", _I32)]
 
     def __init__(self, w, h, idle_ms=CURSOR_IDLE_MS):
         super().__init__()
@@ -176,6 +135,7 @@ _SIGS = (
     ("moy_input_source_typing", [_P, _U32], _I32),
     ("moy_input_release_all", [_P], None),
     ("moy_input_spend_edges", [_P], None),
+    ("moy_input_spend_key", [_P], None),
     ("moy_input_clear_edges", [_P], None),
     ("moy_input_keep_edges", [_P], None),
     ("moy_input_tick_edges", [_P], None),
@@ -187,6 +147,7 @@ _SIGS = (
     ("moy_input_source_name", [_P, _U32, ctypes.c_char_p, ctypes.c_size_t], _I),
     ("moy_input_last_key", [_P], _I32),
     ("moy_input_key_event", [_P], _I32),
+    ("moy_input_key_press", [_P], _I32),
     ("moy_input_set_last_key", [_P, _I32], None),
     ("moy_input_typed", [_I32], _I32),
     ("moy_input_set_mods", [_P, _U32, _U8], _I),
@@ -213,20 +174,6 @@ _SIGS = (
 )
 
 
-class _Event(ctypes.Structure):
-    _fields_ = [("t_us", _U32), ("src", ctypes.c_uint16), ("kind", _U8), ("prov", _U8),
-                ("a", ctypes.c_uint16), ("id", ctypes.c_uint16), ("b", _U32)]
-
-
-class _Ring(ctypes.Structure):
-    _fields_ = [("depth", _U32), ("head", _U32), ("count", _U32), ("drops", _U32),
-                ("prov", _U8), ("internal", _B), ("src", ctypes.c_uint16)]
-
-
-class _Isr(ctypes.Structure):
-    _fields_ = [("mux", _P), ("ring", _P)]
-
-
 _EV_SIGS = (
     ("moy_input_ring_open", [_P, ctypes.c_char_p, _U8, _U32, _PU32], _I),
     ("moy_input_radio", [_P, _U8, ctypes.c_bool, _U32, ctypes.POINTER(ctypes.c_bool)], _I),
@@ -247,8 +194,6 @@ _EV_SIGS = (
     ("moy_input_events", [_P, _I, ctypes.POINTER(_Event), ctypes.c_size_t], ctypes.c_size_t),
     ("moy_input_pending", [_P, _I], ctypes.c_size_t),
     ("moy_input_now_us", [], _U32),
-    ("moy_input_pin_clock", [_U32], None),
-    ("moy_hid_usage", [_I32], ctypes.c_uint16),
 )
 
 _LIB = [None]
@@ -538,9 +483,16 @@ class InputTable:
         _lib().moy_input_drop_edges(self._t)
 
     def spend_edges(self):
-        """A surface took this frame's edges and steps: none after it sees
-        them, and a held button keeps repeating on its schedule."""
+        """A surface took this frame's edges and steps, `typed` with them:
+        none after it sees them, and a held button keeps repeating on its
+        schedule."""
         _lib().moy_input_spend_edges(self._t)
+
+    def spend_key(self):
+        """A surface took the keyboard: this frame's `typed` is spent, and
+        the byte held now is not a press until it is let go and pressed
+        again."""
+        _lib().moy_input_spend_key(self._t)
 
     def clear_edges(self):
         """`spend_edges`, and every held repeat's delay starts over: the tap
@@ -565,6 +517,13 @@ class InputTable:
     @last_key.setter
     def last_key(self, value):
         _lib().moy_input_set_last_key(self._t, value or 0)
+
+    @property
+    def typed(self):
+        """The byte `last_key` types where it is a fresh press this frame,
+        else 0: the one typed-key edge every surface reads (THE PRESS,
+        native/moy_input/moy_input.h)."""
+        return _lib().moy_input_key_press(self._t)
 
     @property
     def key_event(self):
@@ -837,25 +796,9 @@ def pointer_state(inp, out):
 # None, and `kick()` -- one pass of them, once a frame -- does nothing. `kernel()`
 # is the drivers' table, the one a board's console reads.
 
-def pin_clock(us):
-    """The records' clock held at `us` microseconds (0: the real one)."""
-    _lib().moy_input_pin_clock(us & 0xFFFFFFFF)
-
-
-def hid_usage(ev):
-    """The HID usage a key event's key is (low byte) and its modifiers (high
-    byte): a KEY record's `a`."""
-    return _lib().moy_hid_usage(ev)
-
-
 def event(code, mods=0):
     """The key event of `code` typed with `mods` held."""
     return code | (mods << MODS_AT)
-
-
-def typed(ev):
-    """The byte key event `ev` types, 0 for none."""
-    return _lib().moy_input_typed(ev)
 
 
 def keyboard():
@@ -908,17 +851,9 @@ def kernel():
 # protocol. A bus may also give ms() and us() clocks and sleep_ms(); without
 # them the host's ticks are used and sleeps are skipped.
 
-_WRITE = ctypes.CFUNCTYPE(_I, _P, _U8, ctypes.POINTER(_U8), ctypes.c_size_t)
-_READ = ctypes.CFUNCTYPE(_I, _P, _U8, ctypes.POINTER(_U8), ctypes.c_size_t)
-_WREAD = ctypes.CFUNCTYPE(_I, _P, _U8, ctypes.POINTER(_U8), ctypes.c_size_t,
-                          ctypes.POINTER(_U8), ctypes.c_size_t)
-_CLOCK = ctypes.CFUNCTYPE(_U32, _P)
-_SLEEP = ctypes.CFUNCTYPE(None, _P, _U32)
-
-
-class _Ops(ctypes.Structure):
-    _fields_ = [("write", _WRITE), ("read", _READ), ("write_read", _WREAD),
-                ("ms", _CLOCK), ("us", _CLOCK), ("sleep_ms", _SLEEP), ("ctx", _P)]
+_I2C_CB = dict(_Ops._fields_)
+_WRITE, _READ, _WREAD = _I2C_CB["write"], _I2C_CB["read"], _I2C_CB["write_read"]
+_CLOCK, _SLEEP = _I2C_CB["ms"], _I2C_CB["sleep_ms"]
 
 
 class Bus:
@@ -972,49 +907,6 @@ class Bus:
         self._fns = (_WRITE(write), _READ(read), _WREAD(write_read), _CLOCK(ms),
                      _CLOCK(us), _SLEEP(sleep))
         self.ops = _Ops(*self._fns, None)
-
-
-class _Map(ctypes.Structure):
-    _fields_ = [("w", _I32), ("h", _I32), ("raw_w", _I32), ("raw_h", _I32),
-                ("raw_x0", _I32), ("raw_y0", _I32), ("swap", _B), ("flip_x", _B),
-                ("flip_y", _B)]
-
-
-class _Held(ctypes.Structure):
-    _fields_ = [("down", _B), ("fresh", _B), ("has_last", _B), ("extrapolate", _B),
-                ("gliding", _B), ("lx", _I32), ("ly", _I32), ("gx", _I32), ("gy", _I32),
-                ("w", _I32), ("h", _I32), ("hold_ms", _I32), ("ms", _U32),
-                ("vx", ctypes.c_float), ("vy", ctypes.c_float), ("damp", ctypes.c_float)]
-
-
-class _Pt(ctypes.Structure):
-    _fields_ = [("down", _B), ("edge", _B), ("x", _I32), ("y", _I32)]
-
-
-class _Kbd(ctypes.Structure):
-    _fields_ = [("table", _P), ("src", _U32), ("available", _B), ("raw_mode", _B),
-                ("raw_unsupported", _B), ("raw_game", _B), ("want", ctypes.c_int8),
-                ("err_run", _U8), ("held", _U32), ("held_until", _U32),
-                ("raw_held", _U32), ("raw_key", _I32), ("raw_bytes", _U8 * 5),
-                ("raw_valid", _B), ("stat_n", _U32), ("stat_max_us", _U32),
-                ("stat_over5", _U32), ("stat_over20", _U32), ("stat_timeouts", _U32),
-                ("stat_max_raw", _B), ("raw_text", _B), ("typing", ctypes.c_int16)]
-
-
-class _Touch(ctypes.Structure):
-    _fields_ = [("kind", _U8), ("addr", _U8), ("available", _B), ("yx", _B),
-                ("clear_first", _B), ("gate", _B), ("int_count", _U32), ("int_last", _U32),
-                ("int_seen", _B), ("touching", _B), ("last_read_ms", _U32), ("fw", _P),
-                ("fw_len", ctypes.c_size_t), ("loaded", _U32), ("init_state", ctypes.c_int8),
-                ("gsl_werr", _U32), ("gsl_sig", _U32), ("gsl_sig_read", _B),
-                ("gsl_ms", _U32), ("gsl_tries", _U8),
-                ("reprobe", ctypes.c_uint16), ("lock", _I), ("st_point", _B), ("st_up", _B),
-                ("st_x", _I32), ("st_y", _I32), ("st_fingers", _U8), ("map", _Map),
-                ("held", _Held), ("raw_x", _I32), ("raw_y", _I32), ("has_raw", _B),
-                ("fingers", _U8), ("stat_n", _U32), ("stat_max_us", _U32),
-                ("stat_over5", _U32), ("stat_over20", _U32), ("stat_skipped", _U32),
-                ("fb_set", _B), ("fb_phase", _U8), ("fb_status", ctypes.c_int16),
-                ("fb_ms", _U32), ("fb_n", _U32)]
 
 
 _PKBD = ctypes.POINTER(_Kbd)
@@ -1241,31 +1133,15 @@ HID_BOOT_MOUSE = 0x2A33
 HID_NOTIFY = 0x10
 
 
-class _Addr(ctypes.Structure):
-    _fields_ = [("type", _U8), ("a", _U8 * 6)]
-
-
 def _addr(a):
     return _Addr(a[0], (_U8 * 6)(*bytes(a[1])))
 
 
 _PADDR = ctypes.POINTER(_Addr)
-_H_SCAN = ctypes.CFUNCTYPE(_I, _P, _B)
-_H_CTX = ctypes.CFUNCTYPE(_I, _P)
-_H_CONNECT = ctypes.CFUNCTYPE(_I, _P, _PADDR)
-_H_CONN = ctypes.CFUNCTYPE(_I, _P, ctypes.c_uint16)
-_H_RANGE = ctypes.CFUNCTYPE(_I, _P, ctypes.c_uint16, ctypes.c_uint16, ctypes.c_uint16)
-_H_WRITE = ctypes.CFUNCTYPE(_I, _P, ctypes.c_uint16, ctypes.c_uint16, ctypes.POINTER(_U8),
-                            ctypes.c_size_t, _B)
-_H_VOID = ctypes.CFUNCTYPE(None, _P)
-_H_SAVE = ctypes.CFUNCTYPE(None, _P, _P)
-
-
-class _HidOps(ctypes.Structure):
-    _fields_ = [("scan", _H_SCAN), ("scan_stop", _H_CTX), ("connect", _H_CONNECT),
-                ("disconnect", _H_CONN), ("pair", _H_CONN), ("disc_svcs", _H_CONN),
-                ("disc_chrs", _H_RANGE), ("disc_dscs", _H_RANGE), ("write", _H_WRITE),
-                ("forget_bonds", _H_VOID), ("save", _H_SAVE), ("ms", _CLOCK), ("ctx", _P)]
+_HID_CB = dict(_HidOps._fields_)
+_H_SCAN, _H_CTX, _H_CONNECT = _HID_CB["scan"], _HID_CB["scan_stop"], _HID_CB["connect"]
+_H_CONN, _H_RANGE, _H_WRITE = _HID_CB["disconnect"], _HID_CB["disc_chrs"], _HID_CB["write"]
+_H_VOID, _H_SAVE = _HID_CB["forget_bonds"], _HID_CB["save"]
 
 
 _PHID = _P

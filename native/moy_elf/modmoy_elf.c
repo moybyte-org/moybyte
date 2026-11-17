@@ -49,6 +49,7 @@
 #include "py/builtin.h"
 
 #include "esp_heap_caps.h"
+#include "moy_kmem.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -258,7 +259,7 @@ static int load(mp_obj_t path, uint32_t flags, uint32_t pid, moy_os_module_t *m,
     }
 #endif
     g_load.int_before = heap_caps_get_free_size(INTERNAL_CAPS);
-    int64_t t0 = esp_timer_get_time();
+    int64_t t0 = moy_now_us();
     mp_obj_t args[2] = { path, MP_OBJ_NEW_QSTR(MP_QSTR_rb) };
     mp_obj_t f = mp_call_function_n_kw(MP_OBJ_FROM_PTR(&mp_builtin_open_obj), 2, 0, args);
     int e = 0;
@@ -271,7 +272,7 @@ static int load(mp_obj_t path, uint32_t flags, uint32_t pid, moy_os_module_t *m,
         snprintf(err, errlen, "the module is empty, unreadable or too big");
         return -1;
     }
-    uint8_t *buf = heap_caps_malloc((size_t)size, PSRAM_CAPS);
+    uint8_t *buf = moy_kalloc((size_t)size, MOY_KMEM_PSRAM);
     if (buf == NULL) {
         mp_stream_close(f);
         snprintf(err, errlen, "out of memory: no PSRAM for the module file");
@@ -285,7 +286,7 @@ static int load(mp_obj_t path, uint32_t flags, uint32_t pid, moy_os_module_t *m,
         return -1;
     }
     size_t len = (size_t)size;
-    int64_t t1 = esp_timer_get_time();
+    int64_t t1 = moy_now_us();
     const char *bad = moy_ota_admit_module(buf, len, MOY_ELF_SIG_SCHEME, CHIP,
                                            (flags & MOY_OS_UNSIGNED) != 0, NULL, 0, &len);
     if (bad != NULL) {
@@ -302,8 +303,8 @@ static int load(mp_obj_t path, uint32_t flags, uint32_t pid, moy_os_module_t *m,
     }
     uint8_t sha[32];
     moy_net_sha256(buf, len, sha);
-    int64_t t2 = esp_timer_get_time();
-    esp_elf_t *elf = heap_caps_calloc(1, sizeof *elf, PSRAM_CAPS);
+    int64_t t2 = moy_now_us();
+    esp_elf_t *elf = moy_kalloc(sizeof *elf, MOY_KMEM_PSRAM | MOY_KMEM_ZERO);
     if (elf == NULL) {
         heap_caps_free(buf);
         snprintf(err, errlen, "out of memory");
@@ -341,7 +342,7 @@ static int load(mp_obj_t path, uint32_t flags, uint32_t pid, moy_os_module_t *m,
     map_module(elf, pid, sha);
     g_load.read_us = t1 - t0;
     g_load.check_us = t2 - t1;
-    g_load.reloc_us = esp_timer_get_time() - t2;
+    g_load.reloc_us = moy_now_us() - t2;
     g_load.int_loaded = heap_caps_get_free_size(INTERNAL_CAPS);
     m->entry = (moy_elf_entry_fn)(uintptr_t)elf->entry;
     m->loaded = elf;
@@ -478,7 +479,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(mod_cancel_obj, mod_cancel);
 
 // The loop's job (moy_loop.h) while a service lives: the watchdog once a
 // frame on the console's task (moy_os_watch), where no VM wake is due.
-bool moy_loop_job(moy_loop_job_fn fn, void *arg) __attribute__((weak));
+#pragma weak moy_loop_job
 
 static bool watch_job(void *arg) {
     (void)arg;

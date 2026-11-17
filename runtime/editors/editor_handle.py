@@ -28,14 +28,14 @@ cart's own `key()`/`keyp()` read nothing while a handle holds focus. That is
 not symmetry for its own sake: taking the keyboard for a text surface is a
 screen change, and the byte that caused it is still live on the next frame
 (`b2ff7de`) -- so the seed that swallows it has to happen in the one place
-that flips the T-Deck's keyboard, `Workstation._set_text_mode`, which no cart
-can call. Taps have no mode switch and no stray edge, and only the cart knows
+that flips the T-Deck's keyboard, the input policy's `apply`
+(runtime/shell/input_policy.py), which no cart can call. Taps have no mode switch and no stray edge, and only the cart knows
 which rect it drew the editor into, so they stay the cart's to forward.
 
 DIRECTIONAL input follows the keyboard for the same reason (`nav`): on the
 T-Deck the trackball IS the arrow keys, and whether a roll is a caret or a
 mouse cursor is a question about which surface holds the keyboard -- so
-`Workstation.nav` answers it once, for the Code tab and for a cart's focused
+`InputRouter.nav` answers it once, for the Code tab and for a cart's focused
 handle alike, and reports whether it spent the pulses.
 
 **The document draws as a text view** (`ui.text_view`, the Code tab's): the
@@ -49,36 +49,13 @@ its checkboxes and `[[links]]` answer a tap, read off the line under it
 the record of the rows it drew, so a frame draws the rows that changed.
 """
 
-try:
-    from editors_code import CodeEditor, TextMouse
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_code import CodeEditor, TextMouse
-try:
-    from moy_input import PB_MIDDLE as _PB_MIDDLE, SHIFT as _SHIFT
-except ImportError:  # pragma: no cover - host fallback
-    from runtime.moy_input import PB_MIDDLE as _PB_MIDDLE, SHIFT as _SHIFT
-
-try:
-    from op_history import History, TextEditCodec, text_diff_op
-except ImportError:  # pragma: no cover - direct host import
-    from runtime.op_history import History, TextEditCodec, text_diff_op
-
-try:
-    import text_modes as _modes
-except ImportError:  # pragma: no cover - direct host import
-    from runtime import text_modes as _modes
-
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - direct host import
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-
-try:
-    from ticks import _ticks_ms, _ticks_diff
-except ImportError:  # pragma: no cover - direct host import
-    from runtime.ticks import _ticks_ms, _ticks_diff
+from editors_code import CodeEditor, TextMouse
+from moy_input import PB_MIDDLE as _PB_MIDDLE, SHIFT as _SHIFT
+from op_history import History, TextEditCodec, text_diff_op
+import text_modes as _modes
+import ui as _ui
+import ui_draw as _ui_draw
+from ticks import _ticks_ms, _ticks_diff
 from array import array as _array
 
 
@@ -322,7 +299,7 @@ class EditorHandle:
     def nav(self, dx, dy, select=None):
         """Feed DIRECTIONAL input -- the T-Deck trackball, a host arrow key.
 
-        It moves the CARET and the view follows, which is `ws.nav`'s contract
+        It moves the CARET and the view follows, which is `ws.router.nav`'s contract
         for the Code tab held one rung down: on the writing board the ball IS
         the arrow keys, and a text surface that spent them on a mouse cursor
         would leave the caret unreachable. In SELECT mode the same motion
@@ -539,7 +516,7 @@ class EditorHandle:
         """Whether the handle has a frame to draw: a verb changed it since its
         last draw (a key handed to it outside a drawn frame), its caret moved
         where the view has not shown it (`aim`) or its idle save is due --
-        what an app drawn on change (`Player.animates`) asks of every handle
+        what an app drawn on change (`AppFace.animates`) asks of every handle
         it opened."""
         ed = self.ed
         if self._gen != self._drawn or (self.live and (self._caret_at != ed.row
@@ -557,7 +534,7 @@ class EditorHandle:
         the mode is a program's or data's. `scale` is the canvas's font
         scale's, which the view takes itself.
 
-        In the run's pass (`Player.ui_host`) the view is a stop of the
+        In the run's pass (`AppFace.ui_host`) the view is a stop of the
         app's page, whose frames the engine plans: a fling, a glide or the
         caret's step moves the rows the frame before drew and draws the ones
         it brings, and a typed key draws the rows it changed

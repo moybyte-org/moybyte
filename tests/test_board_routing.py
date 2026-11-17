@@ -91,7 +91,7 @@ def test_ota_updater_wired_into_run_desktop_with_rollback_confirm():
     # keeps a writable store on internal flash, and an updater that went on
     # bracketing the SD bus and staging onto /sd/update would be aimed at a
     # card that is not there.
-    assert "ws.updater = moy_ota.OtaUpdater(ws._with_sd, update_dir=update_dir)" in runtime
+    assert "ws.updater = moy_ota.OtaUpdater(ws.with_sd, update_dir=update_dir)" in runtime
     assert "(None if self.on_sd else FLASH_UPDATE_DIR)" in runtime
     assert "ws.updater.mark_valid()" not in runtime
 
@@ -129,7 +129,7 @@ def test_micropython_native_sd_shares_display_spi_host():
     # The SD session is wrapped so it drains any in-flight panel DMA first (the
     # double-buffer SD-vs-panel mutual exclusion), but still delegates to the
     # native live-mount path.
-    assert "_ws._with_sd = store.session" in runtime
+    assert "_ws.with_sd = store.session" in runtime
     assert "return moybyte_sd.with_sd_live(fn)" in runtime
     # can_manage defaults to "the store root is known" inside the shared
     # console.wire_workstation_core (the runtime hands it carts_root).
@@ -160,11 +160,12 @@ def test_micropython_touch_and_idle_cursor():
 
 
 def test_micropython_cart_textmode_flips_keyboard_ascii_raw():
-    """The per-frame CALL that derives the keyboard mode from the cart's
-    textmode request lives in Player.tick; the mode flip itself is executed in
-    tests/test_cart_textmode.py and tests/test_tdeck_input.py."""
-    player = runtime_file("player.py").read_text(encoding="utf-8")
-    assert "ws._sync_cart_text_mode()" in player
+    """The keyboard's mode is derived around every key pass and tap
+    (`InputPolicy.sync`), the cart's textmode request among what it reads;
+    the mode flip itself is executed in tests/test_cart_textmode.py and
+    tests/test_tdeck_input.py."""
+    src = runtime_file("console_input.py").read_text(encoding="utf-8")
+    assert src.count("policy.sync()") >= 2 and src.count("input_policy.sync()") >= 1
 
 
 def test_kid_mode_gates_diag_frame_eaters():
@@ -755,7 +756,7 @@ def _idf_candidates(build):
 
 
 def test_exactly_one_board_owns_the_esp_idf_checkout():
-    """ESP-IDF v5.5.1 is ~600MB and identical for all three boards, so they
+    """ESP-IDF is ~600MB and identical for every board, so they
     share ONE clone: `moybyte_setup_idf` takes a candidate list and falls back
     to cloning into its own `.build/esp-idf`. That makes the ownership a
     GRAPH, and the graph is what rots.
@@ -863,11 +864,14 @@ def test_the_feeder_task_is_pinned_lazy_and_chunked():
     out = (NATIVE / "moy_audio" / "moy_aud_out.c").read_text(encoding="utf-8")
     aud = (NATIVE / "moy_audio" / "moy_aud.c").read_text(encoding="utf-8")
 
-    assert "xTaskCreatePinnedToCore(feeder" in out
-    assert "&s_task, MOY_AUDIO_CORE)" in out    # the core, the last argument
-    assert "#define MOY_AUDIO_CORE 1\n" in out
+    tasks = (NATIVE / "moy_kernel" / "moy_tasks.h").read_text(encoding="utf-8")
+
+    assert "moy_task_spawn_as(MOY_TASK_AUDIO, NULL, 4096 + OUT_SAMPLES * 2" in out
+    # The table's row: its priority and the core, unless the board names one.
+    assert 'X(AUDIO, "moy_audio", MOY_TASK_GIVEN, MOY_AUDIO_PRIO, MOY_AUDIO_CORE, 0)' in tasks
+    assert "#define MOY_AUDIO_CORE 1 " in tasks
     # Under the esp_timer task where the two share a core.
-    assert "#define FEEDER_PRIO (ESP_TASK_TIMER_PRIO - 1)" in out
+    assert "#define MOY_AUDIO_PRIO (ESP_TASK_TIMER_PRIO - 1)" in tasks
     for board in ("esp32_p4_wifi6_touch_lcd_7b/boards/MOYBYTE_P4",
                   "guition_jc8012p4a1c/boards/MOYBYTE_GUITION_P4"):
         h = (Path("firmware") / board / "mpconfigboard.h").read_text(encoding="utf-8")
@@ -1028,3 +1032,14 @@ def test_each_p4_board_says_what_its_layers_in_place_shift_costs():
         src = (_REPO / "firmware" / board / "modules" / "moy_runtime.py").read_text()
         assert re.search(r"^LAYER_SHIFT_COST = \d+$", src, re.M), board
         assert "layer_shift_cost=LAYER_SHIFT_COST" in src, board
+
+
+def test_the_vm_going_closes_an_open_lua_run():
+    """A soft reset ends the Player's runs and closes moycore's open runtime
+    first: without the call, a Lua run a Ctrl-C left open outlives its VM,
+    keeps its internal SRAM and refuses the next VM's first run. Executed on
+    glass by `on_glass.a_ctrl_c_ends_a_front_run`."""
+    src = (NATIVE / "moy_play" / "modmoy_play.c").read_text()
+    body = src.split("void moy_play_vm_stop(void) {", 1)[1].split("\n}\n", 1)[0]
+    assert "moycore_vm_stop();" in body
+    assert "void moycore_vm_stop(void)" in (NATIVE / "moycore" / "modmoycore.c").read_text()

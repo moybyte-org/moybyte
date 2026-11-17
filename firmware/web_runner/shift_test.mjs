@@ -3,8 +3,9 @@
 // buffer, so the shift is in place, and it must move the pixels the boards'
 // and the host's do -- every sign of the move, a rect clipped at each edge --
 // held to the per-pixel reference tests/test_shift_last.py states
-// (docs/theme_and_shell_2026-11.md §9.6). The web canvas names no last frame's
-// buffer, so copy_last_into is absent.
+// (docs/theme_and_shell_2026-11.md §9.6). The web canvas is the one-buffer
+// compositor's (runtime/toolkit/one_buffer.py): its one buffer is the last
+// frame's, so copy_last copies nothing and copy_last_into reads that buffer.
 //
 // Run from firmware/web_runner, against dist/. tests/test_web_shift.py runs it.
 import { pathToFileURL } from "node:url";
@@ -39,8 +40,18 @@ def ref(before, x, y, w, h, dx, dy):
     return out
 
 c = web_canvas.make_canvas(W, H)
-if getattr(c, "copy_last_into", None) is not None:
-    raise AssertionError("the web canvas has no last frame's buffer to copy from")
+c._buf[:] = noise(W * H * 2, 99)
+before = bytes(c._buf)
+if c.copy_last(3, 3, 20, 10) is not True or bytes(c._buf) != before:
+    raise AssertionError("copy_last on the one buffer moved pixels")
+lay = c.new_layer(8, 6)
+lay._buf[:] = bytes(8 * 6 * 2)
+if c.copy_last_into(lay, 5, 2, 8, 6) is not True:
+    raise AssertionError("copy_last_into refused")
+for r in range(6):
+    a = ((2 + r) * W + 5) * 2
+    if bytes(lay._buf[r * 16:(r + 1) * 16]) != before[a:a + 16]:
+        raise AssertionError("copy_last_into row %d is not the one buffer's" % r)
 k = 0
 for rect in ((5, 4, 20, 12), (-3, -2, 15, 10), (30, 15, 20, 15), (0, 0, 40, 24)):
     for d in ((0, 1), (0, -1), (0, 7), (0, -7), (3, 0), (-3, 0), (2, -5), (-4, 6),

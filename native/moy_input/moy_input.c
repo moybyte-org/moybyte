@@ -1,17 +1,16 @@
 // moy_input: the merged input table. moy_input.h has the contract.
 
-#ifndef _POSIX_C_SOURCE
-#define _POSIX_C_SOURCE 200809L     // clock_gettime under -std=c99
-#endif
+#include "moy_platform.h"
 
 #include "moy_input.h"
+#include "moy_kmem.h"
 
 #include <string.h>
 
 #include "moy_hid.h"
 #include "moy_htab.h"
 
-#ifdef MOY_INPUT_BOARD
+#ifdef MOY_ON_BOARD
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -70,7 +69,7 @@ struct moy_input_ring {
 };
 
 typedef struct {
-#ifdef MOY_INPUT_BOARD
+#ifdef MOY_ON_BOARD
     portMUX_TYPE mux;
 #endif
     int8_t key_src;                 // which source owns last_key, -1 for none
@@ -112,6 +111,8 @@ struct moy_input {
     uint32_t krep_due[MOY_INPUT_SOURCES];
     int32_t krep_ev;                        // this frame's repeated key, and its count
     uint8_t krep;
+    int32_t key_prev;                       // the byte typed at the last merge
+    int32_t key_press;                      // this frame's byte where it is a fresh press
     // the event rings and their readers, written under the lock
     moy_input_ring_t *ring[MOY_INPUT_RINGS];   // the latch sources', then the ring sources'
     uint8_t ev_used;                        // a bit a reader
@@ -159,75 +160,37 @@ static uint32_t vocab(const moy_input_t *t) {
     return (1u << t->nbuttons) - 1u;
 }
 
-#ifdef MOY_INPUT_BOARD
-// The kernel's small-block pool (moy_kernel.h), where the image has it.
-void *moy_kpool_alloc(size_t n) __attribute__((weak));
-bool moy_kpool_free(void *p) __attribute__((weak));
+// The kernel's small-block pool first (moy_kernel.h), then PSRAM.
 static void *tab_alloc(size_t n) {
-    void *q = moy_kpool_alloc != NULL ? moy_kpool_alloc(n) : NULL;
-    if (q != NULL) {
-        return q;
-    }
-    void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM);
-    return p ? p : heap_caps_calloc(1, n, MALLOC_CAP_8BIT);
+    return moy_kalloc(n, MOY_KMEM_SMALL | MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK | MOY_KMEM_ZERO);
 }
 static void tab_free(void *p) {
-    if (moy_kpool_free != NULL && moy_kpool_free(p)) {
-        return;
-    }
-    heap_caps_free(p);
+    moy_kfree(p);
 }
 static void *front_alloc(void) {
-    return heap_caps_calloc(1, sizeof(moy_input_front_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    return moy_kalloc(sizeof(moy_input_front_t), MOY_KMEM_INTERNAL | MOY_KMEM_ZERO);
 }
 static void front_free(void *p) {
-    heap_caps_free(p);
+    moy_kfree(p);
 }
 // A ring an ISR writes is internal, as the latches are; any other is the
 // table's (PSRAM).
 static void *ring_alloc(size_t n, bool internal) {
-    return internal ? heap_caps_calloc(1, n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) : tab_alloc(n);
+    return internal ? moy_kalloc(n, MOY_KMEM_INTERNAL | MOY_KMEM_ZERO) : tab_alloc(n);
 }
 static void ring_free(void *p, bool internal) {
-    if (internal) {
-        heap_caps_free(p);
-    } else {
-        tab_free(p);
-    }
+    (void)internal;
+    moy_kfree(p);
 }
 static uint64_t clock_us(void) {
-    return (uint64_t)esp_timer_get_time();
+    return (uint64_t)moy_now_us();
 }
+#ifdef MOY_ON_BOARD
 #define ISR_TEXT MOY_INPUT_ISR_TEXT
-#define ISR_CLOCK() esp_timer_get_time()    // IRAM in ESP-IDF
+#define ISR_CLOCK() moy_now_us()    // always inlined: esp_timer_get_time, IRAM in ESP-IDF
 #define ISR_LOCK(w) portENTER_CRITICAL_SAFE((portMUX_TYPE *)(w)->mux)
 #define ISR_UNLOCK(w) portEXIT_CRITICAL_SAFE((portMUX_TYPE *)(w)->mux)
 #else
-static void *tab_alloc(size_t n) {
-    return calloc(1, n);
-}
-static void tab_free(void *p) {
-    free(p);
-}
-static void *front_alloc(void) {
-    return calloc(1, sizeof(moy_input_front_t));
-}
-static void front_free(void *p) {
-    free(p);
-}
-static void *ring_alloc(size_t n, bool internal) {
-    (void)internal;
-    return calloc(1, n);
-}
-static void ring_free(void *p, bool internal) {
-    (void)internal;
-    free(p);
-}
-static uint64_t clock_us(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000000u + (uint64_t)ts.tv_nsec / 1000u;
-}
 #define ISR_TEXT
 #define ISR_CLOCK() clock_us()
 #define ISR_LOCK(w) ((void)(w))
@@ -256,8 +219,14 @@ static uint32_t depth_of(uint32_t depth) {
 // (native/moy_play/moy_play.h, MOY_SHARE_RINGS): over the row, the source has
 // no ring. Weak: an image without the Player counts nothing.
 #define RINGS_ROW 2u
-int moy_share_take(uint8_t row, uint32_t n) __attribute__((weak));
-void moy_share_give(uint8_t row, uint32_t n) __attribute__((weak));
+#if __has_include("moy_play.h")
+#include "moy_play.h"
+#else
+int moy_share_take(uint8_t row, uint32_t n);
+void moy_share_give(uint8_t row, uint32_t n);
+#endif
+#pragma weak moy_share_take
+#pragma weak moy_share_give
 
 static uint32_t ring_bytes(uint32_t depth) {
     return (uint32_t)(sizeof(moy_input_ring_t) + depth * sizeof(moy_event_t));
@@ -367,7 +336,7 @@ static void rescan(moy_input_t *t) {
 static int init(moy_input_t *t, moy_input_front_t *front, uint8_t nbuttons) {
     memset(t, 0, sizeof(*t));
     memset(front, 0, sizeof(*front));
-#ifdef MOY_INPUT_BOARD
+#ifdef MOY_ON_BOARD
     portMUX_INITIALIZE(&front->mux);
 #endif
     front->key_src = -1;
@@ -918,7 +887,7 @@ int moy_input_isr_attach(moy_input_t *t, uint32_t h, moy_input_isr_t *w) {
     if (!t->ring[s]->late) {
         return MOY_INPUT_BAD;
     }
-#ifdef MOY_INPUT_BOARD
+#ifdef MOY_ON_BOARD
     w->mux = &t->front->mux;
 #else
     w->mux = NULL;
@@ -1218,7 +1187,10 @@ void moy_input_begin_frame(moy_input_t *t, uint32_t now) {
     for (uint8_t i = 0; i < t->nsrc; i++) {
         t->front->src[i].pflags &= (uint8_t)~P_EDGE;
     }
+    int32_t typed = moy_input_typed(t->front->last_key);
     UNLOCK(t);
+    t->key_press = typed != t->key_prev ? typed : 0;
+    t->key_prev = typed;
     t->mods = mods;
     t->pb_pressed = (uint8_t)(pb & ~t->pb_held);
     t->pb_held = pb;
@@ -1337,7 +1309,13 @@ void moy_input_release_all(moy_input_t *t) {
     memset(t->p_held, 0, sizeof(t->p_held));
 }
 
+void moy_input_spend_key(moy_input_t *t) {
+    t->key_press = 0;
+    t->key_prev = moy_input_typed(t->front->last_key);
+}
+
 void moy_input_spend_edges(moy_input_t *t) {
+    moy_input_spend_key(t);
     memset(t->rep, 0, sizeof(t->rep));
     t->krep = 0;
     t->krep_ev = 0;
@@ -1431,6 +1409,10 @@ int32_t moy_input_last_key(const moy_input_t *t) {
     return moy_input_typed(t->front->last_key);
 }
 
+int32_t moy_input_key_press(const moy_input_t *t) {
+    return t->key_press;
+}
+
 int32_t moy_input_key_event(const moy_input_t *t) {
     return t->front->last_key;
 }
@@ -1478,6 +1460,8 @@ void moy_input_set_last_key(moy_input_t *t, int32_t key) {
     LOCK(t);
     t->front->last_key = key;
     UNLOCK(t);
+    int32_t typed = moy_input_typed(key);
+    t->key_press = typed != t->key_prev ? typed : 0;
 }
 
 uint8_t moy_input_players(const moy_input_t *t, uint8_t *out) {

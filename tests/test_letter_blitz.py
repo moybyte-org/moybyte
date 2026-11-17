@@ -74,7 +74,7 @@ def test_letter_blitz_opens_and_runs_headless(tmp_path):
 
     _open_cart(ws, "Letter Blitz")
     assert ws.screen == "desktop"
-    assert ws.ns is not None and ws._update and ws._draw
+    assert ws.ns is not None and ws.run.player.update and ws.run.player.draw
     _run(ws, 300)  # ~10s headless, tanks wandering, no input -- must not crash
 
 
@@ -163,7 +163,7 @@ def test_letter_blitz_letters_unlocked_stepper_expands_pool(tmp_path):
 
     assert ws.ns["_unlocked"]() == "ABCDEF"       # default starting batch
 
-    ws.config["letters_unlocked"] = 26
+    ws.run.project.config["letters_unlocked"] = 26
     assert ws.ns["_unlocked"]() == "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
     # every glyph a tank could show must actually be drawable (#72: glyphs are
@@ -249,7 +249,7 @@ def test_letter_blitz_arena_refresh_without_trace(tmp_path):
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Letter Blitz")
-    ws.config["trace_bonus"] = 0
+    ws.run.project.config["trace_bonus"] = 0
 
     ws.ns["_clear_maze"]()  # a fully chewed-up arena
     ws.ns["pop_count"] = 3  # the next pop is the 4th
@@ -456,6 +456,7 @@ def test_letter_blitz_exit_button_quits_to_launcher(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Letter Blitz")
     assert ws.screen == "desktop"
+    ws.input_policy.sync()                  # the frame's look at the mode
     assert ws.input.text_mode is True              # the typing game asked for text input
 
     ex, ey, ew, eh = ws.ns["_exit_rect"]()         # the X's rect (top-right corner)

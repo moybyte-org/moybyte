@@ -12,8 +12,9 @@ and `asyncio.sleep_ms(ms)` are timers, and a stream (`open_connection`,
 A TASK IS ITS PROCESS'S. A task belongs to the process current when it was
 made (the OS log's `current`), so a task a task makes is its maker's. Each
 step of it (one resume of its coroutine, up to its next await) is that
-process's callback: `Scheduler.step` runs it as the process, under the guard,
-its cost in the process's CPU time and every overrun rung counted. An aborted
+process's callback: the scheduler's `python.step` (sched_python.py) runs it
+as the process, under the guard, its cost in the process's CPU time and
+every overrun rung counted. An aborted
 step ends its task (CancelledError to whatever awaits it). A step while the
 process is suspended is put off. A process holds its live tasks as it holds
 its wakes (`moybyte.WAKES.count`), so a service runs while it has a task; its
@@ -49,15 +50,8 @@ awaited it by the step that raised it. The browser's VM has no asyncio:
 
 import sys as _sys
 
-try:
-    from ticks import _ticks_ms, _ticks_diff, _ticks_add
-except ImportError:  # host: the runtime package
-    from runtime.ticks import _ticks_ms, _ticks_diff, _ticks_add
-
-try:
-    import moybyte as _moybyte
-except ImportError:  # host: the runtime package
-    from runtime import moybyte as _moybyte
+from ticks import _ticks_ms, _ticks_diff, _ticks_add
+import moybyte as _moybyte
 
 try:
     import moy_log as _L
@@ -77,7 +71,6 @@ except ImportError:  # MicroPython's takes anything with send
 SHELL = 1
 POLL_MS = 50                    # the loop's wake, at least this often while a task lives
 _MP = _sys.implementation.name == "micropython"
-_AT = _moybyte._AT
 
 TASKS = []
 
@@ -171,7 +164,7 @@ class _Loop:
         if w is None or s.wakes.by_id.get(w[0]) is not w:
             wid = s.plain_every(1, self._drive)
             w = self.w = s.wakes.by_id[wid]
-        w[_AT] = _ticks_ms()
+        s.wakes.set(w[0], 0)
 
     def unwake(self):
         w = self.w
@@ -194,7 +187,7 @@ class _Loop:
         if at is None:
             self.unwake()
             return
-        w[_AT] = at
+        self.sched.wakes.set(w[0], max(0, _ticks_diff(at, now)))
 
     # -- one step -------------------------------------------------------------
 
@@ -218,7 +211,7 @@ class _Loop:
         self._o = o
         self._exc = exc
         try:
-            r = s.step(o.pid, self._go)
+            r = s.python.step(o.pid, self._go)
         except StopIteration:
             self._done(o)
             raise
@@ -227,18 +220,18 @@ class _Loop:
             raise
         except SystemExit as e:
             _gone(o)
-            s.crash(o.pid, e)
+            s.python.crash(o.pid, e)
             self._done(o)
             raise asyncio.CancelledError()
         except Exception as e:  # noqa: BLE001 -- the loop's to deliver, or a crash
             _gone(o)
             if not self.awaited(o):
-                s.crash(o.pid, e)
+                s.python.crash(o.pid, e)
             self._done(o)
             raise
         finally:
             self._o = self._exc = None
-        if r is s.ABORTED:
+        if r is s.python.ABORTED:
             o.close()
             self._done(o)
             raise asyncio.CancelledError()
@@ -252,7 +245,7 @@ class _Loop:
         self._o = o
         self._exc = exc
         try:
-            self.sched.step(o.pid, self._go)
+            self.sched.python.step(o.pid, self._go)
         except BaseException:  # noqa: BLE001 -- its end, whatever it raised
             pass
         finally:
@@ -262,7 +255,7 @@ class _Loop:
 
     def _done(self, o):
         _gone(o)
-        self.sched.settle(o.pid)
+        self.sched.python.settle(o.pid)
 
     # -- the faces ----------------------------------------------------------
 
@@ -470,8 +463,7 @@ def install(sched):
         lp.patch()
         lp.patched = True
     sched.wakes.holds = count
-    if _end not in _moybyte.ENDS:
-        _moybyte.ENDS.append(_end)
+    _moybyte.on_end("tasks", _end)
     if TASKS or lp.pending():
         lp.nudge()
     return True

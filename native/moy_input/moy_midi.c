@@ -1,5 +1,9 @@
 // moy_midi: the `midi` device API's driver (moy_midi.h).
 
+#include "moy_tasks.h"
+
+#include "moy_kmem.h"
+
 #include "moy_midi.h"
 
 #include <stdlib.h>
@@ -8,7 +12,7 @@
 #include "moy_gatt.h"
 #include "moy_input.h"
 
-#if defined(MOY_INPUT_BOARD)
+#if defined(MOY_ON_BOARD)
 #include "driver/uart.h"
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
@@ -23,7 +27,7 @@ typedef struct {
     uint32_t unit;
     uint8_t ble;                        // a BLE port's step (MOY_MIDI_BLE_*)
     uint16_t chr;                       // ... its MIDI characteristic's value handle
-    #if defined(MOY_INPUT_BOARD)
+    #if defined(MOY_ON_BOARD)
     TaskHandle_t reader;
     volatile uint8_t stop;
     #endif
@@ -50,8 +54,9 @@ static void post(int port, uint8_t status, uint8_t d1, uint8_t d2, uint8_t prov)
 // The lease table's lock (moy_lease.h, weak: an image without the kernel's
 // table has one task at the ports): the face on the VM's task and a compiled
 // program's handle on its own (moy_midi_dev.c) take and give ports under it.
-void moy_lease_lock(void) __attribute__((weak));
-void moy_lease_unlock(void) __attribute__((weak));
+#include "moy_lease.h"
+#pragma weak moy_lease_lock
+#pragma weak moy_lease_unlock
 
 static void lock(void) {
     if (moy_lease_lock != NULL) {
@@ -74,11 +79,7 @@ static int open_(uint32_t owner) {
         return -MOY_MIDI_EBADF;
     }
     if (M == NULL) {
-        #if defined(MOY_INPUT_BOARD)
-        M = heap_caps_calloc(1, sizeof(*M), MALLOC_CAP_SPIRAM);
-        #else
-        M = calloc(1, sizeof(*M));
-        #endif
+        M = moy_kalloc(sizeof(*M), MOY_KMEM_PSRAM | MOY_KMEM_ZERO);
         if (M == NULL) {
             return -MOY_MIDI_ENODEV;
         }
@@ -106,7 +107,7 @@ static int open_(uint32_t owner) {
 }
 
 static void unport(port_t *p) {
-    #if defined(MOY_INPUT_BOARD)
+    #if defined(MOY_ON_BOARD)
     if (p->reader != NULL) {
         p->stop = 1;
         for (int i = 0; i < 100 && p->reader != NULL; i++) {
@@ -469,7 +470,7 @@ int moy_midi_ble_send(uint32_t owner, int port, const uint8_t *msg, size_t n, ui
 
 // -- the UART reader ---------------------------------------------------------------
 
-#if defined(MOY_INPUT_BOARD)
+#if defined(MOY_ON_BOARD)
 
 // Off the UART's FIFO, a few bytes a wake: the leased UART's driver is
 // MicroPython's (machine.UART), installed before the port and uninstalled
@@ -506,8 +507,7 @@ static int uart_(uint32_t owner, int port) {
         return 0;
     }
     p->stop = 0;
-    if (xTaskCreatePinnedToCore(reader, "midi", 2560, (void *)(intptr_t)port, 12, &p->reader, 0)
-        != pdPASS) {
+    if (!moy_task_spawn(MOY_TASK_MIDI, reader, (void *)(intptr_t)port, &p->reader)) {
         p->reader = NULL;
         return -MOY_MIDI_ENODEV;
     }

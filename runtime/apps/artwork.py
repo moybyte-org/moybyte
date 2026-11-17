@@ -35,30 +35,10 @@ The Player hands the service only to the shipped Paint cart, by its identity
 and cannot reach the store through this object.
 """
 
-try:
-    from moy_store_base import builtin_name, COVER_FILE
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import builtin_name, COVER_FILE
-
-try:
-    from file_widgets import Bitmap
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.file_widgets import Bitmap
-
-try:
-    from app_context import NO_STORE
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.app_context import NO_STORE
-
-try:
-    from picture_copies import PictureCopies
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.picture_copies import PictureCopies
-
-try:
-    from moyimg import cover_stream
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moyimg import cover_stream
+from moy_store_base import builtin_name, COVER_FILE
+from file_widgets import Bitmap
+from app_context import NO_STORE
+from picture_copies import PictureCopies
 
 try:
     import moy_gfx as _gfx
@@ -75,10 +55,7 @@ try:
 except ImportError:  # pragma: no cover - a board without the layer
     _uf = None
 
-try:
-    import moybuf as _moybuf
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import moybuf as _moybuf
+import moybuf as _moybuf
 
 # A cart's cover is this square, always (SPEC.md 3.6).
 COVER_SIDE = 128
@@ -127,19 +104,14 @@ def picture_size(blob):
 def read_cover(blob, dst, dw, dh):
     """Drawing `blob` read into `dst` (dw * dh indices) a row at a time,
     cropped about its centre to dw:dh and sampled nearest -- the picture
-    decoder the backdrop reads with (native/moy_store/moy_img.h, whose
-    reference is `moyimg.cover_stream`), so a 1024 x 600 drawing never stands
+    decoder the backdrop reads with (native/moy_store/moy_img.h,
+    `moy_ufiles.cover_image`), so a 1024 x 600 drawing never stands
     whole in memory. Its (w, h), or None when it is not a picture."""
-    if not blob:
+    if not blob or _uf is None:
         return None
     raw = blob.encode() if isinstance(blob, str) else blob
     f = _io.BytesIO(raw)
-    if _uf is not None:
-        try:
-            return _uf.cover_image(f, dst, dw, dh, DESK_W, DESK_H)
-        except (AttributeError, ImportError):
-            f.seek(0)
-    return cover_stream(f, dst, dw, dh, DESK_W, DESK_H)
+    return _uf.cover_image(f, dst, dw, dh, DESK_W, DESK_H)
 
 
 def _invalidate_bitmap(img):

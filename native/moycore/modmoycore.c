@@ -59,7 +59,12 @@
 // -- helpers -----------------------------------------------------------------
 
 // The kernel's Player, where the image has it (weak: moycore stands alone).
-bool moy_play_lock_seed(uint32_t *seed) __attribute__((weak));
+#if __has_include("moy_play.h")
+#include "moy_play.h"
+#else
+bool moy_play_lock_seed(uint32_t *seed);
+#endif
+#pragma weak moy_play_lock_seed
 
 void *moycore_buf_w(mp_obj_t o, size_t *len)
 {
@@ -583,6 +588,34 @@ static mp_obj_t mod_exec(mp_obj_t src_obj, mp_obj_t name_obj)
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_exec_obj, mod_exec);
 
+// own(pid) -> None, or the error text: an app run's `moybyte` table
+// (moycore_moybyte.h), its wakes process `pid`'s, its console calls through
+// the `__moybyte_call` registered before it, its wakes served as each of
+// the run's frames starts (moycore_lua_tick). call(fn, args)
+// -> None, or the error text: the run's global `fn` called with the values
+// of `args`, a JSON array (the window's events).
+static mp_obj_t mod_own(mp_obj_t pid)
+{
+    char err[192];
+    if (moycore_lua_own((uint32_t)mp_obj_get_int(pid), err, sizeof(err)) != 0) {
+        return mp_obj_new_str(err, strlen(err));
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_own_obj, mod_own);
+
+static mp_obj_t mod_call(mp_obj_t fn, mp_obj_t args)
+{
+    size_t n = 0;
+    const char *json = mp_obj_str_get_data(args, &n);
+    char err[192];
+    if (moycore_lua_call(mp_obj_str_get_str(fn), json, n, err, sizeof(err)) != 0) {
+        return mp_obj_new_str(err, strlen(err));
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_call_obj, mod_call);
+
 // load(chunks, layout=None) -> None, or the error text. `chunks` is a sequence of
 // (src, chunkname) pairs -- THE WHOLE CART, in the order SPEC.md 4's `sources`
 // gives. Call AFTER any register()s and any exec()s. `layout`, a responsive
@@ -924,7 +957,8 @@ int moycore_wasm_open_c(const moycore_open_c_t *o, char *err, size_t n)
 
 // The kernel's stop (native/moy_kernel): nonzero while the VM goes for a VM
 // stop rather than a soft reset. Weak, for an image without the stop.
-int moy_kernel_stop_pending(void) __attribute__((weak));
+#include "moy_kernel.h"
+#pragma weak moy_kernel_stop_pending
 
 // The VM is going (native/moy_kernel's soft reset, a VM stop's included): a
 // run still open closes with it, while its objects are still the VM's; the
@@ -1125,7 +1159,7 @@ static mp_obj_t mod_sram_report(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_sram_report_obj, mod_sram_report);
 
-#ifndef MOYCORE_PSRAM
+#ifndef MOY_ON_BOARD
 // sram_sim(bytes) -- arm the host's simulated internal-SRAM region, 0 to
 // disarm; returns what is armed. The board reads that figure from the heap and
 // this file is the only place the floor arithmetic lives, so this is how the
@@ -1155,7 +1189,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_pool_check_obj, mod_pool_check);
 //                                  a None chunkname the service's own;
 //                                  app: its app's run, moy_app's `run()`)
 //   svc_info(h) -> (state, exit, heap, cpu_us, strikes, why, wakes, mail), None when stale
-//   svc_tasks() -> bool   svc_step(now_ms) -> ms to the next deadline   svc_reset()
+//   svc_tasks() -> bool   svc_step() -> ms to the next deadline   svc_reset()
 
 static void svc_check(int rc)
 {
@@ -1237,11 +1271,11 @@ static mp_obj_t mod_svc_tasks(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_svc_tasks_obj, mod_svc_tasks);
 
-static mp_obj_t mod_svc_step(mp_obj_t now)
+static mp_obj_t mod_svc_step(void)
 {
-    return mp_obj_new_int_from_uint(moycore_svc_step((uint32_t)mp_obj_get_int_truncated(now)));
+    return mp_obj_new_int_from_uint(moycore_svc_step());
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(mod_svc_step_obj, mod_svc_step);
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_svc_step_obj, mod_svc_step);
 
 static mp_obj_t mod_svc_reset(void)
 {
@@ -1257,6 +1291,8 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_p8_memory), MP_ROM_PTR(&mod_p8_memory_obj) },
     { MP_ROM_QSTR(MP_QSTR_register),    MP_ROM_PTR(&mod_register_obj) },
     { MP_ROM_QSTR(MP_QSTR_exec),        MP_ROM_PTR(&mod_exec_obj) },
+    { MP_ROM_QSTR(MP_QSTR_own),         MP_ROM_PTR(&mod_own_obj) },
+    { MP_ROM_QSTR(MP_QSTR_call),        MP_ROM_PTR(&mod_call_obj) },
     { MP_ROM_QSTR(MP_QSTR_load),        MP_ROM_PTR(&mod_load_obj) },
     { MP_ROM_QSTR(MP_QSTR_layout),      MP_ROM_PTR(&mod_layout_obj) },
     { MP_ROM_QSTR(MP_QSTR_tick),        MP_ROM_PTR(&mod_tick_obj) },
@@ -1309,7 +1345,7 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_sram_floor), MP_ROM_PTR(&mod_set_sram_floor_obj) },
     { MP_ROM_QSTR(MP_QSTR_alloc_stats), MP_ROM_PTR(&mod_alloc_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_sram_report), MP_ROM_PTR(&mod_sram_report_obj) },
-#ifndef MOYCORE_PSRAM
+#ifndef MOY_ON_BOARD
     { MP_ROM_QSTR(MP_QSTR_sram_sim),    MP_ROM_PTR(&mod_sram_sim_obj) },
 #endif
     { MP_ROM_QSTR(MP_QSTR_pool_check), MP_ROM_PTR(&mod_pool_check_obj) },

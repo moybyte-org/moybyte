@@ -417,6 +417,14 @@ int moy_ui_frame_icon(moy_ui_box_t w, int th, int btns, moy_ui_box_t *slot);
 // its outline's partly covered pixels, blended over what that layer just
 // painted (runtime/wm/wm_desk.py draws it, clipped to what it repainted).
 int moy_ui_frame_under(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int active, int mode);
+// The same over `src`, a buffer of `len` bytes laid out as the canvas's,
+// in place of the canvas's own pixels: `src` laid into every pixel of buffer
+// rect `outer` but those of `inner` (the clip does not apply), with the
+// shadow over it where it falls -- the restore of a cache and the shadow of
+// the first window over it, one pass (moy_shape_shadow_fill).
+int moy_ui_frame_under_fill(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int active,
+                            int mode, const void *src, size_t len, moy_ui_box_t outer,
+                            moy_ui_box_t inner);
 // The same, onto the pixels window `o` (title strip `oth`, focused `oactive`)
 // paints opaque -- its frame and content, never its outline's fringe or the
 // corners its arcs leave -- within the clip: what a window above casts over a

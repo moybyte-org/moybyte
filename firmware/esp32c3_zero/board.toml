@@ -1,0 +1,322 @@
+#  Moybyte board definition -- ESP32-C3 "Zero" (headless)
+#  ======================================================
+#
+#  The Zero on the smallest chip that runs it: an ESP32-C3 with 4 MB of
+#  in-package flash (the C3FH4: Super Mini and its kin), USB-Serial/JTAG on
+#  the chip, WiFi and no PSRAM. It is the Zero's VARIANT, not a second design:
+#  the same tier, the same store host (device/zero_host.py and its two
+#  siblings, which both Zero boards take) and the same module sets, so every
+#  reason the XIAO's board.toml gives for a module crossing or not is this
+#  board's reason too, and is not restated here. What this file records is
+#  what the chip changes:
+#
+#  * NO PSRAM. The kernel's PSRAM placements are the one internal heap on a
+#    build without it (native/moy_kernel/moy_platform.h, MOY_HAS_PSRAM), and
+#    the kernel keeps no small-block pool. WiFi, the VM's heap and every
+#    native block share roughly 300 KB, so what the C takes while it works
+#    is sized for it: the SSH server's stacks and session arena, SFTP refused
+#    (README.md's SSH paragraph), and the Python heap's ceiling
+#    (boards/MOYBYTE_C3_ZERO/mpconfigboard.h).
+#  * ONE APP SLOT (owner, 2026-11-17: the C3 keeps the browser console and
+#    has no OTA). This board is the Zero "without OTA" that the XIAO's
+#    `[image]` names as a way out: a factory slot, no otadata, and
+#    `moy_ota.OtaUpdater.available()` False, which is how the shared update
+#    screen already reads a board it cannot update. A new image goes on by
+#    cable, and the flash installs the browser console add-on that fits it
+#    into the store (`[flash] addon`).
+#  * SINGLE CORE, RISC-V. Every task the native tier starts is on core 0
+#    (native/moy_kernel/moy_tasks.h).
+
+[board]
+name    = "esp32c3_zero"
+chip    = "esp32c3"
+ota     = "c3_zero"         # the board id inside a signed OTA manifest (#53)
+tier    = "headless"
+tier_why = """
+The Zero's tier on a C3: no glass, the browser is the display and the store is
+the product, so this board stages the sync stack and nothing that draws -- the
+XIAO's tier_why, which this board shares, on a chip with no PSRAM and one app
+slot."""
+
+# ---------------------------------------------------------------------------
+
+[modules]
+dest = "modules"
+prune = true
+keep  = [
+  "carts_data.py",   # the PACKED seed roster (tools/gen_device_carts.py --packed)
+  "_ota_build.py",   # the version/label/board stamp (#53); no OTA slot to use it
+]
+
+[modules.shared]
+source   = "runtime"
+strategy = "allowlist"
+why = """
+The Zero's allowlist, group for group: the board is not a console, so a new
+runtime/ module reaches it only by name (firmware/seeed_xiao_esp32s3_zero/
+board.toml says why at length). tests/test_staging_closure.py derives this
+board's frozen set from this file as it does the XIAO's."""
+
+[[modules.shared.group]]
+files = ["moy_sync.py", "moy_fs.py"]
+why = "The sync RPC: the board's reason to exist, as on the XIAO."
+
+[[modules.shared.group]]
+files = ["moy_carts.py", "moy_store_base.py", "moy_seed.py", "moy_docs.py", "moy_pack.py",
+         "moy_backup.py", "moyimg.py", "cart_listing.py"]
+why = "The store module and its umbrella: the files layer and the packed seed, as on the XIAO."
+
+[[modules.shared.group]]
+files = ["moy_journal.py"]
+why = "The store-of-record journal: browser pushes land here, as on the XIAO."
+
+[[modules.shared.group]]
+files = ["ticks.py"]
+why = "The wrap-safe ms clock zero_setup and moy_webhost import, as on the XIAO."
+
+[[modules.shared.group]]
+files = ["ssh_service.py"]
+why = "The SSH server's Python side, which zero_shell hands its console, as on the XIAO."
+
+[[modules.shared.group]]
+files = ["web_addon.py", "cart_index.py", "cart_unpack.py", "cart_files.py",
+         "app_imports.py"]
+why = """
+The install the browser console's Get Carts asks this board for: the official
+carts of its release, fetched over its own network and checked file by file
+before they land (web_addon.OfficialCarts over cart_index, as on the XIAO).
+With no OTA slot the image never runs the add-on's step, which the cable flash
+does for it."""
+
+[[modules.shared.lazy]]
+module = "blocks"
+why = "moy_carts.save_blocks() reaches the block compiler through an ImportError ladder; no Zero freezes its callers (the XIAO's reason)."
+
+[[modules.shared.lazy]]
+module = "cover_png"
+why = "moy_carts reaches the cover reader through an ImportError ladder whose only caller is Paint (the XIAO's reason)."
+
+[[modules.shared.lazy]]
+module = "ssh_service"
+why = "moy_webhost.make_webhost() reads a console's sign-in folder through it, in a ladder; its callers are the consoles' (the XIAO's reason)."
+
+[modules.device]
+source   = "device"
+why = """
+The store host and its transport, and the version stamp. The Zero's own three
+modules live in device/ because both Zero boards take them."""
+packages = []
+packages_why = "No device package crosses: the store host is flat modules."
+
+[[modules.device.group]]
+files = ["zero_host.py", "zero_setup.py", "zero_shell.py"]
+why = "The Zero's store host, its first-boot setup and its terminal: both Zero boards' main.py."
+
+[[modules.device.group]]
+files = ["cart_net.py"]
+why = "The transport cart_index fetches through on a board (the kernel's client), as on the XIAO."
+
+[[modules.device.group]]
+files = ["moy_webhost.py"]
+why = "The HTTP transport zero_host serves the console and the sync RPC through."
+
+[[modules.device.group]]
+files = ["moy_ota.py", "moy_ota_health.py"]
+why = """
+The version ladder (moy_ota.FIRMWARE_VERSION, its label and board stamp) every
+board reports, and the updater zero_host constructs. With one app slot the
+updater's available() is False, and /update says so."""
+
+# ---------------------------------------------------------------------------
+
+[roster]
+# The image carries only the CORE carts (moy_seed.CORE: Get Carts, Files,
+# Appearance, Achievements, the Wallpaper slot and Moy Night, the default
+# backdrop), which zero_host.seed_carts seeds as a console seeds its own
+# (present unless the kid removed one), and a new store gets nothing more
+# (owner, 2026-11-17): beside the browser console add-on the store has little
+# room above zero_host.SEED_RESERVE, and that room is the kid's. Every other
+# system cart is an official cart the release publishes in
+# carts-<board>.json, which the page this board serves adds and removes
+# (`/official`). With no OTA, a cable flash brings the official carts the
+# store holds to the image's release.
+image = "core"
+install = []
+
+[flash]
+# No `after`: esptool's hard_reset (an RTS pulse through the USB-Serial/JTAG)
+# boots the C3's app and its USB device stays put. A watchdog_reset resets the
+# whole chip, USB included, under esptool's still-open handle, so the host
+# gives the board a new ttyACM number (seen 2026-11-13: ttyACM0 came back as
+# ttyACM1), which a fixed device passthrough cannot follow.
+image  = "dist/c3_zero/moybyte_c3_zero.bin"
+offset = "0x0"
+baud   = 460800
+# The carts folder the browser console add-on that fits the flashed image is
+# installed into, over the REPL, after a cable flash (tools/board_flash.py):
+# with no OTA, a cable flash is how a new image arrives, and its page with it.
+addon  = "/moy/carts"
+
+[image]
+# One factory slot (boards/MOYBYTE_C3_ZERO/partitions-moybyte-c3-zero.csv has
+# the arithmetic). Only the slot-fit guard (#168) holds it, as on every board.
+headroom_floor_kib = 0
+
+[serial]
+# The chip's own USB-Serial/JTAG, opened like the XIAO's: both lines HIGH,
+# because both LOW is a chip reset under the open handle. serial_number is the
+# test unit's MAC, the identity tools/board.py settles a port by.
+dtr  = true
+rts  = true
+usb  = "303a:1001"
+serial_number = "0C:4E:A0:65:67:CC"
+chunk = 768
+attach_only = false
+
+[monitor]
+baud = 115200
+
+# ---------------------------------------------------------------------------
+
+[hardware]
+chip_gpio = "esp32c3"
+unused = []
+
+[[hardware.resource]]
+name = "gpio"
+class = "lease"
+pins = [0, 1, 3, 4, 5, 6, 7, 10]
+
+[[hardware.resource]]
+name = "uart0"
+class = "os"
+pins = {tx = 21, rx = 20}
+why = "MicroPython's UART REPL, the recovery path when USB has wedged"
+
+[[hardware.resource]]
+name = "strap"
+class = "never"
+pins = [2, 8, 9]
+why = "strapping: 9 is BOOT, 8 the Super Mini's LED and ROM log gate, 2 must idle high"
+
+[[hardware.resource]]
+name = "usb"
+class = "never"
+pins = [18, 19]
+why = "the USB-Serial/JTAG this board is reached and flashed through"
+
+[[hardware.resource]]
+name = "flash"
+class = "never"
+pins = [11, 12, 13, 14, 15, 16, 17]
+why = "the in-package flash and its VDD_SPI"
+
+# ---------------------------------------------------------------------------
+
+[native]
+dest = "native/.staged"
+
+[native.shared]
+source   = "native"
+why = """
+The XIAO's set: the store, the kernel's entry, the links, the shell, the
+terminal, SSH and moy_web, which names the browser console add-on this
+board serves. Every denial is the XIAO's, for the XIAO's reason (no glass,
+no card, no audio, no carts run here); each is one line below and the reasoning
+is that file's."""
+
+[[native.shared.deny]]
+module = "moy_usbdisk"
+why = "No card: the store is the internal flash (the XIAO's reason)."
+
+[[native.shared.deny]]
+module = "moy_play"
+why = "No carts run here: the browser plays them (the XIAO's reason)."
+
+[[native.shared.deny]]
+module = "moy_app"
+why = "No apps run here (the XIAO's reason)."
+
+[[native.shared.deny]]
+module = "moy_ui"
+why = "Nothing draws here (the XIAO's reason)."
+
+[[native.shared.deny]]
+module = "moy_gfx"
+why = "No canvas: nothing dispatches into the draw kernel (the XIAO's reason)."
+
+[[native.shared.deny]]
+module = "moy_alloc"
+why = "No panel, no framebuffer, no DMA path to allocate for (the XIAO's reason)."
+
+[[native.shared.deny]]
+module = "moy_flush"
+why = "No panel (the XIAO's reason)."
+
+[[native.shared.deny]]
+module = "moy_sd"
+why = "No card slot (the XIAO's reason)."
+
+[[native.shared.deny]]
+module = "moy_audio"
+why = "No speaker (the XIAO's reason)."
+
+[[native.shared.deny]]
+module = "moy_media"
+why = "Its mix is moy_audio's, denied here: a stream has nowhere to play (the XIAO's reason)."
+
+[[native.shared.deny]]
+module = "moy_lua"
+why = "No carts run here (the XIAO's reason)."
+
+[[native.shared.deny]]
+module = "moycore"
+why = "No carts run here (the XIAO's reason)."
+
+[[native.shared.deny]]
+module = "moy_prof"
+why = "No frame loop to profile (the XIAO's reason)."
+
+[[native.shared.deny]]
+module = "moy_wasm"
+why = "No compiled carts run here (the XIAO's reason)."
+
+[[native.shared.deny]]
+module = "moy_elf"
+why = "No native programs run here (the XIAO's reason)."
+
+[[native.shared.take]]
+module = "moy_kernel"
+why = "The kernel's entry, the VM service and the serial floor (the XIAO's reason)."
+
+[[native.shared.deny]]
+module = "moy_glass"
+why = "No glass (the XIAO's reason)."
+
+[[native.shared.deny]]
+module = "moy_input"
+why = "No input device (the XIAO's reason)."
+
+[[native.shared.take]]
+module = "moy_net"
+why = "The links: the webhost, the sync RPC's batch codec and the HTTP parser this board serves through (the XIAO's reason)."
+
+[[native.shared.take]]
+module = "moy_sh"
+why = "The terminal's C shell; with no glass and a bare REPL, its faces are the network's (the XIAO's reason)."
+
+[[native.shared.take]]
+module = "moy_tty"
+why = "The shell's face over a stream: SSH, the web terminal and SFTP into the store (the XIAO's reason)."
+
+[[native.shared.deny]]
+module = "moy_png"
+why = "No shelf to draw covers on: the browser reads a cart's covers itself (the XIAO's reason)."
+
+[[native.shared.deny]]
+module = "moy_index"
+why = "The shelf's query index: this board draws no shelf and answers no query (the XIAO's reason)."
+
+[[native.shared.deny]]
+module = "moy_serial"
+why = "No dev channel: a bare REPL, and carts arrive over the network (the XIAO's reason)."

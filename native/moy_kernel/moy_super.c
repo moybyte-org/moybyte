@@ -1,9 +1,7 @@
 // moy_super: the one supervisor of background callbacks (moy_super.h has the
 // ladder).
 
-#if defined(__has_include) && !__has_include("esp_heap_caps.h") && !defined(_POSIX_C_SOURCE)
-#define _POSIX_C_SOURCE 200809L     // clock_gettime under -std=c99
-#endif
+#include "moy_platform.h"
 
 #include "moy_super.h"
 
@@ -14,7 +12,8 @@
 #include "moy_sync.h"
 
 // The OS log (moy_log.h), where the image has it.
-void moy_log_write(int level, uint32_t pid, const char *text, size_t n) __attribute__((weak));
+#include "moy_log.h"
+#pragma weak moy_log_write
 enum { LOG_ERR = 3, LOG_WARNING = 4 };
 
 typedef struct {

@@ -70,7 +70,7 @@ def _sources():
         with open(os.path.join(d, name)) as fh:
             text = fh.read()
         out[name] = _widen_to_double(text) if widen else text
-    return out
+    return native_build.with_platform(out)
 
 
 def _key(cc, sources):
@@ -376,12 +376,10 @@ def get():
     return _lib
 
 
-def install():
-    """Put `moy_audio` where an `import` finds it; never displaces a real one."""
-    mod = get()
-    if mod is not None:
-        sys.modules.setdefault("moy_audio", mod)
-    return mod
+def binding():
+    """The module `moy_audio` (runtime/host/faces.py: registered at its first
+    import), or None with no compiler."""
+    return get()
 
 
 if __name__ == "__main__":

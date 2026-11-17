@@ -116,7 +116,7 @@ def test_the_code_tab_takes_its_language_from_the_table(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     cart = ws.carts.all[0]
     ws.open_in_editor(cart)
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     assert ws.code_layer._is_lua() is (text_modes.cart_lang(ws.cart) == "lua")
     ws.cart["runtime"] = "lua"
     assert ws.code_layer._is_lua() is True

@@ -14,6 +14,8 @@
 #ifndef MOY_NET_H
 #define MOY_NET_H
 
+#include "moy_platform.h"
+
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -22,9 +24,9 @@
 // -- HTTP ----------------------------------------------------------------------
 
 enum {
-    MOY_HTTP_PARTIAL = 0,   // the head's blank line has not arrived
-    MOY_HTTP_OK = 1,
-    MOY_HTTP_BAD = -1,      // a head whose request line has no target
+    MOY_HTTP_OK = 0,
+    MOY_HTTP_PARTIAL = 1,   // the head's blank line has not arrived
+    MOY_HTTP_BAD = 2,       // a head whose request line has no target
 };
 
 // The largest Content-Length a request is believed about; beyond it the
@@ -57,6 +59,19 @@ int moy_http_parse(const char *buf, size_t n, moy_http_req_t *r);
 int moy_http_query(const char *target, size_t n, const char *name,
                    size_t name_n, const char **val, size_t *val_n);
 
+typedef struct {
+    int status;             // 0 when the status line does not parse
+    uint32_t clen;          // Content-Length, 0 when absent or unreadable
+    const char *loc;        // Location's value, trimmed; NULL when none
+    size_t loc_n;
+    size_t head_end;        // the byte past the blank line
+} moy_http_resp_t;
+
+// A response head off the first `n` bytes of `buf`: MOY_HTTP_OK with `r`
+// filled, or MOY_HTTP_PARTIAL until the "\r\n\r\n" arrives. Header names
+// match without regard to ASCII case.
+int moy_http_resp_parse(const char *buf, size_t n, moy_http_resp_t *r);
+
 // -- the listener and the platform (moy_net_port.c) -----------------------------
 
 #define MOY_HTTP_REQ_MAX 65536      // a request past this is cut there
@@ -74,6 +89,9 @@ int moy_http_accept(int lfd, uint32_t *peer);
 // MOY_HTTP_BAD when no head arrived.
 int moy_http_recv(int fd, char *buf, size_t cap, moy_http_req_t *r,
                   size_t *got);
+// Read on into `buf`, which holds `n` bytes, until it holds `cap` or the peer
+// stops sending: the bytes it then holds.
+size_t moy_http_recv_more(int fd, char *buf, size_t n, size_t cap);
 // All `n` bytes, or -1 when the client stopped taking them.
 int moy_http_send(int fd, const void *p, size_t n);
 void moy_http_close(int fd);
@@ -106,10 +124,8 @@ void moy_net_sha256(const void *p, size_t n, uint8_t out[32]);
 // time. A board's system clock counts from 2000, MicroPython's epoch on the
 // esp32 port (machine.RTC sets it so, and the WiFi driver sets NTP's answer
 // MOY_NET_CLOCK_EPOCH back, moy_wifi.c), so its time() takes the epoch back;
-// the unix port, the browser and the host count from 1970. A board is told by
-// the header it has: ESP_PLATFORM is not defined for a usermod's sources on
-// the esp32 port (the executable compiles them too, and its copy is linked).
-#if __has_include("esp_heap_caps.h")
+// the unix port, the browser and the host count from 1970.
+#ifdef MOY_ON_BOARD
 #define MOY_NET_CLOCK_EPOCH 946684800       // 1970-01-01 to 2000-01-01
 #else
 #define MOY_NET_CLOCK_EPOCH 0
@@ -156,10 +172,6 @@ const char *moy_http_reason(int status);
 // writes at most `cap` bytes (no NUL) and returns the length the whole needs.
 size_t moy_http_head(char *out, size_t cap, int status, const char *ctype,
                      size_t body_n);
-
-// Whether the `n` bytes at `s` are well-formed UTF-8 (no overlong form, no
-// surrogate, nothing past U+10FFFF): what a strict decode accepts.
-int moy_utf8_valid(const char *s, size_t n);
 
 // -- the sync batch's envelope -----------------------------------------------
 
@@ -476,14 +488,15 @@ int moy_net_await(uint32_t *since);
 int moy_gpio_request(int post, const char *target, size_t tn, const char *body,
                      size_t bn, char *out, size_t cap);
 // The board's pins (moy_net_port.c where mpconfigboard.h names
-// MOY_NET_GPIO_PINS): the allowlist and its count; a write (0, or an error);
+// MOY_NET_GPIO_ROUTE: its board.toml `gpio` lease row, MOY_LEASE_GPIO_PINS):
+// the allowlist and its count; a write (0, or an error);
 // a read (0 or 1, or -1).
-int moy_gpio_pins(const uint8_t **pins) __attribute__((weak));
-int moy_gpio_drive(int pin, int level) __attribute__((weak));
-int moy_gpio_sense(int pin) __attribute__((weak));
+int moy_gpio_pins(const uint8_t **pins);
+int moy_gpio_drive(int pin, int level);
+int moy_gpio_sense(int pin);
 // The pin's next touch configures it afresh (its lease is new: one dropped
 // since left it safe).
-void moy_gpio_reset(int pin) __attribute__((weak));
+void moy_gpio_reset(int pin);
 // Every pin lease the page holds dropped (the webhost's stop).
 void moy_gpio_release(void);
 
@@ -542,14 +555,14 @@ static inline int moy_wifi_remember(int ok, const char *password,
 
 // -- the WiFi driver (a board that defines MOY_NET_WIFI) -------------------------
 
-#ifdef ESP_PLATFORM
+#if defined(MOY_ON_BOARD) && __has_include("py/mpconfig.h")
 #include "py/mpconfig.h"            // the board's MOY_NET_WIFI (mpconfigboard.h)
 #endif
 
-#if defined(MOY_NET_WIFI) && MOY_NET_WIFI
-
 typedef struct {
-    uint8_t driver;         // initialised this boot (one-way: its RAM stays)
+    uint8_t driver;         // initialised: on an S3 until the station's stop
+    uint8_t station;        // the station's interface made this boot: it keeps
+                            // its internal RAM until the next boot, driver or not
     uint8_t on;             // started: the radio is up
     uint8_t connected;      // associated and holding an address
     uint8_t reason;         // the last disconnect's reason, 0 after an address
@@ -568,7 +581,7 @@ typedef struct {
 // THE BOOK. The station's power follows the lease table's radio rows
 // (moy_lease.h's THE RADIO), the one record of who holds it: the table calls
 // moy_wifi_book with its mask after every change, under its lock, from
-// whichever task made it (the VM's Workstation.wifi_hold, a compiled
+// whichever task made it (the VM's Spine.wifi_hold, a compiled
 // program's http handle, the media service). The mask's first holder powers
 // a station that is down on (moy_wifi_on), and the book is the station's one
 // start: the VM's view of it (modmoy_net's wifi_on) starts only a station
@@ -617,7 +630,5 @@ int moy_wifi_scan(moy_wifi_ap_t *out, int max);
 int moy_wifi_mac(uint8_t mac[6]);
 // The power-save mode, set first when `set` is 0 or more; -1 before the driver.
 int moy_wifi_ps(int set);
-
-#endif
 
 #endif // MOY_NET_H

@@ -7,10 +7,7 @@ app on a console with a camera would.
                           big-endian
   remove()                no camera again"""
 
-try:                                    # the instance the face imports, its state
-    from runtime import moy_camera as _N    # being Python's, not a C library's
-except ImportError:  # loaded flat
-    import moy_camera as _N
+import moy_camera as _N  # the instance the face imports, its state
 
 
 def install(w=320, h=240):

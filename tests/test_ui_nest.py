@@ -45,7 +45,7 @@ def nest_runs(tmp_path_factory):
             _frame(drv)
         assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         out[name] = _pmem(ws)[:6]
-        ws.exit()
+        ws.spine.exit()
     return out
 
 

@@ -16,6 +16,8 @@
 #include "tusb.h"
 
 #include "esp_heap_caps.h"
+#include "moy_kmem.h"
+#include "moy_tasks.h"
 #include "esp_mac.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -58,8 +60,18 @@
 
 // The store's hold (native/moy_store/moy_card.c), and the `usb` host on the
 // same port where the image has one (native/p4/moy_usb).
-extern int moy_store_card_held(void) __attribute__((weak));
-extern int moy_usb_host_up(void) __attribute__((weak));
+#if __has_include("moy_vol.h")
+#include "moy_vol.h"
+#else
+int moy_store_card_held(void);
+#endif
+#pragma weak moy_store_card_held
+#if __has_include("moy_usb.h")
+#include "moy_usb.h"
+#else
+int moy_usb_host_up(void);
+#endif
+#pragma weak moy_usb_host_up
 
 static volatile int s_on;           // the stack is up
 static volatile int s_run;          // the task goes on
@@ -358,12 +370,12 @@ static void phy_down(void) {
 // drive nobody turns off still ends.
 static void task(void *arg) {
     (void)arg;
-    int64_t since = esp_timer_get_time();
+    int64_t since = moy_now_us();
     int was = -1;
     while (s_run) {
         tud_task_ext(50, false);
         int st = moy_usbdisk_state();
-        int64_t now = esp_timer_get_time();
+        int64_t now = moy_now_us();
         if (st != was) {
             was = st;
             since = now;
@@ -408,7 +420,7 @@ int moy_usbdisk_start(void) {
     }
     xSemaphoreTake(s_done, 0);              // a drive that ended by itself gave it
     if (W == NULL) {
-        W = heap_caps_malloc(sizeof(work_t), MALLOC_CAP_SPIRAM);
+        W = moy_kalloc(sizeof(work_t), MOY_KMEM_PSRAM);
         if (W == NULL) {
             return MP_ENOMEM;
         }
@@ -428,7 +440,7 @@ int moy_usbdisk_start(void) {
         return MP_EIO;
     }
     s_run = 1;
-    if (xTaskCreatePinnedToCore(task, "usbdisk", 4096, NULL, 5, &s_task, 0) != pdPASS) {
+    if (!moy_task_spawn(MOY_TASK_USBDISK, task, NULL, &s_task)) {
         s_run = 0;
         s_on = 0;
         tud_deinit(MOY_TUSB_RHPORT);

@@ -31,7 +31,11 @@ from test_ota_signing import TEST_KEYS, sign_with_test_key  # noqa: E402
 import moy_ota_health  # noqa: E402  (the health half: its thresholds and marker)
 from runtime import net_binding as nb  # noqa: E402
 
-nb.install()
+
+@pytest.fixture(autouse=True)
+def _moy_net(monkeypatch):
+    """`import moy_net` reaches the host's face, as a board's reaches the usermod."""
+    monkeypatch.setitem(sys.modules, "moy_net", nb)
 
 
 def _fresh():
@@ -374,6 +378,15 @@ def test_mark_valid_swallows_a_board_that_cannot(board):
     stopping a boot for."""
     board.esp.mark_error = OSError("ESP_ERR_INVALID_STATE")
     assert board.u.mark_valid() is False
+
+
+def test_a_factory_image_is_not_asked_to_confirm(board, monkeypatch):
+    """One app slot (the C3 Zero) has no rollback to cancel, and ESP-IDF logs
+    an error for being asked, so the confirm does not ask."""
+    esp = _Esp32(running="factory")
+    _install_esp32(monkeypatch, esp)
+    assert board.u.mark_valid() is False
+    assert esp.marked == 0
 
 
 def test_the_online_row_needs_both_a_slot_and_a_radio(board):
@@ -1085,8 +1098,8 @@ def _dialling_screen(tmp_path, board, monkeypatch):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.updater = board.u
     lease = []
-    ws.wifi_hold = lambda tag, pid=None: lease.append(("hold", tag))
-    ws.wifi_release = lambda tag, pid=None: lease.append(("release", tag))
+    ws.spine.wifi_hold = lambda tag, pid=None: lease.append(("hold", tag))
+    ws.spine.wifi_release = lambda tag, pid=None: lease.append(("release", tag))
     labels = []
     real = update_ui._ui.label
     monkeypatch.setattr(update_ui._ui, "label",

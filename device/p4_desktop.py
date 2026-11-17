@@ -80,12 +80,12 @@ def run_desktop(name, link_id, compositor, set_backlight, touch_cls,
 
     def _union_cmd(ws, parts, line):
         on = not (len(parts) == 2 and parts[1] == "0")
-        ws.wm._union_disabled = not on
+        ws.wm.union_disabled = not on
         print("REMOTE union %s" % ("on" if on else "off"))
 
     def _cache_cmd(ws, parts, line):
         on = not (len(parts) == 2 and parts[1] == "0")
-        ws.wm._backdrop_disabled = not on
+        ws.wm.backdrop_disabled = not on
         print("REMOTE cache %s" % ("on" if on else "off"))
 
     d = build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp,

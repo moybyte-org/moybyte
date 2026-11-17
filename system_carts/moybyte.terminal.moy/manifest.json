@@ -13,7 +13,6 @@
     "app": {
       "id": "terminal",
       "entry": "terminal_app:TerminalAppLayer",
-      "text_mode": true,
       "order": 90
     },
     "permissions": [

@@ -10,11 +10,9 @@ from __future__ import annotations
 import ctypes
 import os
 
-try:                                    # the host's runtime package
-    from . import host_native, native_build
-except ImportError:                     # loaded flat, runtime/ on sys.path
-    import host_native
-    import native_build
+import host_native
+import native_build
+from moy_lora_face import moy_lora_cfg_t as _Cfg
 
 _NET = os.path.join(native_build.ROOT, "native", "moy_net")
 _INPUT = os.path.join(native_build.ROOT, "native", "moy_input")
@@ -31,11 +29,6 @@ _U8, _U16, _U32, _I, _I8, _I16 = (ctypes.c_uint8, ctypes.c_uint16, ctypes.c_uint
                                   ctypes.c_int, ctypes.c_int8, ctypes.c_int16)
 _B = ctypes.c_char_p
 _P = ctypes.c_void_p
-
-
-class _Cfg(ctypes.Structure):
-    _fields_ = [("freq", _U32), ("bw", _U32), ("sf", _U8), ("cr", _U8), ("power", _I8),
-                ("sync", _U8), ("preamble", _U16)]
 
 
 _SIGS = (

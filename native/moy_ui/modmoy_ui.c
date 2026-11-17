@@ -2,15 +2,13 @@
 // ids out once; after that the face passes ints, and caches what it gets
 // back, so a widget draw reaches here only on a cache miss.
 
+#include "moy_platform.h"
+
 #include <string.h>
 
-#if __has_include("esp_heap_caps.h")
-#include "esp_heap_caps.h"
-#define JOINED_ALLOC(n) heap_caps_malloc_prefer((n), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT)
-#else
-#include <stdlib.h>
-#define JOINED_ALLOC(n) malloc(n)
-#endif
+#include "moy_kmem.h"
+
+#define JOINED_ALLOC(n) moy_kalloc((n), MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK)
 
 #include "py/obj.h"
 #include "py/runtime.h"
@@ -822,17 +820,6 @@ static mp_obj_t ui_font_reset(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ui_font_reset_obj, ui_font_reset);
 
-// text_wire() -> bool: whether the glyph lane blends byte-swapped words;
-// text_wire(swapped) sets it (moy_text.h) and answers what it was.
-static mp_obj_t ui_text_wire(size_t n_args, const mp_obj_t *a) {
-    int was = moy_text_wire_swapped();
-    if (n_args > 0) {
-        moy_text_wire(mp_obj_is_true(a[0]));
-    }
-    return mp_obj_new_bool(was);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_text_wire_obj, 0, 1, ui_text_wire);
-
 // text_lanes() -> (store, read): the version 2 glyphs drawn since boot that
 // read nothing and that read the target (moy_text_lanes).
 static mp_obj_t ui_text_lanes(void) {
@@ -1224,7 +1211,7 @@ static void sink_of(moy_ui_sink_t *s, mp_obj_t cv, mp_obj_t look) {
 }
 
 // A coordinate, converted toward zero as the print gate's gate_num does.
-static int32_t num(mp_obj_t o) {
+static MP_NOINLINE int32_t num(mp_obj_t o) {
     if (mp_obj_is_small_int(o)) {
         return (int32_t)MP_OBJ_SMALL_INT_VALUE(o);
     }
@@ -1293,6 +1280,15 @@ static moy_ui_span_t span_of(mp_obj_t o) {
     size_t n;
     sp.p = (const uint8_t *)mp_obj_str_get_data(o, &n);
     sp.n = (uint16_t)(n > 0xFFFF ? 0xFFFF : n);
+    return sp;
+}
+
+// Text where NULL never crosses: None, as any empty text, an empty span at "".
+static MP_NOINLINE moy_ui_span_t span0_of(mp_obj_t o) {
+    moy_ui_span_t sp = span_of(o);
+    if (sp.p == NULL) {
+        sp.p = (const uint8_t *)"";
+    }
     return sp;
 }
 
@@ -1560,7 +1556,6 @@ static mp_obj_t ui_scrollbar(size_t n_args, const mp_obj_t *a) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_scrollbar_obj, 7, 7, ui_scrollbar);
-
 
 // fill_uncovered(cv, inner, outer, ci)
 static mp_obj_t ui_fill_uncovered(size_t n_args, const mp_obj_t *a) {
@@ -2022,6 +2017,20 @@ static mp_obj_t ui_frame_under(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_frame_under_obj, 6, 6, ui_frame_under);
 
+// frame_under_fill(cv, look, rect, title_h, active, mode, src, outer, inner)
+static mp_obj_t ui_frame_under_fill(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], a[1]);
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(a[6], &b, MP_BUFFER_READ);
+    check(moy_ui_frame_under_fill(&s, box_of(a[2]), mp_obj_get_int(a[3]), mp_obj_is_true(a[4]),
+                                  mp_obj_get_int(a[5]), b.buf, b.len, box_of(a[7]),
+                                  box_of(a[8])));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_frame_under_fill_obj, 9, 9, ui_frame_under_fill);
+
 // frame_under_onto(cv, look, rect, title_h, active, mode, onto, onto_title_h, onto_active)
 static mp_obj_t ui_frame_under_onto(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -2197,7 +2206,6 @@ static mp_obj_t ui_cell_art(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_cell_art_obj, 4, 4, ui_cell_art);
 
-
 // -- interaction over caller-owned buffers ------------------------------------------------
 
 static void *rw(mp_obj_t o, size_t need, size_t *len) {
@@ -2362,18 +2370,6 @@ static int32_t over_colour(mp_obj_t v) {
     return (int32_t)(mp_obj_get_int_truncated(v) & 0xffffff);
 }
 
-static int8_t over_flag(mp_obj_t v) {
-    return v == MP_OBJ_NULL ? -1 : (int8_t)mp_obj_is_true(v);
-}
-
-// The keys of the override table, in the order `over_vals` keeps them.
-enum {
-    OV_FILL, OV_INK, OV_BORDER, OV_ID, OV_CURRENT, OV_DISABLED, OV_NAV, OV_MARK, OV_STEPS,
-    OV_HINT, OV_WASH, OV_LEAD, OV_GEN, OV_PART, OV_BAR, OV_AXIS, OV_SNAP, OV_WHOLE,
-    OV_OFFSET, OV_SPILL, OV_ACROSS, OV_AT, OV_KEEP, OV_OVER, OV_SHIFT, OV_FADE, OV_SIGNAL, OV_VALUES, OV_CHECK,
-    OV_SUBS, OV_ICONS, OV_COUNTS, OV_TAGS, OV_MARKS, OV_CARD, OV_TAG, OV_FOCUS, OV_FOLLOW, OV_COUNT
-};
-
 // A dict key's qstr: its own, a str's interned one, else MP_QSTRnull.
 static qstr over_qstr(mp_obj_t k) {
     if (mp_obj_is_qstr(k)) {
@@ -2387,56 +2383,14 @@ static qstr over_qstr(mp_obj_t k) {
     return MP_QSTRnull;
 }
 
-static int over_slot(qstr q) {
-    switch (q) {
-        case MP_QSTR_fill: return OV_FILL;
-        case MP_QSTR_ink: return OV_INK;
-        case MP_QSTR_border: return OV_BORDER;
-        case MP_QSTR_id: return OV_ID;
-        case MP_QSTR_current: return OV_CURRENT;
-        case MP_QSTR_disabled: return OV_DISABLED;
-        case MP_QSTR_nav: return OV_NAV;
-        case MP_QSTR_mark: return OV_MARK;
-        case MP_QSTR_steps: return OV_STEPS;
-        case MP_QSTR_hint: return OV_HINT;
-        case MP_QSTR_wash: return OV_WASH;
-        case MP_QSTR_lead: return OV_LEAD;
-        case MP_QSTR_gen: return OV_GEN;
-        case MP_QSTR_part: return OV_PART;
-        case MP_QSTR_bar: return OV_BAR;
-        case MP_QSTR_axis: return OV_AXIS;
-        case MP_QSTR_snap: return OV_SNAP;
-        case MP_QSTR_whole: return OV_WHOLE;
-        case MP_QSTR_offset: return OV_OFFSET;
-        case MP_QSTR_spill: return OV_SPILL;
-        case MP_QSTR_across: return OV_ACROSS;
-        case MP_QSTR_at: return OV_AT;
-        case MP_QSTR_keep: return OV_KEEP;
-        case MP_QSTR_over: return OV_OVER;
-        case MP_QSTR_shift: return OV_SHIFT;
-        case MP_QSTR_fade: return OV_FADE;
-        case MP_QSTR_signal: return OV_SIGNAL;
-        case MP_QSTR_values: return OV_VALUES;
-        case MP_QSTR_check: return OV_CHECK;
-        case MP_QSTR_subs: return OV_SUBS;
-        case MP_QSTR_icons: return OV_ICONS;
-        case MP_QSTR_counts: return OV_COUNTS;
-        case MP_QSTR_tags: return OV_TAGS;
-        case MP_QSTR_marks: return OV_MARKS;
-        case MP_QSTR_card: return OV_CARD;
-        case MP_QSTR_tag: return OV_TAG;
-        case MP_QSTR_focus: return OV_FOCUS;
-        case MP_QSTR_follow: return OV_FOLLOW;
-        default: return -1;
-    }
-}
+#include "modmoy_ui_over.h"
 
 // Each key of the table's dict into its slot of `v` (MP_OBJ_NULL where it is
 // absent or None): one walk of the dict's entries, whatever keys the engine
 // reads -- a verb's table holds a few of them, and a lookup a key hashed
 // and probed every one.
 static void over_vals(mp_map_t *m, mp_obj_t *v) {
-    for (int i = 0; i < OV_COUNT; i++) {
+    for (int i = 0; i < MOY_UI_OV_COUNT; i++) {
         v[i] = MP_OBJ_NULL;
     }
     for (size_t i = 0; i < m->alloc; i++) {
@@ -2457,158 +2411,64 @@ static void over_vals(mp_map_t *m, mp_obj_t *v) {
 static void opts_cap(mp_obj_t o, uint8_t *buf, size_t cap, mp_buffer_info_t *out);
 
 static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
-    mp_obj_t vals[OV_COUNT];
+    mp_obj_t vals[MOY_UI_OV_COUNT];
     over_vals(mp_obj_dict_get_map(d), vals);
     moy_ui_over_none(out);
-    out->fill = over_colour(vals[OV_FILL]);
-    out->ink = over_colour(vals[OV_INK]);
-    out->border = over_colour(vals[OV_BORDER]);
-    mp_obj_t v = vals[OV_ID];
-    if (v != MP_OBJ_NULL) {
-        out->id = span_of(v);
-    }
-    out->current = over_flag(vals[OV_CURRENT]);
-    out->disabled = over_flag(vals[OV_DISABLED]);
-    out->nav = over_flag(vals[OV_NAV]);
-    out->mark = over_flag(vals[OV_MARK]);
-    out->steps = over_flag(vals[OV_STEPS]);
-    v = vals[OV_HINT];
-    if (v != MP_OBJ_NULL) {
-        out->hint = span_of(v);
-    }
-    mp_obj_t wash = vals[OV_WASH];
-    mp_obj_t lead = vals[OV_LEAD];
-    if (wash != MP_OBJ_NULL || lead != MP_OBJ_NULL) {
-        out->wash = (int8_t)(wash != MP_OBJ_NULL && mp_obj_is_true(wash));
-        if (out->wash == 1 && mp_obj_is_str(wash)) {
-            out->wash = 2;          // "view": its anchor's view alone
-        }
-        out->lead = (int8_t)(lead != MP_OBJ_NULL && mp_obj_is_true(lead));
-    }
-    v = vals[OV_GEN];
-    if (v != MP_OBJ_NULL) {
-        out->gen = (int32_t)mp_obj_get_int_truncated(v);
-        out->has_gen = 1;
-    }
-    v = vals[OV_PART];
-    if (v != MP_OBJ_NULL) {
-        size_t n = 0;
-        mp_obj_t *wh = NULL;
-        mp_obj_get_array(v, &n, &wh);
-        if (n == 2) {
-            out->has_part = 1;
-            out->part_w = (int16_t)mp_obj_get_int_truncated(wh[0]);
-            out->part_h = (int16_t)mp_obj_get_int_truncated(wh[1]);
-        }
-    }
-    out->bar = over_flag(vals[OV_BAR]);
-    v = vals[OV_AXIS];
-    if (v != MP_OBJ_NULL && mp_obj_is_str(v)) {
-        size_t n = 0;
-        const char *a = mp_obj_str_get_data(v, &n);
-        out->axis_x = (int8_t)(n == 1 && a[0] == 'x');
-    }
-    out->snap = (int8_t)(over_flag(vals[OV_SNAP]) == 1);
-    out->flags2 = over_flag(vals[OV_FOLLOW]) == 1 ? MOY_UI_O2_FOLLOW : 0;
-    out->whole = (int8_t)(over_flag(vals[OV_WHOLE]) == 1);
-    v = vals[OV_OFFSET];
-    if (v != MP_OBJ_NULL) {
-        out->offset = (int32_t)mp_obj_get_int_truncated(v);
-        out->has_offset = 1;
-    }
-    v = vals[OV_SPILL];
-    if (v != MP_OBJ_NULL) {
-        mp_int_t sp = mp_obj_get_int_truncated(v);
-        out->spill = (int16_t)(sp < 0 ? 0 : sp > 4096 ? 4096 : sp);
-    }
-    v = vals[OV_ACROSS];
-    if (v != MP_OBJ_NULL) {
-        size_t n = 0;
-        mp_obj_t *r = NULL;
-        mp_obj_get_array(v, &n, &r);
-        if (n == 2) {
-            out->has_across = 1;
-            out->across_first = (int16_t)mp_obj_get_int_truncated(r[0]);
-            out->across_pitch = (int16_t)mp_obj_get_int_truncated(r[1]);
-        }
-    }
-    v = vals[OV_AT];
-    if (v != MP_OBJ_NULL) {
-        out->at = (int16_t)mp_obj_get_int_truncated(v);
-    }
-    v = vals[OV_KEEP];
-    if (v != MP_OBJ_NULL) {
-        out->keep = (int32_t)mp_obj_get_int_truncated(v);
-        out->has_keep = 1;
-    }
-    v = vals[OV_OVER];
-    if (v != MP_OBJ_NULL) {
-        size_t n = 0;
-        mp_obj_t *r = NULL;
-        mp_obj_get_array(v, &n, &r);
-        if (n == 4) {
-            mp_int_t w = mp_obj_get_int_truncated(r[2]), h = mp_obj_get_int_truncated(r[3]);
-            if (w > 0 && h > 0) {
-                out->over_x = (int16_t)mp_obj_get_int_truncated(r[0]);
-                out->over_y = (int16_t)mp_obj_get_int_truncated(r[1]);
-                out->over_w = (int16_t)(w > 0x7fff ? 0x7fff : w);
-                out->over_h = (int16_t)(h > 0x7fff ? 0x7fff : h);
-            }
-        }
-    }
-    v = vals[OV_SHIFT];
-    if (v != MP_OBJ_NULL) {
-        out->shift = mp_obj_is_true(v);
-    }
-    v = vals[OV_FADE];
-    if (v != MP_OBJ_NULL) {
-        mp_int_t h = mp_obj_get_int_truncated(v);
-        out->fade = (int16_t)(h < 0 ? 0 : h > 4096 ? 4096 : h);
-    }
-    v = vals[OV_SIGNAL];
-    if (v != MP_OBJ_NULL) {
-        mp_int_t g = mp_obj_get_int_truncated(v);
-        out->signal = (int8_t)(g < 0 ? 0 : g > 4 ? 5 : g + 1);
-    }
     // a list's texts a row, joined into the module's own buffer: made at the
     // first list that names them (JOINED_ALLOC: PSRAM where the board has
     // it) and kept, where a static would hold it in internal SRAM from boot;
     // without one they join on the heap
     static uint8_t *joined;
-    if (joined == NULL) {
-        joined = JOINED_ALLOC(JOINED_BUF);
-    }
-    size_t used = 0, room = joined != NULL ? JOINED_BUF : 0;
-    static const uint8_t keys[] = {OV_VALUES, OV_SUBS, OV_ICONS, OV_COUNTS, OV_TAGS, OV_MARKS};
-    moy_ui_span_t *spans[] = {&out->values, &out->subs, &out->icons, &out->counts, &out->tags,
-                              &out->marks};
-    for (size_t i = 0; i < sizeof(keys); i++) {
-        v = vals[keys[i]];
-        if (v != MP_OBJ_NULL) {
+    size_t used = 0;
+    for (int k = 0; k < MOY_UI_OV_COUNT; k++) {
+        mp_obj_t v = vals[k];
+        if (v == MP_OBJ_NULL) {
+            continue;
+        }
+        int32_t w[4] = {0, 0, 0, 0};
+        int kind = moy_ui_over_keys[k].kind;
+        if (kind == MOY_UI_KIND_TEXT) {
+            moy_ui_over_text(out, k, span_of(v));
+            continue;
+        }
+        if (kind == MOY_UI_KIND_TEXTS) {
+            if (joined == NULL) {
+                joined = JOINED_ALLOC(JOINED_BUF);
+            }
+            size_t room = joined != NULL ? JOINED_BUF : 0;
             mp_buffer_info_t b;
             opts_cap(v, joined != NULL ? joined + used : NULL, room - used, &b);
             if (joined != NULL && (uint8_t *)b.buf == joined + used) {
                 used += b.len;
             }
-            spans[i]->p = (const uint8_t *)b.buf;
-            spans[i]->n = (uint16_t)(b.len > 0xffff ? 0xffff : b.len);
+            moy_ui_span_t s = {(const uint8_t *)b.buf, (uint16_t)(b.len > 0xffff ? 0xffff : b.len)};
+            moy_ui_over_text(out, k, s);
+            continue;
         }
-    }
-    v = vals[OV_CHECK];
-    if (v != MP_OBJ_NULL) {
-        out->check = mp_obj_is_true(v);
-    }
-    v = vals[OV_CARD];
-    if (v != MP_OBJ_NULL) {
-        out->card = mp_obj_is_true(v);
-    }
-    v = vals[OV_TAG];
-    if (v != MP_OBJ_NULL && mp_obj_is_str(v)) {
-        out->tag = span_of(v);
-    }
-    v = vals[OV_FOCUS];
-    if (v != MP_OBJ_NULL && mp_obj_is_str(v)) {
-        out->focus = span_of(v);
+        if (kind == MOY_UI_KIND_PAIR || kind == MOY_UI_KIND_QUAD) {
+            size_t n = 0, want = kind == MOY_UI_KIND_PAIR ? 2 : 4;
+            mp_obj_t *it = NULL;
+            mp_obj_get_array(v, &n, &it);
+            if (n != want) {
+                continue;
+            }
+            for (size_t i = 0; i < n; i++) {
+                w[i] = (int32_t)mp_obj_get_int_truncated(it[i]);
+            }
+        } else if (kind == MOY_UI_KIND_COLOUR) {
+            w[0] = over_colour(v);
+        } else if (kind == MOY_UI_KIND_INT || kind == MOY_UI_KIND_INDEX) {
+            w[0] = (int32_t)mp_obj_get_int_truncated(v);
+        } else if (kind == MOY_UI_KIND_AXIS || kind == MOY_UI_KIND_WASH) {
+            size_t n = 0;
+            const char *s = mp_obj_is_str(v) ? mp_obj_str_get_data(v, &n) : NULL;
+            const char *is = kind == MOY_UI_KIND_AXIS ? "x" : "view";
+            int named = s != NULL && n == strlen(is) && memcmp(s, is, n) == 0;
+            w[0] = kind == MOY_UI_KIND_AXIS ? named : named ? 2 : mp_obj_is_true(v);
+        } else {
+            w[0] = mp_obj_is_true(v);
+        }
+        moy_ui_over_put(out, k, w);
     }
 }
 
@@ -2708,12 +2568,6 @@ static void opts_of(mp_obj_t o, uint8_t *buf, mp_buffer_info_t *out) {
     opts_cap(o, buf, OPTS_BUF, out);
 }
 
-// api_size() -> the bytes a context takes
-static mp_obj_t ui_api_size(void) {
-    return MP_OBJ_NEW_SMALL_INT((mp_int_t)moy_ui_api_size());
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(ui_api_size_obj, ui_api_size);
-
 // api_begin(ctx, inp, rect, flags, fs) -> settled. `flags` moy_ui.h's
 // MOY_UI_DESK and MOY_UI_WINDOW; `inp` an array('i') of MOY_UI_IN_LEN words,
 // or None.
@@ -2733,19 +2587,6 @@ static mp_obj_t ui_api_begin(size_t n_args, const mp_obj_t *a) {
                                             mp_obj_get_int(a[4])));
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_begin_obj, 5, 5, ui_api_begin);
-
-// api_page(ctx, cv, look, title, o) -> the content rect
-static mp_obj_t ui_api_page(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_ctx_t *c = ctx_of(a[0]);
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    moy_ui_over_t o;
-    moy_ui_box_t b;
-    moy_ui_api_page(c, &s, span_of(a[3]), over_of(a[4], &o), &b);
-    return box_tuple(b);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_page_obj, 5, 5, ui_api_page);
 
 // Which of `n` words string `v` is, -1 none (or no string).
 static int word_of(mp_obj_t v, const char *const *w, int n) {
@@ -2824,147 +2665,6 @@ static mp_obj_t ui_api_label(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_label_obj, 5, 5, ui_api_label);
 
-// api_button(ctx, cv, look, label, kind, o) -> activated; `kind` a button
-// kind's index
-static mp_obj_t ui_api_button(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_ctx_t *c = ctx_of(a[0]);
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    moy_ui_over_t o;
-    return mp_obj_new_bool(moy_ui_api_button(c, &s, span_of(a[3]), mp_obj_get_int(a[4]),
-                                             over_of(a[5], &o)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_button_obj, 6, 6, ui_api_button);
-
-// api_toggle(ctx, cv, look, label, on, o) -> the new on
-static mp_obj_t ui_api_toggle(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_ctx_t *c = ctx_of(a[0]);
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    moy_ui_over_t o;
-    return mp_obj_new_bool(moy_ui_api_toggle(c, &s, span_of(a[3]), mp_obj_is_true(a[4]),
-                                             over_of(a[5], &o)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_toggle_obj, 6, 6, ui_api_toggle);
-
-// api_slider(ctx, cv, look, label, v, lo, hi, o) -> the new v
-static mp_obj_t ui_api_slider(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_ctx_t *c = ctx_of(a[0]);
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    moy_ui_over_t o;
-    return mp_obj_new_int(moy_ui_api_slider(c, &s, span_of(a[3]), num(a[4]), num(a[5]),
-                                            num(a[6]), over_of(a[7], &o)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_slider_obj, 8, 8, ui_api_slider);
-
-// api_icon(ctx, name) -> whether `name` names an icon: the next row's
-static mp_obj_t ui_api_icon(mp_obj_t ctx, mp_obj_t name) {
-    return mp_obj_new_bool(moy_ui_api_icon(ctx_of(ctx), span_of(name)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_icon_obj, ui_api_icon);
-
-// api_box(ctx, id) -> (x, y, w, h) where stop `id` drew last frame, or None
-static mp_obj_t ui_api_box(mp_obj_t ctx, mp_obj_t id) {
-    int32_t v[4];
-    if (!moy_ui_api_box(ctx_of(ctx), span_of(id), v)) {
-        return mp_const_none;
-    }
-    mp_obj_t t[4] = {mp_obj_new_int(v[0]), mp_obj_new_int(v[1]), mp_obj_new_int(v[2]),
-                     mp_obj_new_int(v[3])};
-    return ret_tuple(4, t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_box_obj, ui_api_box);
-
-// api_progress(ctx, cv, look, label, v, hi, o)
-static mp_obj_t ui_api_progress(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_ctx_t *c = ctx_of(a[0]);
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    moy_ui_over_t o;
-    moy_ui_api_progress(c, &s, span_of(a[3]), num(a[4]), num(a[5]), over_of(a[6], &o));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_progress_obj, 7, 7, ui_api_progress);
-
-// api_list(ctx, cv, look, label, items, cur, o) -> the new cur; `items` the
-// rows NUL-separated (bytes)
-static mp_obj_t ui_api_list(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_ctx_t *c = ctx_of(a[0]);
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    moy_ui_over_t o;
-    mp_buffer_info_t b;
-    uint8_t ob[OPTS_BUF];
-    opts_of(a[4], ob, &b);
-    return mp_obj_new_int(moy_ui_api_list(c, &s, span_of(a[3]), (const uint8_t *)b.buf, b.len,
-                                          num(a[5]), over_of(a[6], &o)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_list_obj, 7, 7, ui_api_list);
-
-// api_group(ctx, cv, look, caption, o): a caption of length 0 ends the group
-static mp_obj_t ui_api_group(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_ctx_t *c = ctx_of(a[0]);
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    moy_ui_over_t o;
-    moy_ui_api_group(c, &s, span_of(a[3]), over_of(a[4], &o));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_group_obj, 5, 5, ui_api_group);
-
-// api_value(ctx, cv, look, kind, label, value, o) -> activated; `kind` an
-// info's or a link's (moy_ui.h's MOY_UI_V_*)
-static mp_obj_t ui_api_value(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_ctx_t *c = ctx_of(a[0]);
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    moy_ui_over_t o;
-    return mp_obj_new_bool(moy_ui_api_value(c, &s, num(a[3]), span_of(a[4]), span_of(a[5]),
-                                            over_of(a[6], &o)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_value_obj, 7, 7, ui_api_value);
-
-// api_choice(ctx, cv, look, kind, label, opts, cur, o) -> the new cur; `opts`
-// the options NUL-separated, or a swatch picker's colours as words (bytes)
-static mp_obj_t ui_api_choice(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_ctx_t *c = ctx_of(a[0]);
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    moy_ui_over_t o;
-    mp_buffer_info_t b;
-    uint8_t ob[OPTS_BUF];
-    opts_of(a[5], ob, &b);
-    return mp_obj_new_int(moy_ui_api_choice(c, &s, num(a[3]), span_of(a[4]),
-                                            (const uint8_t *)b.buf, b.len, num(a[6]),
-                                            over_of(a[7], &o)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_choice_obj, 8, 8, ui_api_choice);
-
-// api_hints(ctx, cv, look, items, o): `items` the key and action pairs
-// NUL-separated (bytes)
-static mp_obj_t ui_api_hints(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_ctx_t *c = ctx_of(a[0]);
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    moy_ui_over_t o;
-    mp_buffer_info_t b;
-    uint8_t ob[OPTS_BUF];
-    opts_of(a[3], ob, &b);
-    moy_ui_api_hints(c, &s, (const uint8_t *)b.buf, b.len, over_of(a[4], &o));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_hints_obj, 5, 5, ui_api_hints);
-
 // api_table_rows(ctx) -> (row0_y, row_h, view, pic_x, pic_side) of the table
 // drawn last, or None where it had no picture column
 static mp_obj_t ui_api_table_rows(mp_obj_t ctx) {
@@ -2980,187 +2680,6 @@ static mp_obj_t ui_api_table_rows(mp_obj_t ctx) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_table_rows_obj, ui_api_table_rows);
 
-// api_table_dist(ctx) -> the part answered last's distance from its view's
-// centre along its table's axis, in 256ths of a row (0: none open)
-static mp_obj_t ui_api_table_dist(mp_obj_t ctx) {
-    return mp_obj_new_int(moy_ui_api_table_dist(ctx_of(ctx)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_table_dist_obj, ui_api_table_dist);
-
-// api_table_pics(ctx, cv, look): the table drawn last's edge fades again over
-// its picture column, its pictures drawn
-static mp_obj_t ui_api_table_pics(mp_obj_t ctx, mp_obj_t cv, mp_obj_t look) {
-    moy_ui_sink_t s;
-    sink_of(&s, cv, look);
-    moy_ui_api_table_pics(ctx_of(ctx), &s);
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_table_pics_obj, ui_api_table_pics);
-
-// api_table_part(ctx, cv, look, r) -> the next part's row of the table drawn
-// last, its cell's x, y, w, h and what shows of it into r (eight words), or
-// -1 after the last
-static mp_obj_t ui_api_table_part(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    mp_buffer_info_t b;
-    mp_get_buffer_raise(a[3], &b, MP_BUFFER_WRITE);
-    if (b.len < 8 * sizeof(int32_t)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("eight words"));
-    }
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    return mp_obj_new_int(moy_ui_api_table_part(ctx_of(a[0]), &s, (int32_t *)b.buf));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_table_part_obj, 4, 4, ui_api_table_part);
-
-// api_table_floor(ctx, r) -> 1 and the next rect of the kept table's floor
-// into r (four words); 0, -1 or -2 after the last
-static mp_obj_t ui_api_table_floor(mp_obj_t ctx, mp_obj_t r) {
-    mp_buffer_info_t b;
-    mp_get_buffer_raise(r, &b, MP_BUFFER_WRITE);
-    if (b.len < 4 * sizeof(int32_t)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("four words"));
-    }
-    return mp_obj_new_int(moy_ui_api_table_floor(ctx_of(ctx), (int32_t *)b.buf));
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_table_floor_obj, ui_api_table_floor);
-
-// api_table_copy(ctx, r, back) -> 1 and the next rect of the floor the
-// last frame's buffer holds into r (four words); 0 after the last, or
-// with `back` (the rect answered last given back to the floor)
-static mp_obj_t ui_api_table_copy(mp_obj_t ctx, mp_obj_t r, mp_obj_t back) {
-    mp_buffer_info_t b;
-    mp_get_buffer_raise(r, &b, MP_BUFFER_WRITE);
-    if (b.len < 4 * sizeof(int32_t)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("four words"));
-    }
-    return mp_obj_new_int(moy_ui_api_table_copy(ctx_of(ctx), (int32_t *)b.buf,
-                                                mp_obj_is_true(back)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_table_copy_obj, ui_api_table_copy);
-
-// api_table_shift(ctx, r, back) -> 1 and the move of the kept table's view
-// out of the last frame's buffer into r (the view's four words, the move
-// along its axis); 0 none, or with `back` (the canvas could not move it:
-// the floor is the view whole)
-static mp_obj_t ui_api_table_shift(mp_obj_t ctx, mp_obj_t r, mp_obj_t back) {
-    mp_buffer_info_t b;
-    mp_get_buffer_raise(r, &b, MP_BUFFER_WRITE);
-    if (b.len < 5 * sizeof(int32_t)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("five words"));
-    }
-    return mp_obj_new_int(moy_ui_api_table_shift(ctx_of(ctx), (int32_t *)b.buf,
-                                                 mp_obj_is_true(back)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_table_shift_obj, ui_api_table_shift);
-
-// api_held(ctx, id, key) -> whether the buffer this frame paints holds part
-// `id` as a frame drew it under `key`
-static mp_obj_t ui_api_held(mp_obj_t ctx, mp_obj_t id, mp_obj_t key) {
-    moy_ui_span_t sp = span_of(id);
-    if (sp.p == NULL) {
-        sp.p = (const uint8_t *)"";
-    }
-    return mp_obj_new_bool(moy_ui_api_held(ctx_of(ctx), sp,
-                                           (int32_t)mp_obj_get_int_truncated(key)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_held_obj, ui_api_held);
-
-// api_held_last(ctx, id, key) -> whether the buffer the last frame painted
-// holds part `id` as it named it under `key`
-static mp_obj_t ui_api_held_last(mp_obj_t ctx, mp_obj_t id, mp_obj_t key) {
-    moy_ui_span_t sp = span_of(id);
-    if (sp.p == NULL) {
-        sp.p = (const uint8_t *)"";
-    }
-    return mp_obj_new_bool(moy_ui_api_held_last(ctx_of(ctx), sp,
-                                                (int32_t)mp_obj_get_int_truncated(key)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_held_last_obj, ui_api_held_last);
-
-// api_held_all(ctx) -> whether every buffer holds every part this frame named
-static mp_obj_t ui_api_held_all(mp_obj_t ctx) {
-    return mp_obj_new_bool(moy_ui_api_held_all(ctx_of(ctx)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_held_all_obj, ui_api_held_all);
-
-// api_slots(ctx, cap, key) -> the slots the table drawn last keeps its
-// parts' faces in (moy_ui_api_slots)
-static mp_obj_t ui_api_slots(mp_obj_t ctx, mp_obj_t cap, mp_obj_t key) {
-    return mp_obj_new_int(moy_ui_api_slots(ctx_of(ctx), (int32_t)mp_obj_get_int_truncated(cap),
-                                           (int32_t)mp_obj_get_int_truncated(key)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_faces_obj, ui_api_slots);
-
-// api_slot(ctx, name, gen, mint) -> the slot of the face `name` and `gen`
-// name, | MINT where it is to be drawn there first; -1 none (moy_ui_api_slot)
-static mp_obj_t ui_api_slot(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_span_t sp = span_of(a[1]);
-    if (sp.p == NULL) {
-        sp.p = (const uint8_t *)"";
-    }
-    return mp_obj_new_int(moy_ui_api_slot(ctx_of(a[0]), sp, (int32_t)mp_obj_get_int_truncated(a[2]),
-                                          mp_obj_is_true(a[3])));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_face_obj, 4, 4, ui_api_slot);
-
-// api_slot_next(ctx) -> the next part whose face an idle frame draws, -1 none
-static mp_obj_t ui_api_slot_next(mp_obj_t ctx) {
-    return mp_obj_new_int(moy_ui_api_slot_next(ctx_of(ctx)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_slot_next_obj, ui_api_slot_next);
-
-// api_block_set(id, field, value) -> whether field `field` of block `id` changed
-static mp_obj_t ui_api_block_set(mp_obj_t id, mp_obj_t field, mp_obj_t value) {
-    moy_ui_span_t sp = span_of(id);
-    if (sp.p == NULL) {
-        sp.p = (const uint8_t *)"";
-    }
-    return mp_obj_new_bool(moy_ui_api_block_set(NULL, sp, mp_obj_get_int(field),
-                                                (uint32_t)mp_obj_get_int_truncated(value)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_block_set_obj, ui_api_block_set);
-
-// api_block_gen(id) -> the block's generation, 0 never set
-static mp_obj_t ui_api_block_gen(mp_obj_t id) {
-    moy_ui_span_t sp = span_of(id);
-    if (sp.p == NULL) {
-        sp.p = (const uint8_t *)"";
-    }
-    return mp_obj_new_int(moy_ui_api_block_gen(NULL, sp));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_block_gen_obj, ui_api_block_gen);
-
-// api_block_since(id, gen) -> the fields set to another value after `gen`, a bit each
-static mp_obj_t ui_api_block_since(mp_obj_t id, mp_obj_t gen) {
-    moy_ui_span_t sp = span_of(id);
-    if (sp.p == NULL) {
-        sp.p = (const uint8_t *)"";
-    }
-    return mp_obj_new_int_from_uint(moy_ui_api_block_since(NULL, sp, (int32_t)mp_obj_get_int(gen)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_block_since_obj, ui_api_block_since);
-
-// api_block_key(id) -> what the block's fields show, hashed
-static mp_obj_t ui_api_block_key(mp_obj_t id) {
-    moy_ui_span_t sp = span_of(id);
-    if (sp.p == NULL) {
-        sp.p = (const uint8_t *)"";
-    }
-    return mp_obj_new_int(moy_ui_api_block_key(NULL, sp));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_block_key_obj, ui_api_block_key);
-
-// api_end(ctx, cv, look): the page's end, after its rows
-static mp_obj_t ui_api_end(mp_obj_t ctx, mp_obj_t cv, mp_obj_t look) {
-    moy_ui_sink_t s;
-    sink_of(&s, cv, look);
-    moy_ui_api_end(ctx_of(ctx), &s);
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_end_obj, ui_api_end);
-
 // fade(cv, rect, ci, up[, look]): a fade toward colour `ci` over `rect`
 static mp_obj_t ui_fade(size_t n_args, const mp_obj_t *a) {
     moy_ui_sink_t s;
@@ -3169,47 +2688,6 @@ static mp_obj_t ui_fade(size_t n_args, const mp_obj_t *a) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_fade_obj, 4, 5, ui_fade);
-
-// api_hints_w(ctx, cv, look, items) -> the width those hints take
-static mp_obj_t ui_api_hints_w(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_ctx_t *c = ctx_of(a[0]);
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    mp_buffer_info_t b;
-    uint8_t ob[OPTS_BUF];
-    opts_of(a[3], ob, &b);
-    return MP_OBJ_NEW_SMALL_INT(moy_ui_api_hints_w(c, &s, (const uint8_t *)b.buf, b.len));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_hints_w_obj, 4, 4, ui_api_hints_w);
-
-// api_part(ctx, cv, look, id, w, h, o) -> (x, y, w, h, state)
-static mp_obj_t ui_api_part(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_ctx_t *c = ctx_of(a[0]);
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    moy_ui_over_t o;
-    int32_t v[5];
-    moy_ui_api_part(c, &s, span_of(a[3]), num(a[4]), num(a[5]), over_of(a[6], &o), v);
-    mp_obj_t t[5];
-    for (int i = 0; i < 5; i++) {
-        t[i] = mp_obj_new_int(v[i]);
-    }
-    return ret_tuple(5, t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_part_obj, 7, 7, ui_api_part);
-
-// api_part_at(ctx) -> (x, y) inside the part answered last, or None
-static mp_obj_t ui_api_part_at(mp_obj_t ctx) {
-    int32_t v[2];
-    if (!moy_ui_api_part_at(ctx_of(ctx), v)) {
-        return mp_const_none;
-    }
-    mp_obj_t t[2] = {mp_obj_new_int(v[0]), mp_obj_new_int(v[1])};
-    return ret_tuple(2, t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_part_at_obj, ui_api_part_at);
 
 // api_split(ctx, cv, look, id, sizes, n, mins, opt, out) -> the focused pane;
 // sizes, mins (None: none), opt and out are array('i')s
@@ -3240,12 +2718,6 @@ static mp_obj_t ui_api_split(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_split_obj, 9, 9, ui_api_split);
 
-// api_split_at(ctx, x, y) -> whether a divider the last pass drew lies there
-static mp_obj_t ui_api_split_at(mp_obj_t ctx, mp_obj_t x, mp_obj_t y) {
-    return mp_obj_new_bool(moy_ui_api_split_at(ctx_of(ctx), num(x), num(y)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_split_at_obj, ui_api_split_at);
-
 // api_split_frame(ctx, words, out) -> the split frame's answer
 // (moy_ui_api_split_frame): `words` eight int32 -- gen, known, still, top
 // and the lag's x0, y0, x1, y1 -- and `out` four writable ones, the pane's
@@ -3262,50 +2734,6 @@ static mp_obj_t ui_api_split_frame(mp_obj_t ctx, mp_obj_t words, mp_obj_t out) {
         moy_ui_api_split_frame(ctx_of(ctx), v[0], v[1], v[2], v[3], v + 4, (int32_t *)o.buf));
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_split_frame_obj, ui_api_split_frame);
-
-// api_split_toward(ctx, x, y, dx, dy, out) -> whether a pane of the last
-// pass's splits lies (dx, dy) from the one holding (x, y); its rect into
-// `out`
-static mp_obj_t ui_api_split_toward(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    mp_buffer_info_t o;
-    mp_get_buffer_raise(a[5], &o, MP_BUFFER_WRITE);
-    if (o.len < 4 * sizeof(int32_t)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("four words"));
-    }
-    return mp_obj_new_bool(moy_ui_api_split_toward(ctx_of(a[0]), num(a[1]), num(a[2]),
-                                                   num(a[3]), num(a[4]), (int32_t *)o.buf));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_split_toward_obj, 6, 6, ui_api_split_toward);
-
-// api_grid(ctx, cv, look, id, w, h, o): an id of length 0 ends the grid
-static mp_obj_t ui_api_grid(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_ctx_t *c = ctx_of(a[0]);
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    moy_ui_over_t o;
-    moy_ui_api_grid(c, &s, span_of(a[3]), num(a[4]), num(a[5]), over_of(a[6], &o));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_grid_obj, 7, 7, ui_api_grid);
-
-// api_card(ctx, cv, look, title, sub, o) -> (x, y, w, h, state): the picture's rect
-static mp_obj_t ui_api_card(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_ctx_t *c = ctx_of(a[0]);
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    moy_ui_over_t o;
-    int32_t v[5];
-    moy_ui_api_card(c, &s, span_of(a[3]), span_of(a[4]), over_of(a[5], &o), v);
-    mp_obj_t t[5];
-    for (int i = 0; i < 5; i++) {
-        t[i] = mp_obj_new_int(v[i]);
-    }
-    return ret_tuple(5, t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_card_obj, 6, 6, ui_api_card);
 
 // api_table(ctx, cv, look, label, cols, cells, cur, o) -> (cur, opened); `cols`
 // and `cells` NUL-separated (bytes), the cells row by row
@@ -3334,18 +2762,6 @@ static mp_int_t nested(int32_t v) {
     }
     return v;
 }
-
-// api_scroll(ctx, cv, look, id, o): an id of length 0 ends the region
-static mp_obj_t ui_api_scroll(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_ctx_t *c = ctx_of(a[0]);
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    moy_ui_over_t o;
-    nested(moy_ui_api_scroll(c, &s, span_of(a[3]), over_of(a[4], &o)));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_scroll_obj, 5, 5, ui_api_scroll);
 
 // ui.text_view's lines: a list's (or a tuple's) str items, by index.
 static const uint8_t *tv_line(void *src, int32_t i, size_t *n) {
@@ -3397,38 +2813,6 @@ static mp_obj_t ui_api_text_view(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_text_view_obj, 7, 10, ui_api_text_view);
 
-// api_text_at(ctx, id, px, py) -> (line, column) under the point in view
-// `id` as its last pass drew it, or None
-static mp_obj_t ui_api_text_at(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    int32_t v[2];
-    if (!moy_ui_api_text_at(ctx_of(a[0]), span_of(a[1]), mp_obj_get_int(a[2]),
-                            mp_obj_get_int(a[3]), v)) {
-        return mp_const_none;
-    }
-    mp_obj_t t[2] = {mp_obj_new_int(v[0]), mp_obj_new_int(v[1])};
-    return ret_tuple(2, t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_text_at_obj, 4, 4, ui_api_text_at);
-
-// api_text_cover(ctx, id, y0, y1): rows y0..y1 of view `id` were drawn over
-static mp_obj_t ui_api_text_cover(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_api_text_cover(ctx_of(a[0]), span_of(a[1]), mp_obj_get_int(a[2]),
-                          mp_obj_get_int(a[3]));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_text_cover_obj, 4, 4, ui_api_text_cover);
-
-// api_text_aim(ctx, id, line, lines) -> whether the view moved: before the
-// frame begins, its first line (-1 its foot), so the move is the frame's shift
-static mp_obj_t ui_api_text_aim(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    return mp_obj_new_bool(moy_ui_api_text_aim(ctx_of(a[0]), span_of(a[1]),
-                                               mp_obj_get_int(a[2]), mp_obj_get_int(a[3])));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_text_aim_obj, 4, 4, ui_api_text_aim);
-
 // api_text_reveal(ctx, id, lines, line, col) -> whether the view moved:
 // before the frame begins, as far as it needs to show (line, col)'s row
 // (col -1: line first), so the move is the frame's shift
@@ -3457,101 +2841,6 @@ static mp_obj_t ui_text_tones(mp_obj_t tones) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_text_tones_obj, ui_text_tones);
-
-// api_field(ctx, cv, look, label, buf, n, o) -> the new length, plus 0x10000
-// the frame Enter is pressed in it; `buf` a bytearray, its room the field's
-static mp_obj_t ui_api_field(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_ctx_t *c = ctx_of(a[0]);
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    moy_ui_over_t o;
-    mp_buffer_info_t b;
-    mp_get_buffer_raise(a[4], &b, MP_BUFFER_RW);
-    return mp_obj_new_int(moy_ui_api_field(c, &s, span_of(a[3]), (uint8_t *)b.buf, b.len,
-                                           (size_t)num(a[5]), over_of(a[6], &o)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_field_obj, 7, 7, ui_api_field);
-
-// api_dialog(ctx, cv, look, title, buttons, kind, o) -> the button activated
-// (from 0), -1 none; a title of length 0 ends the dialog
-static mp_obj_t ui_api_dialog(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_ctx_t *c = ctx_of(a[0]);
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    moy_ui_over_t o;
-    mp_buffer_info_t b;
-    uint8_t ob[OPTS_BUF];
-    opts_of(a[4], ob, &b);
-    return mp_obj_new_int(nested(moy_ui_api_dialog(c, &s, span_of(a[3]), (const uint8_t *)b.buf,
-                                                   b.len, num(a[5]), over_of(a[6], &o))));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_dialog_obj, 7, 7, ui_api_dialog);
-
-// api_wash(ctx, cv, look): wash what a dialog begun now would
-static mp_obj_t ui_api_wash(mp_obj_t ctx, mp_obj_t cv, mp_obj_t look) {
-    moy_ui_sink_t s;
-    sink_of(&s, cv, look);
-    moy_ui_api_wash(ctx_of(ctx), &s);
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_wash_obj, ui_api_wash);
-
-// api_wash_box(ctx) -> (x, y, w, h): what api_wash covers
-static mp_obj_t ui_api_wash_box(mp_obj_t ctx) {
-    return box_tuple(moy_ui_api_wash_box(ctx_of(ctx)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_wash_box_obj, ui_api_wash_box);
-
-// api_popover(ctx, cv, look, id, w, o) -> 1, 0 the frame it is dismissed; an
-// id of length 0 ends the popover
-static mp_obj_t ui_api_popover(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_ctx_t *c = ctx_of(a[0]);
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    moy_ui_over_t o;
-    return mp_obj_new_int(nested(moy_ui_api_popover(c, &s, span_of(a[3]), num(a[4]),
-                                                    over_of(a[5], &o))));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_popover_obj, 6, 6, ui_api_popover);
-
-// api_menu(ctx, cv, look, label, items, icons, o) -> the item activated (from
-// 0), -1 none
-static mp_obj_t ui_api_menu(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_ctx_t *c = ctx_of(a[0]);
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    moy_ui_over_t o;
-    mp_buffer_info_t b, ib;
-    uint8_t ob[OPTS_BUF], oi[OPTS_BUF];
-    opts_of(a[4], ob, &b);
-    opts_of(a[5], oi, &ib);
-    return mp_obj_new_int(moy_ui_api_menu(c, &s, span_of(a[3]), (const uint8_t *)b.buf, b.len,
-                                          (const uint8_t *)ib.buf, ib.len, over_of(a[6], &o)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_menu_obj, 7, 7, ui_api_menu);
-
-// api_menu_danger(ctx, rows): the next api_menu's danger rows, bit i row i.
-static mp_obj_t ui_api_menu_danger(mp_obj_t ctx, mp_obj_t rows) {
-    moy_ui_api_menu_danger(ctx_of(ctx), (uint32_t)mp_obj_get_int_truncated(rows));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_menu_danger_obj, ui_api_menu_danger);
-
-// api_tool(ctx, cv, look, icon, label, o) -> activated
-static mp_obj_t ui_api_tool(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_ctx_t *c = ctx_of(a[0]);
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    moy_ui_over_t o;
-    return mp_obj_new_bool(moy_ui_api_tool(c, &s, span_of(a[3]), span_of(a[4]),
-                                           over_of(a[5], &o)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_tool_obj, 6, 6, ui_api_tool);
 
 // api_bar(ctx, cv, look, title, tools, off) -> the tool the host's bar
 // activated (from 0), -2 its way back, -1 none
@@ -3637,217 +2926,6 @@ static mp_obj_t ui_api_run_bar_lent(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ui_api_run_bar_lent_obj, ui_api_run_bar_lent);
 
-// api_run_bar_tap(i): api_bar_tap over the running cart's own context
-static mp_obj_t ui_api_run_bar_tap(mp_obj_t i) {
-    moy_ui_run_bar_tap(mp_obj_get_int(i));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_run_bar_tap_obj, ui_api_run_bar_tap);
-
-// api_paste(ctx, text): the console's Paste into the field focused in the
-// frame begun (moy_ui_api_paste); text bytes, UTF-8
-static mp_obj_t ui_api_paste(mp_obj_t ctx, mp_obj_t text) {
-    mp_buffer_info_t b;
-    mp_get_buffer_raise(text, &b, MP_BUFFER_READ);
-    moy_ui_api_paste(ctx_of(ctx), (const uint8_t *)b.buf, b.len);
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_paste_obj, ui_api_paste);
-
-// api_run_paste(text): api_paste into the running cart's own frame begun next
-static mp_obj_t ui_api_run_paste(mp_obj_t text) {
-    mp_buffer_info_t b;
-    mp_get_buffer_raise(text, &b, MP_BUFFER_READ);
-    moy_ui_run_paste((const uint8_t *)b.buf, b.len);
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_run_paste_obj, ui_api_run_paste);
-
-// api_run_steps(rep, keyrep): the frame's steps, into the running cart's own
-// frame begun next
-static mp_obj_t ui_api_run_steps(mp_obj_t rep, mp_obj_t keyrep) {
-    moy_ui_run_steps(mp_obj_get_int(rep), mp_obj_get_int(keyrep));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_run_steps_obj, ui_api_run_steps);
-
-// api_run_typing() -> whether the running cart's own page has a field in focus
-static mp_obj_t ui_api_run_typing(void) {
-    return mp_obj_new_bool(moy_ui_run_typing());
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(ui_api_run_typing_obj, ui_api_run_typing);
-
-// api_rule(ctx, cv, look)
-static mp_obj_t ui_api_rule(mp_obj_t ctx, mp_obj_t cv, mp_obj_t look) {
-    moy_ui_sink_t s;
-    sink_of(&s, cv, look);
-    moy_ui_api_rule(ctx_of(ctx), &s);
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_rule_obj, ui_api_rule);
-
-// api_bar_tap(ctx, i): the host's bar activated tool i of the bar lent last
-static mp_obj_t ui_api_bar_tap(mp_obj_t ctx, mp_obj_t i) {
-    moy_ui_api_bar_tap(ctx_of(ctx), mp_obj_get_int(i));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_bar_tap_obj, ui_api_bar_tap);
-
-// api_back(ctx, take) -> whether the app takes the host's back over the
-// frame drawn last (moy_ui_api_back): a field's edit in progress, a popover
-// it drew, or a page it lent the bar's way back for; `take` false only asks
-static mp_obj_t ui_api_back(mp_obj_t ctx, mp_obj_t take) {
-    return mp_obj_new_bool(moy_ui_api_back(ctx_of(ctx), mp_obj_is_true(take)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_back_obj, ui_api_back);
-
-// api_run_back(take): api_back over the running cart's own context, a Lua,
-// compiled, WASI or native app's (moy_ui_run_back)
-static mp_obj_t ui_api_run_back(mp_obj_t take) {
-    return mp_obj_new_bool(moy_ui_run_back(mp_obj_is_true(take)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_run_back_obj, ui_api_run_back);
-
-// api_cancel(ctx, take) -> whether the focused field has an edit the host's
-// cancel gives back (moy_ui_api_cancel); `take` false only asks
-static mp_obj_t ui_api_cancel(mp_obj_t ctx, mp_obj_t take) {
-    return mp_obj_new_bool(moy_ui_api_cancel(ctx_of(ctx), mp_obj_is_true(take)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_cancel_obj, ui_api_cancel);
-
-// api_run_cancel(take): api_cancel over the running cart's own context
-// (moy_ui_run_cancel)
-static mp_obj_t ui_api_run_cancel(mp_obj_t take) {
-    return mp_obj_new_bool(moy_ui_run_cancel(mp_obj_is_true(take)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_run_cancel_obj, ui_api_run_cancel);
-
-// api_text(ctx, lines, centre, tone, role): the next label's text options.
-static mp_obj_t ui_api_text(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_api_text(ctx_of(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_text_obj, 5, 5, ui_api_text);
-
-// api_card_mark(ctx, badge, tone, blank): the next card's badge, tone and
-// blank picture's icon.
-static mp_obj_t ui_api_card_mark(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_api_card_mark(ctx_of(a[0]), span_of(a[1]), num(a[2]), span_of(a[3]));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_card_mark_obj, 4, 4, ui_api_card_mark);
-
-// api_grid_spread(ctx, cols, foot, top, margin, wrap): the next grid's spread.
-static mp_obj_t ui_api_grid_spread(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_api_grid_spread(ctx_of(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]),
-                           num(a[5]));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_grid_spread_obj, 6, 6, ui_api_grid_spread);
-
-// api_group_card(ctx, cv, look): a group with no caption.
-static mp_obj_t ui_api_group_card(mp_obj_t ctx, mp_obj_t cv, mp_obj_t look) {
-    moy_ui_sink_t s;
-    sink_of(&s, cv, look);
-    moy_ui_api_group_card(ctx_of(ctx), &s);
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_group_card_obj, ui_api_group_card);
-
-// api_bubble(ctx, cv, look, text, head, status, opt, o) -> (x, y, w, h, state):
-// `opt` an array of int32 words in MOY_UI_BBO_* order
-static mp_obj_t ui_api_bubble(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_ctx_t *c = ctx_of(a[0]);
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    mp_buffer_info_t ob;
-    mp_get_buffer_raise(a[6], &ob, MP_BUFFER_READ);
-    moy_ui_over_t o;
-    int32_t v[5];
-    moy_ui_api_bubble(c, &s, span_of(a[3]), span_of(a[4]), span_of(a[5]),
-                      (const int32_t *)ob.buf, (int)(ob.len / 4), over_of(a[7], &o), v);
-    mp_obj_t t[5];
-    for (int i = 0; i < 5; i++) {
-        t[i] = mp_obj_new_int(v[i]);
-    }
-    return ret_tuple(5, t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_bubble_obj, 8, 8, ui_api_bubble);
-
-// api_empty(ctx, cv, look, icon, title, lines) -> the head's foot y
-static mp_obj_t ui_api_empty(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_ctx_t *c = ctx_of(a[0]);
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    mp_buffer_info_t b;
-    uint8_t ob[OPTS_BUF];
-    opts_of(a[5], ob, &b);
-    return mp_obj_new_int(moy_ui_api_empty(c, &s, span_of(a[3]), span_of(a[4]),
-                                           (const uint8_t *)b.buf, b.len));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_empty_obj, 6, 6, ui_api_empty);
-
-// api_note(ctx, cv, look, icon, lines) -> the note's foot y
-static mp_obj_t ui_api_note(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_ctx_t *c = ctx_of(a[0]);
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    mp_buffer_info_t b;
-    uint8_t ob[OPTS_BUF];
-    opts_of(a[4], ob, &b);
-    return mp_obj_new_int(moy_ui_api_note(c, &s, span_of(a[3]), (const uint8_t *)b.buf, b.len));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_note_obj, 5, 5, ui_api_note);
-
-// api_month(ctx, cv, look, title, days, first, n, today) -> -1, 0 or 1
-static mp_obj_t ui_api_month(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_ctx_t *c = ctx_of(a[0]);
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    return mp_obj_new_int(moy_ui_api_month(c, &s, span_of(a[3]), span_of(a[4]), num(a[5]),
-                                           num(a[6]), num(a[7])));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_month_obj, 8, 8, ui_api_month);
-
-// api_toast(ctx, cv, look, text, kind, flat) -> the pill's (x, y, w, h)
-static mp_obj_t ui_api_toast(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_ctx_t *c = ctx_of(a[0]);
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    int32_t b[4];
-    moy_ui_api_toast(c, &s, span_of(a[3]), span_of(a[4]), mp_obj_is_true(a[5]), b);
-    mp_obj_t t[4] = {mp_obj_new_int(b[0]), mp_obj_new_int(b[1]), mp_obj_new_int(b[2]),
-                     mp_obj_new_int(b[3])};
-    return mp_obj_new_tuple(4, t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_toast_obj, 6, 6, ui_api_toast);
-
-// api_owes(ctx) -> whether the frame drawn last owes the next
-static mp_obj_t ui_api_owes(mp_obj_t ctx) {
-    return mp_obj_new_bool(moy_ui_api_owes(ctx_of(ctx)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_owes_obj, ui_api_owes);
-
-// api_moved(ctx) -> whether this frame's begin moved the focus or a scroll
-static mp_obj_t ui_api_moved(mp_obj_t ctx) {
-    return mp_obj_new_bool(moy_ui_api_moved(ctx_of(ctx)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_moved_obj, ui_api_moved);
-
-// api_moving(ctx) -> whether a page of the context flings or glides
-static mp_obj_t ui_api_moving(mp_obj_t ctx) {
-    return mp_obj_new_bool(moy_ui_api_moving(ctx_of(ctx)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_moving_obj, ui_api_moving);
-
 // api_busy(ctx) -> whether the frame drawn last owes the next or a page of
 // the context flings or glides: api_owes or api_moving, in one call
 static mp_obj_t ui_api_busy(mp_obj_t ctx) {
@@ -3855,18 +2933,6 @@ static mp_obj_t ui_api_busy(mp_obj_t ctx) {
     return mp_obj_new_bool(moy_ui_api_owes(c) || moy_ui_api_moving(c));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_busy_obj, ui_api_busy);
-
-// api_offset(ctx, x, y) -> the scroll of the page under (x, y), -1 none
-static mp_obj_t ui_api_offset(mp_obj_t ctx, mp_obj_t x, mp_obj_t y) {
-    return mp_obj_new_int(moy_ui_api_offset(ctx_of(ctx), num(x), num(y)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_offset_obj, ui_api_offset);
-
-// api_fades(reset) -> the list fades drawn since the count was reset
-static mp_obj_t ui_api_fades(mp_obj_t reset) {
-    return mp_obj_new_int_from_uint(moy_ui_api_fades(NULL, mp_obj_is_true(reset)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_fades_obj, ui_api_fades);
 
 // api_focus(ctx, id=None) -> the focused id, or None
 static mp_obj_t ui_api_focus(mp_obj_t ctx, mp_obj_t id) {
@@ -3883,38 +2949,6 @@ static mp_obj_t ui_api_focus(mp_obj_t ctx, mp_obj_t id) {
     return n < 0 ? mp_const_none : ret_str(buf, strlen(buf));
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_focus_obj, ui_api_focus);
-
-// api_focus_ahead(ctx, id): focus on `id` from the next frame's begin
-static mp_obj_t ui_api_focus_ahead(mp_obj_t ctx, mp_obj_t id) {
-    moy_ui_span_t sp = span_of(id);
-    if (sp.p == NULL) {
-        sp.p = (const uint8_t *)"";
-    }
-    moy_ui_api_focus_ahead(ctx_of(ctx), sp);
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_focus_ahead_obj, ui_api_focus_ahead);
-
-// api_shift_plan(ctx, out) -> the shift frame begin licensed (moy_ui_api.h's
-// MOY_UI_SHIFT_*); `out`, eight writable int32 words: R's x, y, w, h, dy,
-// the floor's rows, the pictures' rows it leaves and, for a dialog's rows
-// frame, the frames its card has stood (0: a page's)
-static mp_obj_t ui_api_shift_plan(mp_obj_t ctx, mp_obj_t out) {
-    mp_buffer_info_t b;
-    mp_get_buffer_raise(out, &b, MP_BUFFER_WRITE);
-    if (b.len < 8 * sizeof(int32_t)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("eight words"));
-    }
-    return MP_OBJ_NEW_SMALL_INT(moy_ui_api_shift_plan(ctx_of(ctx), (int32_t *)b.buf));
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_shift_plan_obj, ui_api_shift_plan);
-
-// api_shift_break(ctx): the frame draws whole from here
-static mp_obj_t ui_api_shift_break(mp_obj_t ctx) {
-    moy_ui_api_shift_break(ctx_of(ctx));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_shift_break_obj, ui_api_shift_break);
 
 // api_shift_drawn(ctx) -> what the pass begun last drew (MOY_UI_SHIFT_*),
 // plus 4 where it left R the page's alone
@@ -3962,32 +2996,6 @@ static mp_obj_t ui_api_band(size_t n_args, const mp_obj_t *a) {
     return ret_tuple(4, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_band_obj, 1, 2, ui_api_band);
-
-
-// api_floor_box(ctx, out) -> whether the pass drew a floor; `out`, four
-// writable int32 words, its bounding rect on screen (moy_ui_api_floor_box)
-static mp_obj_t ui_api_floor_box(mp_obj_t ctx, mp_obj_t out) {
-    mp_buffer_info_t b;
-    mp_get_buffer_raise(out, &b, MP_BUFFER_WRITE);
-    if (b.len < 4 * sizeof(int32_t)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("four words"));
-    }
-    return mp_obj_new_bool(moy_ui_api_floor_box(ctx_of(ctx), (int32_t *)b.buf));
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_floor_box_obj, ui_api_floor_box);
-
-// api_change_box(ctx, out) -> whether the pass was a shift or rows frame;
-// `out`, eight writable int32 words: what it changed, and its R
-// (moy_ui_api_change_box)
-static mp_obj_t ui_api_change_box(mp_obj_t ctx, mp_obj_t out) {
-    mp_buffer_info_t b;
-    mp_get_buffer_raise(out, &b, MP_BUFFER_WRITE);
-    if (b.len < 8 * sizeof(int32_t)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("eight words"));
-    }
-    return mp_obj_new_bool(moy_ui_api_change_box(ctx_of(ctx), (int32_t *)b.buf));
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_change_box_obj, ui_api_change_box);
 
 // api_lag_note(ctx, hist, bands, f, kind): frame f's slot of the lag history
 // `hist`, writable int32 words in slots of 2 + 2 * bands, from the pass begun
@@ -4044,42 +3052,7 @@ static mp_obj_t ui_api_host_begin(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_host_begin_obj, 7, 7, ui_api_host_begin);
 
-// api_host_arm(ctx) -> the frame's dy: the host made its begin's moves
-static mp_obj_t ui_api_host_arm(mp_obj_t ctx) {
-    return MP_OBJ_NEW_SMALL_INT(moy_ui_api_host_arm(ctx_of(ctx)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_host_arm_obj, ui_api_host_arm);
-
-
-// api_host_whole(ctx): the frame begun next draws whole
-static mp_obj_t ui_api_host_whole(mp_obj_t ctx) {
-    moy_ui_api_host_whole(ctx_of(ctx));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_host_whole_obj, ui_api_host_whole);
-
-// api_keys_back(ctx): the keys another surface held at the frame's begin are
-// the page's again, from here in the pass
-static mp_obj_t ui_api_keys_back(mp_obj_t ctx) {
-    moy_ui_api_keys_back(ctx_of(ctx));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_keys_back_obj, ui_api_keys_back);
-
-
 // -- text views (moy_ui_text.h) ----------------------------------------------------
-
-// api_pop_box(ctx, out) -> whether the pass drew a popover; `out`, four
-// writable int32 words, its card
-static mp_obj_t ui_api_pop_box(mp_obj_t ctx, mp_obj_t out) {
-    mp_buffer_info_t b;
-    mp_get_buffer_raise(out, &b, MP_BUFFER_WRITE);
-    if (b.len < 4 * sizeof(int32_t)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("four words"));
-    }
-    return mp_obj_new_bool(moy_ui_api_pop_box(ctx_of(ctx), (int32_t *)b.buf));
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_pop_box_obj, ui_api_pop_box);
 
 // text_words(syntax, words, tone): words (NUL-separated) a syntax colours
 static mp_obj_t ui_text_words(mp_obj_t syn, mp_obj_t words, mp_obj_t tone) {
@@ -4108,69 +3081,6 @@ static mp_obj_t ui_text_runs(mp_obj_t line, mp_obj_t syn) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_text_runs_obj, ui_text_runs);
 
-// api_keep(ctx, cv, look, id, h) -> the state bits of a stop carried forward
-// undrawn
-static mp_obj_t ui_api_keep(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_sink_t s;
-    sink_of(&s, a[1], a[2]);
-    return MP_OBJ_NEW_SMALL_INT(moy_ui_api_keep(ctx_of(a[0]), &s, span_of(a[3]), num(a[4])));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_keep_obj, 5, 5, ui_api_keep);
-
-// api_audit(on) -> the shift frames whose records moved outside the floor
-// since the last call (the tests' net); on -1 leaves the switch
-static mp_obj_t ui_api_audit(mp_obj_t on) {
-    return mp_obj_new_int_from_uint(moy_ui_api_audit(NULL, mp_obj_get_int(on)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_audit_obj, ui_api_audit);
-
-// api_keys_taken(ctx) -> whether the ui used this frame's keys
-static mp_obj_t ui_api_keys_taken(mp_obj_t ctx) {
-    return mp_obj_new_bool(moy_ui_api_keys_taken(ctx_of(ctx)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_keys_taken_obj, ui_api_keys_taken);
-
-// api_typing(ctx) -> whether the page's focus is a field it is typed into
-static mp_obj_t ui_api_typing(mp_obj_t ctx) {
-    return mp_obj_new_bool(moy_ui_api_typing(ctx_of(ctx)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_typing_obj, ui_api_typing);
-
-// api_edge(ctx) -> whether this frame's up press went past the page's top
-static mp_obj_t ui_api_edge(mp_obj_t ctx) {
-    return mp_obj_new_bool(moy_ui_api_edge(ctx_of(ctx)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_edge_obj, ui_api_edge);
-
-// api_tap_armed(ctx) -> whether the press down may tap where it is released
-static mp_obj_t ui_api_tap_armed(mp_obj_t ctx) {
-    return mp_obj_new_bool(moy_ui_api_tap_armed(ctx_of(ctx)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_tap_armed_obj, ui_api_tap_armed);
-
-// api_at(ctx, x, y, w, h)
-static mp_obj_t ui_api_at(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_api_at(ctx_of(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_at_obj, 5, 5, ui_api_at);
-
-// api_dup(ctx) -> a duplicate id drawn this frame, once per id, or None
-static mp_obj_t ui_api_dup(mp_obj_t ctx) {
-    const char *d = moy_ui_api_dup(ctx_of(ctx));
-    return d == NULL ? mp_const_none : mp_obj_new_str(d, strlen(d));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_dup_obj, ui_api_dup);
-
-// api_lost(ctx) -> the stops the last frame drew past the ones it records,
-// once per count, else 0
-static mp_obj_t ui_api_lost(mp_obj_t ctx) {
-    return MP_OBJ_NEW_SMALL_INT(moy_ui_api_lost(ctx_of(ctx)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_lost_obj, ui_api_lost);
-
 // wasm_rows() -> the public UI API's rows a compiled app imports ("ui_page", ...),
 // in the role table's order: what this image serves (moy_ui_wasm.h).
 static mp_obj_t ui_wasm_rows(void) {
@@ -4187,6 +3097,9 @@ static mp_obj_t ui_calls(void) {
     return mp_obj_new_int_from_uint(moy_ui_calls());
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ui_calls_obj, ui_calls);
+
+// The toolkit's context form (tools/gen_os/ui.py, from face.json's `api` rows).
+#include "modmoy_ui_face.h"
 
 static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_ui) },
@@ -4208,6 +3121,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_use_depth), MP_ROM_PTR(&ui_use_depth_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame_geom), MP_ROM_PTR(&ui_frame_geom_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame_under), MP_ROM_PTR(&ui_frame_under_obj) },
+    { MP_ROM_QSTR(MP_QSTR_frame_under_fill), MP_ROM_PTR(&ui_frame_under_fill_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame_under_onto), MP_ROM_PTR(&ui_frame_under_onto_obj) },
     { MP_ROM_QSTR(MP_QSTR_cast), MP_ROM_PTR(&ui_cast_obj) },
     { MP_ROM_QSTR(MP_QSTR_pattern_unreadable), MP_ROM_PTR(&ui_pattern_unreadable_obj) },
@@ -4240,7 +3154,6 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_font_load), MP_ROM_PTR(&ui_font_load_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_file), MP_ROM_PTR(&ui_font_file_obj) },
     { MP_ROM_QSTR(MP_QSTR_font_reset), MP_ROM_PTR(&ui_font_reset_obj) },
-    { MP_ROM_QSTR(MP_QSTR_text_wire), MP_ROM_PTR(&ui_text_wire_obj) },
     { MP_ROM_QSTR(MP_QSTR_text_lanes), MP_ROM_PTR(&ui_text_lanes_obj) },
     { MP_ROM_QSTR(MP_QSTR_print_font), MP_ROM_PTR(&ui_print_font_obj) },
     { MP_ROM_QSTR(MP_QSTR_cart_text), MP_ROM_PTR(&ui_cart_text_obj) },
@@ -4269,120 +3182,29 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_moy_use), MP_ROM_PTR(&ui_moy_use_obj) },
     { MP_ROM_QSTR(MP_QSTR_s), MP_ROM_PTR(&ui_s_obj) },
     { MP_ROM_QSTR(MP_QSTR_wasm_rows), MP_ROM_PTR(&ui_wasm_rows_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_size), MP_ROM_PTR(&ui_api_size_obj) },
+    MOY_FACE_MOY_UI_ROWS
     { MP_ROM_QSTR(MP_QSTR_api_begin), MP_ROM_PTR(&ui_api_begin_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_page), MP_ROM_PTR(&ui_api_page_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_label), MP_ROM_PTR(&ui_api_label_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_button), MP_ROM_PTR(&ui_api_button_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_toggle), MP_ROM_PTR(&ui_api_toggle_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_group), MP_ROM_PTR(&ui_api_group_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_value), MP_ROM_PTR(&ui_api_value_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_choice), MP_ROM_PTR(&ui_api_choice_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_hints), MP_ROM_PTR(&ui_api_hints_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_hints_w), MP_ROM_PTR(&ui_api_hints_w_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_slider), MP_ROM_PTR(&ui_api_slider_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_icon), MP_ROM_PTR(&ui_api_icon_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_box), MP_ROM_PTR(&ui_api_box_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_progress), MP_ROM_PTR(&ui_api_progress_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_list), MP_ROM_PTR(&ui_api_list_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_part), MP_ROM_PTR(&ui_api_part_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_part_at), MP_ROM_PTR(&ui_api_part_at_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_split), MP_ROM_PTR(&ui_api_split_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_split_at), MP_ROM_PTR(&ui_api_split_at_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_split_frame), MP_ROM_PTR(&ui_api_split_frame_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_split_toward), MP_ROM_PTR(&ui_api_split_toward_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_grid), MP_ROM_PTR(&ui_api_grid_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_card), MP_ROM_PTR(&ui_api_card_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_table), MP_ROM_PTR(&ui_api_table_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_scroll), MP_ROM_PTR(&ui_api_scroll_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_field), MP_ROM_PTR(&ui_api_field_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_dialog), MP_ROM_PTR(&ui_api_dialog_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_wash), MP_ROM_PTR(&ui_api_wash_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_wash_box), MP_ROM_PTR(&ui_api_wash_box_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_owes), MP_ROM_PTR(&ui_api_owes_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_moved), MP_ROM_PTR(&ui_api_moved_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_moving), MP_ROM_PTR(&ui_api_moving_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_busy), MP_ROM_PTR(&ui_api_busy_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_offset), MP_ROM_PTR(&ui_api_offset_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_fades), MP_ROM_PTR(&ui_api_fades_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_end), MP_ROM_PTR(&ui_api_end_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_table_rows), MP_ROM_PTR(&ui_api_table_rows_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_table_dist), MP_ROM_PTR(&ui_api_table_dist_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_table_pics), MP_ROM_PTR(&ui_api_table_pics_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_table_part), MP_ROM_PTR(&ui_api_table_part_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_table_floor), MP_ROM_PTR(&ui_api_table_floor_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_table_copy), MP_ROM_PTR(&ui_api_table_copy_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_table_shift), MP_ROM_PTR(&ui_api_table_shift_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_held), MP_ROM_PTR(&ui_api_held_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_held_last), MP_ROM_PTR(&ui_api_held_last_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_held_all), MP_ROM_PTR(&ui_api_held_all_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_slots), MP_ROM_PTR(&ui_api_faces_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_slot), MP_ROM_PTR(&ui_api_face_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_slot_next), MP_ROM_PTR(&ui_api_slot_next_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_block_set), MP_ROM_PTR(&ui_api_block_set_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_block_gen), MP_ROM_PTR(&ui_api_block_gen_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_block_since), MP_ROM_PTR(&ui_api_block_since_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_block_key), MP_ROM_PTR(&ui_api_block_key_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_popover), MP_ROM_PTR(&ui_api_popover_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_menu), MP_ROM_PTR(&ui_api_menu_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_menu_danger), MP_ROM_PTR(&ui_api_menu_danger_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_tool), MP_ROM_PTR(&ui_api_tool_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_bar), MP_ROM_PTR(&ui_api_bar_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_bar_lent), MP_ROM_PTR(&ui_api_bar_lent_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_bar_tap), MP_ROM_PTR(&ui_api_bar_tap_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_back), MP_ROM_PTR(&ui_api_back_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_cancel), MP_ROM_PTR(&ui_api_cancel_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_run_cancel), MP_ROM_PTR(&ui_api_run_cancel_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_run_back), MP_ROM_PTR(&ui_api_run_back_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_run_bar_lent), MP_ROM_PTR(&ui_api_run_bar_lent_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_run_bar_tap), MP_ROM_PTR(&ui_api_run_bar_tap_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_paste), MP_ROM_PTR(&ui_api_paste_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_run_paste), MP_ROM_PTR(&ui_api_run_paste_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_run_steps), MP_ROM_PTR(&ui_api_run_steps_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_run_typing), MP_ROM_PTR(&ui_api_run_typing_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_rule), MP_ROM_PTR(&ui_api_rule_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_text), MP_ROM_PTR(&ui_api_text_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_card_mark), MP_ROM_PTR(&ui_api_card_mark_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_grid_spread), MP_ROM_PTR(&ui_api_grid_spread_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_group_card), MP_ROM_PTR(&ui_api_group_card_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_empty), MP_ROM_PTR(&ui_api_empty_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_note), MP_ROM_PTR(&ui_api_note_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_bubble), MP_ROM_PTR(&ui_api_bubble_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_month), MP_ROM_PTR(&ui_api_month_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_toast), MP_ROM_PTR(&ui_api_toast_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_focus), MP_ROM_PTR(&ui_api_focus_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_focus_ahead), MP_ROM_PTR(&ui_api_focus_ahead_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_shift_plan), MP_ROM_PTR(&ui_api_shift_plan_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_shift_break), MP_ROM_PTR(&ui_api_shift_break_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_shift_drawn), MP_ROM_PTR(&ui_api_shift_drawn_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_band), MP_ROM_PTR(&ui_api_band_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_floor_box), MP_ROM_PTR(&ui_api_floor_box_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_change_box), MP_ROM_PTR(&ui_api_change_box_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_lag_note), MP_ROM_PTR(&ui_api_lag_note_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_lag), MP_ROM_PTR(&ui_api_lag_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_host_begin), MP_ROM_PTR(&ui_api_host_begin_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_host_arm), MP_ROM_PTR(&ui_api_host_arm_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_host_whole), MP_ROM_PTR(&ui_api_host_whole_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_keys_back), MP_ROM_PTR(&ui_api_keys_back_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_pop_box), MP_ROM_PTR(&ui_api_pop_box_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_text_view), MP_ROM_PTR(&ui_api_text_view_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_text_at), MP_ROM_PTR(&ui_api_text_at_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_text_cover), MP_ROM_PTR(&ui_api_text_cover_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_text_aim), MP_ROM_PTR(&ui_api_text_aim_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_text_reveal), MP_ROM_PTR(&ui_api_text_reveal_obj) },
     { MP_ROM_QSTR(MP_QSTR_text_tones), MP_ROM_PTR(&ui_text_tones_obj) },
     { MP_ROM_QSTR(MP_QSTR_text_words), MP_ROM_PTR(&ui_text_words_obj) },
     { MP_ROM_QSTR(MP_QSTR_text_runs), MP_ROM_PTR(&ui_text_runs_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_card_clip), MP_ROM_PTR(&ui_api_card_clip_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_keep), MP_ROM_PTR(&ui_api_keep_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_audit), MP_ROM_PTR(&ui_api_audit_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_keys_taken), MP_ROM_PTR(&ui_api_keys_taken_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_typing), MP_ROM_PTR(&ui_api_typing_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_edge), MP_ROM_PTR(&ui_api_edge_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_tap_armed), MP_ROM_PTR(&ui_api_tap_armed_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_at), MP_ROM_PTR(&ui_api_at_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_dup), MP_ROM_PTR(&ui_api_dup_obj) },
-    { MP_ROM_QSTR(MP_QSTR_api_lost), MP_ROM_PTR(&ui_api_lost_obj) },
     { MP_ROM_QSTR(MP_QSTR_str_set), MP_ROM_PTR(&ui_str_set_obj) },
     { MP_ROM_QSTR(MP_QSTR_str_reset), MP_ROM_PTR(&ui_str_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_glyph), MP_ROM_PTR(&ui_glyph_obj) },

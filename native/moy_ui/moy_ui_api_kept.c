@@ -30,7 +30,7 @@ static kept_mem_t *kept_mem(moy_ui_inst_t *I) {
 }
 
 // The ring the engine keeps for context c, else NULL; with `make` one taken
-// for it where it has none, holding the paint begun (kt_f) alone.
+// for it where it has none, holding the paint begun (kf.f) alone.
 kept_ring_t *mua_ring_of(const moy_ui_ctx_t *c, int make) {
     kept_mem_t *m = make ? kept_mem(c->inst) : c->inst->kept;
     if (m == NULL) {
@@ -53,7 +53,7 @@ kept_ring_t *mua_ring_of(const moy_ui_ctx_t *c, int make) {
     old->owner = c;
     old->used = ++m->used;
     old->n = 1;
-    old->kt[0].f = c->kt_f;
+    old->kt[0].f = c->kf.f;
     old->kt[0].kept = 1;
     return old;
 }
@@ -75,8 +75,8 @@ static int kept_slot(const kept_ring_t *r, int back) {
 // a slot of the context's ring where it has one, the one begun before it
 // again where f is its frame (a pass begun twice in one painted frame).
 void mua_kept_begin(moy_ui_ctx_t *c, int32_t f, int k) {
-    c->kt_f = f;
-    c->kt_k = (uint8_t)(k < 0 ? 0 : k >= MOY_UI_KEPT_RING ? MOY_UI_KEPT_RING - 1 : k);
+    c->kf.f = f;
+    c->kf.k = (uint8_t)(k < 0 ? 0 : k >= MOY_UI_KEPT_RING ? MOY_UI_KEPT_RING - 1 : k);
     kept_ring_t *r = mua_ring_of(c, 0);
     if (r == NULL) {
         return;
@@ -96,16 +96,16 @@ void mua_kept_begin(moy_ui_ctx_t *c, int32_t f, int k) {
     p->over.w = 0;
 }
 
-// The paint whose pixels the buffer this frame paints holds: kt_k back,
+// The paint whose pixels the buffer this frame paints holds: kf.k back,
 // where the paints between were this context's, one a frame, and that one
 // the app's alone; else NULL.
 static const moy_ui_kept_t *kept_held(const moy_ui_ctx_t *c, const kept_ring_t *r) {
-    int k = c->kt_k;
+    int k = c->kf.k;
     if (k < 1 || r->n <= k) {
         return NULL;
     }
     for (int b = 1; b <= k; b++) {
-        if (r->kt[kept_slot(r, b)].f != c->kt_f - b) {
+        if (r->kt[kept_slot(r, b)].f != c->kf.f - b) {
             return NULL;
         }
     }
@@ -125,7 +125,7 @@ static int kept_same(const moy_ui_kept_t *a, const moy_ui_kept_t *b) {
 }
 
 int moy_ui_api_held(moy_ui_ctx_t *c, moy_ui_span_t id, int32_t key) {
-    kept_ring_t *r = c->kt_k < 1 ? NULL : mua_ring_of(c, 1);
+    kept_ring_t *r = c->kf.k < 1 ? NULL : mua_ring_of(c, 1);
     if (r == NULL) {
         return 0;
     }
@@ -191,7 +191,7 @@ static int kept_merge(rc_t *f, int n, int rh, int sp, int xa) {
 }
 
 // Which of the floor's rects f[0..n) the buffer the last frame painted
-// holds as this frame draws them (kf_copy, a bit each): where that paint
+// holds as this frame draws them (kf.copy, a bit each): where that paint
 // is the frame before this one's, the app's alone, of this table under
 // its key, geometry and scroll, and not the paint this frame's buffer
 // holds (the canvas presents two buffers or more), a rect every part of
@@ -201,11 +201,11 @@ static int kept_merge(rc_t *f, int n, int rh, int sp, int xa) {
 static void kept_copy(moy_ui_ctx_t *c, const kept_ring_t *r, const moy_ui_kept_t *now,
                       const rc_t *f, int n, const uint32_t *hv, int vis0, int nk, int np,
                       int base, int rh, int sp, int xa, int c0, int pitch) {
-    if (c->kt_k < 2 || r->n < 2) {
+    if (c->kf.k < 2 || r->n < 2) {
         return;
     }
     const moy_ui_kept_t *p = &r->kt[kept_slot(r, 1)];
-    if (p->f != c->kt_f - 1 || !p->kept || !p->has_tbl || p->id != now->id
+    if (p->f != c->kf.f - 1 || !p->kept || !p->has_tbl || p->id != now->id
         || p->key != now->key || p->geo != now->geo || !mua_same_box(p->view, now->view)
         || p->off != now->off || p->rh != now->rh || p->n != now->n || p->np != np
         || p->k < 0) {
@@ -239,7 +239,7 @@ static void kept_copy(moy_ui_ctx_t *c, const kept_ring_t *r, const moy_ui_kept_t
             }
         }
         if (same) {
-            c->kf_copy |= (uint8_t)(1u << q);
+            c->kf.copy |= (uint8_t)(1u << q);
         }
     }
 }
@@ -293,12 +293,12 @@ void mua_kept_table(moy_ui_ctx_t *c, kept_ring_t *r, const moy_ui_over_t *o, uin
     // it) and the fade at the view's end, whose blended pixels moved.
     const moy_ui_kept_t *from = NULL;
     int d = 0;
-    c->kf_sh = 0;
-    if (whole && o->whole != 1 && o->shift && now->kept && nk >= 0 && r->n >= 2 && c->kt_k >= 1) {
+    c->kf.sh = 0;
+    if (whole && o->whole != 1 && o->shift && now->kept && nk >= 0 && r->n >= 2 && c->kf.k >= 1) {
         from = &r->kt[kept_slot(r, 1)];
         d = from->off - offset;
         int v0 = xa ? vr.x0 : vr.y0, v1 = xa ? vr.x1 : vr.y1;
-        if (from->f != c->kt_f - 1 || !from->kept || !from->has_tbl || from->id != id
+        if (from->f != c->kf.f - 1 || !from->kept || !from->has_tbl || from->id != id
             || from->key != o->keep || from->geo != geo || !mua_same_box(from->view, view)
             || from->rh != rh || from->n != count || from->np != np || from->k < 0
             || (d < 0 ? -d : d) >= v1 - v0) {
@@ -361,17 +361,17 @@ void mua_kept_table(moy_ui_ctx_t *c, kept_ring_t *r, const moy_ui_over_t *o, uin
         f[0] = vr;
         n = vr.x1 > vr.x0 && vr.y1 > vr.y0;
     } else if (from != NULL) {
-        c->kf_sh = 1;
-        c->kf_shift = d;
-        c->kf_sv = view;
+        c->kf.sh = 1;
+        c->kf.shift = d;
+        c->kf.sv = view;
     }
     n = kept_merge(f, n, rh, sp, xa);
-    c->kf_i = 0;
-    c->kf_n = (uint8_t)n;
+    c->kf.i = 0;
+    c->kf.n = (uint8_t)n;
     for (int i = 0; i < n; i++) {
-        c->kf[i] = mua_box_of(f[i]);
+        c->kf.box[i] = mua_box_of(f[i]);
     }
-    c->kf_copy = c->kf_took = c->kf_ci = 0;
+    c->kf.copy = c->kf.took = c->kf.ci = 0;
     if (o->whole != 1 && now->kept && nk > 0 && from == NULL) {
         kept_copy(c, r, now, f, n, hv, vis0, nk, np, base, rh, sp, xa, c0, pitch);
     }
@@ -379,12 +379,12 @@ void mua_kept_table(moy_ui_ctx_t *c, kept_ring_t *r, const moy_ui_over_t *o, uin
     // each, left it as this one does, with nothing over it
     // (one drawn over this paint: the frames after, which draw it again,
     // bring no buffer to the table alone)
-    int held = now->kept && r->n >= c->kt_k, over = now->over.w > 0;
-    for (int b = 1; held && b < c->kt_k; b++) {
+    int held = now->kept && r->n >= c->kf.k, over = now->over.w > 0;
+    for (int b = 1; held && b < c->kf.k; b++) {
         const moy_ui_kept_t *p = &r->kt[kept_slot(r, b)];
-        held = p->f == c->kt_f - b && p->kept && p->over.w <= 0 && kept_same(p, now);
+        held = p->f == c->kf.f - b && p->kept && p->over.w <= 0 && kept_same(p, now);
     }
-    c->kf_held = (uint8_t)(over ? MOY_UI_KF_OVER : held ? MOY_UI_KF_HELD : 0);
+    c->kf.held = (uint8_t)(over ? MOY_UI_KF_OVER : held ? MOY_UI_KF_HELD : 0);
     if (!held && !over) {
         c->owe = 1;                     // the frames that bring each buffer to it
     }
@@ -399,12 +399,12 @@ static int kept_parts(const moy_ui_ctx_t *c) {
     if (now == NULL || !now->nh) {
         return 1;                       // (nothing named)
     }
-    if (!now->kept || r->n < c->kt_k) {
+    if (!now->kept || r->n < c->kf.k) {
         return 0;
     }
-    for (int b = 1; b < c->kt_k; b++) {
+    for (int b = 1; b < c->kf.k; b++) {
         const moy_ui_kept_t *p = &r->kt[kept_slot(r, b)];
-        if (p->f != c->kt_f - b || !p->kept) {
+        if (p->f != c->kf.f - b || !p->kept) {
             return 0;
         }
         for (int j = 0; j < now->nh; j++) {
@@ -421,12 +421,12 @@ static int kept_parts(const moy_ui_ctx_t *c) {
 }
 
 int moy_ui_api_held_last(const moy_ui_ctx_t *c, moy_ui_span_t id, int32_t key) {
-    const kept_ring_t *r = c->kt_k < 1 ? NULL : mua_ring_of(c, 0);
+    const kept_ring_t *r = c->kf.k < 1 ? NULL : mua_ring_of(c, 0);
     if (r == NULL || r->n < 2) {
         return 0;
     }
     const moy_ui_kept_t *p = &r->kt[kept_slot(r, 1)];
-    if (p->f != c->kt_f - 1 || !p->kept) {
+    if (p->f != c->kf.f - 1 || !p->kept) {
         return 0;
     }
     uint32_t h = mua_hash(id.p, id.n, 0x6b657074u);
@@ -439,24 +439,24 @@ int moy_ui_api_held_last(const moy_ui_ctx_t *c, moy_ui_span_t id, int32_t key) {
 }
 
 int moy_ui_api_held_all(const moy_ui_ctx_t *c) {
-    return c->kt_k > 0 && kept_parts(c);
+    return c->kf.k > 0 && kept_parts(c);
 }
 
 int32_t moy_ui_api_table_copy(moy_ui_ctx_t *c, int32_t out[4], int back) {
     if (back) {
-        if (c->kf_ci > 0) {
-            c->kf_took &= (uint8_t)~(1u << (c->kf_ci - 1));
+        if (c->kf.ci > 0) {
+            c->kf.took &= (uint8_t)~(1u << (c->kf.ci - 1));
         }
         return 0;
     }
-    while (c->kf_ci < c->kf_n && !(c->kf_copy & (1u << c->kf_ci))) {
-        c->kf_ci++;
+    while (c->kf.ci < c->kf.n && !(c->kf.copy & (1u << c->kf.ci))) {
+        c->kf.ci++;
     }
-    if (c->kf_ci >= c->kf_n) {
+    if (c->kf.ci >= c->kf.n) {
         return 0;
     }
-    moy_ui_box_t b = c->kf[c->kf_ci];
-    c->kf_took |= (uint8_t)(1u << c->kf_ci++);
+    moy_ui_box_t b = c->kf.box[c->kf.ci];
+    c->kf.took |= (uint8_t)(1u << c->kf.ci++);
     out[0] = b.x;
     out[1] = b.y;
     out[2] = b.w;
@@ -466,38 +466,38 @@ int32_t moy_ui_api_table_copy(moy_ui_ctx_t *c, int32_t out[4], int back) {
 
 int32_t moy_ui_api_table_shift(moy_ui_ctx_t *c, int32_t out[5], int back) {
     if (back) {
-        if (c->kf_sh == 2) {
+        if (c->kf.sh == 2) {
             // the canvas could not move it: the view draws whole
-            c->kf[0] = c->kf_sv;
-            c->kf_n = 1;
-            c->kf_i = c->kf_copy = c->kf_took = c->kf_ci = c->kf_sh = 0;
+            c->kf.box[0] = c->kf.sv;
+            c->kf.n = 1;
+            c->kf.i = c->kf.copy = c->kf.took = c->kf.ci = c->kf.sh = 0;
         }
         return 0;
     }
-    if (c->kf_sh != 1) {
+    if (c->kf.sh != 1) {
         return 0;
     }
-    c->kf_sh = 2;
-    out[0] = c->kf_sv.x;
-    out[1] = c->kf_sv.y;
-    out[2] = c->kf_sv.w;
-    out[3] = c->kf_sv.h;
-    out[4] = c->kf_shift;
+    c->kf.sh = 2;
+    out[0] = c->kf.sv.x;
+    out[1] = c->kf.sv.y;
+    out[2] = c->kf.sv.w;
+    out[3] = c->kf.sv.h;
+    out[4] = c->kf.shift;
     return 1;
 }
 
 int32_t moy_ui_api_table_floor(moy_ui_ctx_t *c, int32_t out[4]) {
-    while (c->kf_i < c->kf_n && (c->kf_took & (1u << c->kf_i))) {
-        c->kf_i++;
+    while (c->kf.i < c->kf.n && (c->kf.took & (1u << c->kf.i))) {
+        c->kf.i++;
     }
-    if (c->kf_i >= c->kf_n) {
-        if (c->kf_held == MOY_UI_KF_HELD && c->kt_k > 0 && !kept_parts(c)) {
-            c->kf_held = 0;
+    if (c->kf.i >= c->kf.n) {
+        if (c->kf.held == MOY_UI_KF_HELD && c->kf.k > 0 && !kept_parts(c)) {
+            c->kf.held = 0;
             c->owe = 1;                 // a part beside it lags in a buffer
         }
-        return c->kf_held == MOY_UI_KF_HELD ? 0 : c->kf_held == MOY_UI_KF_OVER ? -2 : -1;
+        return c->kf.held == MOY_UI_KF_HELD ? 0 : c->kf.held == MOY_UI_KF_OVER ? -2 : -1;
     }
-    moy_ui_box_t b = c->kf[c->kf_i++];
+    moy_ui_box_t b = c->kf.box[c->kf.i++];
     out[0] = b.x;
     out[1] = b.y;
     out[2] = b.w;
@@ -537,10 +537,10 @@ int32_t moy_ui_api_slots(moy_ui_ctx_t *c, int32_t cap, int32_t key) {
         memset(fc->used, 0, sizeof(fc->used));
     }
     fc->w = fc->wn = 0;
-    fc->np = c->tp_np ? c->tp_np : 1;
-    fc->rows = c->tp_n;
-    fc->r0 = c->tp_v0;
-    fc->r1 = c->tp_id ? c->tp_e : c->tp_v0;
+    fc->np = c->tp.np ? c->tp.np : 1;
+    fc->rows = c->tp.n;
+    fc->r0 = c->tp.v0;
+    fc->r1 = c->tp.id ? c->tp.e : c->tp.v0;
     return cap;
 }
 

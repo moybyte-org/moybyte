@@ -16,15 +16,8 @@ settings load later still (the same ordering `make_webhost` respects by reading
 the sign-in's folder at `start()` rather than at construction).
 """
 
-try:
-    from web_console_ui import WebConsoleUI
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.web_console_ui import WebConsoleUI
-
-try:
-    from chrome import _ticks_us
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.chrome import _ticks_us
+from web_console_ui import WebConsoleUI
+from chrome import _ticks_us
 
 
 def _moy_net():
@@ -105,13 +98,62 @@ class WebConsole:
         """How a browser that cannot scan the code signs in, one sentence,
         read with the link it sits beside (the password file is a read)."""
         if self._hint is None:
-            try:
-                import ssh_service
-            except ImportError:  # host: the runtime package
-                from runtime import ssh_service
+            import ssh_service
             self._hint = ("Or type this console's password" if ssh_service.is_set(self.ws)
                           else "Scan to pair: set a password (passwd) to type one instead")
         return self._hint
+
+    # -- the add-on (runtime/carts/web_addon.py) --------------------------------
+
+    def open_addon(self):
+        """The browser console add-on was opened from the shelf: the console
+        turns on (or comes back to its screen), and an add-on that fits
+        another firmware starts updating."""
+        addon = getattr(self.ws, "addon", None)
+        if addon is not None:
+            addon.point(again=True)     # Get Carts may have just installed it
+        if self.serving() or self.joining():
+            if not self.parked:
+                self.park()
+        else:
+            self.toggle()
+        self.update_page(retry=True)
+
+    def page_note(self):
+        """None while the page this console serves fits its firmware, else
+        one line for the screen: why not, or how far its update is."""
+        addon = getattr(self.ws, "addon", None)
+        if addon is not None:
+            addon.point()
+        net = _moy_net()
+        state = getattr(net, "page_state", None)
+        if state is None or not state():   # an image that names no page
+            return None
+        why = net.page_why()
+        if addon is not None and addon.busy():
+            got = addon.progress
+            if got is not None and got[1]:
+                return "Updating the browser console: %d%%" % (got[0] * 100 // got[1])
+            return "Updating the browser console..."
+        if why is None:
+            return None
+        if addon is not None and addon.error:
+            return "Couldn't update the browser console: %s" % addon.error
+        return why[:1].upper() + why[1:]
+
+    def page_stale(self):
+        """True while the page wants an add-on (the one installed fits
+        another firmware, or none is and the console was not removed) and
+        nothing is installing it: the screen offers Update."""
+        addon = getattr(self.ws, "addon", None)
+        return addon is not None and not addon.busy() and addon.wanted()
+
+    def update_page(self, retry=False):
+        """Start the add-on's update (Update on the screen; turning the
+        console on, `retry`)."""
+        addon = getattr(self.ws, "addon", None)
+        if addon is not None and addon.start(retry=retry):
+            self.ws.mark_dirty()
 
     def on_paired(self):
         """A browser paired with the QR's token: the screen draws a fresh one,
@@ -121,7 +163,7 @@ class WebConsole:
         sl = getattr(self.ws, "settings_layer", None)
         if sl is not None:
             sl._read_paired()
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def park(self):
         """Take the glass over with the connection screen (#197).
@@ -145,7 +187,7 @@ class WebConsole:
         self.parked = True
         self.ui.on_enter()
         self.ws.wm.enter_console()
-        self.ws.go_home()
+        self.ws.home.go_home()
 
     @staticmethod
     def _stop_saying_why(wh, why):
@@ -198,10 +240,10 @@ class WebConsole:
         everywhere else."""
         ws = self.ws
         self.parked = False
-        ws._dirty = True
+        ws.mark_dirty()
         ws.wm.goto("launcher")          # out of the screen, not over it
         if getattr(ws.wm, "has_desk", False):
-            ws.open_desk()
+            ws.home.open_desk()
 
     def serving(self):
         wh = self.ws.webhost
@@ -213,15 +255,15 @@ class WebConsole:
 
     def on_serving(self):
         """The switch came up after a join: the glass goes to the screen."""
-        self.ws._dirty = True
+        self.ws.mark_dirty()
         if not self.parked:
             self.park()
 
     def on_failed(self):
         """The join ran out or the bind was refused: the row says why, the
         radio goes, and the glass (never parked by a join) stays where it is."""
-        self.ws.wifi_release("web")
-        self.ws._dirty = True
+        self.ws.spine.wifi_release("web")
+        self.ws.mark_dirty()
         if self.parked:
             self.unpark()
 
@@ -285,14 +327,15 @@ class WebConsole:
                 # still CLOSING keeps it and lets go from its own stop (the
                 # `on_stop` make_webhost wires). An immediate stop lets go now.
                 if not getattr(wh, "closing", None):
-                    self.ws.wifi_release("web")
+                    self.ws.spine.wifi_release("web")
             else:
-                self.ws.wifi_hold("web")
+                self.ws.spine.wifi_hold("web")
                 wh.start()
+                self.update_page(retry=True)
         except Exception as exc:  # noqa: BLE001
             wh.error = "%s" % exc
-            self.ws.wifi_release("web")      # a start that failed holds nothing
-        self.ws._dirty = True
+            self.ws.spine.wifi_release("web")      # a start that failed holds nothing
+        self.ws.mark_dirty()
         if getattr(wh, "serving", False):
             if not self.parked:
                 self.park()

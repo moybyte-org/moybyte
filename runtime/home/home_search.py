@@ -13,24 +13,31 @@ every frame. It owns no state of its own: the query is the console's
 (`ws.search_query`, `ws.search_typing`).
 """
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
+import ui as _ui
+import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
 class HomeSearch:
     """The search line, its tap and its typing of `LauncherHomeLayer`."""
 
+    def typing(self):
+        """A query being typed takes the keyboard."""
+        return self.ws.search_typing
+
+    def cancel(self):
+        """Mic while a query is typed: the box closes, cleared."""
+        if not self.ws.search_typing:
+            return False
+        self.ws.home.close_search(clear=True)
+        return True
+
     def _search_label(self, query, typing):
         """The search box's words: "Search: " and the query (a bar caret
         follows it while typed, `_draw_search`), or, where the input in use
         cannot type, that a keyboard is needed (#239 is the on-screen
         keyboard)."""
-        if typing and not query and not self.ws.can_type():
+        if typing and not query and not self.ws.text.can_type():
             return self.ws.no_keyboard_text
         return "Search: " + query
 
@@ -55,7 +62,7 @@ class HomeSearch:
         label = _ui_draw.print_fit(self._search_label(query, typing), line[2] // 2, fs)
         cv.print(label, x, y, ink, 1)
         x += _ui_draw.print_width(label, fs)
-        if typing and ws.can_type():
+        if typing and ws.text.can_type():
             # the field's caret: a unit wide, a unit over and under the ink
             x += fs
             cv.rect(x, y + fs, fs, ws.layout.line_h - 2 * fs, th["value"])
@@ -78,7 +85,7 @@ class HomeSearch:
         x1 = next((a for v, a, _b in spans if v == "tabs"), line[0] + line[2])
         if not _in(px, py, (line[0], line[1], x1 - line[0], line[3])):
             return False
-        self.ws.close_search(clear=True)
+        self.ws.home.close_search(clear=True)
         return True
 
     def _handle_search_typing(self, i):
@@ -91,17 +98,16 @@ class HomeSearch:
         the full grid. Grid nav is intentionally NOT handled here (mirrors the
         wifi panel: while typing, the d-pad doesn't drive anything else)."""
         ws = self.ws
-        k = ws.input.last_key
+        k = ws.input.typed
         if i.pressed("b"):                          # a gamepad's B: the strip's Close
-            ws.close_search(clear=True)
-        elif k and k != self._search_kprev:
+            ws.home.close_search(clear=True)
+        elif k:
             if k in (10, 13):                       # ENTER -> stop typing, keep results
-                ws.close_search(clear=False)
+                ws.home.close_search(clear=False)
             elif k == 27:                           # ESC -> cancel back to the full grid
-                ws.close_search(clear=True)
+                ws.home.close_search(clear=True)
             elif k == 8:                            # BACKSPACE -> delete
-                ws.set_search_query(ws.search_query[:-1])
+                ws.home.set_search_query(ws.search_query[:-1])
             elif 32 <= k <= 126 and len(ws.search_query) < 24:
-                ws.set_search_query(ws.search_query + chr(k))
-        self._search_kprev = k
+                ws.home.set_search_query(ws.search_query + chr(k))
         return True

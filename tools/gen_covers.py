@@ -204,7 +204,7 @@ def silence(ws, names):
     rebound in its own state. The cart's code looks each name up when it calls
     it, so nothing else about the cart changes."""
     p = ws.run.player
-    if getattr(p, "_lua", None) is not None:
+    if getattr(p, "lua", None) is not None:
         from runtime import moycore      # the host's binding of the Lua engine
         err = moycore.exec("".join("%s = function() end\n" % n for n in names),
                            "cover")
@@ -265,7 +265,7 @@ def capture(slug):
             return None
         ws.launcher.sel = target
         with seeded_lua():
-            ws.launch_selected()
+            ws.home.launch_selected()
         if ws.screen != "desktop" or ws.cart_error:
             print("skip (did not start):", slug, ws.cart_error)
             return None
@@ -278,12 +278,12 @@ def capture(slug):
         frames, crop = pick.get("frames", FRAMES), pick.get("crop")
         silence(ws, MUTE + pick.get("mute", ()))
         for _ in range(frames):
-            ws._toast_until = 0          # keep system toasts out of the artwork
+            ws.toast_until = 0          # keep system toasts out of the artwork
             if ws.pointer is not None:
                 ws.pointer.visible = False
             ws.frame(1 / 30)
-        ws._toast_until = 0
-        ws._dirty = True
+        ws.toast_until = 0
+        ws.mark_dirty()
         ws.frame(1 / 30)                 # one clean frame after the last toast clear
         if ws.cart_error:
             print("skip (crashed during capture):", slug, ws.cart_error)

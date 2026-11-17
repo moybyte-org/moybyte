@@ -60,7 +60,7 @@ int moy_img_decode(const char *text, size_t n, uint8_t *pix, size_t cap,
 //   the stream  a ZLIB stream of exactly w*h indices, its checksum good; what
 //               follows its end inside the base64 is not read as pixels.
 //
-// runtime/carts/moyimg.py's `cover_stream` is the reference, rule for rule.
+// tests/test_picture_stream.py is the net, on CPython and on the boards' VM.
 
 #define MOY_IMG_HEAD 256u
 

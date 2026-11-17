@@ -29,6 +29,8 @@ import os
 from . import native_build
 from .lua_ext import cfg_blob
 from .moyimg import decode_moyimg
+from .moycore_face import moycore_svc_chunk_t as SvcChunk, moycore_svc_info_t as SvcInfo
+from .moy_play_face import moy_play_info_t as PlayInfo
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = native_build.ROOT
@@ -78,29 +80,31 @@ def _lua_names():
 
 # This module's share of the host's one library (runtime/host/host_native.py): the
 # Lua run, the kernel's Player and the public UI API's Lua and RUN faces
-# (native/moycore/moycore_ui.h, native/moy_ui/moy_ui_wasm.h).
+# (native/moycore/moycore_ui.h, native/moy_ui/moy_ui_run.h).
 PART = native_build.Part("lua", list(_RASTER) + [
     "moy_lua.c", "moy_p8.c", "moycore_run.h", "moycore_run.c", "moycore_lua.h",
     "moycore_lua.c", "moycore_layers.h", "moycore_superset.h", "moycore_scene.h",
-    "moy_gfx_kernels.h", "moy_gfx_kernels.c", "moy_text.h", "moy_text.c",
+    "moy_gfx_kernels.h", "moy_gfx_kernels.c", "moy_gfx_base.h", "moy_gfx_base.c",
+    "moy_text.h", "moy_text.c",
     "moy_shape.h", "moy_shape.c",
     "moy_json.h", "moy_json.c", "moy_htab.h", "moy_htab.c",
     "moy_play.h", "moy_play.c", "moy_play_rule.c", "moy_rt.h", "moy_rt.c",
     "moy_tick.h", "moy_tick.c", "moy_match.h", "moy_match.c", "moy_match_kernel.c",
     "moy_crash.h", "moy_chrome.h", "moy_chrome.c",
     "moy_ui.h", "moy_ui_glyph.c", "moy_ui_tables.h", "moy_ui_tables.c",
-    "moycore_ui.h", "moy_ui.c", "moy_ui_draw.c", "moy_ui_paint.c", "moy_ui_depth.c",
-    "moy_ui_parts.c", "moy_ui_interact.c", "moy_ui_api.h", "moy_ui_api_int.h", "moy_ui_api.c",
+    "moycore_ui.h", "moycore_ui_rows.h", "moy_ui.c", "moy_ui_draw.c", "moy_ui_paint.c", "moy_ui_depth.c",
+    "moy_ui_parts.c", "moy_ui_interact.c", "moy_ui_api.h", "moy_ui_over_keys.h", "moy_ui_api_int.h", "moy_ui_api.c",
     "moy_ui_api_text.c", "moy_ui_api_kept.c", "moy_ui_api_table.c", "moy_ui_api_pop.c",
     "moy_ui_api_host.c",
     "moy_ui_text.h", "moy_ui_text.c",
-    "moy_ui_wasm.h", "moy_ui_wasm_rows.h", "moy_ui_wasm.c",
+    "moy_ui_run.h", "moy_ui_run_rows.h", "moy_ui_run_face.h", "moy_ui_run.c", "moy_ui_wasm.h",
+    "moy_ui_wasm_rows.h", "moy_ui_wasm_face.h", "moy_ui_wasm.c",
     "moy_theme.h", "moy_theme.c",
     "moy_canvas.h", "moy_str.h", "moy_str.c", "moy_str_table.h", "moy_str_table.c",
     "moy_cat.h", "moy_cat.c", "moy_load.h", "moy_arena.h", "moy_vol.h", "moy_vol.c",
     "moy_fs.h", "moy_fs.c", "moy_store_host.c", "moy_img.h",
     "moy_loop.h", "moy_idle.h", "moy_perf.h", "moy_input.h", "moy_aud.h", "moy_buf.h",
-    "moy_proc.h", "moy_proc_exit.h", "moy_proc.c", "moy_app_run.h", "moycore_svc.h", "moycore_svc.c", "moy_app_lua_rows.h",
+    "moy_proc.h", "moy_proc_exit.h", "moy_proc.c", "moy_app_run.h", "moycore_svc.h", "moycore_svc.c", "moycore_moybyte.h", "moycore_moybyte.c", "moy_app_lua_rows.h",
 ] + _lua_names(), (_LIBMOY, _BINDING_DIR, _LUA, _HERE, _MOYCORE, _MOY_GFX, _SPINE,
                    _PLAY, _STORE, _KERNEL, _INPUT, _AUDIO, _GLASS, _UI,
                    os.path.join(_NATIVE, "moy_app")), shim=_SHIM)
@@ -110,9 +114,10 @@ PART = native_build.Part("lua", list(_RASTER) + [
 # binding, the cart's `snd` stream (libmoy's synth at the boards' float) and
 # its written files, and a WASI command's table (native/moy_wasm/moy_wasi.c).
 WASM_PART = native_build.Part("wasm", (
-    "moy_wasm.c", "moy_wasm.h", "moy_wasm_footprint.h", "moy_audio.c", "moy_audio.h",
+    "moy_wasm.c", "moy_wasm.h", "moy_wasm_footprint.h", "moy_audio.c", "moy_audio.h", "moycore_moybyte.h",
     "moy_files.h", "moy_files.c", "moyhost_wasm.c", "moycore_run.h", "moycore_lua.h",
-    "moy_ui_wasm.h", "moy_ui_wasm_rows.h", "moy.h", "moy_pixel.h", "moy_app_run.h", "moy_proc.h",
+    "moy_ui_run.h", "moy_ui_run_rows.h", "moy_ui_wasm.h", "moy_ui_wasm_rows.h", "moy.h", "moy_pixel.h",
+    "moy_app_run.h", "moy_proc.h",
     "moy_wasi.c", "moy_wasi.h", "moy_wasi_os_rows.h", "moy_evq.h", "moy_screen_slot.h", "moy_vmq.h", "moy_super.h", "moy_sh.h", "moy_sh_board.h", "moy_sh_prog.h", "moy_log.h", "moy_proc_exit.h"),
     (_LIBMOY, _BINDING_DIR, _HERE, _MOYCORE, _STORE, _UI, _KERNEL,
      os.path.join(_NATIVE, "moy_wasm"), os.path.join(_NATIVE, "moy_sh"), os.path.join(_AUDIO, "libmoy"),
@@ -129,18 +134,6 @@ def build(verbose=False):
 _I, _P, _F, _C = ctypes.c_int, ctypes.c_void_p, ctypes.c_float, ctypes.c_char_p
 _U32 = ctypes.c_uint32
 
-class SvcChunk(ctypes.Structure):
-    """moycore_svc_chunk_t (native/moycore/moycore_svc.h)."""
-    _fields_ = [("src", ctypes.c_char_p), ("n", ctypes.c_size_t), ("name", ctypes.c_char_p)]
-
-
-class SvcInfo(ctypes.Structure):
-    """moycore_svc_info_t (native/moycore/moycore_svc.h)."""
-    _fields_ = [("state", ctypes.c_uint8), ("strikes", ctypes.c_uint8), ("exit", ctypes.c_int32),
-                ("heap", ctypes.c_uint32), ("cpu_us", ctypes.c_uint32), ("pid", ctypes.c_uint32),
-                ("why", ctypes.c_char * 96), ("wakes", ctypes.c_uint8), ("mail", ctypes.c_uint8)]
-
-
 _SIGS = (
     ("moycore_svc_start", [_U32, _C, ctypes.POINTER(SvcChunk), ctypes.c_size_t, _C,
                            ctypes.c_size_t, _C, ctypes.POINTER(_U32)], _I),
@@ -149,7 +142,7 @@ _SIGS = (
     ("moycore_svc_reap", [_U32], _I),
     ("moycore_svc_at", [_U32], _U32),
     ("moycore_svc_tasks", [], ctypes.c_bool),
-    ("moycore_svc_step", [_U32], _U32),
+    ("moycore_svc_step", [], _U32),
     ("moycore_svc_reset", [], None),
     ("hl_kernel", [_I, _P], None),
     ("hl_img_decoder", [_P], None),
@@ -169,6 +162,8 @@ _SIGS = (
     ("hl_layer_restore", [_P, _P], None),
     ("hl_layer_pixels", [_P, _I, ctypes.POINTER(_P), ctypes.POINTER(_I), ctypes.POINTER(_I)], _I),
     ("hl_exec", [_P, _C, _I, _C, _P, _I], _I),
+    ("hl_own", [_P, _U32, _P, _I], _I),
+    ("hl_call", [_P, _C, _C, _I, _P, _I], _I),
     ("hl_load", [_P, ctypes.POINTER(_C), ctypes.POINTER(_I), ctypes.POINTER(_C), _I,
                  _P, _P, _I], _I),
     ("hl_layout", [_P, _I, _I, _I, _P, _I], _I),
@@ -261,6 +256,8 @@ def _lib():
             d.hl_img_decoder(ctypes.cast(_IMG_CB, _P))
             d.hl_play_rows(1 if hasattr(d, "hw_runtime") else 0)
             kernel(d)
+            import face_ctypes
+            face_ctypes.library()       # the kernel's timers on the console's clock
             _LIB[0] = d
     return _LIB[0] or None
 
@@ -275,19 +272,6 @@ SNAP_ROOM_X, SNAP_ROOM_Y, SNAP_ROOM_W, SNAP_ROOM_H = 15, 16, 17, 18
 AQ_SLOTS = 4
 AQ_MAX = 32
 AQ_SFX, AQ_MUSIC, AQ_BEEP, AQ_MUSIC_STOP, AQ_SOUND_STOP, AQ_VOLUME = range(6)
-
-
-class PlayInfo(ctypes.Structure):
-    """moy_play_info_t (native/moy_play/moy_play.h)."""
-    _fields_ = [("runtime", ctypes.c_char * 12), ("error", ctypes.c_char * 192),
-                ("frames", _U32), ("ticks", _U32), ("upcalls", _U32 * 6),
-                ("stack_open", _U32), ("stack_frame", _U32),
-                ("why", ctypes.c_uint8), ("end_why", ctypes.c_uint8),
-                ("stop_why", ctypes.c_uint8), ("vm_down", ctypes.c_bool),
-                ("vm_free", ctypes.c_bool), ("raised", ctypes.c_bool),
-                ("ended", ctypes.c_bool), ("game", ctypes.c_bool),
-                ("title", ctypes.c_char * 48), ("id", ctypes.c_char * 24),
-                ("fit", _U32 * 5), ("stuck", ctypes.c_bool)]
 
 
 class HostLuaRun:
@@ -498,6 +482,19 @@ class HostLuaRun:
         err = ctypes.create_string_buffer(256)
         b = src.encode("utf-8") if isinstance(src, str) else bytes(src)
         return self._err(self._d.hl_exec(self._r, b, len(b), name.encode(),
+                                         ctypes.cast(err, _P), 256), err)
+
+    def own(self, pid):
+        """The run's `moybyte` table, process `pid`'s: None, or the error."""
+        err = ctypes.create_string_buffer(256)
+        return self._err(self._d.hl_own(self._r, int(pid), ctypes.cast(err, _P), 256), err)
+
+    def call(self, fn, args):
+        """The run's global `fn` with the values of JSON array `args`: None,
+        or the error."""
+        err = ctypes.create_string_buffer(256)
+        b = args.encode("utf-8") if isinstance(args, str) else bytes(args)
+        return self._err(self._d.hl_call(self._r, str(fn).encode(), b, len(b),
                                          ctypes.cast(err, _P), 256), err)
 
     def load(self, chunks, layout=None):

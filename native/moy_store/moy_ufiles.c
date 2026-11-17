@@ -5,12 +5,17 @@
 #include <string.h>
 #include <time.h>
 
+#include "moy_sb.h"
+#include "moy_codec.h"
 #include "moy_cat.h"
 #include "moy_img.h"
 #include "moy_journal.h"
 #include "moy_json.h"
 #include "moy_png.h"
 #include "moy_ufiles.h"
+
+// What a builder here grows in: the store's call scratch.
+static const moy_htab_mem_t STORE_MEM = { moy_store_alloc, moy_store_free };
 
 // -- the registry ---------------------------------------------------------------------
 
@@ -19,7 +24,7 @@ static const struct {
     uint8_t folder;
 } KINDS[MOY_UF_KINDS] = {
     { "drawings", ".moyimg", "drawing", "Pictures", 0 },
-    { "docs", ".md", "doc", "Documents", 0 },
+    { "docs", MOY_UF_DOC_EXT, "doc", "Documents", 0 },
     { "sprites", ".moygfx", "sheet", "Pictures/Sprites", 0 },
     { "music", ".moysong", "song", "Music", 0 },
     { "recordings", "", "recording", "Recordings", 1 },
@@ -31,11 +36,11 @@ static const char *const VAULT_EXTS[] = { ".py", ".lua", ".txt", ".json" };
 #define NSCRIPT 2u
 #define NVAULT 4u
 
-static const char FILES_DIR[] = "files";
-static const char TRASH_DIR[] = ".Trash";
-static const char HISTORY_DIR[] = ".history";
-static const char HISTORY_EXT[] = ".jsonl";
-static const char PROJECT[] = "project:";
+static const char FILES_DIR[] = MOY_UF_FILES_DIR;
+static const char TRASH_DIR[] = MOY_UF_TRASH_DIR;
+static const char HISTORY_DIR[] = MOY_UF_HISTORY_DIR;
+static const char HISTORY_EXT[] = MOY_UF_HISTORY_EXT;
+static const char PROJECT[] = MOY_UF_PROJECT_KIND;
 static const char COVER[] = "cover.png";
 static const char ARTWORK[] = "artwork.moyimg";
 
@@ -1239,13 +1244,20 @@ int moy_uf_delete(const char *root, const char *kind, const char *name,
         return rc;
     }
     rc = mkdirs(root, 0, TRASH_DIR, KINDS[k].name, NULL);
+    char *src = rc == 0 ? file_path(root, k, name) : NULL;
+    if (rc == 0 && src == NULL) {
+        rc = MOY_ENOMEM;
+    } else if (rc == 0 && !exists(src)) {
+        rc = MOY_UF_NONE;
+    }
     if (rc == 0) {
         rc = unique_name(root, k, name, trash_path, name_out);
     }
     if (rc != 0) {
+        str_free(src);
         return rc;
     }
-    char *src = file_path(root, k, name), *dst = trash_path(root, k, name_out);
+    char *dst = trash_path(root, k, name_out);
     if ((rc = path_pair(&src, &dst)) != 0) {
         return rc;
     }
@@ -1478,65 +1490,23 @@ static ptrdiff_t last_kf(const recs_t *rs) {
     return last;
 }
 
-// A growing answer.
-typedef struct {
-    char *p;
-    size_t n, cap;
-    int rc;
-} sink_t;
-
-static void sink_put(sink_t *s, const char *p, size_t n) {
-    if (s->rc != 0) {
-        return;
+// The builder as a moy_buf_t (moy_buf_free frees `n + 1` bytes).
+static int sink_take(moy_sb_t *s, moy_buf_t *out) {
+    if (!s->failed && s->p == NULL) {
+        moy_sb_put(s, "", 0);
     }
-    if (s->n + n + 1u > s->cap) {
-        size_t cap = s->cap ? s->cap : 256u;
-        while (cap < s->n + n + 1u) {
-            cap *= 2u;
-        }
-        char *q = moy_store_alloc(cap);
-        if (q == NULL) {
-            s->rc = MOY_ENOMEM;
-            return;
-        }
-        if (s->p != NULL) {
-            memcpy(q, s->p, s->n);
-            moy_store_free(s->p, s->cap);
-        }
-        s->p = q;
-        s->cap = cap;
-    }
-    memcpy(s->p + s->n, p, n);
-    s->n += n;
-    s->p[s->n] = 0;
-}
-
-static void sink_s(sink_t *s, const char *z) {
-    sink_put(s, z, strlen(z));
-}
-
-// The sink as a moy_buf_t (moy_buf_free frees `n + 1` bytes).
-static int sink_take(sink_t *s, moy_buf_t *out) {
-    if (s->rc != 0) {
-        if (s->p != NULL) {
-            moy_store_free(s->p, s->cap);
-        }
-        return s->rc;
-    }
-    if (s->p == NULL) {
-        sink_put(s, "", 0);
-        if (s->rc != 0) {
-            return s->rc;
-        }
+    if (s->failed) {
+        moy_sb_free(s);
+        return MOY_ENOMEM;
     }
     out->p = moy_store_alloc(s->n + 1u);
     if (out->p == NULL) {
-        moy_store_free(s->p, s->cap);
+        moy_sb_free(s);
         return MOY_ENOMEM;
     }
     memcpy(out->p, s->p, s->n + 1u);
     out->n = s->n;
-    moy_store_free(s->p, s->cap);
+    moy_sb_free(s);
     return 0;
 }
 
@@ -1557,8 +1527,8 @@ static char *sidecar(const char *root, const char *kind, const char *name, int *
 }
 
 static int empty_array(moy_buf_t *out) {
-    sink_t s = { NULL, 0, 0, 0 };
-    sink_s(&s, "[]");
+    moy_sb_t s = moy_sb_grown(&STORE_MEM);
+    moy_sb_str(&s, "[]");
     return sink_take(&s, out);
 }
 
@@ -1577,15 +1547,15 @@ int moy_uf_history(const char *root, const char *kind, const char *name,
     if (rc != 0) {
         return rc;
     }
-    sink_t s = { NULL, 0, 0, 0 };
-    sink_s(&s, "[");
+    moy_sb_t s = moy_sb_grown(&STORE_MEM);
+    moy_sb_str(&s, "[");
     for (size_t i = 0; i < rs.n; i++) {
         if (i) {
-            sink_s(&s, ", ");
+            moy_sb_str(&s, ", ");
         }
-        sink_put(&s, rs.r[i].p, (size_t)(rs.r[i].end - rs.r[i].p));
+        moy_sb_put(&s, rs.r[i].p, (size_t)(rs.r[i].end - rs.r[i].p));
     }
-    sink_s(&s, "]");
+    moy_sb_str(&s, "]");
     recs_free(&rs);
     return sink_take(&s, out);
 }
@@ -1605,9 +1575,9 @@ int moy_uf_history_ops(const char *root, const char *kind, const char *name,
     if (rc != 0) {
         return rc;
     }
-    sink_t s = { NULL, 0, 0, 0 };
+    moy_sb_t s = moy_sb_grown(&STORE_MEM);
     int first = 1;
-    sink_s(&s, "[");
+    moy_sb_str(&s, "[");
     for (size_t i = (size_t)(last_kf(&rs) + 1); i < rs.n; i++) {
         const char *v, *ve;
         if (rs.r[i].kf || !moy_json_get(rs.r[i].p, rs.r[i].end, "ops", &v, &ve)
@@ -1619,19 +1589,19 @@ int moy_uf_history_ops(const char *root, const char *kind, const char *name,
         moy_json_iter(&it, v, ve);
         while (moy_json_next(&it, &k, &ke, &e, &ee)) {
             if (!first) {
-                sink_s(&s, ", ");
+                moy_sb_str(&s, ", ");
             }
             first = 0;
-            sink_put(&s, e, (size_t)(ee - e));
+            moy_sb_put(&s, e, (size_t)(ee - e));
         }
     }
-    sink_s(&s, "]");
+    moy_sb_str(&s, "]");
     recs_free(&rs);
     return sink_take(&s, out);
 }
 
 // Each kept record as json.dumps writes it, one a line.
-static int canon_line(sink_t *s, const rec_t *r) {
+static int canon_line(moy_sb_t *s, const rec_t *r) {
     size_t need = moy_json_canon(r->p, r->end, NULL, 0);
     if (need == MOY_JSON_DEEP) {
         return MOY_UF_BAD;
@@ -1641,8 +1611,8 @@ static int canon_line(sink_t *s, const rec_t *r) {
         return MOY_ENOMEM;
     }
     moy_json_canon(r->p, r->end, tmp, need);
-    sink_put(s, tmp, need);
-    sink_s(s, "\n");
+    moy_sb_put(s, tmp, need);
+    moy_sb_str(s, "\n");
     moy_store_free(tmp, need + 1u);
     return 0;
 }
@@ -1666,7 +1636,7 @@ static int prune(const char *path, uint32_t keep, uint32_t *dropped) {
         recs_free(&rs);
         return 0;
     }
-    sink_t s = { NULL, 0, 0, 0 };
+    moy_sb_t s = moy_sb_grown(&STORE_MEM);
     if (kf >= 0) {
         rc = canon_line(&s, &rs.r[kf]);
     }
@@ -1817,31 +1787,17 @@ int moy_uf_clear_history(const char *root, const char *kind, const char *name) {
 
 // -- provenance --------------------------------------------------------------------------------
 
-// The next code point of UTF-8 `p` (a byte that starts none is itself).
-static uint32_t next_cp(const unsigned char **p, const unsigned char *end) {
-    const unsigned char *s = *p;
-    uint32_t c = *s++;
-    int more = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : c >= 0xC0 ? 1 : 0;
-    if (more && end - s >= more) {
-        c &= 0x3Fu >> more;
-        for (int i = 0; i < more; i++) {
-            c = c << 6 | (*s++ & 0x3Fu);
-        }
-    }
-    *p = s;
-    return c;
-}
-
 uint32_t moy_uf_sig(const char *text, size_t n) {
     if (n == 0) {
         return 0;
     }
-    const unsigned char *p = (const unsigned char *)text, *end = p + n;
     uint32_t cps[64];
     size_t len = 0, ring = 0;
     uint32_t s = 0;
-    while (p < end) {
-        uint32_t c = next_cp(&p, end);
+    for (size_t i = 0; i < n;) {
+        uint8_t lead = (uint8_t)text[i];
+        int32_t u = moy_utf8_next(text, n, &i);
+        uint32_t c = u < 0 ? lead : (uint32_t)u;     // a refused byte is itself
         if (len < 64u) {
             s += c;
         }
@@ -1986,7 +1942,7 @@ const uint8_t *moy_uf_palette(void) {
 #define ZW_MAX 258
 
 typedef struct {
-    sink_t *out;
+    moy_sb_t *out;
     uint32_t bits;
     unsigned nbits;
     int32_t head[1u << ZW_HASH_BITS];
@@ -2015,7 +1971,7 @@ static void zw_bits(zw_t *z, uint32_t v, unsigned n) {
     z->nbits += n;
     while (z->nbits >= 8u) {
         char c = (char)(z->bits & 0xffu);
-        sink_put(z->out, &c, 1);
+        moy_sb_put(z->out, &c, 1);
         z->bits >>= 8;
         z->nbits -= 8u;
     }
@@ -2069,7 +2025,7 @@ static void zw_insert(zw_t *z, const uint8_t *p, size_t q) {
     z->head[h] = (int32_t)q;
 }
 
-static int zw_deflate(sink_t *out, const uint8_t *p, size_t n) {
+static int zw_deflate(moy_sb_t *out, const uint8_t *p, size_t n) {
     zw_t *z = moy_store_alloc(sizeof(zw_t));
     if (z == NULL) {
         return MOY_ENOMEM;
@@ -2083,7 +2039,7 @@ static int zw_deflate(sink_t *out, const uint8_t *p, size_t n) {
     char head[2] = { 0x08, (char)0x80 };
     head[0] = (char)(head[0] | (MOY_UF_WBITS - 8) << 4);
     head[1] = (char)(head[1] | (31 - (((uint8_t)head[0] * 256 + 0x80) % 31)));
-    sink_put(out, head, 2);
+    moy_sb_put(out, head, 2);
     zw_bits(z, 1, 1);                    // BFINAL
     zw_bits(z, 1, 2);                    // BTYPE 01: the fixed codes
     size_t i = 0;
@@ -2135,7 +2091,7 @@ static int zw_deflate(sink_t *out, const uint8_t *p, size_t n) {
     }
     uint32_t sum = b << 16 | a;
     char tail[4] = { (char)(sum >> 24), (char)(sum >> 16), (char)(sum >> 8), (char)sum };
-    sink_put(out, tail, 4);
+    moy_sb_put(out, tail, 4);
     moy_store_free(z, sizeof(zw_t));
     return 0;
 }
@@ -2143,16 +2099,13 @@ static int zw_deflate(sink_t *out, const uint8_t *p, size_t n) {
 int moy_uf_deflate(const uint8_t *p, size_t n, moy_buf_t *out) {
     out->p = NULL;
     out->n = 0;
-    sink_t z = { NULL, 0, 0, 0 };
+    moy_sb_t z = moy_sb_grown(&STORE_MEM);
     int rc = zw_deflate(&z, p, n);
     if (rc != 0) {
         return rc;
     }
     return sink_take(&z, out);
 }
-
-static const char B64[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 int moy_uf_encode_image(uint32_t w, uint32_t h, const uint8_t *pix, size_t n,
                         moy_buf_t *out) {
@@ -2161,38 +2114,27 @@ int moy_uf_encode_image(uint32_t w, uint32_t h, const uint8_t *pix, size_t n,
     if (w == 0 || h == 0 || (uint64_t)w * h != n) {
         return MOY_UF_BAD;
     }
-    sink_t z = { NULL, 0, 0, 0 };
+    moy_sb_t z = moy_sb_grown(&STORE_MEM);
     int zrc = zw_deflate(&z, pix, n);
     if (zrc != 0) {
         return zrc;
     }
-    if (z.rc != 0) {
-        if (z.p != NULL) {
-            moy_store_free(z.p, z.cap);
-        }
-        return z.rc;
+    if (z.failed) {
+        moy_sb_free(&z);
+        return MOY_ENOMEM;
     }
-    sink_t s = { NULL, 0, 0, 0 };
+    moy_sb_t s = moy_sb_grown(&STORE_MEM);
     char head[96];
     snprintf(head, sizeof head, "{\"format\": \"moyimg-v1\", \"w\": %lu, \"h\": %lu, \"data\": \"",
              (unsigned long)w, (unsigned long)h);
-    sink_s(&s, head);
-    const uint8_t *b = (const uint8_t *)z.p;
-    for (size_t i = 0; i < z.n; i += 3) {
-        uint32_t v = (uint32_t)b[i] << 16;
-        size_t left = z.n - i;
-        if (left > 1) {
-            v |= (uint32_t)b[i + 1] << 8;
-        }
-        if (left > 2) {
-            v |= b[i + 2];
-        }
-        char q[4] = { B64[v >> 18 & 63], B64[v >> 12 & 63],
-                      left > 1 ? B64[v >> 6 & 63] : '=', left > 2 ? B64[v & 63] : '=' };
-        sink_put(&s, q, 4);
+    moy_sb_str(&s, head);
+    char q[256];
+    for (size_t i = 0; i < z.n; i += 192) {     // whole quanta until the last
+        size_t k = z.n - i < 192u ? z.n - i : 192u;
+        moy_sb_put(&s, q, moy_b64_encode((const uint8_t *)z.p + i, k, q, 0));
     }
-    sink_s(&s, "\"}");
-    moy_store_free(z.p, z.cap);
+    moy_sb_str(&s, "\"}");
+    moy_sb_free(&z);
     return sink_take(&s, out);
 }
 
@@ -2262,16 +2204,16 @@ static void be32(char *p, uint32_t v) {
     p[3] = (char)v;
 }
 
-static void chunk(sink_t *s, const char *tag, const char *body, size_t n) {
+static void chunk(moy_sb_t *s, const char *tag, const char *body, size_t n) {
     char head[8];
     be32(head, (uint32_t)n);
     memcpy(head + 4, tag, 4);
-    sink_put(s, head, 8);
-    sink_put(s, body, n);
+    moy_sb_put(s, head, 8);
+    moy_sb_put(s, body, n);
     uint32_t crc = moy_fs_crc32(moy_fs_crc32(0, tag, 4), body, n);
     char tail[4];
     be32(tail, crc);
-    sink_put(s, tail, 4);
+    moy_sb_put(s, tail, 4);
 }
 
 int moy_uf_encode_cover(const uint8_t *pix, size_t n, moy_buf_t *out) {
@@ -2289,27 +2231,25 @@ int moy_uf_encode_cover(const uint8_t *pix, size_t n, moy_buf_t *out) {
         raw[y * row] = 0;
         memcpy(raw + y * row + 1u, pix + y * MOY_UF_COVER_SIDE, MOY_UF_COVER_SIDE);
     }
-    sink_t z = { NULL, 0, 0, 0 };
+    moy_sb_t z = moy_sb_grown(&STORE_MEM);
     int zrc = zw_deflate(&z, raw, row * MOY_UF_COVER_SIDE);
     moy_store_free(raw, row * MOY_UF_COVER_SIDE);
     if (zrc != 0) {
         return zrc;
     }
-    sink_t s = { NULL, 0, 0, 0 };
-    sink_put(&s, "\x89PNG\r\n\x1a\n", 8);
+    moy_sb_t s = moy_sb_grown(&STORE_MEM);
+    moy_sb_put(&s, "\x89PNG\r\n\x1a\n", 8);
     static const char IHDR[13] = { 0, 0, 0, MOY_UF_COVER_SIDE, 0, 0, 0,
                                    MOY_UF_COVER_SIDE, 8, 3, 0, 0, 0 };
     chunk(&s, "IHDR", IHDR, sizeof IHDR);
     chunk(&s, "PLTE", (const char *)MOY64, sizeof MOY64);
-    if (z.rc == 0) {
+    if (!z.failed) {
         chunk(&s, "IDAT", z.p, z.n);
-    } else if (s.rc == 0) {
-        s.rc = z.rc;
+    } else {
+        s.failed = 1;
     }
     chunk(&s, "IEND", "", 0);
-    if (z.p != NULL) {
-        moy_store_free(z.p, z.cap);
-    }
+    moy_sb_free(&z);
     return sink_take(&s, out);
 }
 

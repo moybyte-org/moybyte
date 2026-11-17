@@ -158,17 +158,17 @@ def test_the_bar_reads_dashes_until_synced_then_local_time(tmp_path, monkeypatch
     ws = build_ws(tmp_path)
     bar = ws.bar_layer
     _kernel(0)
-    bar._clock_at = -1
-    assert bar._clock_text() == "--:--"
-    assert bar._today() == (0, 0, 0)
-    assert ws._today_ymd() == 0
+    bar.clock_at = -1
+    assert bar.clock_text() == "--:--"
+    assert bar.today() == (0, 0, 0)
+    assert ws.notices.today_ymd() == 0
     _kernel(1)
     monkeypatch.setattr(wc, "_now", lambda: _at(2026, 11, 6, 23, 30))
-    ws.set_time_zone(BELGRADE)
-    assert bar._clock_text() == "00:30"            # the zone's next day
-    assert bar._today() == (2026, 11, 7)
-    ws.set_time_zone("UTC0")
-    assert bar._clock_text() == "23:30"
+    ws.toggles.set_time_zone(BELGRADE)
+    assert bar.clock_text() == "00:30"            # the zone's next day
+    assert bar.today() == (2026, 11, 7)
+    ws.toggles.set_time_zone("UTC0")
+    assert bar.clock_text() == "23:30"
 
 
 # -- the setting ------------------------------------------------------------------------
@@ -176,12 +176,12 @@ def test_the_bar_reads_dashes_until_synced_then_local_time(tmp_path, monkeypatch
 def test_the_zone_is_stored_and_read_back_at_boot(tmp_path):
     ws = build_ws(tmp_path)
     assert ws.system.get("tz") is None and wc.zone() == wc.UTC
-    ws.set_time_zone(BELGRADE)
+    ws.toggles.set_time_zone(BELGRADE)
     assert ws.system.get("tz") == BELGRADE
     wc.set_zone(wc.UTC)
-    ws.load_system()
+    ws.spine.load_system()
     assert wc.zone() == BELGRADE
-    ws.set_time_zone("not a zone")
+    ws.toggles.set_time_zone("not a zone")
     assert ws.system.get("tz") == wc.UTC and wc.zone() == wc.UTC
 
 
@@ -194,7 +194,7 @@ def test_the_settings_row_opens_the_picker_and_a_pick_sets_the_zone(tmp_path):
     assert sl._settings_rows()[i] == ("tz", "TIME ZONE", "tz")
     assert sl._value("tz", "tz") == "UTC"
     sl.settings_adjust(1, i)
-    assert sl.has_page() and sl._page_of() == "tz"
+    assert sl.has_page() and sl.page == "tz"
     sl._draw_page()
     pick = [k for k, (p, _tz) in enumerate(wc.ZONES) if p == "Tokyo"][0]
     real = settings_layer._ui.link
@@ -207,7 +207,7 @@ def test_the_settings_row_opens_the_picker_and_a_pick_sets_the_zone(tmp_path):
     assert not sl.has_page()
     assert wc.zone() == "JST-9" and ws.system.get("tz") == "JST-9"
     assert sl._value("tz", "tz") == "Tokyo"
-    sl.open_tz()
+    sl.open_page("tz")
     sl.back()
     assert not sl.has_page()
 

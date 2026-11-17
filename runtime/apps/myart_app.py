@@ -22,27 +22,18 @@ Trash gives a drawing back. On the desk the foot carries the focused card's
 verbs. With nothing drawn yet the page says so and offers New drawing.
 """
 
-try:
-    import ui
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui
+import ui
 
 from array import array
 
-try:
-    from layout_base import bar_rows, content_of, metric_class, window_foot, DESK
-    from moy_store_base import builtin_name
-    from artwork import DrawingCovers, picture_size, GAME_W, GAME_H
-    from picture_copies import PictureCopies
-    from drawing_pages import GamePage, shown, dot
-    from ticks import _ticks_ms, _ticks_diff
-except ImportError:  # pragma: no cover - direct host import
-    from runtime.layout_base import bar_rows, content_of, metric_class, window_foot, DESK
-    from runtime.moy_store_base import builtin_name
-    from runtime.artwork import DrawingCovers, picture_size, GAME_W, GAME_H
-    from runtime.picture_copies import PictureCopies
-    from runtime.drawing_pages import GamePage, shown, dot
-    from runtime.ticks import _ticks_ms, _ticks_diff
+from layers import AppLayer
+from layout_base import bar_rows, content_of, metric_class, window_foot, DESK
+from moy_store_base import builtin_name
+from artwork import DrawingCovers, picture_size, GAME_W, GAME_H
+from picture_copies import PictureCopies
+from drawing_pages import GamePage, shown, dot
+from ticks import _ticks_ms, _ticks_diff
+import intents as _intents
 
 
 DRAWINGS = "drawings"
@@ -109,7 +100,7 @@ class MyArtLayout:
                        "foot": 30 if self.desk else 26, "top": 4}
 
 
-class MyArtAppLayer:
+class MyArtAppLayer(AppLayer):
     """The My Art app: the drawings as cards and their verbs."""
 
     id = "myart"
@@ -149,7 +140,6 @@ class MyArtAppLayer:
         self.toast = None             # (text, icon, until ms)
         self._focus = None
         self._focused = None
-        self._key = 0
         self._cards = None            # (drawings, wallpaper, [card]) as `_cards_of` made them
         self._built = {}              # a drawing's name -> the pictures made for it
         self._pic_wh = None           # a card's picture's size, as the grid drew it
@@ -264,11 +254,8 @@ class MyArtAppLayer:
     # -- input ------------------------------------------------------------------
 
     def handle_input(self, inp):
-        k = getattr(inp, "last_key", 0) or 0
-        if not isinstance(k, int):
-            k = ord(k[0]) if k else 0
-        typed = k != 0 and k != self._key
-        self._key = k
+        k = getattr(inp, "typed", 0)
+        typed = k != 0
         if self.toast is not None and (typed or inp.any_pressed()):
             self.toast = None
             self._damage.all()
@@ -297,13 +284,18 @@ class MyArtAppLayer:
         self.toast = (text, icon, _ticks_ms() + TOAST_MS)
         self._damage.all()
 
+    def _open(self, name):
+        """A drawing to the app that opens pictures, by the intents' route
+        (runtime/system/intents.py), as Files' OPEN goes."""
+        _intents.INTENTS.open_with(_intents.SHELL, _intents.item_of(DRAWINGS, name), False)
+
     def _verb(self, verb, name=None):
         name = name or self.cur
         files = self._files
         if verb == "new":
             got, err = files.new_name(DRAWINGS)
             if err is None:
-                self._nav.open_image(got, DRAWINGS)
+                self._open(got)
             return
         if verb == "menu":
             if name is not None:
@@ -313,7 +305,7 @@ class MyArtAppLayer:
         if name is None:
             return
         if verb == "open":
-            self._nav.open_image(name, DRAWINGS)
+            self._open(name)
         elif verb == "wallpaper":
             if self.copies.set_wallpaper(name):
                 self.wallpaper = name

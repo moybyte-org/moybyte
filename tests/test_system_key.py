@@ -47,10 +47,10 @@ def _press(ws, name):
     i.begin_frame()
     ws.input = i
     try:
-        ws.handle_input()
+        ws.router.handle_input()
         i.source("kbd").set_button(name, False)
         i.begin_frame()
-        ws.handle_input()
+        ws.router.handle_input()
     finally:
         ws.input = was
 
@@ -86,10 +86,10 @@ def test_super_opens_the_system_menu_from_every_surface(tmp_path, surface):
     if surface == "settings":
         ws.open_settings()
     elif surface == "calc":
-        ws.open_app(ws._apps_by_id["calc"])
+        ws.spine.open_app(ws.app("calc"))
     else:
         open_cart(ws, "Star Catcher")
-        ws._exit_to_caller()
+        ws.spine.exit_to_caller()
         ws.open_in_editor(next(c for c in ws.carts.all if c["title"] == "Star Catcher"))
     _frames(drv)
     top = ws.screen
@@ -102,7 +102,7 @@ def test_super_opens_the_system_menu_from_every_surface(tmp_path, surface):
 def test_super_on_the_windowed_desk_opens_the_system_menu(tmp_path):
     ws = build_desktop_ws(tmp_path)
     drv = make_drv(ws)
-    ws.open_desk()
+    ws.home.open_desk()
     _frames(drv)
     drv.system_key()
     assert ws.sysmenu.open
@@ -135,7 +135,7 @@ def _tdeck_frame(ws, frame, raw=True, text=False):
     was = ws.input
     ws.input = table
     try:
-        ws.handle_input()
+        ws.router.handle_input()
     finally:
         ws.input = was
     return table
@@ -161,9 +161,9 @@ def test_the_tdeck_mic_key_pauses_a_game_and_opens_the_system_menu_elsewhere(tmp
     assert not ws.sysmenu.open, "Mic again closes it"
     ws, _drv = _game(tmp_path / "g")
     _mic(ws, MIC)
-    assert ws.pause.open and ws.run.player.paused and not ws.sysmenu.open
+    assert ws.pause.open and ws.run.player.pace.paused and not ws.sysmenu.open
     _mic(ws, MIC)
-    assert not ws.pause.open and not ws.run.player.paused
+    assert not ws.pause.open and not ws.run.player.pace.paused
 
 
 def test_the_tdeck_mic_key_works_in_text_mode_and_on_the_ascii_path(tmp_path):
@@ -193,9 +193,9 @@ def test_the_tdeck_mic_key_never_reaches_the_cart(tmp_path):
 def test_super_over_a_fullscreen_game_pauses_and_again_resumes(tmp_path):
     ws, drv = _game(tmp_path)
     drv.system_key()
-    assert ws.pause.open and ws.run.player.paused and not ws.sysmenu.open
+    assert ws.pause.open and ws.run.player.pace.paused and not ws.sysmenu.open
     drv.system_key()
-    assert not ws.pause.open and not ws.run.player.paused
+    assert not ws.pause.open and not ws.run.player.pace.paused
     drv.system_key()
     drv.escape()
     assert not ws.pause.open, "Esc resumes"
@@ -215,7 +215,7 @@ def test_the_pause_holds_the_carts_ticks_and_its_clock(tmp_path):
     drv.system_key()
     _frames(drv, 10)
     assert ws.run.player.ns["n"] == n0, "a held cart does not tick"
-    ws.run.player._paused_at -= 500             # half a second held
+    ws.run.player.paused_at -= 500             # half a second held
     drv.system_key()
     assert ws.run.cart_start_ms - start0 >= 500, "time() skips the pause"
     _frames(drv, 2)
@@ -240,8 +240,8 @@ def test_a_paused_frame_does_not_animate(tmp_path):
     drv.system_key()
     _frames(drv, 2)
     quiesce(ws)
-    ws._splash_until = None
-    assert not ws._animating(_DT), "the card is drawn on a change, not every frame"
+    ws.splash_until = None
+    assert not ws.animating(_DT), "the card is drawn on a change, not every frame"
 
 
 # -- the pause menu's verbs ------------------------------------------------------------
@@ -279,7 +279,7 @@ def test_restart_runs_the_cart_from_the_top(tmp_path):
     _key(drv, "down")
     _key(drv, "down")
     _key(drv, "a")
-    assert not ws.pause.open and not ws.run.player.paused
+    assert not ws.pause.open and not ws.run.player.pace.paused
     assert ws.screen == "desktop" and ws.run.player.ns["n"] <= 2
 
 
@@ -298,9 +298,8 @@ def test_esc_over_an_editor_playtest_pauses_and_quit_returns_to_the_editor(tmp_p
     ws.editor_app.leave()               # the Editor's PLAY
     _frames(drv, 3)
     assert ws.plays_fullscreen() and ws.cart.get("input") is None
-    assert drv.takes_escape(), "the simulator hands Esc to the console in play"
-    drv.escape()
-    assert ws.pause.open and ws.run.player.paused
+    drv.escape()                        # the simulator hands Esc to the console in play
+    assert ws.pause.open and ws.run.player.pace.paused
     for _ in range(3):
         _key(drv, "down")
     _key(drv, "a")
@@ -345,7 +344,7 @@ def test_the_look_cards_rect_is_the_one_the_engine_draws(tmp_path, desk, cart):
     _moy(ws)
     drv = make_drv(ws)
     if desk:
-        ws.open_desk()
+        ws.home.open_desk()
     if cart:
         ws.open_in_editor(next(c for c in ws.carts.all if c["title"] == "Star Catcher"))
     _frames(drv)
@@ -381,9 +380,9 @@ def test_the_look_card_keeps_clear_of_the_bar_the_strip_and_its_anchor(tmp_path,
     drv = make_drv(ws)
     ws.idle_ladder = _Ladder()
     if desk:
-        ws.open_desk()
+        ws.home.open_desk()
     else:
-        ws.set_home_tab("make")
+        ws.home.set_home_tab("make")
         ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items) if it.get("path"))
     _frames(drv)
     ws._golden_popover = True
@@ -419,7 +418,7 @@ def test_the_card_menu_covers_its_point_only_to_show_whole(tmp_path):
     ws = build_ws(tmp_path)
     _moy(ws)
     drv = make_drv(ws)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items) if it.get("path"))
     _frames(drv)
     covered = 0
@@ -482,9 +481,9 @@ def test_the_pause_cards_title_row_draws_moy_in_its_icon_slot(tmp_path, desk):
     column of the rows' icons, over the first row."""
     if desk:
         ws = build_desktop_ws(tmp_path)
-        ws.open_library()
-        ws._open_workspace(next(c for c in ws.carts.all if c["title"] == "Star Catcher"))
-        ws.play(ws.launcher_layer)
+        ws.home.open_library()
+        ws.open_workspace(next(c for c in ws.carts.all if c["title"] == "Star Catcher"))
+        ws.spine.play(ws.launcher_layer)
         drv = make_drv(ws)
         _frames(drv, 3)
     else:
@@ -511,7 +510,7 @@ def test_the_pause_cards_title_row_draws_moy_in_its_icon_slot(tmp_path, desk):
     from runtime import ui_draw
     ui_draw._C.moy_use(None, 0)
     try:
-        ws._dirty = True
+        ws.mark_dirty()
         _frames(drv, 2)
         assert slot() != with_moy, "Moy draws in the title row's icon slot"
     finally:
@@ -547,7 +546,7 @@ def _desk_game(tmp_path):
     host_app.moy_carts.ensure_dirs(carts)
     host_app.moy_carts.create("Counter", carts, src=COUNTER, type="game", edit=[])
     ws = build_desktop_ws(tmp_path)
-    ws.open_desk()
+    ws.home.open_desk()
     assert select_on_home(ws, "Counter") is not None
     ws.open()
     drv = make_drv(ws)
@@ -573,8 +572,8 @@ def test_the_pause_card_offers_play_in_a_window_on_a_board_with_a_desk(tmp_path)
     _frames(drv, 2)
     assert ws.pause._host.box(ws.pause.WINDOW) is not None, "drawn on the card"
     drv.system_key()
-    ws._exit_to_caller()
-    ws.open_library()                            # console mode on the same board
+    ws.spine.exit_to_caller()
+    ws.home.open_library()                            # console mode on the same board
     assert select_on_home(ws, "Counter") is not None
     ws.open()
     _frames(drv, 3)
@@ -588,24 +587,24 @@ def test_play_in_a_window_from_console_mode_gives_the_desk_back_with_the_game(tm
     where they were, and the running game stands in a window there, its run
     going on: no restart, no full screen."""
     ws, drv = _desk_game(tmp_path)
-    ws._exit_to_caller()
-    ws.open_app(ws._apps_by_id["calc"])          # a desk window to come back to
+    ws.spine.exit_to_caller()
+    ws.spine.open_app(ws.app("calc"))          # a desk window to come back to
     _frames(drv, 2)
-    ws.open_library()
+    ws.home.open_library()
     assert select_on_home(ws, "Counter") is not None
     ws.open()
     _frames(drv, 3)
-    assert ws.wm.mode == "console" and "calc" in ws.wm._parked.kinds
+    assert ws.wm.mode == "console" and "calc" in ws.wm.parked.kinds
     drv.system_key()
     n0 = ws.run.player.ns["n"]
     _choose(ws, ws.pause.WINDOW)
     _frames(drv, 3)
     wm = ws.wm
-    assert wm.mode == "desktop" and not ws.pause.open and not ws.run.player.paused
+    assert wm.mode == "desktop" and not ws.pause.open and not ws.run.player.pace.paused
     assert ws.run.player.ns["n"] > n0, "the same run goes on"
-    win = wm._wins["desktop"]
+    win = wm.windows["desktop"]
     assert not win.full() and win.content_rect()[1] > win.y and win.own
-    assert "calc" in wm._wins and wm._order[-1] == "desktop" and wm._focus == "desktop"
+    assert "calc" in wm.windows and wm.z_order[-1] == "desktop" and wm.focus_key == "desktop"
 
 
 def test_play_in_a_window_keeps_the_run_and_maximize_gives_full_screen_back(tmp_path):
@@ -614,8 +613,8 @@ def test_play_in_a_window_keeps_the_run_and_maximize_gives_full_screen_back(tmp_
     and that window's maximize is full screen again, with no buttons."""
     ws, drv = _desk_game(tmp_path)
     wm = ws.wm
-    win = wm._wins["desktop"]
-    cv = wm._root_canvas
+    win = wm.windows["desktop"]
+    cv = wm.root_canvas
     assert win.full() and (win.x, win.y, win.w, win.h) == (0, 0, cv.w, cv.h)
     assert wm._frame_buttons(win) == [], "no window buttons during play"
     drv.system_key()
@@ -623,7 +622,7 @@ def test_play_in_a_window_keeps_the_run_and_maximize_gives_full_screen_back(tmp_
     assert n0 > 0
     _choose(ws, ws.pause.WINDOW)
     _frames(drv, 3)
-    assert wm._wins["desktop"] is win and not ws.pause.open and not ws.run.player.paused
+    assert wm.windows["desktop"] is win and not ws.pause.open and not ws.run.player.pace.paused
     assert ws.run.player.ns["n"] > n0, "the same run goes on, from where it stood"
     assert not win.full() and win.content_rect()[1] > win.y, "a title strip"
     names = [n for n, _r, _side in wm._frame_buttons(win)]
@@ -636,7 +635,7 @@ def test_play_in_a_window_keeps_the_run_and_maximize_gives_full_screen_back(tmp_
     _frames(drv, 2)
     assert win.full() and wm._frame_buttons(win) == []
     assert ws.run.player.ns["n"] > n0 and ws.plays_fullscreen()
-    wm._toggle_max(win)
+    wm.toggle_max(win)
     ws.pause.show()                              # the card over the windowed game
     assert ws.pause.open and ws.pause.rows == ws.pause.ITEMS, \
         "a windowed game goes full screen by its maximise alone"

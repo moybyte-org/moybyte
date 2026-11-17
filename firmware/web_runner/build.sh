@@ -35,7 +35,7 @@
 #     emscripten_scan_registers dependency -> NO -s ASYNCIFY (it instruments every
 #     wasm function; dropping it halves the .wasm and speeds the whole VM).
 #   - no periodic mp_js_hook (node REPL Ctrl-C plumbing; costs a call / 10 VM ops).
-# Port patches applied idempotently below (upstream v1.28.0 vs emscripten 6.x):
+# Port patches applied idempotently below (upstream MicroPython vs emscripten 6.x):
 #   - Makefile: two -Wno-* (new clang warnings tripping -Werror) + -Os on the
 #     LINK step (emcc defaults the JS glue to -O0 + ASSERTIONS, and the
 #     assertions abort on the port's own patterns).
@@ -54,7 +54,9 @@ MPY_DIR="${BUILD_DIR}/micropython"
 EMSDK_DIR="${BUILD_DIR}/emsdk"
 PORT_DIR="${MPY_DIR}/ports/webassembly"
 STAGE_DIR="${BUILD_DIR}/stage"
-MPY_TAG="${MPY_TAG:-v1.28.0}"
+# shellcheck source=../../tools/upstream_pins.env
+source "${REPO_ROOT}/tools/upstream_pins.env"
+MPY_TAG="${MPY_TAG:-${MOYBYTE_MPY_TAG}}"
 # The emscripten the bundle is compiled with: emcc's output is not byte-reproducible
 # across versions, and this bundle rides every board image. It is the version
 # moy-spec's preflight builds its player in (EMSDK_IMAGE there); move them together.
@@ -219,7 +221,7 @@ PYEOF
         "${USERMODS_DIR}/moy_png"
 
   # moy_index usermod: the store's native index. Its fragment compiles it unless
-  # MOY_INDEX_IMPL=py (tools/moy_index_spike.py's header), and board_config's
+  # MOY_INDEX_IMPL=py (tools/native_check.py's header), and board_config's
   # stage below then leaves runtime/carts/moy_index.py out.
   cp -r "${REPO_ROOT}/native/moy_index" \
         "${USERMODS_DIR}/moy_index"
@@ -452,7 +454,7 @@ EOF
   # (MOY_INDEX_IMPL back to py) would link a module table naming code it no
   # longer has. A changed hook starts the generated headers afresh.
   INDEX_STAMP="${PORT_DIR}/${WASM_BUILD}/moy_index_impl"
-  INDEX_HOOK="${MOY_INDEX_IMPL:-c}${MOY_INDEX_BENCH:++bench}"
+  INDEX_HOOK="${MOY_INDEX_IMPL:-c}"
   if [ "$(cat "${INDEX_STAMP}" 2>/dev/null || echo py)" != "${INDEX_HOOK}" ]; then
     rm -rf "${PORT_DIR}/${WASM_BUILD}/genhdr"
   fi

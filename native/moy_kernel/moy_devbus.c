@@ -1,5 +1,7 @@
 // moy_devbus: the buses a device handle drives. moy_devbus.h has the contract.
 
+#include "moy_platform.h"
+
 #include "moy_devbus.h"
 
 #include <string.h>
@@ -8,14 +10,8 @@
 #include "moy_lease.h"
 #include "moy_ledc.h"
 
-// A board is known by the header it has (moy_lease.c does the same).
-#if defined(__has_include)
-#if __has_include("esp_heap_caps.h")
-#define DEVBUS_BOARD 1
-#endif
-#endif
 
-#ifdef DEVBUS_BOARD
+#ifdef MOY_ON_BOARD
 
 #include "py/mpconfig.h"        // the board's MOY_BUS_I2C_PORT (mpconfigboard.h)
 #include "driver/i2c.h"
@@ -26,8 +22,15 @@
 #include "esp_clk_tree.h"
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
+#include "soc/soc_caps.h"
 
-#if defined(MOY_BUS_I2C_PORT) && MOY_BUS_I2C_PORT == 1
+// The device bus takes the controller the kernel's own bus (MOY_BUS_I2C_PORT)
+// leaves. A chip with one controller (the C3) has only port 0, so a board on
+// one has no kernel bus to declare beside it.
+#if SOC_I2C_NUM < 2 && defined(MOY_BUS_I2C_PORT)
+#error "one I2C controller: the kernel's bus and the device bus cannot both have it"
+#endif
+#if (defined(MOY_BUS_I2C_PORT) && MOY_BUS_I2C_PORT == 1) || SOC_I2C_NUM < 2
 #define MOY_DEVBUS_I2C_PORT I2C_NUM_0
 #else
 #define MOY_DEVBUS_I2C_PORT I2C_NUM_1

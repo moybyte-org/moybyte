@@ -18,12 +18,18 @@ thing the store holds across them, so its rows are what take handles.
   ensure_dirs(root)                make the root and its parent
   sweep_store(root)                the once-per-store sweep of retired seeds,
                                    which a boot runs before its catalogue
+  bring_addon(src, root)           the browser console add-on the website's
+                                   install wrote into the internal store
+                                   (`src`) moved to a card's store, which a
+                                   boot on a card runs before its catalogue
   seed(seed, root, shelf, progress) -> [entry]
                                    seed the built-in roster (packed or listed)
                                    against `shelf`, the root's catalogue: the
                                    entries' versions say what to write, and
                                    the shelf comes back with each folder the
-                                   seed wrote read again
+                                   seed wrote read again; the shelf's record
+                                   (installed.json) is held to the shelf
+                                   first (moy_seed.keep_record)
   embedded_floor(seed)             the read-only built-ins, for a board with no
                                    writable store: carts with no path and no "h"
   catalogue(root) -> [entry]       the shelf: one entry per cart folder, in
@@ -82,22 +88,16 @@ knows its folder makes instead of a scan: a folder that reads takes (or keeps)
 its row, and one that does not -- removed, or no cart -- has its row released.
 """
 
-try:
-    import moy_carts
-    import moy_journal
-    from moy_index import Index, ROOTS, StaleHandle  # noqa: F401 (re-exported)
-    from moy_store_base import cart_path, USER_NS, USER_NS_KEY  # noqa: F401
-    from moy_store_base import BUILTIN_NS, cart_folder, seeded
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import moy_carts
-    from runtime import moy_journal
-    from runtime.moy_index import Index, ROOTS, StaleHandle  # noqa: F401
-    from runtime.moy_store_base import cart_path, USER_NS, USER_NS_KEY  # noqa: F401
-    from runtime.moy_store_base import BUILTIN_NS, cart_folder, seeded
+import moy_carts
+import moy_journal
+from moy_index import Index, ROOTS, StaleHandle  # noqa: F401 (re-exported)
+from moy_store_base import cart_path, USER_NS, USER_NS_KEY  # noqa: F401
+from moy_store_base import BUILTIN_NS, cart_folder, seeded
 
 CARTS_DIR = moy_carts.CARTS_DIR
 ensure_dirs = moy_carts.ensure_dirs
 sweep_store = moy_carts.sweep_store
+bring_addon = moy_carts.bring_addon
 embedded_floor = moy_carts.embedded_floor
 
 _index = Index()
@@ -144,9 +144,11 @@ def seed(seed, root, shelf, progress=None):
     packed = moy_carts.is_packed(seed)
     seeded(root, [cart_folder(item[0] if packed else item["title"], BUILTIN_NS)
                   for item in seed])
+    seed = moy_carts.unremoved(seed, root)
     present = {}
     for e in shelf:
         present[e["path"][len(root) + 1:]] = e["version"]
+    moy_carts.keep_record(root, present)
     wrote = moy_carts.seed_any(seed, root, present, progress)
     if not wrote:
         return shelf

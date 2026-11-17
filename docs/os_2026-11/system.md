@@ -437,7 +437,7 @@ upload's always does. Modes, owners and times are accepted and ignored
 times. A change under the carts folder (a cart folder written, made,
 removed or renamed) tells the shelf once the client has been quiet for
 300 ms or the session ends: the door's `rescan`, which re-reads those
-folders alone (`ws.rescan_carts`, as the browser sync does). System files
+folders alone (`ws.carts.synced`, as the browser sync does). System files
 stay writable: the owner is root on their own console.
 
 **What the files tree shows (2026-11-06).** Its root `/` is the console's
@@ -505,7 +505,7 @@ else gets a file face until a command needs one.
 
 `pkg` (owner, 2026-11-03) is apt-shaped: a repository is a URL serving an
 index and the carts it lists; moybyte-org/carts is the first. A `.moy` is the
-package. As built (P3.2), one installer has two faces: `runtime/carts/pkg.py`
+package. As built (P3.2), one installer has two faces: `runtime/shell/pkg.py`
 holds the verbs and the checks over `runtime/carts/cart_index.py` (with the
 `install` role's store, network and radio lease), and Get Carts
 (`runtime/apps/getcarts_app.py`) is its GUI face, making the same checks
@@ -526,7 +526,11 @@ server's certificate.
 **`system/sources`** names the repositories, one index URL a line (`#`
 comments); absent or empty, the console reads moybyte-org/carts. A legacy
 `indexes.json` reads as absent. A page served from a static host writes the
-host's `indexes.json` there at boot.
+host's `indexes.json` there at boot. A board reads its own release's index
+last (`carts-<board>.json` beside its update manifest): the browser console
+add-on and every seed cart of that build as an OFFICIAL cart, the one place
+an entry in the built-ins' namespace or a Python cart installs from, with
+the signature verified (`.claude/rules/carts.md`).
 
 **The verbs** (the shell's `pkg`, `runtime/shell/sh_roles.py`):
 
@@ -536,7 +540,7 @@ host's `indexes.json` there at boot.
 | `pkg list` | every cart the cached indexes list: id, version, where it stands here (`-`, `installed`, `update`, `taken`), name |
 | `pkg search WORD...` | those whose id, name, description or tags hold every word |
 | `pkg install [-y] ID...` | each with its `depends` first (`cart_index.needs`: one no index lists, or a cycle, refuses), the checks, an external file's licence, the download and the permission prompt (`processes.md` §2); `-y` answers yes, else each is asked on stdin |
-| `pkg remove ID...` | the store's delete: the folder, its record, the files it wrote, its consent |
+| `pkg remove ID...` | the store's delete: the folder, its record, the files it wrote, its consent; an optional built-in's removal recorded so the seed never writes it back, and a core one (`moy_seed.CORE`) refused |
 | `pkg list` with no VM | the carts the record holds, `installed` (the indexes need the console) |
 | `pkg upgrade [-y]` | every installed cart the indexes list newer |
 | `pkg sources` | the sources in use |
@@ -561,7 +565,11 @@ a keeper before anything is deleted), the folder's rename out of the carts
 folder and delete, and the cart's written files. `cart_index`'s
 `load_record`, `find_installed` and `remove_steps` call it on every tier, and
 with the VM stopped the C shell's `pkg list` and `pkg remove` serve it, the
-removal forgetting the cart's consent through the settings rows.
+removal forgetting the cart's consent through the settings rows. The removal
+record of the optional built-ins (`system/removed`) is the same store's
+(`native/moy_store/moy_removed.h`): `pkg`'s and Get Carts' removal, the C
+shell's `pkg remove` and a page's cart delete over the sync wire all write
+it, and its core set is generated from `moy_seed.CORE`.
 
 **An install's landing and a removal are stepped, a store op a frame**
 (2026-11-07), where one frame used to hold them whole (diag's HITCH lines

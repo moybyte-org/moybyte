@@ -85,6 +85,7 @@ def _lib():
         "moy_kernel_host", os.path.join(KERNEL, "moy_recovery.c"),
         ["moy_crash.c", "moy_crash.h", "moy_recovery.h", "moy_boot.c", "moy_boot.h",
          "moy_scr.c", "moy_scr.h", "moy_path.c", "moy_path.h", "moy_path_faces.h",
+         "moy_gfx_base.h", "moy_gfx_base.c",
          "moy_str.h", "moy_str.c", "moy_str_table.h", "moy_str_table.c"],
         os.path.join(ROOT, ".build", "host_kernel"),
         cflags=native_build.BASE_CFLAGS + ["-Wall", "-Werror"],
@@ -325,6 +326,16 @@ def test_a_crash_names_the_app_before_the_wallpaper(lib):
     lib.moy_kstate_arm(ctypes.byref(st), ROLE_APP, None)
     assert lib.moy_kstate_open_id(ctypes.byref(st), ctypes.byref(out)) == ROLE_WALLPAPER
 
+
+def test_no_open_id_is_an_empty_string_in_the_state_itself(lib):
+    # The panic wrapper copies the id with the flash cache possibly off, so the
+    # empty one must live where the state does, never in flash .rodata.
+    st = _state(lib)
+    out = ctypes.c_char_p()
+    assert lib.moy_kstate_open_id(ctypes.byref(st), ctypes.byref(out)) == 0
+    assert out.value == b""
+    at = ctypes.cast(out, ctypes.c_void_p).value
+    assert ctypes.addressof(st) <= at < ctypes.addressof(st) + ctypes.sizeof(st)
 
 def test_a_crash_names_a_game_between_the_app_and_the_wallpaper(lib):
     st = _state(lib)

@@ -1,8 +1,8 @@
 // The journal (docs/history/kernel_store_2026-10.md section 7): a cart's durable
 // undo history, on the medium as runtime/carts/moy_journal.py keeps it.
 //
-// moy_journal.py's header is the reference and the crash-safety story every
-// call here follows: `journal/journal.jsonl` appended one line a commit, the
+// moy_journal.py's header documents the format and the crash-safety story
+// every call here follows: `journal/journal.jsonl` appended one line a commit, the
 // snapshot under `journal/s/` put down first (a claimed publish backup where
 // the stamp matches, else written), the line next, the per-file cursor map
 // (`cursor.json`, which exists only while something is rewound) last; the

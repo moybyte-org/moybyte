@@ -3,6 +3,7 @@
 #include "moy_scr.h"
 
 #include "moy_path.h"
+#include "moy_gfx_base.h"
 
 static inline uint16_t wire(const moy_scr_t *s, uint16_t c) {
     return s->swap ? (uint16_t)((c >> 8) | (c << 8)) : c;
@@ -41,7 +42,7 @@ int moy_scr_draw(moy_scr_t *s, moy_scr_paint_t paint, const void *ctx) {
     if (s->scratch != NULL) {
         moy_path_lend(s->scratch, s->scratch_n);
     }
-    moy_path_wire_swapped(s->swap);
+    moy_gfx_wire(s->swap);
     if (s->rot == 0 && s->band == NULL) {
         s->px = s->fb;
         s->stride = s->fb_w;
@@ -177,23 +178,6 @@ static const int16_t IC_CODE[] = {
 
 static const int16_t *const ICONS[MOY_SCR_ICONS] = {IC_RETRY, IC_HOME, IC_CODE};
 
-static int64_t isqrt64(int64_t v) {
-    int64_t r = 0, b = (int64_t)1 << 62;
-    while (b > v) {
-        b >>= 2;
-    }
-    while (b != 0) {
-        if (v >= r + b) {
-            v -= r + b;
-            r = (r >> 1) + b;
-        } else {
-            r >>= 1;
-        }
-        b >>= 2;
-    }
-    return r;
-}
-
 #define IC_SEGS 48
 
 void moy_scr_icon(moy_scr_t *s, int icon, int x, int y, int size, uint16_t c) {
@@ -210,7 +194,7 @@ void moy_scr_icon(moy_scr_t *s, int icon, int x, int y, int size, uint16_t c) {
             int64_t ay = y * 64 + (int64_t)p[1] * size * 64 / 96;
             int64_t bx = x * 64 + (int64_t)p[2] * size * 64 / 96;
             int64_t by = y * 64 + (int64_t)p[3] * size * 64 / 96;
-            int64_t dx = bx - ax, dy = by - ay, len = isqrt64(dx * dx + dy * dy);
+            int64_t dx = bx - ax, dy = by - ay, len = (int64_t)mg_isqrt64((uint64_t)(dx * dx + dy * dy));
             p += 2;
             if (len == 0) {
                 continue;

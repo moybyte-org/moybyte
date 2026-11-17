@@ -6,10 +6,7 @@ from __future__ import annotations
 
 import ctypes
 
-try:                                    # the host's runtime package
-    from . import host_native
-except ImportError:                     # loaded flat, runtime/ on sys.path
-    import host_native
+import host_native
 
 CHANNELS, TIMERS = 8, 4
 VM, LIGHT, FRESH = 0xFFFFFFFF, 0xFFFFFFFE, 0xFFFFFFFF

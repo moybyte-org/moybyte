@@ -139,10 +139,7 @@ def install_logging():
         return
     except ImportError:
         pass
-    try:
-        import moy_logging
-    except ImportError:  # pragma: no cover - host fallback
-        from runtime import moy_logging
+    import moy_logging
     _sys.modules["logging"] = moy_logging
 
 

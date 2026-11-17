@@ -22,6 +22,7 @@ import json
 import pytest
 
 from runtime import app_perms, moybyte, notifications, os_log, scheduler as S, system_api
+from runtime import sched_lua
 from runtime import moy_log as L
 
 from ws_helpers import build_ws, make_drv, select_on_home
@@ -91,7 +92,7 @@ def _draw():
 
 @pytest.fixture(params=["python", "lua"])
 def tier(request):
-    if request.param == "lua" and S._svc() is None:
+    if request.param == "lua" and sched_lua.runtime() is None:
         pytest.skip("no Lua runtime on this host")
     return request.param
 
@@ -246,7 +247,7 @@ def test_the_install_prompt_says_a_service_works_in_the_background():
 
 def test_a_start_whose_grant_cannot_be_made_is_refused(ws, tier, monkeypatch):
     def full(*a, **k):
-        raise OSError(28, "the grant table is full")
+        raise OSError(28, "no room")
     monkeypatch.setattr(system_api, "service_api", full)
     assert _start(ws, _service(tier)) is None
     p = [q for q in S.SCHED.services() if q.name == APP][-1]

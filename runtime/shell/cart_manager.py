@@ -52,18 +52,17 @@ named, which the verbs below already read as "nothing to load".
 # ~300-500KB of permanently-live strings the GC MARK phase pays for on every
 # collect (#66 live-set diet). Opening a cart rehydrates them from the store,
 # and switching carts re-slims the previous one. "icon_rows" is what the scan
-# read for the cart's icon, dropped once slim() has baked it.
-try:
-    import moy_catalogue
-    from moy_carts import PAYLOADS
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import moy_catalogue
-    from runtime.moy_carts import PAYLOADS
-try:
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host package lane
-    from runtime import ui_draw as _ui_draw
-_SLIM_DROPS = PAYLOADS + ("icon_rows",)
+# read for the cart's icon, dropped once slim() has baked it. RUN_ONLY are the
+# entry's fields only a run reads, off the rehydrated cart: a "palette" is 64
+# "RRGGBB" strings, ~2.3KB of live heap a shelved PICO-8 import would hold.
+import moy_catalogue
+import moy_carts
+from moy_carts import PAYLOADS
+from moy_store_base import builtin_name
+import ui_draw as _ui_draw
+RUN_ONLY = ("palette",)
+_RESLIM_DROPS = PAYLOADS + RUN_ONLY
+_SLIM_DROPS = _RESLIM_DROPS + ("icon_rows",)
 
 
 def _folder_order(cart):
@@ -72,22 +71,15 @@ def _folder_order(cart):
 
 def _perms():
     """The permission table's module (`app_perms`), imported at the call."""
-    try:
-        import app_perms
-    except ImportError:  # host: the runtime package
-        from runtime import app_perms
+    import app_perms
     return app_perms
 
 
 def _removal():
     """`(pkg, ShellInstall)`: a cart's one removal and the install server it
     steps over, imported at the call."""
-    try:
-        import pkg
-        from shell_servers import ShellInstall
-    except ImportError:  # host: the runtime package
-        from runtime import pkg
-        from runtime.shell_servers import ShellInstall
+    import pkg
+    from shell_servers import ShellInstall
     return pkg, ShellInstall
 
 
@@ -169,9 +161,9 @@ class CartManager:
             # hit the STALE entry and make it permanent.
             ws.covers.invalidate(paths)
             self.slim(paths)               # #66: bake the new entries' icons, mark them lazy
-            ws.launcher.set_items(ws._launcher_view_items())   # #105: keep an active filter
+            ws.launcher.set_items(ws.home.launcher_view_items())   # #105: keep an active filter
             if ws.projects_grid is not None:
-                ws.projects_grid.set_items(ws._launcher_view_items(ws.projects_grid))
+                ws.projects_grid.set_items(ws.home.launcher_view_items(ws.projects_grid))
             look = getattr(ws, "look", None)
             if look is not None:
                 look.store_moved()      # the theme packages are carts too
@@ -211,7 +203,7 @@ class CartManager:
             print("Moybyte rescan failed:", exc)
             return
         finally:
-            ws._dirty = True
+            ws.mark_dirty()
         self.apply(items, paths)
 
     def synced(self, folders=None):
@@ -328,7 +320,7 @@ class CartManager:
         # most ~one fat cart live). Only SD-backed carts that slim() managed.
         if cart is None or not cart.get("path") or cart.get("lazy") is not False:
             return
-        for k in PAYLOADS:
+        for k in _RESLIM_DROPS:
             if k in cart:
                 del cart[k]
         cart["lazy"] = True
@@ -399,7 +391,7 @@ class CartManager:
         that is left to do is tell the kid why nothing appeared."""
         full = getattr(self.ws.carts_store, "store_full", None)
         if full is not None and full(exc):
-            self.ws.notice(refusal, _ui_draw.s("notice.store_full"), "warn")
+            self.ws.notices.notice(refusal, _ui_draw.s("notice.store_full"), "warn")
 
     def delete(self, cart=None):
         """Delete `cart` (a home's Delete), else the OPEN cart (the system
@@ -407,7 +399,7 @@ class CartManager:
         and `pkg remove` take (`pkg.removed`): the folder, its install-record
         entry, the files it wrote, its consent and its keys all go, and no
         Trash holds a cart. Every route asks first
-        (`console_notices.DeleteConfirm`) and calls this on its Delete, which
+        (`shell_cards.DeleteConfirm`) and calls this on its Delete, which
         is done when this returns. Keeps at least one real cart on the
         device."""
         ws = self.ws
@@ -424,6 +416,37 @@ class CartManager:
         except Exception as exc:  # noqa: BLE001
             print("Moybyte delete failed:", exc)
             self.rescan([path])
+
+    def deletable(self, cart):
+        """Whether `cart` is a cart a Delete takes: the kid's or an installed
+        one, or an optional built-in where this console's own release index
+        can bring it back (`ws.cart_own`); a core cart never
+        (moy_seed.CORE)."""
+        path = cart.get("path") if cart else None
+        if not path:
+            return False
+        name = builtin_name(path)
+        if name is None:
+            return True
+        return moy_carts.removable(name) and bool(getattr(self.ws, "cart_own", None))
+
+    def put_back(self, titles):
+        """The seed carts titled `titles` that a removal took off this store,
+        seeded again from the image's roster with their removal records
+        dropped (moy_seed.put_back), and the shelf re-read: their titles. A
+        tool that measures a seed cart calls it first (tools/perf_pass.py);
+        a tier with no frozen roster (the host) puts nothing back."""
+        try:
+            from carts_data import CARTS_Z as seed
+        except ImportError:
+            return []
+        root = self.ws.carts_root
+        if not root or not self.store.writable():
+            return []
+        back = self.store.call(lambda: moy_carts.put_back(root, seed, list(titles)))
+        if back:
+            self.rescan()
+        return back
 
     # -- favorites + recents (#105) ------------------------------------------
 
@@ -464,7 +487,7 @@ class CartManager:
         else:
             favs.append(path)
         ws.system.set("favorites", favs)
-        ws._dirty = True
+        ws.mark_dirty()
 
     def note_recent(self, cart):
         """Record `cart` as most-recently-run: move its path to the front of
@@ -551,5 +574,5 @@ def _play_rec(rec):
 def today_ymd(ws):
     """Today as YYYYMMDD from the bar's wall clock, 0 without one (a board
     that never set its clock reads a year before 2020)."""
-    y, m, d = ws.bar_layer._today()
+    y, m, d = ws.bar_layer.today()
     return y * 10000 + m * 100 + d if y >= 2020 else 0

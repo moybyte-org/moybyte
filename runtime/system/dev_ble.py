@@ -32,20 +32,9 @@ string. Every verb answers at once; what it did arrives as an event, to
   stop_advertising()
   close()"""
 
-try:
-    import moy_gatt as _N
-except ImportError:  # host: the runtime package
-    from runtime import moy_gatt as _N
-
-try:
-    import devices as _D
-except ImportError:  # host: the runtime package
-    from runtime import devices as _D
-
-try:
-    import moybyte as _moybyte
-except ImportError:  # host: the runtime package
-    from runtime import moybyte as _moybyte
+import moy_gatt as _N
+import devices as _D
+import moybyte as _moybyte
 
 EV_ADV, EV_SCAN_DONE, EV_CONNECTED = _N.EV_ADV, _N.EV_SCAN_DONE, _N.EV_CONNECTED
 EV_DISCONNECTED, EV_FOUND, EV_READ = _N.EV_DISCONNECTED, _N.EV_FOUND, _N.EV_READ

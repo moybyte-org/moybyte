@@ -6,6 +6,8 @@
 // ... `ESC [?1049l`, moy_tty_sh.c) and the grid has none, so the link keeps
 // the shell's screen when the app's begins and draws it back when it ends.
 
+#include "moy_kmem.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,7 +43,7 @@ static link_t *L;
 
 static link_t *link_of(void) {
     if (L == NULL) {
-        L = calloc(1, sizeof *L);
+        L = moy_kalloc(sizeof *L, MOY_KMEM_LIBC | MOY_KMEM_ZERO);
         if (L != NULL) {
             L->state = MOY_SH_LINK_IDLE;
         }
@@ -96,7 +98,7 @@ static void keep(link_t *l) {
     }
     int cols, rows;
     moy_term_size(t, &cols, &rows);
-    l->kept = malloc((size_t)rows * ROW_CAP);
+    l->kept = moy_kalloc((size_t)rows * ROW_CAP, MOY_KMEM_LIBC);
     if (l->kept == NULL) {
         return;
     }
@@ -326,7 +328,7 @@ struct moy_sh_screen {
 
 static void *h_alloc(void *ctx, size_t n) {
     (void)ctx;
-    return malloc(n ? n : 1u);
+    return moy_kalloc(n ? n : 1u, MOY_KMEM_LIBC);
 }
 
 static void h_free(void *ctx, void *p) {
@@ -355,7 +357,7 @@ static void open_remote(moy_sh_screen_t *f) {
 
 moy_sh_screen_t *moy_sh_screen_new(int cols, int rows, const char *root) {
     (void)root;
-    moy_sh_screen_t *f = calloc(1, sizeof *f);
+    moy_sh_screen_t *f = moy_kalloc(sizeof *f, MOY_KMEM_LIBC | MOY_KMEM_ZERO);
     if (f == NULL) {
         return NULL;
     }

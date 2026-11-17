@@ -21,9 +21,9 @@ def _keys_after():
 def test_only_a_keyboard_types(tmp_path, kind, types):
     ws = build_ws(tmp_path)
     ws.use_inputs([("local", kind)])
-    assert ws.can_type() is types
+    assert ws.text.can_type() is types
     ws.soft_keyboard = True
-    assert ws.can_type(), "a page's soft keyboard types under any input"
+    assert ws.text.can_type(), "a page's soft keyboard types under any input"
 
 
 def test_a_tap_leaves_the_t_decks_keyboard_typing(tmp_path):
@@ -33,7 +33,7 @@ def test_a_tap_leaves_the_t_decks_keyboard_typing(tmp_path):
     ws.use_inputs([("kbd", "tdeck"), ("ble", "keys"), ("touch", "touch")])
     ws.input_used("touch")
     assert ui_draw.input_kind() == "touch"
-    assert ws.can_type()
+    assert ws.text.can_type()
 
 
 class _Ble:
@@ -52,11 +52,11 @@ def test_a_bluetooth_keyboard_types_while_it_is_connected(tmp_path):
     ws = build_ws(tmp_path)
     ws.use_inputs([("touch", "touch"), ("ble", "keys")])
     ws.keyboard = kbd = _Ble("scanning")
-    assert not ws.can_type()
+    assert not ws.text.can_type()
     kbd.state = "ready"
-    assert ws.can_type()
+    assert ws.text.can_type()
     ws.input_used("touch")
-    assert ws.can_type()
+    assert ws.text.can_type()
 
 
 def _printed(ws, drv):
@@ -70,7 +70,7 @@ def _printed(ws, drv):
         return real(text, *a, **kw)
     cv.print = spy
     try:
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     finally:
         cv.print = real
@@ -97,7 +97,7 @@ def test_settings_name_is_a_field_only_where_something_types(tmp_path, kind, fie
     ui.group = lambda caption="", o=None: (rows.append((caption,)), real[1](caption, o))
     try:
         for _ in range(3):
-            ws._dirty = True
+            ws.mark_dirty()
             drv.frame(1 / 30)
     finally:
         ui.info, ui.group = real
@@ -122,7 +122,7 @@ def test_the_wifi_prompt_promises_connect_only_where_something_types(tmp_path, k
     ws.open_settings()
     ws.use_inputs([("local", kind)])
     sl = ws.settings_layer
-    sl.open_wifi()
+    sl.open_page("wifi")
     sl.wifi_pick = "Cafe"
     got = []
     real = ui_api.hints
@@ -133,7 +133,7 @@ def test_the_wifi_prompt_promises_connect_only_where_something_types(tmp_path, k
     ui_api.hints = spy
     try:
         for _ in range(2):
-            ws._dirty = True
+            ws.mark_dirty()
             drv.frame(1 / 30)
     finally:
         ui_api.hints = real
@@ -145,7 +145,7 @@ def test_the_home_search_says_to_pair_a_keyboard_where_nothing_types(tmp_path, k
     ws = build_ws_with_shelf(tmp_path, 4)
     drv = make_drv(ws)
     drv.frame(1 / 30)
-    ws.open_search()
+    ws.home.open_search()
     ws.use_inputs([("local", kind)])
     assert ws.no_keyboard_text in _printed(ws, drv)
     ws.use_inputs([("local", "keys")])

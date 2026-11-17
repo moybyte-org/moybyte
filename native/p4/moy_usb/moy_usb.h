@@ -113,4 +113,7 @@ void moy_usb_sim_in(uint8_t addr, const uint8_t *d, size_t n);
 int moy_usb_sim_out(uint8_t addr, uint8_t *out, size_t cap, uint32_t *baud);
 void moy_usb_reset(void);
 
+// The host port's stack is up (moy_usb_host.c).
+int moy_usb_host_up(void);
+
 #endif // MOY_USB_H

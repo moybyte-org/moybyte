@@ -1,5 +1,7 @@
 // moy_gatt: the `ble` device API's machine and the host's stand-in (moy_gatt.h).
 
+#include "moy_kmem.h"
+
 #include "moy_gatt.h"
 
 #include <stdlib.h>
@@ -9,7 +11,7 @@
 #include "moy_drivers.h"
 #include "moy_lease.h"
 
-#if defined(MOY_INPUT_BOARD)
+#if defined(MOY_ON_BOARD)
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 static moy_drv_lock_t s_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -53,7 +55,8 @@ static const moy_gatt_ops_t *ops(void) {
 
 // The `midi` API's BLE port, whose machine steps on these events
 // (moy_midi.h, moy_midi_gatt): weak, for an image without it.
-void moy_midi_gatt(uint8_t ev, uint16_t a, int32_t b) __attribute__((weak));
+#include "moy_midi.h"
+#pragma weak moy_midi_gatt
 
 // An event posted for the holder's reader, then handed to the MIDI port's
 // machine (outside the driver's lock).
@@ -92,11 +95,7 @@ static int open_(uint32_t owner) {
         return -MOY_GATT_EBUSY;
     }
     if (G == NULL) {
-        #if defined(MOY_INPUT_BOARD)
-        G = heap_caps_calloc(1, sizeof(*G), MALLOC_CAP_SPIRAM);
-        #else
-        G = calloc(1, sizeof(*G));
-        #endif
+        G = moy_kalloc(sizeof(*G), MOY_KMEM_PSRAM | MOY_KMEM_ZERO);
         if (G == NULL) {
             return -MOY_GATT_ENODEV;
         }
@@ -515,7 +514,7 @@ void moy_gatt_on_advertising(int err) {
 // Peripherals a test declares, answering at once: each op completes before it
 // returns, as a quick radio would at the next host-task turn.
 
-#if !defined(MOY_INPUT_BOARD)
+#if !defined(MOY_ON_BOARD)
 
 #define SIM_DEVS 4
 #define SIM_CHRS 8

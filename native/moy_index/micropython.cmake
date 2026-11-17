@@ -1,5 +1,5 @@
 # moy_index: the store's index, native (moy_index.h). Every image that takes
-# the module builds it; MOY_INDEX_IMPL=py (tools/moy_index_spike.py's header)
+# the module builds it; MOY_INDEX_IMPL=py (tools/native_check.py's header)
 # builds nothing here and freezes runtime/carts/moy_index.py instead. THIS FILE AND
 # micropython.mk ARE TWINS.
 
@@ -12,10 +12,6 @@ if(MOY_INDEX_IMPL STREQUAL "c")
     target_sources(usermod_moy_index INTERFACE
         ${CMAKE_CURRENT_LIST_DIR}/modmoy_index.c
         ${CMAKE_CURRENT_LIST_DIR}/moy_index.c)
-    if("$ENV{MOY_INDEX_BENCH}" STREQUAL "1")
-        target_sources(usermod_moy_index INTERFACE
-            ${CMAKE_CURRENT_LIST_DIR}/bench_moy_index.c)
-    endif()
     # moy_index.c's slots are native/moy_spine's handle table: moy_htab.h is
     # found beside it, and moy_htab.c is built by moy_spine's own fragment.
     target_include_directories(usermod_moy_index INTERFACE

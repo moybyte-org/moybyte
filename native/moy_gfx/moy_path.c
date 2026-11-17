@@ -6,7 +6,11 @@
 #pragma GCC optimize("O3")
 #endif
 
+#include "moy_platform.h"
+
+#include "moy_codec.h"
 #include "moy_path.h"
+#include "moy_gfx_base.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -15,28 +19,14 @@
 
 // The scratch (a row's coverage and a glyph's edges) is PSRAM where the
 // board has it, as moy_shape's caches are: kept, grown on need.
-#if __has_include("esp_heap_caps.h")
-#include "esp_heap_caps.h"
-#define PATH_ALLOC(n) heap_caps_malloc_prefer((n), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT)
-#define PATH_FREE(p) heap_caps_free(p)
-#else
-#define PATH_ALLOC(n) malloc(n)
-#define PATH_FREE(p) free(p)
-#endif
+#include "moy_kmem.h"
+
+#define PATH_ALLOC(n) moy_kalloc((n), MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK)
+#define PATH_FREE(p) moy_kfree(p)
 
 #define ONE 64                  // 26.6: a pixel
 #define FULL (2 * ONE * ONE)    // a covered pixel's area, doubled (the half is kept whole)
 #define CURVE_STEPS 16          // the most lines a quadratic curve flattens into
-
-static int s_swapped = 1;
-
-void moy_path_wire_swapped(int swapped) {
-    s_swapped = swapped != 0;
-}
-
-static inline uint16_t can(uint16_t w) {
-    return s_swapped ? (uint16_t)((w << 8) | (w >> 8)) : w;
-}
 
 // -- the scratch ------------------------------------------------------------------
 
@@ -181,7 +171,7 @@ static int raster(uint16_t *dst, size_t cap, int dw, int n, int bx0, int by0, in
         return -1;
     }
     int touched = 0;
-    uint16_t cc = can(col);         // the colour's channels, canonical
+    uint16_t cc = moy_gfx_order(col);    // the colour's channels, canonical
     int cr = cc >> 11, cg = (cc >> 5) & 63, cb = cc & 31;
     for (int ry = by0; ry < by1; ry++) {
         int64_t top = (int64_t)ry * ONE, bot = top + ONE;
@@ -248,12 +238,12 @@ static int raster(uint16_t *dst, size_t cap, int dw, int n, int bx0, int by0, in
                 continue;
             }
             int al = (int)((a * 256) / FULL);       // 0..255
-            uint16_t p = can(dst[at]);
+            uint16_t p = moy_gfx_order(dst[at]);
             int pr = p >> 11, pg = (p >> 5) & 63, pb = p & 31;
             pr += ((cr - pr) * al + 128) >> 8;
             pg += ((cg - pg) * al + 128) >> 8;
             pb += ((cb - pb) * al + 128) >> 8;
-            dst[at] = can((uint16_t)((pr << 11) | (pg << 5) | pb));
+            dst[at] = moy_gfx_order((uint16_t)((pr << 11) | (pg << 5) | pb));
         }
     }
     return touched;
@@ -339,28 +329,31 @@ static const moy_path_face_t *face_of(int face, int size) {
 }
 
 // The next byte a glyph draws at: Latin-1 at its value, else `?`. *i moves
-// past the codepoint.
+// past the codepoint. The outline text keeps a rule of its own for what the
+// strict decoder refuses: a sequence whose continuation bytes are whole is
+// taken whole (an overlong form draws as what it spells), and anything else
+// is its lead byte alone, drawn as `?`.
 static int next_byte(const uint8_t *s, size_t n, size_t *i) {
-    uint8_t b = s[*i];
-    if (b < 0x80) {
-        (*i)++;
-        return b < 0x20 ? '?' : b;
+    size_t at = *i;
+    int32_t cp = moy_utf8_next(s, n, i);
+    if (cp >= 0 && cp < 0x80) {
+        return cp < 0x20 ? '?' : cp;
     }
-    int len = (b & 0xE0) == 0xC0 ? 2 : (b & 0xF0) == 0xE0 ? 3 : (b & 0xF8) == 0xF0 ? 4 : 1;
-    if (len == 1 || *i + (size_t)len > n) {
-        (*i)++;
-        return '?';
-    }
-    uint32_t cp = b & (0x7F >> len);
-    for (int k = 1; k < len; k++) {
-        uint8_t c = s[*i + (size_t)k];
-        if ((c & 0xC0) != 0x80) {
-            (*i)++;
+    if (cp < 0) {
+        uint8_t b = s[at];
+        size_t len = (b & 0xE0) == 0xC0 ? 2 : (b & 0xF0) == 0xE0 ? 3 : (b & 0xF8) == 0xF0 ? 4 : 1;
+        if (len == 1 || at + len > n) {
             return '?';
         }
-        cp = (cp << 6) | (c & 0x3F);
+        cp = b & (0x7F >> len);
+        for (size_t k = 1; k < len; k++) {
+            if ((s[at + k] & 0xC0) != 0x80) {
+                return '?';
+            }
+            cp = (cp << 6) | (s[at + k] & 0x3F);
+        }
+        *i = at + len;
     }
-    *i += (size_t)len;
     return cp >= 0xA0 && cp <= 0xFF ? (int)cp : '?';
 }
 

@@ -19,49 +19,28 @@ Two layers, the same split as the console's other sub-editors:
 
 One instance lives on Workstation (`ws.block_ui`), with a back-reference to
 it for the primitives it shares with the rest of the console (canvas, input,
-cart, carts_store, _with_sd, set_menu_view, _set_text_mode, _leave_or_home,
+cart, carts_store, _with_sd, set_menu_view, _leave_or_home,
 _btn, editor, pointer, sys_canvas). `NAMES` / `_err_text` are injected at
 construction instead of imported back from console.py, which would be a
 circular import.
 """
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
+import ui as _ui
+import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
-try:
-    from editors_block import BlockEditor, _clone_tree
-    from editors_base import (KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL,
-                              text_key as _text_key)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_block import BlockEditor, _clone_tree
-    from runtime.editors_base import (KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL,
-                                      text_key as _text_key)
+from editors_block import BlockEditor, _clone_tree
+from editors_base import (TextEntry, TE_COMMIT, TE_CANCEL,
+                          text_key as _text_key)
 # The block vocabulary/compiler (#29). Mirrors console.py's own import (see its
 # comment there): bare `blocks` on the device (frozen top-level) and once
 # host_app has aliased it on the host, or `runtime.blocks` when a test loads
 # this module directly without that alias.
-try:
-    import blocks as _blocks_mod
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import blocks as _blocks_mod
-
-try:
-    from widgets import arm_prompt as _arm_prompt
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import arm_prompt as _arm_prompt
-
-try:
-    from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
-    import layout_base as _layout_base
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
-    from runtime import layout_base as _layout_base
+import blocks as _blocks_mod
+from widgets import arm_prompt as _arm_prompt
+from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
+import layout_base as _layout_base
 
 # The page (editor_blocks.py): the objects' tab row over the outline, a row's
 # pitch and a depth's indent, and the foot under it.
@@ -240,7 +219,6 @@ class BlockEditorUI:
         self.blk_protect = False      # block editor opened on a hand-written-code cart
         self.blk_graduated = False    # cart has GRADUATED (Stage 8): blocks read-only
         self.blk_kbd = None           # inline name-entry prompt state dict, or None
-        self._blk_ekey = KeyEdge()    # #93: Ctrl+Z/Y edge tracker
         self.block_layout = BlockLayout()
         self._page = None             # the page on the verbs (editor_blocks.py)
         self._hold = _ui_draw.Hold()      # the page under blk_kbd (`_draw_blk_kbd`)
@@ -249,10 +227,7 @@ class BlockEditorUI:
     def page(self):
         """The Blocks page on the verbs, built at its first use."""
         if self._page is None:
-            try:
-                from editor_blocks import BlocksPage
-            except ImportError:  # pragma: no cover - host fallback
-                from runtime.editor_blocks import BlocksPage
+            from editor_blocks import BlocksPage
             self._page = BlocksPage(self, _ui_draw.AppHost("editor_blocks"))
         return self._page
 
@@ -326,7 +301,7 @@ class BlockEditorUI:
 
     def build(self):
         """Build the BlockEditor over the cart's block program (#29), lazily --
-        called from Workstation.set_menu_view("blocks"). A cart authored from
+        called from Text.set_menu_view("blocks"). A cart authored from
         blocks carries blocks.json (cart["blocks"]); a code-only cart starts a
         fresh empty program -- saving it makes the cart block-authored from then
         on. The Part-1 `blocks` module is injected so the editor core stays
@@ -337,7 +312,7 @@ class BlockEditorUI:
         prog = None
         if ws.carts_store is not None and ws.run.project.cart.get("path"):
             try:
-                prog = ws._with_sd(
+                prog = ws.with_sd(
                     lambda: ws.carts_store.load_blocks(ws.run.project.cart))
             except Exception as exc:  # noqa: BLE001
                 print("Moybyte load blocks failed:", self._err_text(exc))
@@ -355,7 +330,7 @@ class BlockEditorUI:
         # main.py and tell the kid why. A genuinely block-authored cart (has
         # blocks.json) -- or an empty/new-template cart with no real code -- is
         # unprotected and round-trips exactly as before.
-        self.blk_protect = (prog is None and ws._cart_has_handwritten_code())
+        self.blk_protect = (prog is None and ws.text.cart_has_handwritten_code())
         # GRADUATION (Stage 8, spec Section 8): a STORED, one-way project fact (read
         # from the manifest via cart["graduated"]), NOT the re-derived blk_protect
         # heuristic. A graduated cart's blocks.json is FROZEN -- it still opens (so the
@@ -375,7 +350,7 @@ class BlockEditorUI:
     def reset(self):
         """Drop the active editor + any open menu/prompt (a stale one must never
         leak into an unrelated cart or back to the launcher). Called from both
-        Workstation.open() (switching carts) and Workstation.go_home()."""
+        Workstation.open() (switching carts) and Home.go_home()."""
         self.blocks_ed = None
         self.blk_menu = None
         self.blk_kbd = None
@@ -383,7 +358,7 @@ class BlockEditorUI:
         self.blk_graduated = False
 
     def on_leave(self):
-        """Called from Workstation._leave_menu() when menu_view == "blocks"."""
+        """Called from Text._leave_menu() when menu_view == "blocks"."""
         self.blk_menu = None
         self.blk_kbd = None
         # #93: don't leave a half-started MOVE armed when the kid steps away.
@@ -399,7 +374,7 @@ class BlockEditorUI:
         su = self.ws.scene_ui
         se = getattr(su, "sceneedit", None)
         if se is not None and getattr(se, "dirty", False):
-            self.ws.save_scene()
+            self.ws.saves.save_scene()
 
     # -- block editor (#29 Part 2) -------------------------------------------
     #
@@ -507,30 +482,6 @@ class BlockEditorUI:
         elif item == _ACT_MOVE:
             if be.start_move():
                 self.blk_status = "TAP A + SPOT"
-
-    def _blk_undo(self):
-        be = self.blocks_ed
-        if be is None:
-            return
-        be.cancel_move()
-        self.blk_menu = None
-        if be.undo():
-            self.blk_slot = 0
-            self.blk_status = "UNDO"
-        else:
-            self.blk_status = "NOTHING TO UNDO"
-
-    def _blk_redo(self):
-        be = self.blocks_ed
-        if be is None:
-            return
-        be.cancel_move()
-        self.blk_menu = None
-        if be.redo():
-            self.blk_slot = 0
-            self.blk_status = "REDO"
-        else:
-            self.blk_status = "NOTHING TO REDO"
 
     def _blk_open_blocks(self, category):
         ids = _blocks_mod.blocks_in_category(category)
@@ -760,14 +711,12 @@ class BlockEditorUI:
         """Open an entry prompt as `self.blk_kbd`: `kind` routes the keypad
         (num / text / var / list / proc / param) and picks which characters
         its TextEntry accepts; `fields` are the prompt's own facts (the slot or
-        variable it edits). Opened through widgets.arm_prompt with a GUARDED
-        edge (#29): the tap/key that opened it is never its first keystroke."""
+        variable it edits). Opened through widgets.arm_prompt (#29): the
+        tap/key that opened it is never its first keystroke."""
         entry = TextEntry(16, _BLK_KBD_ALLOW.get(kind, _blk_name_allow))
         _arm_prompt(self.ws)
-        seed = getattr(self.ws.input, "last_key", 0) or 0
-        entry.open(text, seed, guard=True)
+        entry.open(text)
         host = _ui_draw.AppHost()
-        host.key = seed                # the byte that opened it types nothing
         host.held = self._hold.ok
         self._kbd_gen += 1
         fields["gen"] = self._kbd_gen
@@ -778,7 +727,7 @@ class BlockEditorUI:
 
     def cancel_prompt(self):
         """Close the open entry prompt as its Cancel does (the T-Deck's Mic,
-        `Workstation.cancel_field`); False where none is open."""
+        `InputPolicy.cancel`); False where none is open."""
         if self.blk_kbd is None:
             return False
         self._blk_kbd_cancel()
@@ -880,7 +829,6 @@ class BlockEditorUI:
         k = self.blk_kbd
         if be is None or k is None:
             self.blk_kbd = None
-            self.ws._set_text_mode(False)
             return
         kind = k.get("kind", "var")
         if kind == "num":
@@ -917,7 +865,6 @@ class BlockEditorUI:
                 be.set_slot(bt[1], final, bt[0])
             self.blk_status = "VAR: " + final[:12]
         self.blk_kbd = None
-        self.ws._set_text_mode(False)
 
     def _blk_kbd_cancel(self):
         """Cancel a prompt: a number/text prompt just discards the edit (the slot keeps
@@ -930,7 +877,6 @@ class BlockEditorUI:
             if bt is not None and bt[0] is not None:
                 be.set_slot(bt[1], k["var"], bt[0])
         self.blk_kbd = None
-        self.ws._set_text_mode(False)
 
     def _blk_kbd_key(self, ch):
         """One typed byte into the open prompt (editors_base.text_key: trim,
@@ -1018,7 +964,7 @@ class BlockEditorUI:
             ws.ach.award("first_code")
             return True
         try:
-            status, smsg = ws._with_sd(
+            status, smsg = ws.with_sd(
                 lambda: ws.carts_store.save_blocks(ws.run.project.cart, prog))
             if status != ws.carts_store.SAVE_OK:
                 self.blk_status = "CAN'T SAVE " + str(smsg)
@@ -1049,7 +995,7 @@ class BlockEditorUI:
             # code you already have" (for a graduated cart, that door is one-way).
             ws.editor = None
             self.blk_menu = None
-            ws.set_menu_view("code")
+            ws.text.set_menu_view("code")
             return
         try:
             src = _blocks_mod.compile_blocks(be.program)
@@ -1060,7 +1006,7 @@ class BlockEditorUI:
         ws.run.project.cart["src"] = src                     # ensure the editor opens the latest
         ws.editor = None                         # rebuild on the new source
         self.blk_menu = None
-        ws.set_menu_view("code")
+        ws.text.set_menu_view("code")
 
     # -- block-editor input / pointer ----------------------------------------
     def _blocks_input(self):
@@ -1071,22 +1017,22 @@ class BlockEditorUI:
         page = self._page
         if page is not None:
             if page.owed():
-                ws._dirty = True
+                ws.mark_dirty()
             if self.blk_kbd is None and self.blk_menu is not None:
                 if page.keys(i):
-                    ws._dirty = True
+                    ws.mark_dirty()
                 if i.pressed("b"):
                     self._blk_menu_back()
-                    ws._dirty = True
+                    ws.mark_dirty()
                 return
         if self.blk_kbd is not None:
             # The entry prompt owns input: its dialog's engine takes the typed
             # bytes, the moves between its stops and Enter; Esc cancels (the
-            # T-Deck's Mic does through Workstation.cancel_field). The key that
+            # T-Deck's Mic does through `InputPolicy.cancel`). The key that
             # opened it types nothing (its host's seed, #29).
             host = self.blk_kbd["host"]
             if host.keys(i):
-                ws._dirty = True
+                ws.mark_dirty()
             if host.inp[5] == 27 or i.pressed("stop"):
                 host.inp[5] = 0
                 self._blk_kbd_cancel()
@@ -1116,11 +1062,7 @@ class BlockEditorUI:
                 be.cancel_move()
                 self.blk_status = "MOVE OFF"
             return
-        # Host convenience (#93): Ctrl+Z / Ctrl+Y walk the in-session outline undo,
-        # mirroring the code editor's shortcut (0x1A / 0x19 arrive via last_key). The
-        # on-screen UNDO/REDO buttons are the touch/device affordance.
-        k = getattr(i, "last_key", 0) or 0
-        moved = self._blk_ekey.undo_redo(k, self._blk_undo, self._blk_redo)
+        moved = False
         if i.steps("up"):
             self._blk_move_cursor(-1)
             moved = True
@@ -1141,7 +1083,7 @@ class BlockEditorUI:
         elif i.pressed("run"):
             self.save_blocks()
         else:
-            ws._leave_or_home(ws.exit)
+            ws.home.leave_or_home(ws.spine.exit)
 
     def _blk_left(self):
         be = self.blocks_ed
@@ -1171,12 +1113,12 @@ class BlockEditorUI:
         ws = self.ws
         if self.blk_kbd is not None:
             if self.blk_kbd["host"].point(px, py, click, ws.pointer.down):
-                ws._dirty = True
+                ws.mark_dirty()
             return
         if click and ws.bar_layer.handle_bar_tap("menu", px, py):
             return
         if self.page().point(px, py, click, ws.pointer.down):
-            ws._dirty = True
+            ws.mark_dirty()
 
     def _blk_tap_row(self, ridx, px, again):
         """A tap on outline row `ridx` at x `px` (the page's table answers
@@ -1204,7 +1146,7 @@ class BlockEditorUI:
                 self.blk_slot = si
         if again:
             self._blk_a()
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def _blk_num_to_block(self):
         """From the number pad, switch to dropping a reporter BLOCK into the slot
@@ -1215,7 +1157,6 @@ class BlockEditorUI:
             return
         block, name = k["block"], k["slot"]
         self.blk_kbd = None
-        self.ws._set_text_mode(False)
         self._blk_open_expr_menu(block, name)
 
     # -- block editor drawing (#29 Part 2) -----------------------------------
@@ -1232,13 +1173,13 @@ class BlockEditorUI:
             return
         how = hold.under(ws, None if k is None else self._held_key(k), self._page_rect(), dt)
         if how == _ui_draw.HOLD_PUT:
-            ws.bar_layer._draw_status_strip("menu")
+            ws.bar_layer.draw_status_strip("menu")
             self._draw_blk_kbd(True, dt)
             hold.note()
             return
         if how == _ui_draw.HOLD_DRAW:
             self.page().draw(ws.sys_canvas, ws.theme_colors, self._page_rect(), False)
-        ws.bar_layer._draw_status_strip("menu")
+        ws.bar_layer.draw_status_strip("menu")
         if self.blk_kbd is not None:
             self._draw_blk_kbd(False, dt)
             hold.note()
@@ -1262,7 +1203,7 @@ class BlockEditorUI:
                 ws, self._held_key(k), k["gen"], k["host"], self._page_rect(),
                 _layout_base.metric_class() == _layout_base.DESK, dt):
             return False
-        ws.bar_layer._draw_status_strip("menu")
+        ws.bar_layer.draw_status_strip("menu")
         self._draw_blk_kbd(True, dt)
         self._hold.note()
         return True

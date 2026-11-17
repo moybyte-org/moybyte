@@ -28,65 +28,25 @@ code_layer, none of which import console/chrome -- so there is no cycle. Same
 bare-or-package fallback as those modules.
 """
 
-try:
-    from editors_sheet import IconSheet
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_sheet import IconSheet
-
-try:
-    from widgets import _Blit, _in, _err_text
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import _Blit, _in, _err_text
+from editors_sheet import IconSheet
+from widgets import _Blit, _in, _err_text
 
 # The toolkit's face: the display type's widths go through its text path.
-try:
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui_draw as _ui_draw
+import ui_draw as _ui_draw
 
 # Surface geometry constants the Layout classes derive their responsive rects from.
 # bar_layer/settings_layer/code_layer OWN these (see their modules); imported here the
 # same way console.py imports them, so Layout/CodeLayout reflow off the same numbers.
-try:
-    from bar_layer import _STATUS_H, _BAR_ICON, _BAR_GAP, _BAR_Y, _bar_text_w
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.bar_layer import _STATUS_H, _BAR_ICON, _BAR_GAP, _BAR_Y, _bar_text_w
-
-try:
-    from settings_layer import _SET_ROW_H
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.settings_layer import _SET_ROW_H
-
-try:
-    from code_layer import (_CODE_LEAD, _CODE_STATUS_H, _SYM_H,
-                            _SYM_MIN, _SYM_MARGIN, _CODE_SYMBOLS, _CODE_INSET,
-                            _CODE_MARK)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.code_layer import (_CODE_LEAD, _CODE_STATUS_H, _SYM_H,
-                                    _SYM_MIN, _SYM_MARGIN, _CODE_SYMBOLS, _CODE_INSET,
-                                    _CODE_MARK)
-
-try:
-    import shell_layout as _shell_layout
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import shell_layout as _shell_layout
-
-try:
-    from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
-    from layout_base import CLASSES as _LB_CLASSES, class_of as _lb_class_of, bar_rows as _bar_rows
-    from layout_base import sys_tile as _sys_tile, metric as _lb_metric, bars as _lb_bars
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
-                                     BASE_H as _BASE_H)
-    from runtime.layout_base import (CLASSES as _LB_CLASSES, class_of as _lb_class_of,
-                                     bar_rows as _bar_rows, sys_tile as _sys_tile,
-                                     metric as _lb_metric, bars as _lb_bars)
-
-
-try:                                    # device: ticks is frozen flat
-    from ticks import _ticks_ms, _ticks_us, _ticks_diff
-except ImportError:                     # host: the runtime package
-    from runtime.ticks import _ticks_ms, _ticks_us, _ticks_diff
+from bar_layer import _STATUS_H, _BAR_ICON, _BAR_GAP, _BAR_Y, _bar_text_w
+from settings_layer import _SET_ROW_H
+from code_layer import (_CODE_LEAD, _CODE_STATUS_H, _SYM_H,
+                        _SYM_MIN, _SYM_MARGIN, _CODE_SYMBOLS, _CODE_INSET,
+                        _CODE_MARK)
+import shell_layout as _shell_layout
+from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
+from layout_base import CLASSES as _LB_CLASSES, class_of as _lb_class_of, bar_rows as _bar_rows
+from layout_base import sys_tile as _sys_tile, metric as _lb_metric, bars as _lb_bars
+from ticks import _ticks_ms, _ticks_us, _ticks_diff
 
 
 def _from_ascii(rows, mapping, transparent="."):
@@ -498,15 +458,6 @@ class Layout(LayoutBase):
             return None
         return (x, gy + row * (ch + gap), cw, hh)
 
-    def grid_content_w(self, n, featured=True):
-        """Total scrollable content width for n grid items (at least the tall
-        slot 0's own column)."""
-        if n <= 0:
-            return 0
-        cw, gap = self.lib_card_w, self.lib_gap
-        _row, last_col = self.tile_cell(n - 1, featured)
-        return last_col * (cw + gap) + cw
-
     def _cell(self, name):
         got = _shell_layout.cell_of(self.bars, name)
         return got[1] if got is not None else None
@@ -677,7 +628,7 @@ _ICON = {
     "close": 12, "run": 13, "save": 14, "music": 15,
     "moy": 16,          # the moybyte mascot (boot logo); not a bar control
     "wifi_off": 17,     # wifi-with-a-red-slash: the right-zone status glyph when
-                        # there's NO connection (ws._wifi_icon_kind picks it, #Part3)
+                        # there's NO connection (ws.wifi_icon_kind picks it, #Part3)
     "scene": 18,        # the scene placement editor tab (#85 Stage 2)
     "undo": 19, "redo": 20,   # the shared Editor bar's undo/redo icons (#88)
     # the media transport, the volume's steps, a list and what plays (#110)
@@ -740,7 +691,7 @@ _ICON_ART = {
         ".......77.......", "................", "................", "................",
     ),
     # "wifi_off": the wifi signal with a bold red (8) diagonal slash through it -- the
-    # right-zone STATUS glyph shown when there is NO connection (ws._wifi_icon_kind).
+    # right-zone STATUS glyph shown when there is NO connection (ws.wifi_icon_kind).
     "wifi_off": (
         "................", "....77777777....", ".887........77..", ".788..7777....7.",
         "...887....77....", "...788......7...", ".....88777......", ".....788..7.....",

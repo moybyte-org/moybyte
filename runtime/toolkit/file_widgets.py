@@ -2,10 +2,7 @@
 # re-exported) that the user-files (#108) surfaces read a cover through.
 # MicroPython-safe; staged to every board.
 
-try:
-    from moyimg import cover_indices  # noqa: F401 -- re-exported
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moyimg import cover_indices  # noqa: F401
+from moyimg import cover_indices  # noqa: F401 -- re-exported
 
 
 class Bitmap:

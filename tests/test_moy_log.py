@@ -174,11 +174,11 @@ def test_hitch_loop_and_perf_reach_the_ring_from_the_loop():
 
 def test_the_ring_is_psram_and_made_before_the_vm():
     """native/moy_kernel/moy_kernel.h: kernel data is PSRAM. The ring allocates
-    only through log_psram, which asks for SPIRAM first, and the kernel makes
-    it in app_main, before the VM task's first heap area."""
+    only through log_psram, one moy_kalloc asking for PSRAM first (moy_kmem.h),
+    and the kernel makes it in app_main, before the VM task's first heap area."""
     src = (KERNEL / "moy_log.c").read_text()
     alloc = re.search(r"static void \*log_psram\(size_t n\) \{.*?\n\}", src, re.S).group(0)
-    assert alloc.index("MALLOC_CAP_SPIRAM") < alloc.index("MALLOC_CAP_8BIT")
+    assert "moy_kalloc(" in alloc and "MOY_KMEM_PSRAM" in alloc
     rest = src.replace(alloc, "")
     assert not re.findall(r"\b(malloc|calloc|heap_caps_malloc|heap_caps_calloc)\s*\(", rest)
     kernel = (KERNEL / "moy_kernel.c").read_text()

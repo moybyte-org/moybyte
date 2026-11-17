@@ -70,28 +70,14 @@ is swapped for the native SD attach after that. Same rule the sibling
 collaborators follow.
 """
 
-try:
-    from editors_sheet import SpriteSheet
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_sheet import SpriteSheet
-
-try:
-    from ticks import _ticks_ms, _ticks_diff
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.ticks import _ticks_ms, _ticks_diff
-
-try:
-    import cover_png
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import cover_png
+from editors_sheet import SpriteSheet
+from ticks import _ticks_ms, _ticks_diff
+import cover_png
 
 # #186 moy_buf: cover payloads (source files, decoded pictures, the decode
 # scratch) live OUTSIDE the MP gc heap on device, so a warm shelf stops taxing
 # every GC collect. On the host this is a transparent no-op layer.
-try:
-    import moybuf as _moybuf
-except ImportError:
-    from runtime import moybuf as _moybuf
+import moybuf as _moybuf
 
 # The three decodes of a cover, named by the reduction each one is (the
 # `div` cover_png takes): see the module docstring for who asks for which.
@@ -415,7 +401,7 @@ class CoverCache:
             native = cover_png.native() is not None
             if native and self._buf is None:
                 self._buf = _moybuf.alloc(cover_png.WORK)
-            self.ws.note_cost("cover.build")     # one decode of one size
+            self.ws.perf.note_cost("cover.build")     # one decode of one size
             job = _CoverJob(src, div, self._swapped(), self._buf if native else None)
             if not job.done:
                 jobs[key] = job
@@ -757,7 +743,7 @@ class CoverCache:
         ws = self.ws
         store = ws.carts_store
         loader = getattr(store, "load_cover", None)
-        ws.note_cost("cover.blob.read")
+        ws.perf.note_cost("cover.blob.read")
         # Through the storage gate like every other store read here: this fires
         # from the launcher's draw and the idle prefetch, i.e. around a repaint,
         # where the T-Deck has a flush in flight over the SPI host its card
@@ -772,7 +758,7 @@ class CoverCache:
         # glyph, `_none` stops it being re-probed every idle frame, and a store
         # re-scan clears that and tries again.
         try:
-            data = ws._with_sd(
+            data = ws.with_sd(
                 lambda: loader(path)) if loader is not None else None
             if data and cover_png.structure(data) is None:
                 data = None

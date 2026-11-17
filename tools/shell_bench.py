@@ -109,7 +109,7 @@ if not hasattr(ws, '_type_installed'):
         if ws._tn > 0:
             ws._tc += 1
             if ws._tc % 4 == 0:
-                fe = ws.run.player._focus_editor
+                fe = ws.run.player.focus_editor
                 if fe is not None:
                     fe.key(ord(ws._ts[ws._tn % len(ws._ts)]))
                     ws._tn -= 1
@@ -192,7 +192,7 @@ class Run:
         if self.windowed:
             self.pb.home(self.b)
         else:
-            self.ex("ws.go_home()")
+            self.ex("ws.home.go_home()")
             self.b.drain(1.5)
 
     def _row(self, name, r, **extra):
@@ -305,7 +305,7 @@ class Run:
             self.ex("ws.open_settings()")
             return True
         return bool(self.pb.pyval(self.b,
-                                  "ws.open_app(ws._apps_by_id[%r])" % app))
+                                  "ws.spine.open_app(ws.app(%r))" % app))
 
     # -- the groups -------------------------------------------------------
     def meta(self):
@@ -369,7 +369,7 @@ class Run:
             # as the router hands the menu a key: the frame is marked only
             # where the popover does not paint its own change
             for d in ("down",) * 3 + ("up",) * 3:
-                b.cmd("py ws._sysmenu_layer.handle_input(ws._SBK(%r)) or "
+                b.cmd("py ws.sysmenu_layer.handle_input(ws._SBK(%r)) or "
                       "ws.wm.popover_takes_keys() or ws.mark_dirty() or 1" % d,
                       wait_for="PY")
                 b.drain(0.3)
@@ -441,7 +441,7 @@ class Run:
             for cx, cy in steps:
                 sx, sy = cart_xy(cx, cy)
                 b.tap(sx, sy, settle=1.5)
-            if pb.pyval(b, "ws.run.player._focus_editor is not None"):
+            if pb.pyval(b, "ws.run.player.focus_editor is not None"):
                 got = True
                 break
         self.rows.append({"name": "notes: editor focused", "ok": got})
@@ -460,7 +460,7 @@ class Run:
 
     def projects_window(self):
         self.home()
-        self.ex("ws.open_projects()")
+        self.ex("ws.home.open_projects()")
         self.b.drain(12.0)
         self.measure("window drag: PROJECTS", self.win_drag())
         self.home()
@@ -522,7 +522,7 @@ class Run:
                                              "ws.mark_dirty()" % key), 2.5)
             self.measure("editor workspace idle: %s" % key, self.idle(3.0))
         self.frames("editor Play (the playtest docks)",
-                    lambda: self.ex("ws.defer(ws._leave_menu)"), 5.0)
+                    lambda: self.ex("ws.defer(ws.text.leave_menu)"), 5.0)
         self.measure("editor playtest running beside the Editor", self.idle(3.0))
         self.ex("ws.wm.close_player()")
         b.drain(2.0)

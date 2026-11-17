@@ -29,26 +29,12 @@ TileMap gives the map tab. SAVE persists through Project.commit_scene (atomic
 write + the durable undo journal, Stage 1). The editor manages the cart's
 DEFAULT scene (multi-scene UX is a deferred follow-up, #85 decision log 4)."""
 
-try:
-    import ui as _ui              # frozen on device
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
+import ui as _ui              # frozen on device
+import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
-try:
-    from editors_scene import SceneEditor
-    from editors_base import KeyEdge
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_scene import SceneEditor
-    from runtime.editors_base import KeyEdge
-
-try:
-    from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H, pane as _in_pane
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
-                                     BASE_H as _BASE_H, pane as _in_pane)
+from editors_scene import SceneEditor
+from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H, pane as _in_pane
 
 # The handheld page (editor_scene.py): the right column's width and the
 # foot's height, beside and under the view.
@@ -108,7 +94,6 @@ class SceneEditorUI:
         self.scene_name = None         # the DEFAULT scene this editor manages
         self.scene_page = 0            # first tile id shown in the palette
         self.scene_zoom = 0            # index into layout.zooms (0 = 1x)
-        self._skey = KeyEdge()         # Ctrl+Z/Y edge tracker
         self._press = None             # gesture origin (px, py); None outside one
         self._mode = None              # open gesture: "move" (an actor) or "pan"
         self._panning = False          # the pan gesture crossed the tap threshold
@@ -123,10 +108,7 @@ class SceneEditorUI:
     def page(self):
         """The handheld's Scene page on the verbs, built at its first use."""
         if self._page is None:
-            try:
-                from editor_scene import ScenePage
-            except ImportError:  # pragma: no cover - host fallback
-                from runtime.editor_scene import ScenePage
+            from editor_scene import ScenePage
             self._page = ScenePage(self, _ui_draw.AppHost("editor_scene"))
         return self._page
 
@@ -150,7 +132,7 @@ class SceneEditorUI:
         return page.point(px, py, click, down)
 
     def relayout(self, w, h, fs, cs=None):
-        """Rebuild the responsive geometry (#39) -- ws._relayout fan-out."""
+        """Rebuild the responsive geometry (#39) -- ws.relayout fan-out."""
         self.layout = SceneLayout(w, h, fs, chrome_scale=cs)
         if self.scene_zoom >= len(self.layout.zooms):
             self.scene_zoom = 0
@@ -159,7 +141,7 @@ class SceneEditorUI:
     def build(self):
         """Build the SceneEditor over the open cart's DEFAULT scene (the
         manifest's element 0; a cart with none starts an empty "main"). Called
-        from Workstation.set_menu_view("scene")."""
+        from Text.set_menu_view("scene")."""
         ws = self.ws
         if self.sceneedit is not None or ws.run.project.sheet is None:
             return
@@ -184,7 +166,6 @@ class SceneEditorUI:
         self._mode = None
         self._panning = False
         self._drag = None
-        self._skey.reset()
 
     # -- live sync + persistence ---------------------------------------------
 
@@ -201,7 +182,7 @@ class SceneEditorUI:
     def save(self):
         """SAVE: persist the edited scene through Project.commit_scene (atomic
         write + manifest registration + the durable undo journal, Stage 1).
-        The ws entry point Workstation.save_scene forwards here."""
+        The ws entry point Saves.save_scene forwards here."""
         ws = self.ws
         se = self.sceneedit
         if se is None or self.scene_name is None:
@@ -308,13 +289,13 @@ class SceneEditorUI:
         if page is not None:
             if page.pop is not None:
                 if page.keys(i):
-                    ws._dirty = True
+                    ws.mark_dirty()
                 if i.pressed("b"):
                     page.close()
-                    ws._dirty = True
+                    ws.mark_dirty()
                 return
             if page.owed():
-                ws._dirty = True
+                ws.mark_dirty()
         if se is not None:
             g = 8
             if se.selected() is not None:
@@ -337,25 +318,11 @@ class SceneEditorUI:
                     self._pan(g, 0)
             if i.pressed("a"):
                 self._cycle_zoom()
-            self._skey.undo_redo(getattr(i, "last_key", 0),
-                                 self._undo, self._redo)
-        ws._leave_or_home(ws.exit)
+        ws.home.leave_or_home(ws.spine.exit)
 
     def _nudge(self, dx, dy):
         se = self.sceneedit
         if se is not None and se.nudge_sel(dx, dy):
-            self._sync_live()
-            self._clamp_cam()
-
-    def _undo(self):
-        se = self.sceneedit
-        if se is not None and se.undo():
-            self._sync_live()
-            self._clamp_cam()
-
-    def _redo(self):
-        se = self.sceneedit
-        if se is not None and se.redo():
             self._sync_live()
             self._clamp_cam()
 
@@ -384,7 +351,7 @@ class SceneEditorUI:
                 se.begin_edit()
             else:
                 self._mode = "pan"
-            ws._dirty = True
+            ws.mark_dirty()
 
     def _scene_drag(self, px, py):
         """Held-drag: a MOVE gesture tracks the actor under the finger (live,
@@ -399,7 +366,7 @@ class SceneEditorUI:
             wx = se.cam_x + (px - x0) // scale
             wy = se.cam_y + (py - y0) // scale
             se.move_sel(wx + self._grab[0], wy + self._grab[1])
-            self.ws._dirty = True
+            self.ws.mark_dirty()
             return
         if self._mode != "pan":
             return
@@ -435,7 +402,7 @@ class SceneEditorUI:
                 if w is not None:
                     se.place(w[0], w[1])
                     self._sync_live()
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         self._press = None
         self._mode = None
         self._panning = False

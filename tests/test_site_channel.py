@@ -56,8 +56,9 @@ def _firmware(root):
         for board in build.BOARDS:
             folder = os.path.join(src, variant, board["id"])
             os.makedirs(folder)
-            with open(os.path.join(folder, board["images"][0]), "wb") as f:
-                f.write((variant + board["id"]).encode() * 64)
+            for _kind, name in build.downloads(board):
+                with open(os.path.join(folder, name), "wb") as f:
+                    f.write((variant + board["id"] + name).encode() * 64)
     return src
 
 
@@ -122,7 +123,7 @@ def test_the_dev_flasher_offers_the_beta_first(tmp_path, monkeypatch):
     manifest = json.load(open(os.path.join(out, "firmware", "manifest.json")))
     for board in manifest["boards"]:
         assert board["variant"] == "beta", board["id"]
-        assert [b["variant"] for b in board["builds"]] == ["beta", "stable"]
+        assert [b["variant"] for b in board["builds"] if b["kind"] == "install"] == ["beta", "stable"]
     # Both builds stay flashable from the dev page.
     assert '<option value="beta" selected>' in page
     assert '<option value="stable">' in page
@@ -132,7 +133,7 @@ def test_the_stable_flasher_offers_the_release_first(tmp_path, monkeypatch):
     out, _ = _site(tmp_path, monkeypatch)
     manifest = json.load(open(os.path.join(out, "firmware", "manifest.json")))
     for board in manifest["boards"]:
-        assert [b["variant"] for b in board["builds"]] == ["stable", "beta"]
+        assert [b["variant"] for b in board["builds"] if b["kind"] == "install"] == ["stable", "beta"]
 
 
 def test_the_page_carries_the_line_the_stamp_rewrites():

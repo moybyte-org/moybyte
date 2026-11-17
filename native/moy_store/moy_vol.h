@@ -29,6 +29,7 @@
 #ifndef MOY_VOL_H
 #define MOY_VOL_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -268,12 +269,28 @@ int moy_vol_at(const char *path, moy_vol_t *v, const char **rest);
 // caller takes it weak.
 int moy_vol_mounts(int (*fn)(void *arg, const char *name), void *arg);
 //
-// moy_store_tick is called at every open and every listing: on a board it
+// moy_store_tick is called at every open and every listing, every card block
+// read or written and every internal-flash read, program or erase: on a board it
 // feeds the kernel's task watchdog when the frame loop has armed it, so a
-// long store call (a seed, a scan, a pack, a big load) is never a hang.
+// long store call (a seed, a scan, a pack, a big load, a restore onto
+// flash) is never a hang.
 void moy_store_tick(void);
 void *moy_store_alloc(size_t n);
 void *moy_store_keep(size_t n);
 void moy_store_free(void *p, size_t n);
+
+// The card volume (moy_card.c): brought up from C (the recovery floor's,
+// `what` naming a failure), and whether a run holds it.
+int moy_store_card_up(const char **what);
+int moy_store_card_held(void);
+
+// The internal volume (moy_kvfs.c): mounted for a new VM, and its state.
+bool moy_kvol_vm_mount(void);
+void moy_kvol_state(int *mounted, int *err, uint32_t *blocks, uint32_t *bsize);
+
+#ifdef MICROPY_INCLUDED_PY_OBJ_H
+// The littlefs a mounted internal volume object holds (moy_kvfs.c), or NULL.
+void *moy_kvfs_lfs(mp_obj_t obj);
+#endif
 
 #endif // MOY_VOL_H

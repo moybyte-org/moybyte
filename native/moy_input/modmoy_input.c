@@ -1,6 +1,6 @@
 // moy_input's MicroPython binding: the input table (moy_input.h) as the module
-// `moy_input`, the same names the host's ctypes binding (runtime/host/moy_input.py)
-// gives CPython.
+// `moy_input`, its names those face.json lists: the rows here are the hand
+// ones, the rest are generated into modmoy_input_face.h.
 //
 //   NAMES, HOST_NAMES             the buttons, libmoy's order then the console's
 //   InputTable(), HostInputTable() a table over all fifteen names, or the host's
@@ -29,6 +29,8 @@
 #include "moy_edge.h"
 #include "moy_hid.h"
 #include "moy_input.h"
+
+#include "modmoy_input_face.h"
 
 // The board's drivers: keyboard(), touch(), trackball() and ble(), and the
 // frame's stage over them. A build that has none -- the browser's, whose input
@@ -245,6 +247,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(table_begin_frame_obj, 1, 2, table_be
 
 TABLE_VERB(table_release_all, moy_input_release_all);
 TABLE_VERB(table_spend_edges, moy_input_spend_edges);
+TABLE_VERB(table_spend_key, moy_input_spend_key);
 TABLE_VERB(table_clear_edges, moy_input_clear_edges);
 TABLE_VERB(table_keep_edges, moy_input_keep_edges);
 TABLE_VERB(table_tick_edges, moy_input_tick_edges);
@@ -466,8 +469,6 @@ static MP_DEFINE_CONST_FUN_OBJ_2(table_apply_pointer_obj, table_apply_pointer);
 
 // -- the event rings: readers (moy_input.h) -------------------------------------------
 
-// A record's fields in a caller's buffer of 32-bit ints, EV_FIELDS a record.
-enum { EV_T, EV_SRC, EV_KIND, EV_PROV, EV_A, EV_ID, EV_B, EV_FIELDS };
 
 // time.ticks_us's mask, at most the boards' 2^30 so a stamp is a small int.
 static inline uint32_t ev_ticks_mask(void) {
@@ -499,7 +500,7 @@ static mp_obj_t table_reader_free(mp_obj_t self_in, mp_obj_t r) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(table_reader_free_obj, table_reader_free);
 
-// events(into, r) -> n: reader r's records into `into` (an array('i'), EV_FIELDS
+// events(into, r) -> n: reader r's records into `into` (an array('i'), MOY_EV_FIELDS
 // ints a record, as many as fit), each stamp on time.ticks_us's clock.
 // Allocates nothing.
 static mp_obj_t table_events(mp_obj_t self_in, mp_obj_t into, mp_obj_t r_in) {
@@ -510,7 +511,7 @@ static mp_obj_t table_events(mp_obj_t self_in, mp_obj_t into, mp_obj_t r_in) {
         mp_raise_TypeError(MP_ERROR_TEXT("events: an array('i')"));
     }
     int r = mp_obj_get_int(r_in);
-    size_t cap = bi.len / (sizeof(int32_t) * EV_FIELDS);
+    size_t cap = bi.len / (sizeof(int32_t) * MOY_EV_FIELDS);
     int32_t *w = bi.buf;
     uint32_t clock = moy_input_now_us();
     uint32_t ticks = (uint32_t)mp_hal_ticks_us();
@@ -521,14 +522,14 @@ static mp_obj_t table_events(mp_obj_t self_in, mp_obj_t into, mp_obj_t r_in) {
         size_t got = moy_input_events(s->t, r, chunk, want);
         for (size_t i = 0; i < got; i++, k++) {
             const moy_event_t *e = &chunk[i];
-            int32_t *f = &w[k * EV_FIELDS];
-            f[EV_T] = (int32_t)((ticks - (clock - e->t_us)) & ev_ticks_mask());
-            f[EV_SRC] = e->src;
-            f[EV_KIND] = e->kind;
-            f[EV_PROV] = e->prov;
-            f[EV_A] = e->a;
-            f[EV_ID] = e->id;
-            f[EV_B] = (int32_t)e->b;
+            int32_t *f = &w[k * MOY_EV_FIELDS];
+            f[MOY_EV_F_T] = (int32_t)((ticks - (clock - e->t_us)) & ev_ticks_mask());
+            f[MOY_EV_F_SRC] = e->src;
+            f[MOY_EV_F_KIND] = e->kind;
+            f[MOY_EV_F_PROV] = e->prov;
+            f[MOY_EV_F_A] = e->a;
+            f[MOY_EV_F_ID] = e->id;
+            f[MOY_EV_F_B] = (int32_t)e->b;
         }
         if (got < want) {
             break;
@@ -650,7 +651,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(ring_ring_obj, ring_ring);
 static mp_obj_t ring_close(mp_obj_t self_in) {
     input_ring_obj_t *o = MP_OBJ_TO_PTR(self_in);
     moy_input_isr_detach(&o->w);
-    #ifdef MOY_INPUT_BOARD
+    #ifdef MOY_ON_BOARD
     if (o->edge) {
         check(moy_edge_close(o->h));
         return mp_const_none;
@@ -661,7 +662,7 @@ static mp_obj_t ring_close(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ring_close_obj, ring_close);
 
-#ifdef MOY_INPUT_BOARD
+#ifdef MOY_ON_BOARD
 // drive(n, period_us): an edge loop pin's n level changes (moy_edge_drive).
 static mp_obj_t ring_drive(mp_obj_t self_in, mp_obj_t n, mp_obj_t period_us) {
     input_ring_obj_t *o = MP_OBJ_TO_PTR(self_in);
@@ -693,7 +694,7 @@ static const mp_rom_map_elem_t ring_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_post), MP_ROM_PTR(&ring_post_obj) },
     { MP_ROM_QSTR(MP_QSTR_ring), MP_ROM_PTR(&ring_ring_obj) },
     { MP_ROM_QSTR(MP_QSTR_close), MP_ROM_PTR(&ring_close_obj) },
-    #ifdef MOY_INPUT_BOARD
+    #ifdef MOY_ON_BOARD
     { MP_ROM_QSTR(MP_QSTR_drive), MP_ROM_PTR(&ring_drive_obj) },
     { MP_ROM_QSTR(MP_QSTR_driving), MP_ROM_PTR(&ring_driving_obj) },
     #endif
@@ -713,6 +714,7 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     { MP_ROM_QSTR(MP_QSTR_begin_frame), MP_ROM_PTR(&table_begin_frame_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_release_all), MP_ROM_PTR(&table_release_all_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_spend_edges), MP_ROM_PTR(&table_spend_edges_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_spend_key), MP_ROM_PTR(&table_spend_key_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_clear_edges), MP_ROM_PTR(&table_clear_edges_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_keep_edges), MP_ROM_PTR(&table_keep_edges_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_tick_edges), MP_ROM_PTR(&table_tick_edges_obj) }, \
@@ -765,6 +767,10 @@ static void table_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         }
         if (attr == MP_QSTR_key_event) {
             dest[0] = MP_OBJ_NEW_SMALL_INT(s->t ? moy_input_key_event(s->t) : 0);
+            return;
+        }
+        if (attr == MP_QSTR_typed) {
+            dest[0] = MP_OBJ_NEW_SMALL_INT(s->t ? moy_input_key_press(s->t) : 0);
             return;
         }
         if (attr == MP_QSTR_mods) {
@@ -889,7 +895,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(input_kernel_obj, input_kernel);
 
 MP_REGISTER_ROOT_POINTER(mp_obj_t moy_input_kernel_obj);
 
-#ifdef MOY_INPUT_BOARD
+#ifdef MOY_ON_BOARD
 // edge(pin, depth=EV_DEPTH, loop=False) -> the pin's edges as a RingSource of
 // the kernel table (moy_edge.h), stamped ISR; its close() frees the pin.
 static mp_obj_t input_edge(size_t n_args, const mp_obj_t *args) {
@@ -1267,7 +1273,6 @@ static mp_obj_t input_pointer_state(mp_obj_t inp, mp_obj_t out) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(input_pointer_state_obj, input_pointer_state);
 
-
 // -- the board's drivers (moy_input_task.c) ------------------------------------------
 //
 // keyboard() -> Keyboard or None: the T-Deck's C3, writing the kernel table's
@@ -1569,7 +1574,6 @@ static mp_obj_t input_trackball(void) {
     return MP_OBJ_FROM_PTR(o);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(input_trackball_obj, input_trackball);
-
 
 // ble() -> the BLE HID keyboard, or None where the board takes no BLE: the
 //   kernel's central (moy_ble_task.c over moy_hid.c), writing the kernel
@@ -1950,7 +1954,8 @@ static MP_DEFINE_CONST_FUN_OBJ_0(input_ball_coast_obj, input_ball_coast);
 // loop's objects went with it: the kernel's table alone, its board drivers
 // kicked and its frame begun, which is every source a stopped run reads (the
 // keys and the buttons the board's input task writes into it).
-bool moy_loop_vm(void) __attribute__((weak));
+#include "moy_loop.h"
+#pragma weak moy_loop_vm
 
 static void loop_inputs_down(uint32_t now, bool *active) {
     moy_input_t *t = moy_input_kernel();
@@ -2072,30 +2077,12 @@ void moy_input_loop_tail(void) {
 
 // -- the module ----------------------------------------------------------------------
 
-// typed(event) -> the byte a key event types, 0 for none (moy_input_typed)
-static mp_obj_t input_typed(mp_obj_t ev) {
-    return MP_OBJ_NEW_SMALL_INT(moy_input_typed((int32_t)mp_obj_get_int(ev)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(input_typed_obj, input_typed);
-
 // event(code, mods=0) -> the key event of `code` typed with `mods` held
 static mp_obj_t input_event(size_t n_args, const mp_obj_t *a) {
     mp_int_t mods = n_args > 1 ? mp_obj_get_int(a[1]) : 0;
     return MP_OBJ_NEW_SMALL_INT(MOY_INPUT_EVENT(mp_obj_get_int(a[0]), mods));
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(input_event_obj, 1, 2, input_event);
-
-// pin_clock(us): the records' clock held at `us` (0: the real one), for tests.
-static mp_obj_t input_pin_clock(mp_obj_t us) {
-    moy_input_pin_clock((uint32_t)mp_obj_get_int_truncated(us));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(input_pin_clock_obj, input_pin_clock);
-
-static mp_obj_t input_hid_usage(mp_obj_t ev) {
-    return MP_OBJ_NEW_SMALL_INT(moy_hid_usage(mp_obj_get_int(ev)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(input_hid_usage_obj, input_hid_usage);
 
 static const mp_rom_map_elem_t moy_input_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_input) },
@@ -2106,7 +2093,7 @@ static const mp_rom_map_elem_t moy_input_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_InputSource), MP_ROM_PTR(&input_source_type) },
     { MP_ROM_QSTR(MP_QSTR_Pointer), MP_ROM_PTR(&input_pointer_type) },
     { MP_ROM_QSTR(MP_QSTR_kernel), MP_ROM_PTR(&input_kernel_obj) },
-    #ifdef MOY_INPUT_BOARD
+    #ifdef MOY_ON_BOARD
     { MP_ROM_QSTR(MP_QSTR_edge), MP_ROM_PTR(&input_edge_obj) },
     #endif
     { MP_ROM_QSTR(MP_QSTR_pointer_state), MP_ROM_PTR(&input_pointer_state_obj) },
@@ -2121,71 +2108,8 @@ static const mp_rom_map_elem_t moy_input_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_loop_bind), MP_ROM_PTR(&input_loop_bind_obj) },
     { MP_ROM_QSTR(MP_QSTR_nav), MP_ROM_PTR(&input_nav_obj) },
     { MP_ROM_QSTR(MP_QSTR_ball_coast), MP_ROM_PTR(&input_ball_coast_obj) },
-    { MP_ROM_QSTR(MP_QSTR_SOURCES), MP_ROM_INT(MOY_INPUT_SOURCES) },
-    { MP_ROM_QSTR(MP_QSTR_RING_SOURCES), MP_ROM_INT(MOY_INPUT_RING_SOURCES) },
-    { MP_ROM_QSTR(MP_QSTR_PLAYERS), MP_ROM_INT(MOY_INPUT_PLAYERS) },
-    { MP_ROM_QSTR(MP_QSTR_UNION), MP_ROM_INT(MOY_INPUT_UNION) },
-    { MP_ROM_QSTR(MP_QSTR_CURSOR_IDLE_MS), MP_ROM_INT(MOY_INPUT_CURSOR_IDLE_MS) },
-    { MP_ROM_QSTR(MP_QSTR_POINTER_LINGER_MS), MP_ROM_INT(MOY_INPUT_POINTER_LINGER_MS) },
-    { MP_ROM_QSTR(MP_QSTR_P_NONE), MP_ROM_INT(MOY_INPUT_P_NONE) },
-    { MP_ROM_QSTR(MP_QSTR_P_LIVE), MP_ROM_INT(MOY_INPUT_P_LIVE) },
-    { MP_ROM_QSTR(MP_QSTR_P_HELD), MP_ROM_INT(MOY_INPUT_P_HELD) },
-    { MP_ROM_QSTR(MP_QSTR_P_CLICK), MP_ROM_INT(MOY_INPUT_P_CLICK) },
-    { MP_ROM_QSTR(MP_QSTR_typed), MP_ROM_PTR(&input_typed_obj) },
+    MOY_FACE_MOY_INPUT_ROWS
     { MP_ROM_QSTR(MP_QSTR_event), MP_ROM_PTR(&input_event_obj) },
-    { MP_ROM_QSTR(MP_QSTR_MODS_AT), MP_ROM_INT(MOY_INPUT_MODS_AT) },
-    { MP_ROM_QSTR(MP_QSTR_CTRL), MP_ROM_INT(MOY_INPUT_MOD_CTRL) },
-    { MP_ROM_QSTR(MP_QSTR_SHIFT), MP_ROM_INT(MOY_INPUT_MOD_SHIFT) },
-    { MP_ROM_QSTR(MP_QSTR_ALT), MP_ROM_INT(MOY_INPUT_MOD_ALT) },
-    { MP_ROM_QSTR(MP_QSTR_SUPER), MP_ROM_INT(MOY_INPUT_MOD_SUPER) },
-    { MP_ROM_QSTR(MP_QSTR_KEY_F1), MP_ROM_INT(MOY_INPUT_KEY_F1) },
-    { MP_ROM_QSTR(MP_QSTR_PB_PRIMARY), MP_ROM_INT(MOY_INPUT_PB_PRIMARY) },
-    { MP_ROM_QSTR(MP_QSTR_PB_MIDDLE), MP_ROM_INT(MOY_INPUT_PB_MIDDLE) },
-    { MP_ROM_QSTR(MP_QSTR_PB_SECONDARY), MP_ROM_INT(MOY_INPUT_PB_SECONDARY) },
-    { MP_ROM_QSTR(MP_QSTR_KEY_LEFT), MP_ROM_INT(MOY_INPUT_KEY_LEFT) },
-    { MP_ROM_QSTR(MP_QSTR_KEY_RIGHT), MP_ROM_INT(MOY_INPUT_KEY_RIGHT) },
-    { MP_ROM_QSTR(MP_QSTR_KEY_UP), MP_ROM_INT(MOY_INPUT_KEY_UP) },
-    { MP_ROM_QSTR(MP_QSTR_KEY_DOWN), MP_ROM_INT(MOY_INPUT_KEY_DOWN) },
-    { MP_ROM_QSTR(MP_QSTR_KEY_PGUP), MP_ROM_INT(MOY_INPUT_KEY_PGUP) },
-    { MP_ROM_QSTR(MP_QSTR_KEY_PGDN), MP_ROM_INT(MOY_INPUT_KEY_PGDN) },
-    { MP_ROM_QSTR(MP_QSTR_pin_clock), MP_ROM_PTR(&input_pin_clock_obj) },
-    { MP_ROM_QSTR(MP_QSTR_hid_usage), MP_ROM_PTR(&input_hid_usage_obj) },
-    { MP_ROM_QSTR(MP_QSTR_EV_VERSION), MP_ROM_INT(MOY_EVENT_VERSION) },
-    { MP_ROM_QSTR(MP_QSTR_EV_FIELDS), MP_ROM_INT(EV_FIELDS) },
-    { MP_ROM_QSTR(MP_QSTR_EV_T), MP_ROM_INT(EV_T) },
-    { MP_ROM_QSTR(MP_QSTR_EV_SRC), MP_ROM_INT(EV_SRC) },
-    { MP_ROM_QSTR(MP_QSTR_EV_KIND), MP_ROM_INT(EV_KIND) },
-    { MP_ROM_QSTR(MP_QSTR_EV_PROV), MP_ROM_INT(EV_PROV) },
-    { MP_ROM_QSTR(MP_QSTR_EV_A), MP_ROM_INT(EV_A) },
-    { MP_ROM_QSTR(MP_QSTR_EV_ID), MP_ROM_INT(EV_ID) },
-    { MP_ROM_QSTR(MP_QSTR_EV_B), MP_ROM_INT(EV_B) },
-    { MP_ROM_QSTR(MP_QSTR_EV_KEY_DOWN), MP_ROM_INT(MOY_EV_KEY_DOWN) },
-    { MP_ROM_QSTR(MP_QSTR_EV_KEY_UP), MP_ROM_INT(MOY_EV_KEY_UP) },
-    { MP_ROM_QSTR(MP_QSTR_EV_TEXT), MP_ROM_INT(MOY_EV_TEXT) },
-    { MP_ROM_QSTR(MP_QSTR_EV_BTN), MP_ROM_INT(MOY_EV_BTN) },
-    { MP_ROM_QSTR(MP_QSTR_EV_TOUCH_DOWN), MP_ROM_INT(MOY_EV_TOUCH_DOWN) },
-    { MP_ROM_QSTR(MP_QSTR_EV_TOUCH_MOVE), MP_ROM_INT(MOY_EV_TOUCH_MOVE) },
-    { MP_ROM_QSTR(MP_QSTR_EV_TOUCH_UP), MP_ROM_INT(MOY_EV_TOUCH_UP) },
-    { MP_ROM_QSTR(MP_QSTR_EV_EDGE), MP_ROM_INT(MOY_EV_EDGE) },
-    { MP_ROM_QSTR(MP_QSTR_EV_UART), MP_ROM_INT(MOY_EV_UART) },
-    { MP_ROM_QSTR(MP_QSTR_EV_LINK), MP_ROM_INT(MOY_EV_LINK) },
-    { MP_ROM_QSTR(MP_QSTR_EV_MEDIA), MP_ROM_INT(MOY_EV_MEDIA) },
-    { MP_ROM_QSTR(MP_QSTR_EV_NET), MP_ROM_INT(MOY_EV_NET) },
-    { MP_ROM_QSTR(MP_QSTR_EV_BLE), MP_ROM_INT(MOY_EV_BLE) },
-    { MP_ROM_QSTR(MP_QSTR_EV_LORA), MP_ROM_INT(MOY_EV_LORA) },
-    { MP_ROM_QSTR(MP_QSTR_EV_WINCH), MP_ROM_INT(MOY_EV_WINCH) },
-    { MP_ROM_QSTR(MP_QSTR_EV_USB), MP_ROM_INT(MOY_EV_USB) },
-    { MP_ROM_QSTR(MP_QSTR_EV_MIDI), MP_ROM_INT(MOY_EV_MIDI) },
-    { MP_ROM_QSTR(MP_QSTR_EV_LOST), MP_ROM_INT(MOY_EV_LOST) },
-    { MP_ROM_QSTR(MP_QSTR_EV_KEYS), MP_ROM_INT(MOY_EV_KEYS) },
-    { MP_ROM_QSTR(MP_QSTR_EV_TOUCH), MP_ROM_INT(MOY_EV_TOUCH) },
-    { MP_ROM_QSTR(MP_QSTR_EV_PAD), MP_ROM_INT(MOY_EV_PAD) },
-    { MP_ROM_QSTR(MP_QSTR_EV_ALL), MP_ROM_INT(MOY_EV_ALL) },
-    { MP_ROM_QSTR(MP_QSTR_PROV_ISR), MP_ROM_INT(MOY_EV_ISR) },
-    { MP_ROM_QSTR(MP_QSTR_PROV_FIFO), MP_ROM_INT(MOY_EV_FIFO) },
-    { MP_ROM_QSTR(MP_QSTR_PROV_POLL), MP_ROM_INT(MOY_EV_POLL) },
-    { MP_ROM_QSTR(MP_QSTR_EV_DEPTH), MP_ROM_INT(MOY_EV_DEPTH) },
-    { MP_ROM_QSTR(MP_QSTR_EV_ISR_DEPTH_MAX), MP_ROM_INT(MOY_EV_ISR_DEPTH_MAX) },
 };
 static MP_DEFINE_CONST_DICT(moy_input_globals, moy_input_globals_table);
 

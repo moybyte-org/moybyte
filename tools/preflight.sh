@@ -48,10 +48,10 @@
 # not a list in a README:
 #
 #   * `make unix-micropython` must run AFTER any `firmware/web_runner/build.sh`,
-#     because the binary bakes the web blob and the cached one is not rebuilt by
-#     a bundle rebuild. Out of order, `tests/test_web_blob.py` fails with a size
-#     mismatch that reads like a generator bug. (Its own assertion message says
-#     so, which is how that afternoon ended.)
+#     because the binary names the web bundle's digest and the cached one is
+#     not rebuilt by a bundle rebuild. Out of order, `tests/test_web_blob.py`
+#     fails with a digest mismatch that reads like a generator bug. (Its own
+#     assertion message says so, which is how that afternoon ended.)
 #   * the redraw tests run ALONE: they assert exact repaint counts against real
 #     wall-clock deadlines, and the top-bar clock legitimately repaints on a
 #     minute rollover, so a long shared run can straddle :00. CI splits them for
@@ -262,8 +262,11 @@ fi
 # job has none and skips it), and a dist/ from before a rebase fails it for
 # code this branch never touched. Then the binary, which bakes that bundle.
 # Not cached-and-skipped: a stale binary is the failure this is here to catch,
-# and a warm build is under a minute.
-step "browser console builds"                       firmware/web_runner/build.sh
+# and a warm build is under a minute. CI builds the browser console and the
+# board images where no desktop MicroPython tree is, so its host library has no
+# inflater's part (runtime/host/host_native.py): NO_INFLATER builds them so here.
+NO_INFLATER=(env MOYHOST_NO_INFLATER=1)
+step "browser console builds"                       "${NO_INFLATER[@]}" firmware/web_runner/build.sh
 [ "${NATIVE}" = "1" ] || step "the CI image and its venv" "${IN[@]}" true
 step "desktop MicroPython with the native usermods" "${IN[@]}" make unix-micropython
 step "docs agree with the tree"                     "${PY}" tools/check_docs.py
@@ -283,7 +286,7 @@ step "headless tour (fresh save dir)" \
 if [ "${WEB}" = "1" ]; then
   # Path-filtered in CI (`web_touched` above). The suites drive the `dist/`
   # built at the top and the site's `dist_site/`, built here as CI builds it.
-  step "the site's browser console builds"       firmware/web_runner/build.sh --site
+  step "the site's browser console builds"       "${NO_INFLATER[@]}" firmware/web_runner/build.sh --site
   step "browser suites in real Chrome, none skipped" browser_suites
 fi
 
@@ -293,7 +296,7 @@ if [ "${FIRMWARE}" = "0" ] && [ "${NOFIRMWARE}" = "0" ] && firmware_touched; the
 fi
 if [ "${FIRMWARE}" = "1" ]; then
   step "every board's image builds, above its headroom floor" \
-    "${PY}" tools/board.py pass --all --build-only
+    "${NO_INFLATER[@]}" "${PY}" tools/board.py pass --all --build-only
 fi
 
 if [ "${fails}" -ne 0 ]; then

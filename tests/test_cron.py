@@ -11,6 +11,7 @@ import pytest
 
 from runtime import cron as C
 from runtime import devices
+from runtime import moy_evq
 from runtime import moy_log as L
 from runtime import moybyte
 from runtime import scheduler as S
@@ -25,11 +26,22 @@ def _at(*ymdhms):
 
 
 class _Clock:
-    """The wall clock the alarms read: Unix seconds a test moves."""
+    """The wall clock the alarms read: Unix seconds a test moves, each move a
+    step of the wall clock the kernel's alarms keep their wall time through
+    (moy_evq_clock)."""
 
     def __init__(self, monkeypatch, t):
-        self.t = t
-        monkeypatch.setattr(wc, "_now", lambda: self.t)
+        self._t = t
+        monkeypatch.setattr(wc, "_now", lambda: self._t)
+
+    @property
+    def t(self):
+        return self._t
+
+    @t.setter
+    def t(self, v):
+        moy_evq.clock(int((v - self._t) * 1000))
+        self._t = v
 
 
 @pytest.fixture(autouse=True)
@@ -52,8 +64,10 @@ def _tick():
     S.SCHED.tick(1_000_000)
 
 
-def _logged(pid):
-    return [(r[2], r[4]) for r in L.read(0, 1 << 30) if r[3] == pid]
+def _logged(pid, seq):
+    """What process `pid` logged from record `seq` on: the ring is the
+    process's, and a pid an earlier test's process held logged there too."""
+    return [(r[2], r[4]) for r in L.read(seq, 1 << 30) if r[3] == pid]
 
 
 def _sh():
@@ -172,13 +186,14 @@ def test_moybyte_at_is_an_alarm_on_the_wall_clock_that_wakes(monkeypatch):
     monkeypatch.setattr(moybyte, "_pid", lambda: 5)
     wid = moybyte.at(clock.t + 60.5, lambda: fired.append(clock.t))
     assert moybyte.WAKES.count(5) == 1
-    out = [0] * 8
+    assert moybyte.WAKES.by_id[wid][moybyte._HOW] == moybyte._TIMER   # the kernel's
     clock.t += 60
-    assert moybyte.WAKES.due(0, out) == 0                 # no earlier than t
+    _tick()
+    assert fired == [] and woke == []                     # no earlier than t
     clock.t += 1
-    assert moybyte.WAKES.due(0, out) == 1 and out[0] == wid and woke == [(5, clock.t)]
-    moybyte.WAKES.call(wid)
-    assert fired == [clock.t] and moybyte.WAKES.count(5) == 0
+    _tick()
+    assert woke == [(5, clock.t)] and fired == [clock.t]
+    assert moybyte.WAKES.count(5) == 0
 
 
 def test_moybyte_at_needs_alarms(monkeypatch):
@@ -237,7 +252,7 @@ def test_a_crontab_line_fires_and_its_output_reaches_the_log(monkeypatch, tmp_pa
     _settle(tab)
     pids = sorted({r[3] for r in L.read(seq, 1 << 30) if L.name(r[3]) == "cron"})
     assert len(pids) == 1
-    assert _logged(pids[0]) == [(L.INFO, "echo tick; echo oops >&2"), (L.INFO, "tick"),
+    assert _logged(pids[0], seq) == [(L.INFO, "echo tick; echo oops >&2"), (L.INFO, "tick"),
                                 (L.ERR, "oops"), (L.INFO, "exit 0")]
     assert tab.due_at == _at(2026, 11, 8, 10, 0)           # the next minute armed
     assert pids[0] not in S.SCHED.procs                    # the job's row went
@@ -314,7 +329,7 @@ def test_the_shell_s_at_and_cron(monkeypatch, tmp_path):
     _tick()
     _settle(tab)
     pids = sorted({r[3] for r in L.read(seq, 1 << 30) if L.name(r[3]) == "at"})
-    assert [_logged(p) for p in pids] == [[(L.INFO, "echo tea time"), (L.INFO, "tea time"),
+    assert [_logged(p, seq) for p in pids] == [[(L.INFO, "echo tea time"), (L.INFO, "tea time"),
                                             (L.INFO, "exit 0")]]
     assert tab.ats == {}
     (ws.system / "crontab").write_text("15 10 * * * echo a\nnope\n")
@@ -335,6 +350,7 @@ def test_kill_interrupts_a_parked_job(monkeypatch, tmp_path):
     tab = C.Cron()
     tab.bind(ws)
     monkeypatch.setattr(C, "CRON", tab)
+    seq = L.next()
     tab.queue.append(("at", "sleep 5; echo never"))
     tab.pump()
     assert tab.job is not None and tab.poll is not None
@@ -346,7 +362,7 @@ def test_kill_interrupts_a_parked_job(monkeypatch, tmp_path):
     t0 = time.monotonic()
     _settle(tab)
     assert time.monotonic() - t0 < 2
-    assert _logged(pid)[-1] == (L.INFO, "exit 130")
+    assert _logged(pid, seq)[-1] == (L.INFO, "exit 130")
     moy_sh.jobs()
 
 

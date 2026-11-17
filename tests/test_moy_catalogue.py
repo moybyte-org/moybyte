@@ -170,7 +170,7 @@ def test_the_seed_runs_after_the_scan_and_reads_only_what_it_writes(tmp_path,
     """The scan's entries carry each present built-in's version, so a seed
     with nothing to write opens no file; one that writes reads back only the
     folders it wrote, and its shelf is the one a catalogue would read."""
-    import builtins
+    import sys
 
     root = str(tmp_path / "carts")
     cat.ensure_dirs(root)
@@ -181,10 +181,12 @@ def test_the_seed_runs_after_the_scan_and_reads_only_what_it_writes(tmp_path,
     assert ([(e["path"], e["h"]) for e in shelf]
             == [(e["path"], e["h"]) for e in cat.catalogue(root)])
 
+    # Every read of a cart: the store's (native/moy_store) entry, load and scan.
     opened = []
-    real = builtins.open
-    monkeypatch.setattr(builtins, "open", lambda p, *a, **k: (
-        opened.append(str(p)), real(p, *a, **k))[1])
+    store = sys.modules["moy_store"]
+    for n in ("entry", "load", "catalogue"):
+        monkeypatch.setattr(store, n, (lambda n, f: lambda p, *a: (
+            opened.append("%s %s/" % (n, p)), f(p, *a))[1])(n, getattr(store, n)))
     assert cat.seed(seed, root, shelf) is shelf
     assert opened == []
 

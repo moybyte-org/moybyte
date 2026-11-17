@@ -46,15 +46,9 @@ try:
 except ImportError:  # pragma: no cover - an image without the kernel
     _L = None
 
-try:
-    import scheduler as _sched
-except ImportError:  # host: the runtime package
-    from runtime import scheduler as _sched
-
-try:
-    import wallclock as _wc
-except ImportError:  # host: the runtime package
-    from runtime import wallclock as _wc
+import scheduler as _sched
+import wallclock as _wc
+from moy_store_base import session_root as _session_root
 
 SHELL = 1
 JOB = "job"                     # a running job's kind in the scheduler's table
@@ -336,10 +330,7 @@ class Cron:
 
     def path(self):
         ws = self.ws
-        try:
-            from moy_docs import system_store_path, CARTS_DIR
-        except ImportError:  # host: the runtime package
-            from runtime.moy_docs import system_store_path, CARTS_DIR
+        from moy_docs import system_store_path, CARTS_DIR
         root = getattr(ws, "carts_root", None) or CARTS_DIR
         return system_store_path(root).rsplit("/", 1)[0] + "/" + NAME
 
@@ -352,7 +343,7 @@ class Cron:
                     return f.read()
             except OSError:
                 return None
-        sd = getattr(self.ws, "_with_sd", None)
+        sd = getattr(self.ws, "with_sd", None)
         return sd(read) if sd is not None else read()
 
     def reload(self):
@@ -510,11 +501,7 @@ class Cron:
             self._end(pid, face, code)
 
     def _host_root(self):
-        try:
-            from terminal_app import _host_root
-        except ImportError:  # host: the runtime package
-            from runtime.terminal_app import _host_root
-        return _host_root(getattr(self.ws, "carts_root", None) or "")
+        return _session_root(getattr(self.ws, "carts_root", None) or "")
 
     def _poll(self):
         job = self.job

@@ -1,0 +1,89 @@
+{
+ "_": "SPEC.md 13: a manifest's format against a host's level. Hand your reader each case's format (null is absent) as a host at the case's level: the cart runs, is refused as a newer console's cart (newer), or is not a moy cart (not moy). Run against moycore by `make -C libmoy manifest-test`.",
+ "cases": [
+  {
+   "name": "the host's level",
+   "format": "moy-1",
+   "level": 1,
+   "verdict": "runs"
+  },
+  {
+   "name": "one above",
+   "format": "moy-2",
+   "level": 1,
+   "verdict": "newer"
+  },
+  {
+   "name": "below the host's",
+   "format": "moy-1",
+   "level": 2,
+   "verdict": "runs"
+  },
+  {
+   "name": "compared as integers: above",
+   "format": "moy-10",
+   "level": 9,
+   "verdict": "newer"
+  },
+  {
+   "name": "compared as integers: below",
+   "format": "moy-9",
+   "level": 10,
+   "verdict": "runs"
+  },
+  {
+   "name": "a leading zero",
+   "format": "moy-01",
+   "level": 1,
+   "verdict": "not moy"
+  },
+  {
+   "name": "level zero",
+   "format": "moy-0",
+   "level": 1,
+   "verdict": "not moy"
+  },
+  {
+   "name": "a sign",
+   "format": "moy-+2",
+   "level": 1,
+   "verdict": "not moy"
+  },
+  {
+   "name": "a minor version",
+   "format": "moy-1.1",
+   "level": 1,
+   "verdict": "not moy"
+  },
+  {
+   "name": "no level",
+   "format": "moy-",
+   "level": 1,
+   "verdict": "not moy"
+  },
+  {
+   "name": "upper case",
+   "format": "MOY-1",
+   "level": 1,
+   "verdict": "not moy"
+  },
+  {
+   "name": "a space after",
+   "format": "moy-1 ",
+   "level": 1,
+   "verdict": "not moy"
+  },
+  {
+   "name": "a number, not a string",
+   "format": 1,
+   "level": 1,
+   "verdict": "not moy"
+  },
+  {
+   "name": "absent",
+   "format": null,
+   "level": 1,
+   "verdict": "not moy"
+  }
+ ]
+}

@@ -13,6 +13,8 @@ network reaching a file that is none of the browser's business.
 """
 
 import json
+import os
+from tests import journal_files as jf
 import socket
 import sys
 import threading
@@ -308,9 +310,20 @@ def _host(tmp_path, **kw):
 
 
 @pytest.fixture
-def baked():
-    """Install a baked bundle (native/moy_web's table) for one test."""
-    return nb._bake
+def baked(tmp_path):
+    """Name a page the way an image does and install the add-on cart that
+    fits it in the `_store` tree, for one test."""
+    def bake(blobs, stamp="0 0 none"):
+        return nb._bake(blobs, stamp, carts=tmp_path / "carts")
+    yield bake
+    nb._bake({})
+
+
+def _paged(r):
+    """The page's own address, from the root's redirect."""
+    head = _head(r)
+    assert b"302" in h_status(r), head
+    return head.split("Location: ", 1)[1].split("\r\n", 1)[0]
 
 
 ASSETS = None
@@ -344,15 +357,38 @@ def test_a_root_a_board_could_not_hold_is_served_on_the_host(tmp_path):
     assert _pull(deep / "carts") == {"hop.moy/main.py": "x = 1\n"}
 
 
-def test_the_root_serves_the_console_page(tmp_path, baked):
-    baked({"index.html.gz": b"\x1f\x8bpage"})
+def test_the_root_sends_the_browser_to_the_page_s_own_address(tmp_path, baked):
+    """`/` names the page by its digest, and everything under that prefix is
+    the same bytes for as long as the digest is: kept for good."""
+    pack = baked({"index.html.gz": b"\x1f\x8bpage"})
+    tag = os.path.basename(os.path.dirname(pack))[len("web_console_"):-len(".moy")]
     h = _host(tmp_path)
     for path in ("/", "/index.html"):
-        r = h.handle_http("GET", path, b"")
-        assert b"200" in h_status(r), path
-        assert "Content-Type: text/html" in _head(r)
-        assert "Content-Encoding: gzip" in _head(r)
-        assert r.endswith(b"\x1f\x8bpage")
+        assert _paged(h.handle_http("GET", path, b"")) == "/p/%s/" % tag
+    r = h.handle_http("GET", "/p/%s/" % tag, b"")
+    assert b"200" in h_status(r)
+    assert "Content-Type: text/html" in _head(r)
+    assert "Content-Encoding: gzip" in _head(r)
+    assert "immutable" in _head(r)
+    assert r.endswith(b"\x1f\x8bpage")
+
+
+def test_a_prefix_naming_another_page_is_served_but_not_kept(tmp_path, baked):
+    """A tab opened before an update asks under the old digest: it gets this
+    image's bytes, which no cache may keep under that name."""
+    baked({"worker.js.gz": b"\x1f\x8bw"})
+    r = _host(tmp_path).handle_http("GET", "/p/000000000000/worker.js", b"")
+    assert b"200" in h_status(r) and r.endswith(b"\x1f\x8bw")
+    assert "no-cache" in _head(r) and "immutable" not in _head(r)
+
+
+def test_the_page_s_requests_route_under_its_prefix(tmp_path, baked):
+    """The page asks for /sync, /carts.json and the rest by relative URLs,
+    so they arrive under the prefix and route as they always did."""
+    baked({"index.html.gz": b"\x1f\x8b"})
+    h = _host(tmp_path)
+    r = h.handle_http("GET", "/p/0123456789ab/carts.json", b"")
+    assert _json(r)["hop.moy/main.py"].startswith("def _draw()")
 
 
 def test_carts_json_is_json_and_live(tmp_path):
@@ -380,18 +416,72 @@ def test_only_the_known_assets_are_reachable(tmp_path, baked):
 
 
 def test_a_query_string_does_not_hide_an_asset(tmp_path, baked):
-    """The page opens itself with `?dev=1`; a served index must survive it."""
+    """The page opens itself with `?dev=1` (and a pairing with `?pin=`): the
+    redirect keeps it, and the page under its prefix answers it."""
     baked({"index.html.gz": b"\x1f\x8bpage"})
-    r = _host(tmp_path).handle_http("GET", "/?dev=1", b"")
+    h = _host(tmp_path)
+    to = _paged(h.handle_http("GET", "/?dev=1", b""))
+    assert to.endswith("/?dev=1")
+    r = h.handle_http("GET", to, b"")
     assert b"200" in h_status(r) and r.endswith(b"page")
 
 
-def test_a_board_with_no_bundle_says_how_to_get_one(tmp_path):
-    """A firmware built with no web bundle looks exactly like a broken feature
-    in a browser. Name the build step, since that is the whole fix."""
+def test_a_console_with_no_add_on_says_where_to_get_it(tmp_path, baked):
+    """The browser console is an add-on cart: a board without it says so, and
+    says where it comes from, which is the whole fix."""
+    pack = baked({"index.html.gz": b"\x1f\x8b"})
+    os.remove(pack)
+    os.rmdir(os.path.dirname(pack))
     r = _host(tmp_path).handle_http("GET", "/", b"")
     assert b"404" in h_status(r)
-    assert b"web_runner/dist" in r and b"reflash" in r
+    assert b"isn't installed" in r and b"Get Carts" in r
+
+
+def test_a_zero_s_root_says_what_it_does_and_links_the_way_back(tmp_path, baked):
+    """A board whose page is its only face (a Zero) says its own sentence
+    where the console is absent (moy_page_say); where its owner removed the
+    console the root links the way back, and following the link is counted
+    (moy_page_asked) for the board to install it again
+    (device/zero_host.way_back)."""
+    pack = baked({"index.html.gz": b"\x1f\x8b"})
+    os.remove(pack)
+    os.rmdir(os.path.dirname(pack))
+    h = _host(tmp_path)
+    try:
+        nb.page_say("This board is fetching its browser console.", 0)
+        r = h.handle_http("GET", "/", b"")
+        assert b"404" in h_status(r) and r.endswith(b"fetching its browser console.")
+        assert b"text/plain" in r
+        nb.page_say("The browser console was removed from this board.", 1)
+        asked = nb.page_asked()
+        r = h.handle_http("GET", "/", b"")
+        assert b"text/html" in r and b"was removed" in r
+        assert b'href="/?console=install"' in r and nb.page_asked() == asked
+        r = h.handle_http("GET", "/?console=install", b"")
+        assert nb.page_asked() == asked + 1
+        assert b"being installed" in r and b"href=" not in r
+    finally:
+        nb.page_say("", 0)
+    r = h.handle_http("GET", "/", b"")
+    assert b"isn't installed" in r and b"Get Carts" in r
+
+
+def test_an_add_on_for_another_image_needs_its_page_updated(tmp_path, baked):
+    """After a firmware update the cart that was installed fits the old
+    image until the one that fits arrives."""
+    pack = baked({"index.html.gz": b"\x1f\x8b"})
+    os.rename(os.path.dirname(pack),
+              os.path.join(os.path.dirname(os.path.dirname(pack)),
+                           "web_console_000000000000.moy"))
+    h = _host(tmp_path)
+    for path in ("/", "/p/000000000000/worker.js"):
+        r = h.handle_http("GET", path, b"")
+        assert b"503" in h_status(r) and b"needs its page updated" in r, path
+
+
+def test_an_image_that_names_no_page_says_so(tmp_path):
+    r = _host(tmp_path).handle_http("GET", "/", b"")
+    assert b"404" in h_status(r) and b"names no browser console" in r
 
 
 def test_a_raw_baked_asset_is_served_without_an_encoding(tmp_path, baked):
@@ -404,13 +494,15 @@ def test_a_raw_baked_asset_is_served_without_an_encoding(tmp_path, baked):
     assert "javascript" in _head(r)
 
 
-def test_the_baked_stamp_answers_which_console_this_board_serves(baked):
+def test_the_stamp_answers_which_console_this_board_serves(tmp_path, baked):
     baked({"index.html.gz": b"x"}, stamp="4 572693 d44b8756bf08")
+    host = _host(tmp_path)
+    host.handle_http("GET", "/", b"")
     assert wh.baked_stamp() == "4 572693 d44b8756bf08"
-    assert "4 572693 d44b8756bf08" in wh.WebHost("/x").source_note()
+    assert "4 572693 d44b8756bf08" in host.source_note()
     baked({})
     assert wh.baked_stamp() is None
-    assert "NONE" in wh.WebHost("/x").source_note()
+    assert "names no browser console" in host.source_note()
 
 
 @pytest.mark.parametrize("name", _assets())
@@ -419,7 +511,7 @@ def test_every_allowlisted_asset_has_a_sane_content_type(tmp_path, baked, name):
     booting and the browser refusing to instantiate it -- and it fails only in
     a real browser, which is the expensive place to find out."""
     baked({name + ".gz": b"\x1f\x8bx"})
-    ctype = _head(_host(tmp_path).handle_http("GET", "/" + name, b""))
+    ctype = _head(_host(tmp_path).handle_http("GET", "/p/0123456789ab/" + name, b""))
     ctype = [l for l in ctype.split("\r\n") if l.startswith("Content-Type")][0]
     if name.endswith(".wasm"):
         assert ctype == "Content-Type: application/wasm"
@@ -429,17 +521,19 @@ def test_every_allowlisted_asset_has_a_sane_content_type(tmp_path, baked, name):
         assert "text/html" in ctype
 
 
-def test_an_asset_is_never_cached(tmp_path, baked):
+def test_an_asset_outside_the_page_s_prefix_is_revalidated(tmp_path, baked):
     """The regression that shipped once: a day-long cache on files whose whole
-    delivery mechanism is a new build."""
+    delivery mechanism is a new build. Only an address naming the page's
+    digest may be kept."""
     baked({"worker.js.gz": b"\x1f\x8bx"})
-    assert "no-store" in _head(_host(tmp_path).handle_http("GET", "/worker.js", b""))
+    head = _head(_host(tmp_path).handle_http("GET", "/worker.js", b""))
+    assert "no-cache" in head and "immutable" not in head
 
 
-def test_the_bundle_send_drains_nothing(tmp_path, baked):
-    """The T-Deck's drain exists because its card shares the panel's SPI host.
-    The baked bundle is in flash and races nothing, so serving it waits on no
-    band in flight."""
+def test_the_pack_is_read_through_the_store_s_gate(tmp_path, baked):
+    """The pack is a file of the store: each piece is read under
+    moy_vol_gate_enter, which drains the panel's flush where a board's card
+    shares its bus. The webhost adds no drain of its own, and /sync none."""
     baked({"worker.js.gz": b"\x1f\x8bx"})
     h = _host(tmp_path)
     before = nb._drains()
@@ -551,6 +645,117 @@ def test_a_request_the_vm_answers_is_parked_and_answered(serving):
     assert seen == ["hop"]
 
 
+def test_a_parked_body_the_vms_heap_cannot_hold_is_busy_not_fatal(serving, monkeypatch):
+    """The poll copies a parked request's body into the VM's heap, which on a
+    board with no PSRAM may not hold it. That is a 503 the page sends again,
+    and the next request is served: a MemoryError out of the poll would end
+    the loop that serves the board."""
+    seen = []
+    h = serving(on_run=lambda name: (seen.append(name), "Hop")[1])
+    take = wh.moy_net.web_take
+
+    def full():
+        take()
+        raise MemoryError
+
+    monkeypatch.setattr(wh.moy_net, "web_take", full)
+    got = _exchange(h, b'POST /run HTTP/1.1\r\nContent-Length: 15\r\n\r\n{"cart": "hop"}')
+    assert b"503" in h_status(got) and b"busy" in got
+    monkeypatch.setattr(wh.moy_net, "web_take", take)
+    got = _exchange(h, b'POST /run HTTP/1.1\r\nContent-Length: 15\r\n\r\n{"cart": "hop"}')
+    assert b"200" in h_status(got) and seen == ["hop"]
+
+
+class _Parking:
+    """_exchange's host for a bare kernel listener: each parked request is
+    noted and answered 200, as the VM's poll would."""
+
+    def __init__(self, port):
+        self.port = port
+        self.seen = []
+        self.bodies = []
+
+    def poll(self):
+        nb.web_poll()
+        req = nb.web_take()
+        if req is not None:
+            self.seen.append((req[0], req[1].split("?", 1)[0]))
+            self.bodies.append(req[2])
+            nb.web_answer(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n"
+                          b"Connection: close\r\n\r\nok")
+
+
+def test_the_setup_forms_host_parks_every_request_in_the_clear(tmp_path):
+    """The setup form's host defers "*" (device/zero_setup.py) and runs before
+    the board has a sign-in. A board refuses a sealed route whatever its
+    sign-in, and a deferred route was sealed, so every request the setup form
+    got was 401 {"error": "session"} and no Zero could be set up. A sign-in
+    folder here stands for the board's closed default, which the host's
+    open default (no folder) would hide."""
+    (tmp_path / "system").mkdir()
+    port = free_port()
+    nb.web_start(port, "/", None, None, str(tmp_path / "system"), ["*"])
+    try:
+        h = _Parking(port)
+        for raw in (b"GET / HTTP/1.1\r\n\r\n",
+                    b"GET /generate_204 HTTP/1.1\r\n\r\n",
+                    b"GET /carts.json HTTP/1.1\r\n\r\n",
+                    b"POST /setup HTTP/1.1\r\nContent-Length: 3\r\n\r\na=b"):
+            got = _exchange(h, raw)
+            assert b"200" in h_status(got), got
+        assert h.seen == [("GET", "/"), ("GET", "/generate_204"), ("GET", "/carts.json"),
+                          ("POST", "/setup")]
+    finally:
+        nb.web_stop()
+
+
+def test_a_parked_body_longer_than_the_kept_head_reaches_the_vm_whole(tmp_path):
+    """A head and a short body are read into the host's kept bytes; a longer
+    body gets a buffer of its own that lives while its request is parked and
+    goes back when the VM answers (moy_webhost.c, HEAD_CAP). The request after
+    it reads into the kept bytes again, and one past MOY_HTTP_REQ_MAX is still
+    cut there."""
+    port = free_port()
+    nb.web_start(port, "/", None, None, None, ["*"])
+    try:
+        h = _Parking(port)
+        body = bytes(range(256)) * 160                      # 40 KB, every byte value
+        for raw in (b"POST /setup HTTP/1.1\r\nContent-Length: %d\r\n\r\n" % len(body) + body,
+                    b"POST /setup HTTP/1.1\r\nContent-Length: 3\r\n\r\na=b"):
+            got = _exchange(h, raw)
+            assert b"200" in h_status(got), got
+        assert h.bodies == [body, b"a=b"]
+        head = b"POST /setup HTTP/1.1\r\nContent-Length: 70000\r\n\r\n"
+        c = socket.create_connection(("127.0.0.1", port), timeout=5)
+        c.sendall(head + b"y" * 70000)
+        # a close with bytes unread is a reset, which may lose the answer: what
+        # the VM was handed is the check
+        for _ in range(400):
+            h.poll()
+            if len(h.bodies) == 3:
+                break
+            time.sleep(0.005)
+        c.close()
+        assert h.bodies[-1] == b"y" * (65536 - len(head))
+    finally:
+        nb.web_stop()
+
+
+def test_a_consoles_deferred_route_stays_sealed(tmp_path):
+    """Only "*" opens the deferral: a console's named one (/run) still asks
+    for a session before the VM sees it."""
+    (tmp_path / "system").mkdir()
+    port = free_port()
+    nb.web_start(port, str(_store(tmp_path)), None, None, str(tmp_path / "system"), ["/run"])
+    try:
+        h = _Parking(port)
+        got = _exchange(h, b"POST /run HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}")
+        assert b"401" in h_status(got) and b"session" in got
+        assert h.seen == []
+    finally:
+        nb.web_stop()
+
+
 def test_a_parked_request_nobody_takes_is_a_503(tmp_path):
     """A VM gone mid-request (a soft reset) must not leave the browser hanging:
     the kernel answers it itself once the window is out."""
@@ -599,6 +804,9 @@ def test_a_host_the_kernel_kept_serving_is_adopted(serving):
 
     class _WS:
         wifi = None
+
+        def __init__(self):
+            self.spine = self       # the console's spine, answered here
 
         def wifi_hold(self, tag):
             held.append(tag)
@@ -682,7 +890,7 @@ def test_a_push_extends_the_carts_own_journal(tmp_path):
         r = h.handle_http("POST", "/sync",
                           _batch({"p": "hop.moy/main.py", "t": src}))
         assert b"200" in r.split(b"\r\n")[0]
-    entries = moy_journal._journal_load_entries(
+    entries = jf.entries(
         str(root / "hop.moy" / "journal" / "journal.jsonl"))
     assert [e["seq"] for e in entries] == [1, 2, 3], entries
     # ...and they are real commits: the console's UNDO walks one back.
@@ -1020,13 +1228,13 @@ def test_the_row_shows_the_ADDRESS_not_just_ON(tmp_path):
     reading "ON" would be telling the kid to go find the IP somewhere else."""
     ws = _ws(tmp_path)
     ws.webhost = _FakeHost()
-    assert ws.webhost_label() == "OFF"
-    ws.toggle_webhost()
-    assert ws.webhost_serving() is True
-    assert ws.webhost_label() == "192.168.1.151"   # scheme stripped
-    ws.toggle_webhost()
-    assert ws.webhost_serving() is False
-    assert ws.webhost_label() == "OFF"
+    assert ws.web.label() == "OFF"
+    ws.web.toggle()
+    assert ws.web.serving() is True
+    assert ws.web.label() == "192.168.1.151"   # scheme stripped
+    ws.web.toggle()
+    assert ws.web.serving() is False
+    assert ws.web.label() == "OFF"
 
 
 def test_a_failed_start_shows_its_reason_and_does_not_raise(tmp_path):
@@ -1035,16 +1243,16 @@ def test_a_failed_start_shows_its_reason_and_does_not_raise(tmp_path):
     a toggle; the row is this feature's only surface, so it carries the news."""
     ws = _ws(tmp_path)
     ws.webhost = _FakeHost(fail="no wifi")
-    ws.toggle_webhost()
-    assert ws.webhost_serving() is False
-    assert "no wifi" in ws.webhost_label()
+    ws.web.toggle()
+    assert ws.web.serving() is False
+    assert "no wifi" in ws.web.label()
 
 
 def test_the_verbs_are_safe_with_no_service(tmp_path):
     ws = _ws(tmp_path)
-    assert ws.webhost_serving() is False
-    assert ws.webhost_label() == "OFF"
-    ws.toggle_webhost()                     # must not raise
+    assert ws.web.serving() is False
+    assert ws.web.label() == "OFF"
+    ws.web.toggle()                     # must not raise
 
 
 
@@ -1161,9 +1369,7 @@ def test_the_sign_in_folder_is_read_at_START_not_at_construction(tmp_path):
     class _WS:
         wifi = None
         carts_root = None
-
-        def rescan_carts(self, folders=None):
-            pass
+        carts = None
 
         def launch_named(self, name):
             return None
@@ -1238,11 +1444,11 @@ def test_turning_the_row_on_parks_the_glass_and_off_returns_it(tmp_path):
     and turning it off gives the console back."""
     ws = _mode_ws(tmp_path)
     assert ws.wm.top_kind() == "launcher"
-    ws.toggle_webhost()
+    ws.web.toggle()
     assert ws.wm.top_kind() == "webconsole" and ws.web.parked is True
-    ws.toggle_webhost()
+    ws.web.toggle()
     assert ws.wm.top_kind() == "launcher" and ws.web.parked is False
-    assert ws.webhost_serving() is False
+    assert ws.web.serving() is False
 
 
 def test_a_failed_start_does_not_park(tmp_path):
@@ -1252,9 +1458,9 @@ def test_a_failed_start_does_not_park(tmp_path):
     ws = _ws(tmp_path)
     ws.webhost = _ModeHost(fail="no wifi")
     ws.open_settings()
-    ws.toggle_webhost()
+    ws.web.toggle()
     assert ws.wm.top_kind() == "settings" and ws.web.parked is False
-    assert "no wifi" in ws.webhost_label()
+    assert "no wifi" in ws.web.label()
 
 
 def test_wasm_mode_holds_the_radio_and_lets_it_go_with_the_socket(tmp_path):
@@ -1265,11 +1471,11 @@ def test_wasm_mode_holds_the_radio_and_lets_it_go_with_the_socket(tmp_path):
     closes for one saying goodbye (the test after this one)."""
     ws = _mode_ws(tmp_path)
     assert ws.wifi.radio is False
-    ws.toggle_webhost()
-    assert ws.webhost_serving() and "web" in ws.leases.holders()
+    ws.web.toggle()
+    assert ws.web.serving() and "web" in ws.leases.holders()
     assert ws.wifi.radio is True
-    ws.toggle_webhost()
-    assert not ws.webhost_serving()
+    ws.web.toggle()
+    assert not ws.web.serving()
     assert ws.leases.holders() == [] and ws.wifi.radio is False
 
 
@@ -1280,8 +1486,8 @@ def test_a_failed_start_holds_no_radio(tmp_path):
     ws = _ws(tmp_path)
     ws.webhost = _ModeHost(fail="no wifi")
     ws.open_settings()
-    ws.toggle_webhost()
-    assert "no wifi" in ws.webhost_label()
+    ws.web.toggle()
+    assert "no wifi" in ws.web.label()
     assert ws.leases.holders() == [] and ws.wifi.radio is False
 
 
@@ -1294,14 +1500,14 @@ def test_the_goodbye_window_keeps_the_radio_until_the_socket_closes(tmp_path):
     kernel's STOPPED event fires."""
     ws = _ws(tmp_path)
     h = wh.WebHost(str(_store(tmp_path)), port=0,
-                   on_stop=lambda: ws.wifi_release("web"))
+                   on_stop=lambda: ws.spine.wifi_release("web"))
     h.update = None
     ws.webhost = h
-    ws.wifi_hold("web")
+    ws.spine.wifi_hold("web")
     h.start(ip="10.0.0.5")
     ws.web.park()
 
-    ws.stop_web_console()                   # the connection screen's TURN OFF
+    ws.web.stop()                   # the connection screen's TURN OFF
     assert h.serving is False and h.closing == "off"
     assert not ws.web.parked
     assert "web" in ws.leases.holders(), "let go before the goodbye was said"
@@ -1321,7 +1527,7 @@ def test_every_board_wires_the_release_to_the_socket(tmp_path):
     release lives there and not in four board files."""
     ws = _ws(tmp_path)
     h = wh.make_webhost(ws, str(_store(tmp_path)), port=free_port())
-    ws.wifi_hold("web")
+    ws.spine.wifi_hold("web")
     h.start(ip="127.0.0.1")
     assert h.serving
     h.stop()                                # a bare stop: the socket is gone
@@ -1337,8 +1543,8 @@ def test_park_sets_the_flag_before_it_hands_the_glass_over(tmp_path):
     ws = _mode_ws(tmp_path)
     seen = []
     ws.web.ui.on_enter = lambda: seen.append(("on_enter", ws.web.parked))
-    ws.go_home = lambda: seen.append(("go_home", ws.web.parked))
-    ws.park_web_console()
+    ws.home.go_home = lambda: seen.append(("go_home", ws.web.parked))
+    ws.web.park()
     assert seen == [("on_enter", True), ("go_home", True)]
 
 
@@ -1348,10 +1554,10 @@ def test_go_home_re_parks_exactly_while_the_flag_is_set(tmp_path):
     cart, the bar's X, a crash and the pause menu's Quit to all land back here."""
     ws = _mode_ws(tmp_path)
     ws.web.parked = True
-    ws.go_home()
+    ws.home.go_home()
     assert ws.wm.top_kind() == "webconsole"
     ws.web.parked = False
-    ws.go_home()
+    ws.home.go_home()
     assert ws.wm.top_kind() == "launcher"
 
 
@@ -1359,7 +1565,7 @@ def test_turn_off_stops_the_host_before_it_gives_the_glass_back(tmp_path):
     """ORDER again, and the reason the mode exists: unparking first would put a
     kid on a launcher over a store a browser is still free to write."""
     ws = _mode_ws(tmp_path)
-    ws.toggle_webhost()
+    ws.web.toggle()
     seen = []
     unpark = ws.web.unpark
 
@@ -1368,17 +1574,17 @@ def test_turn_off_stops_the_host_before_it_gives_the_glass_back(tmp_path):
         unpark()
 
     ws.web.unpark = _unpark
-    ws.stop_web_console()
+    ws.web.stop()
     assert seen == [False], "the glass came back while the host still served"
-    assert ws.web.parked is False and ws.webhost_serving() is False
+    assert ws.web.parked is False and ws.web.serving() is False
 
 
 def test_the_parked_screen_owns_the_glass_and_claims_every_event(tmp_path):
     """A parked surface that let events through would route them to a launcher
     the kid cannot see."""
     ws = _mode_ws(tmp_path)
-    ws.toggle_webhost()
-    layer = ws._content_layer()
+    ws.web.toggle()
+    layer = ws.content_layer()
     assert layer.id == "webconsole" and layer.domain == "system"
     assert layer.handle_pointer(0, 0, False) is True
     assert layer in ws.wm.draw_stack()
@@ -1388,15 +1594,15 @@ def test_the_parked_screen_is_static_so_the_redraw_gate_closes(tmp_path):
     """#44: nothing here animates, so an idle connection screen costs the board
     zero painted frames -- and it may sit on a desk for an hour."""
     ws = _mode_ws(tmp_path)
-    ws.toggle_webhost()
+    ws.web.toggle()
     ws.frame(1 / 30.0)
-    ws._splash_until = None                  # the boot logo animates on its own
+    ws.splash_until = None                  # the boot logo animates on its own
     settle_badges(ws)
-    ws._toast_until = 0
-    ws._dirty = False
+    ws.toast_until = 0
+    ws.frame_state.dirty = False
     ws.pointer.visible = False
-    ws._last_ptr = ws._ptr_state()
-    assert ws._animating(1 / 30.0) is False, "the connection screen animates"
+    ws.last_ptr = ws.ptr_state()
+    assert ws.animating(1 / 30.0) is False, "the connection screen animates"
     assert ws._needs_redraw(1 / 30.0) is False
 
 
@@ -1419,12 +1625,12 @@ def _turn_off_by_its_button(ws):
     ui = ws.web.ui
     ui_draw.input_kind("touch")
     try:
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(1 / 30.0)
         x, y, w, h = ui.host.box("Turn off")
         ui.handle_pointer(x + 2, y + 2, True)
         for _ in range(2):                   # the press, then its release
-            ws._dirty = True
+            ws.mark_dirty()
             ws.frame(1 / 30.0)
     finally:
         ui_draw.input_kind("keys")
@@ -1436,14 +1642,14 @@ def test_the_page_always_shows_the_address_and_how_to_sign_in(tmp_path, monkeypa
     33). The token stays in the code: it is a credential, never shown as text."""
     from runtime import ui
     ws = _mode_ws(tmp_path)
-    ws.toggle_webhost()
+    ws.web.toggle()
     said = []
     real = ui.label
     monkeypatch.setattr(ui, "label", lambda t, o=None: (said.append((t, (o or {}).get("face"))),
                                                          real(t, o))[1])
-    ws._dirty = True
+    ws.mark_dirty()
     ws.frame(1 / 30.0)
-    url = ws.web_console_url()
+    url = ws.web.url()
     host = url.replace("http://", "").split("#")[0]
     assert (host.rstrip("/"), "mono") in said
     assert (ws.web.sign_in_hint(), "caption") in said
@@ -1455,13 +1661,13 @@ def test_back_and_the_turn_off_button_turn_it_off(tmp_path):
     screen -- a mode with no visible way out is a trap. Back (K on the
     T-Deck, Esc) turns it off; a touch glass adds the button."""
     ws = _mode_ws(tmp_path)
-    ws.toggle_webhost()
+    ws.web.toggle()
     ws.web.ui.handle_input(_Back())
-    assert ws.webhost_serving() is False
+    assert ws.web.serving() is False
     assert ws.wm.top_kind() == "launcher"
-    ws.toggle_webhost()
+    ws.web.toggle()
     _turn_off_by_its_button(ws)
-    assert ws.webhost_serving() is False
+    assert ws.web.serving() is False
     assert ws.wm.top_kind() == "launcher"
 
 
@@ -1471,11 +1677,11 @@ def test_turn_off_still_turns_OFF_when_the_host_died_underneath(tmp_path):
     way out that turns it on, on the one screen whose whole job is being the
     way out."""
     ws = _mode_ws(tmp_path)
-    ws.toggle_webhost()
+    ws.web.toggle()
     ws.webhost.stop()                        # the host dies under the screen
-    assert ws.webhost_serving() is False and ws.web.parked is True
+    assert ws.web.serving() is False and ws.web.parked is True
     ws.web.ui.handle_input(_Back())
-    assert ws.webhost_serving() is False, "turning it off restarted the host"
+    assert ws.web.serving() is False, "turning it off restarted the host"
     assert ws.wm.top_kind() == "launcher"
 
 
@@ -1484,8 +1690,8 @@ def test_the_qr_encodes_the_paired_url(tmp_path):
     reconstructed address -- and re-encodes only when it changes."""
     from runtime import moy_qr
     ws = _mode_ws(tmp_path)
-    ws.toggle_webhost()
-    url = ws.web_console_url()
+    ws.web.toggle()
+    url = ws.web.url()
     first = ws.web.ui.matrix(url)
     assert first == moy_qr.encode(url)
     assert ws.web.ui.matrix(url) is first, "re-encoded an unchanged url"
@@ -1500,12 +1706,12 @@ def test_the_windowed_tier_parks_FULLSCREEN_not_in_a_window(tmp_path):
     from ws_helpers import build_desktop_ws
     ws = build_desktop_ws(tmp_path)
     ws.webhost = _ModeHost()
-    ws.open_desk()
+    ws.home.open_desk()
     assert ws.wm.desk_open() is True
-    ws.toggle_webhost()
+    ws.web.toggle()
     assert ws.wm.top_kind() == "webconsole"
     assert ws.wm.desk_open() is False, "the connection screen became a window"
-    ws.toggle_webhost()
+    ws.web.toggle()
     assert ws.wm.desk_open() is True, "the desk is home on this tier"
     assert "webconsole" not in ws.wm.stack.kinds(), \
         "the connection screen stayed under the desk"
@@ -1623,9 +1829,9 @@ def test_launch_named_takes_a_title_or_a_folder(tmp_path):
     ws = _ws(tmp_path)
     for name in ("Star Catcher", "star_catcher", "moybyte.star_catcher.moy",
                  "star catch"):
-        assert ws.launch_named(name) == "Star Catcher", name
-        ws.go_home()
-    assert ws.launch_named("no such cart anywhere") is None
+        assert ws.home.launch_named(name) == "Star Catcher", name
+        ws.home.go_home()
+    assert ws.home.launch_named("no such cart anywhere") is None
 
 
 def test_launch_named_prefers_an_exact_match_to_a_partial_one(tmp_path):
@@ -1634,8 +1840,8 @@ def test_launch_named_prefers_an_exact_match_to_a_partial_one(tmp_path):
     ws = _ws(tmp_path)
     titles = [c["title"] for c in ws.launcher.items if c.get("path")]
     for t in titles:
-        assert ws.launch_named(t) == t, titles
-        ws.go_home()
+        assert ws.home.launch_named(t) == t, titles
+        ws.home.go_home()
 
 
 def test_launch_named_survives_a_name_that_is_not_a_string(tmp_path):
@@ -1644,18 +1850,18 @@ def test_launch_named_survives_a_name_that_is_not_a_string(tmp_path):
     takes the poll down with the whole session."""
     ws = _ws(tmp_path)
     for junk in (7, 3.5, True, {"a": 1}, ["x"]):
-        assert ws.launch_named(junk) is None, junk
+        assert ws.home.launch_named(junk) is None, junk
         assert ws.wm.top_kind() == "launcher", junk
     # None is not junk -- it is the dev channel's `run` with no argument, which
     # plays the first real cart.
-    assert ws.launch_named(None) is not None
+    assert ws.home.launch_named(None) is not None
 
 
 def test_launch_named_never_picks_a_pseudo_tile(tmp_path):
     """The pinned Make/+New cards carry no store path; running one would open
     an editor at a browser's request."""
     ws = _ws(tmp_path)
-    title = ws.launch_named("")
+    title = ws.home.launch_named("")
     assert title and any(c.get("path") and c["title"] == title
                          for c in ws.launcher.items)
 
@@ -1665,12 +1871,12 @@ def test_a_cart_launched_from_the_browser_exits_BACK_to_the_screen(tmp_path):
     through go_home, so the exit gesture, the bar's X and a crash all land back
     on the connection screen rather than on a shelf the browser is rewriting."""
     ws = _mode_ws(tmp_path)
-    ws.toggle_webhost()
-    assert ws.launch_named("Star Catcher") == "Star Catcher"
+    ws.web.toggle()
+    assert ws.home.launch_named("Star Catcher") == "Star Catcher"
     assert ws.wm.top_kind() == "desktop", "the cart did not start"
-    ws._exit_to_caller()
+    ws.spine.exit_to_caller()
     assert ws.wm.top_kind() == "webconsole"
-    assert ws.webhost_serving() is True, "the exit stopped the host"
+    assert ws.web.serving() is True, "the exit stopped the host"
 
 
 def test_leaving_the_mode_from_inside_a_cart_gives_the_console_back(tmp_path):
@@ -1678,11 +1884,11 @@ def test_leaving_the_mode_from_inside_a_cart_gives_the_console_back(tmp_path):
     browser-launched cart plays must clear the mode, not leave the flag set for
     the next exit to trip over."""
     ws = _mode_ws(tmp_path)
-    ws.toggle_webhost()
-    ws.launch_named("Star Catcher")
-    ws.toggle_webhost()
+    ws.web.toggle()
+    ws.home.launch_named("Star Catcher")
+    ws.web.toggle()
     assert ws.web.parked is False
-    ws._exit_to_caller()
+    ws.spine.exit_to_caller()
     assert ws.wm.top_kind() == "launcher"
 
 
@@ -1690,8 +1896,8 @@ def test_the_dev_channel_run_uses_the_same_lookup():
     """ONE author for the cart lookup: a name that works over serial works from
     the page, and neither can grow its own idea of what a cart is called."""
     src = runtime_file("dev_channel.py").read_text()
-    assert "ws.launch_named(" in src
-    assert "ws.launch_selected()" not in src, "the dev channel re-grew a lookup"
+    assert "ws.home.launch_named(" in src
+    assert "ws.home.launch_selected()" not in src, "the dev channel re-grew a lookup"
 
 
 # -- the goodbye ------------------------------------------------------------
@@ -1889,18 +2095,18 @@ def test_the_console_parks_when_the_join_arrives_and_not_before(tmp_path):
     ws = _ws(tmp_path)
     nb._link(None)
     ws.webhost = wh.make_webhost(ws, str(_store(tmp_path)), port=free_port())
-    ws.toggle_webhost()
+    ws.web.toggle()
     assert ws.webhost.joining and not ws.web.parked
-    assert ws.webhost_label() == "JOINING..."
+    assert ws.web.label() == "JOINING..."
     nb._link("10.2.0.4")
     ws.webhost.poll()
     try:
-        assert ws.web.parked and ws.webhost_serving()
+        assert ws.web.parked and ws.web.serving()
         assert nb.wc_state()[1] is True, "the park is the kernel's flag"
     finally:
-        ws.toggle_webhost()
+        ws.web.toggle()
         nb._link(None)
-    assert not ws.web.parked and ws.webhost_label() == "OFF"
+    assert not ws.web.parked and ws.web.label() == "OFF"
 
 
 def test_the_goodbye_ends_with_the_switch_off(tmp_path):

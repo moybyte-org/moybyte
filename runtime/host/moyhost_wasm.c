@@ -280,7 +280,7 @@ const moy_app_run_t *moy_app_wasm_run_of(void *e)
     return NULL;
 }
 
-/* The canvas the ui rows draw on (native/moy_ui/moy_ui_wasm.h): the live
+/* The canvas the ui rows draw on (native/moy_ui/moy_ui_run.h): the live
  * run's draw target, an owed or kept frame written in first, as the board's
  * module does. */
 void *moycore_ui_target(void)

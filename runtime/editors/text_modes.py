@@ -27,10 +27,7 @@ there would lie about the file.
 
 import json as _json
 
-try:
-    import moy_carts as _store
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import moy_carts as _store
+import moy_carts as _store
 
 
 MD = "md"

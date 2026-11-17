@@ -1,23 +1,13 @@
 // moy_sh_face: the Terminal's face. moy_sh_face.h has the contract.
 
+#include "moy_platform.h"
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#if __has_include("esp_timer.h")
-#include "esp_timer.h"
-#define NOW_MS() ((uint32_t)(esp_timer_get_time() / 1000))
-#else
-#include <time.h>
-static uint32_t now_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
-}
-#define NOW_MS() now_ms()
-#endif
-
+#include "moy_codec.h"
 #include "moy_sh_app.h"
 #include "moy_sh_board.h"
 #include "moy_sh_face.h"
@@ -36,8 +26,12 @@ static uint32_t now_ms(void) {
 
 // The T-Deck's keyboard: whether its matrix types `c`, plain or with Sym
 // (native/moy_input/moy_kbd.c). Weak, so a build without the driver links.
-int moy_kbd_raw_key(size_t i, uint8_t *byte, uint8_t *bit, uint8_t *key, uint8_t *sym)
-    __attribute__((weak));
+#if __has_include("moy_drivers.h")
+#include "moy_drivers.h"
+#else
+int moy_kbd_raw_key(size_t i, uint8_t *byte, uint8_t *bit, uint8_t *key, uint8_t *sym);
+#endif
+#pragma weak moy_kbd_raw_key
 
 struct moy_sh_face {
     moy_sh_screen_t *scr;
@@ -91,14 +85,6 @@ static moy_ui_span_t span_n(const char *p, size_t n) {
 
 static moy_ui_span_t span(const char *p) {
     return span_n(p, strlen(p));
-}
-
-static int utf8_len(const char *p, size_t n) {
-    int k = 0;
-    for (size_t i = 0; i < n; i++) {
-        k += ((unsigned char)p[i] & 0xC0) != 0x80;
-    }
-    return k;
 }
 
 // -- the session -------------------------------------------------------------------
@@ -687,7 +673,7 @@ int moy_sh_face_input(moy_sh_face_t *f, int desk, int32_t key, int32_t repeats,
         f->in_row = 0;
     }
     int hit = 0, enter = 0;
-    if (app_of(f) != NULL && moy_sh_app_tick(app_of(f), NOW_MS())) {
+    if (app_of(f) != NULL && moy_sh_app_tick(app_of(f), (uint32_t)moy_now_ms())) {
         hit = 1;
     }
     if (full_app(f) != NULL) {
@@ -890,7 +876,7 @@ static int is_arrow(const char *name) {
 // A key's width in units: a word (an app's Save, Exit) three, Tab and the
 // arrows two, a symbol one.
 static int32_t units_of(const char *label) {
-    int n = utf8_len(label, strlen(label));
+    int n = (int)moy_utf8_count(label, strlen(label));
     return n > 3 && !is_arrow(label) ? 3 : n > 2 ? 2 : 1;
 }
 
@@ -1151,7 +1137,7 @@ int moy_sh_face_draw(moy_sh_face_t *f, moy_ui_ctx_t *c, const moy_ui_sink_t *s,
     char p[MOY_SH_FACE_LINE];
     size_t pn = prompt_of(f, p, sizeof p);
     snprintf(f->prompt_row, sizeof f->prompt_row, "%s%s%s%s%s", ECHO, p, TYPED, f->line, PLAIN);
-    int32_t caret = utf8_len(p, pn) + utf8_len(f->line, (size_t)f->col);
+    int32_t caret = (int32_t)(moy_utf8_count(p, pn) + moy_utf8_count(f->line, (size_t)f->col));
     int32_t left = cols > 2 && caret - cols + 2 > 0 ? caret - cols + 2 : 0;
     int32_t popt[MOY_UI_TXO_LEN] = MOY_UI_TXO_DEFAULTS;
     popt[MOY_UI_TXO_CARET_LINE] = 0;

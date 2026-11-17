@@ -62,20 +62,20 @@ def _objects(cc, out):
                            "-I", SH, "-I", DASH, "-I", STORE]
     jobs = [(src, dash_flags) for src in shell_sources()]
     jobs.append((os.path.join(SH, "moy_sh_arena.c"), CFLAGS + ["-I", SH]))
-    jobs.append((os.path.join(SH, "moy_sh_fmt.c"), CFLAGS + ["-I", SH]))
+    jobs.append((os.path.join(SH, "moy_sh_fmt.c"), CFLAGS + ["-I", SH, "-I", SPINE]))
     jobs.append((os.path.join(SH, "moy_sh_cands.c"), CFLAGS + ["-I", SH]))
     jobs.append((os.path.join(SH, "host", "sh_main.c"), CFLAGS + ["-I", SH, "-I", KERNEL]))
     board = CFLAGS + ["-I", SH, "-I", KERNEL, "-I", STORE, "-I", SPINE]
     for name in BOARD_SOURCES:
         jobs.append((os.path.join(SH, name), board))
     jobs.append((os.path.join(SH, "host", "board_main.c"), board))
-    jobs.append((os.path.join(STORE, "moy_vol.c"), CFLAGS + ["-I", STORE]))
-    jobs.append((os.path.join(STORE, "moy_store_host.c"), CFLAGS + ["-I", STORE]))
-    jobs.append((os.path.join(STORE, "moy_fs.c"), CFLAGS + ["-I", STORE]))
-    for name in ("moy_shelf.c", "moy_cat.c", "moy_files.c"):
-        jobs.append((os.path.join(STORE, name), CFLAGS + ["-I", STORE, "-I", SPINE]))
-    jobs.append((os.path.join(SPINE, "moy_settings.c"), CFLAGS + ["-I", SPINE]))
-    jobs.append((os.path.join(SPINE, "moy_json.c"), CFLAGS + ["-I", SPINE]))
+    jobs.append((os.path.join(STORE, "moy_vol.c"), CFLAGS + ["-I", STORE, "-I", KERNEL]))
+    jobs.append((os.path.join(STORE, "moy_store_host.c"), CFLAGS + ["-I", STORE, "-I", KERNEL]))
+    jobs.append((os.path.join(STORE, "moy_fs.c"), CFLAGS + ["-I", STORE, "-I", KERNEL]))
+    for name in ("moy_shelf.c", "moy_cat.c", "moy_files.c", "moy_removed.c"):
+        jobs.append((os.path.join(STORE, name), CFLAGS + ["-I", STORE, "-I", SPINE, "-I", KERNEL]))
+    jobs.append((os.path.join(SPINE, "moy_settings.c"), CFLAGS + ["-I", SPINE, "-I", KERNEL]))
+    jobs.append((os.path.join(SPINE, "moy_json.c"), CFLAGS + ["-I", SPINE, "-I", KERNEL]))
     jobs.append((os.path.join(KERNEL, "moy_log.c"), CFLAGS + ["-I", KERNEL]))
     jobs.append((UI_TABLES, CFLAGS))
 

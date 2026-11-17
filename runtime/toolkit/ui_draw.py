@@ -6,7 +6,7 @@
 #   -- the style                      metrics, state_colors (C)
 #   -- the theme's shape              use_shape, paint (C)
 #   -- window frames                  frame, frame_buttons, frame_band (C)
-#   -- depth                          use_depth, depth, frame_geom, frame_under, frame_under_onto, cast (C)
+#   -- depth                          use_depth, depth, frame_geom, frame_under, frame_under_fill, frame_under_onto, cast (C)
 #   -- glyphs                         glyph, glyph_id (C); s, the string table (C)
 #   -- widgets                        button, chip
 #   -- button kinds                   use_buttons, button_unreadable, begin_frame, primary_warnings
@@ -1247,7 +1247,7 @@ def status_row(cv, th, rect, items):
 
 
 # --- the classic game-canvas button family -----------------------------------
-# The pre-toolkit Workstation draw trio (_btn/_icon_btn/_mini_btn), moved here
+# The pre-toolkit Workstation draw family (_btn/_mini_btn), moved here
 # verbatim (the 2026-07 kernel-shrink direction: console stays compositor/router);
 # Workstation keeps thin delegates so every call site and test is untouched.
 # These are the EDITOR-body vocabulary (paint/map/music/blocks action bars and
@@ -1409,6 +1409,15 @@ def frame_under(cv, th, rect, title_h, active, mode=UNDER_FULL):
     """What window `rect` leaves to the pixels under it: its shadow at `mode`'s
     size and its outline's partly covered pixels, blended over them."""
     _C.frame_under(cv, _LOOK if th is _TH else _look(th), rect, title_h, active, mode)
+
+
+def frame_under_fill(cv, th, rect, title_h, active, src, outer, inner, mode=UNDER_FULL):
+    """`frame_under` over `src`, a buffer laid out as the canvas's: `src`
+    laid into buffer rect `outer` but `inner` (the clip does not apply), the
+    shadow blended over it where it falls, each pixel once -- a cache's
+    restore and the first window's shadow over it in one pass."""
+    _C.frame_under_fill(cv, _LOOK if th is _TH else _look(th), rect, title_h, active, mode,
+                        src, outer, inner)
 
 
 def frame_under_onto(cv, th, rect, title_h, active, onto, onto_th, onto_active,
@@ -1881,10 +1890,7 @@ def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False, window=False, app=Non
     dup = _C.api_dup(ctx)
     if dup is not None:
         print("ui: two stops share the id %r; the later is no stop" % dup)
-    lost = _C.api_lost(ctx)
-    if lost:
-        print("ui: a frame drew %d stops past the ones it records; they take no focus or "
-              "input (a long list is one ui.list or ui.table)" % lost)
+    say_lost(ctx)
     if rect is None:
         rect = _WHOLE[0]
         if rect is None or rect[2] != cv.w or rect[3] != cv.h:
@@ -1903,7 +1909,7 @@ def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False, window=False, app=Non
 
 
 # The context of the running cart's own frames, a Lua, compiled, WASI or native
-# app's (native/moy_ui/moy_ui_wasm.c's), as `bar_lent` and `bar_tap` take it.
+# app's (native/moy_ui/moy_ui_run.c's), as `bar_lent` and `bar_tap` take it.
 RUN_UI = "run"
 
 
@@ -1961,6 +1967,18 @@ def paste(ctx, text):
         _C.api_paste(ctx, text)
 
 
+def say_lost(ctx):
+    """Log, once each, the stops the frame `ctx` drew last drew past the ones
+    it records and the widgets that asked for kept state past the ids it
+    keeps (native/moy_ui's api_lost)."""
+    lost = _C.api_lost(ctx)
+    if lost & 0xFFFF:
+        print("ui: a frame drew %d stops past the ones it records; they take no focus or "
+              "input (a long list is one ui.list or ui.table)" % (lost & 0xFFFF))
+    if lost >> 16:
+        print("ui: %d widgets past the kept ids draw with no kept state" % (lost >> 16))
+
+
 def app_back(ctx, take=True):
     """The host's back -- the bar's chevron, a window's, Esc, B and the
     T-Deck's K -- over the frame `ctx` drew last: True where the app takes
@@ -1981,14 +1999,26 @@ def app_cancel(ctx, take=True):
     """The host's cancel -- the T-Deck's Mic -- over the frame `ctx` drew
     last: True where its focused field has an edit in progress (its text
     other than when focus came onto it), which the next frame gives back,
-    focus stepping up off the field; False where none is, and the key keeps
-    its own meaning. `take` False only asks."""
+    focus stepping off the field (up, else down), or else where a popover
+    is open, which the next frame dismisses; False where neither is, and
+    the key keeps its own meaning. `take` False only asks."""
     return _C.api_cancel(ctx, take)
 
 
 def run_cancel(take=True):
     """`app_cancel` over the running cart's own context."""
     return _C.api_run_cancel(take)
+
+
+def app_typing(ctx):
+    """Whether the frame `ctx` drew last has a field in focus: its surface
+    takes typed bytes, the keyboard in text mode (runtime/shell/input_policy.py)."""
+    return bool(_C.api_typing(ctx))
+
+
+def run_typing():
+    """`app_typing` over the running cart's own context."""
+    return bool(_C.api_run_typing())
 
 
 _HOST_BUTTONS = ("left", "right", "up", "down", "a", "b", "run")
@@ -2048,7 +2078,7 @@ def on_bar(on=None):
 # The board's tap floor (#203): its chrome stands over its font scale on the
 # handheld's metrics, so a bar icon is chrome.MIN_TAP_MM across on its glass
 # (the Guition S3). Every frame begins with it (moy_ui.h's MOY_UI_TAP; an app
-# run's face word carries it, `Player.ui_face`): a list's rows meet the floor
+# run's face word carries it, `AppFace.ui_face`): a list's rows meet the floor
 # and a bubble takes its tap metrics and faces.
 _TAP_FLOOR = [False]
 
@@ -2165,17 +2195,10 @@ def fill_uncovered(cv, inner, outer, col):
 # The scrolling, the coverless cart's cover and an app's host live in modules
 # of their own; their names are this module's too. Imported here, at the foot,
 # because ui_scroll and ui_host take their share of this module's state from it.
-try:
-    from ui_scroll import drag_steps, PaintRing, ScrollRegion, DragTap
-    from ui_cover import initial_block, initial_cover, initial_parts
-    from ui_host import (AppHost, wash_page, NO_WASH, HOLD_PUT, HOLD_LAST, HOLD_DRAW,
-                         HOLD_LEFT, Hold, text_at, text_aim, text_reveal, text_cover,
-                         held_layer, release_held)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.ui_scroll import drag_steps, PaintRing, ScrollRegion, DragTap
-    from runtime.ui_cover import initial_block, initial_cover, initial_parts
-    from runtime.ui_host import (AppHost, wash_page, NO_WASH, HOLD_PUT, HOLD_LAST, HOLD_DRAW,
-                                 HOLD_LEFT, Hold, text_at, text_aim, text_reveal, text_cover,
-                                 held_layer, release_held)
+from ui_scroll import drag_steps, PaintRing, ScrollRegion, DragTap
+from ui_cover import initial_block, initial_cover, initial_parts
+from ui_host import (AppHost, wash_page, NO_WASH, HOLD_PUT, HOLD_LAST, HOLD_DRAW,
+                     HOLD_LEFT, Hold, text_at, text_aim, text_reveal, text_cover,
+                     held_layer, release_held)
 
 _load_metrics()

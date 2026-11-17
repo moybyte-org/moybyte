@@ -46,14 +46,14 @@ def test_the_strips_are_the_tallest_bar_and_are_republished_on_relayout(tmp_path
 def test_a_root_without_the_verbs_is_left_alone(tmp_path):
     ws = build_desktop_ws(tmp_path)
     ws.bar_layer.publish_strips(ws.sys_canvas)      # no set_strips: nothing
-    ws._relayout()
+    ws.relayout()
     drv = make_drv(ws)
     drv.frame(0.0)
 
 
 def test_a_bar_render_moves_the_strip_and_a_steady_blit_does_not(tmp_path):
     ws = build_ws_with_shelf(tmp_path, 4)
-    ws.bar_layer._clock_text = lambda: "00:00"
+    ws.bar_layer.clock_text = lambda: "00:00"
     root = _published(ws)
     drv = make_drv(ws)
     drv.frame(0.0)
@@ -66,7 +66,7 @@ def test_a_bar_render_moves_the_strip_and_a_steady_blit_does_not(tmp_path):
     ws.mark_dirty()
     drv.frame(0.0)                                  # the same bar, blitted again
     assert root.moved == []
-    ws.bar_layer._clock_text = lambda: "00:01"
+    ws.bar_layer.clock_text = lambda: "00:01"
     ws.bar_layer._bar_cache_gen += 1                # the minute is in the key
     ws.mark_dirty()
     drv.frame(0.0)
@@ -77,12 +77,12 @@ def test_the_desk_clock_cell_moves_the_strip_only_when_its_text_changes(tmp_path
     ws = build_desktop_ws(tmp_path)
     root = _published(ws)
     bl = ws.bar_layer
-    bl._clock_text = lambda: "12:00"
+    bl.clock_text = lambda: "12:00"
     bl.redraw_clock("desk")
     assert len(root.moved) == 1
     bl.redraw_clock("desk")
     assert len(root.moved) == 1, "the same text repainted: no new pixels"
-    bl._clock_text = lambda: "12:01"
+    bl.clock_text = lambda: "12:01"
     bl.redraw_clock("desk")
     assert len(root.moved) == 2
     x, y, w, h = ws.layout.clock_hit()
@@ -103,7 +103,7 @@ def test_a_chip_change_on_the_os_bar_moves_the_strip(tmp_path):
     drv.frame(0.0)
     assert root.moved == [], "the same chips: nothing moved"
     wm = ws.wm
-    wm._chip_tap(wm._focus)                         # minimise: the chip dims
+    wm.chip_tap(wm.focus_key)                         # minimise: the chip dims
     drv.frame(0.0)
     assert (0, 0, ws.sys_canvas.w, ws.layout.status_h) in root.moved
 
@@ -163,16 +163,16 @@ def test_an_overlay_or_a_cursor_leaves_the_frame_undescribed(tmp_path):
     wm = ws.wm
     cv = ws.sys_canvas
     wm.draw_stack()
-    assert wm._cache_sig == 0
+    assert wm.cache_sig == 0
     wm.hand_content_damage(cv, 1, 2, 3, 4)
     assert root.damage == [(1, 2, 3, 4)]
     ws.pointer.visible = True
     wm.hand_content_damage(cv, 1, 2, 3, 4)
     ws.pointer.visible = False
-    ws._deferred.append((lambda: None, True, True))  # a LOADING pill is owed
+    ws.deferred.append((lambda: None, True, True))  # a LOADING pill is owed
     wm.hand_content_damage(cv, 1, 2, 3, 4)
-    ws._deferred.clear()
-    wm._cache_sig = 32                              # a toast is on the stack
+    ws.deferred.clear()
+    wm.cache_sig = 32                              # a toast is on the stack
     wm.hand_content_damage(cv, 1, 2, 3, 4)
     assert root.damage == [(1, 2, 3, 4)]
 

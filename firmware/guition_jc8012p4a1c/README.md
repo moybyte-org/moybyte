@@ -183,9 +183,9 @@ as a Home Assistant panel.
   no BOOT button: esptool's default reset drove `chip_id`, a full 16MB
   `read_flash` and every `write_flash` first try.
 - **16MB flash, not 32**: the Waveshare's OTA-shaped table head (otadata
-  at 0xd000) with 2×7.8125 MiB app slots and the 128 KiB coredump partition
+  at 0xd000) with 2×6.5 MiB app slots and the 128 KiB coredump partition
   after them (a panic's ESP-IDF core dump, `tools/coredump.py`) leaves the
-  tail from 0xFD0000 (192 KiB) for the auto-built VFS, the store's fallback
+  tail from 0xD30000 (2.81 MiB) for the auto-built VFS, the store's fallback
   without a card; a WiFi
   update streams into the inactive slot, so no image stages there. The build
   prints the app slot headroom; nothing else about it is current.
@@ -200,7 +200,7 @@ MOYBYTE_GUITION_P4_PORT=/dev/ttyACM4 .venv/bin/python -m pytest tests/test_guiti
 ```
 
 `build.sh` clones its own MicroPython v1.28.0 into `.build/`, reuses the
-Waveshare's ESP-IDF v5.5.1 checkout when present (its own clone otherwise —
+Waveshare's ESP-IDF v5.5.6 checkout when present (its own clone otherwise —
 CI), applies the same patch ladder (the `p4_*` patch through the shared
 lib, the ESP-Hosted 2.12.12 bump, REPR_C, native-code-free, the GC split
 reserve), stages the shared modules + the `native/p4` tier per `board.toml`,

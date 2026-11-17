@@ -14,7 +14,7 @@ static int pop_body(moy_ui_ctx_t *c, const moy_ui_keep_t *kb, int body, int cap,
     if (body <= cap) {
         return body;
     }
-    c->pop_cut = (int16_t)(cap > 0 ? cap : 1);
+    c->pop.cut = (int16_t)(cap > 0 ? cap : 1);
     int bh = kb != NULL && kb->peek > 0 && kb->peek < cap ? kb->peek : cap;
     return bh < rh ? rh : bh;
 }
@@ -23,7 +23,7 @@ static int pop_body(moy_ui_ctx_t *c, const moy_ui_keep_t *kb, int body, int cap,
 // the page), inside what a wash covers, but for the anchor grown by its
 // ring's reach, which stays as drawn: the four strips around it.
 static void wash_view(const moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t a) {
-    moy_ui_box_t v = c->pop_view, wb = moy_ui_api_wash_box(c);
+    moy_ui_box_t v = c->pop.view, wb = moy_ui_api_wash_box(c);
     int x0 = v.x > wb.x ? v.x : wb.x, y0 = v.y > wb.y ? v.y : wb.y;
     int x1 = v.x + v.w < wb.x + wb.w ? v.x + v.w : wb.x + wb.w;
     int y1 = v.y + v.h < wb.y + wb.h ? v.y + v.h : wb.y + wb.h;
@@ -69,12 +69,12 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
             // middle half the fade above it, the next frame cuts at the
             // deepest row middle plus half the fade above it, so the top
             // of a row's words shows over the fade
-            int peek = c->pop_cut > 0 && took > c->pop_cut && !c->pop_inside ? c->pop_peek : 0;
+            int peek = c->pop.cut > 0 && took > c->pop.cut && !c->pop.inside ? c->pop.peek : 0;
             if (pk != NULL && pk->peek != peek) {
                 pk->peek = (int16_t)peek;
                 c->owe = 1;
             }
-            c->pop_cut = 0;
+            c->pop.cut = 0;
             int bw = c->brow_w;
             if (bw != c->brow_was) {
                 c->brow_was = (int16_t)bw;
@@ -82,6 +82,7 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
             }
             c->brow = 0;
             c->brow_x = c->brow_w = 0;
+            c->pop.hide = 0;
         }
         return 0;
     }
@@ -89,27 +90,34 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
         return MOY_UI_API_DEEP;
     }
     mua_group_close(c, s);
-    c->fl_susp++;                       // an overlay: drawn whole, over the page
-    c->fl_dirty = 1;
-    c->fl_top = 1;
+    c->fl.susp++;                       // an overlay: drawn whole, over the page
+    c->fl.dirty = 1;
+    c->fl.top = 1;
     // the rect it hangs from: ui.at's, else the one it opened under
     if (c->has_at) {
-        c->pop_at = c->at;
-        c->pop_view = c->at_view;
+        c->pop.at = c->at;
+        c->pop.view = c->at_view;
         c->has_at = 0;
-        c->pop_mid = 0;
-        c->pop_placed = 1;
-    } else if (c->pop_prev.w == 0) {
-        c->pop_at = c->focus_box;
-        c->pop_view = c->page;
-        c->pop_mid = c->focus_box.w == 0;   // nothing to hang from: centred
-        c->pop_placed = 0;
+        c->pop.mid = 0;
+        c->pop.placed = 1;
+    } else if (c->pop.prev.w == 0) {
+        c->pop.at = c->focus_box;
+        c->pop.view = c->page;
+        c->pop.mid = c->focus_box.w == 0;   // nothing to hang from: centred
+        c->pop.placed = 0;
     }
-    moy_ui_box_t a = c->pop_at;
+    moy_ui_box_t a = c->pop.at;
     int fs = c->fs, rh = mua_row_h(c);
     uint32_t pid = mua_hash(id.p, id.n, POPOVER_SALT);
     moy_ui_keep_t *kb = mua_keep_of(c, pid);
-    int body = kb != NULL && kb->b > 0 ? kb->b : rh;
+    // no size kept for it yet (its first frame): its body lays out to size
+    // it and nothing draws, the next frame showing it at that size
+    c->pop.hide = (uint8_t)(kb == NULL);
+    if (c->pop.hide) {
+        c->owe = 1;
+        c->inst->owed++;
+    }
+    int body = kb != NULL && kb->rows > 0 ? kb->rows : rh;
     if (!c->modal) {
         c->owe = 1;                     // its first frame: focus opens in it on the next
     }
@@ -121,7 +129,7 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
     if (w <= 0) {
         w = a.w;
     }
-    int edge = c->pop_placed ? (c->cls ? 12 : 8) * fs : pad;
+    int edge = c->pop.placed ? (c->cls ? 12 : 8) * fs : pad;
     if (w > sf.w - 2 * edge) {
         w = sf.w - 2 * edge;
     }
@@ -149,10 +157,10 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
         x = x0;
     }
     int y;
-    c->pop_cut = 0;
-    c->pop_peek = 0;
-    c->pop_inside = 0;
-    if (c->pop_mid) {
+    c->pop.cut = 0;
+    c->pop.peek = 0;
+    c->pop.inside = 0;
+    if (c->pop.mid) {
         bh = pop_body(c, kb, bh, y1 - y0 - 2 * pad, rh);
         x = sf.x + moy_ui_fdiv(sf.w - w, 2);
         y = sf.y + moy_ui_fdiv(sf.h - (2 * pad + bh), 2);
@@ -174,20 +182,23 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
     int h = 2 * pad + bh;
     moy_ui_box_t card = {(int16_t)x, (int16_t)y, (int16_t)w, (int16_t)h};
     static const uint8_t none[1] = {0};
-    if (o->wash == 1) {
+    if (c->pop.hide) {
+    } else if (o->wash == 1) {
         mua_wash(c, s);                     // a row's or a card's menu (DESIGN, Menus and washes)
     } else if (o->wash == 2) {
         wash_view(c, s, a);
     }
-    moy_ui_modal(s, card, (moy_ui_span_t){none, 0}, fs, c->cls, rh);
+    if (!c->pop.hide) {
+        moy_ui_modal(s, card, (moy_ui_span_t){none, 0}, fs, c->cls, rh);
+    }
     int lp = c->cls ? mua_kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_PAD) * fs
                     : mua_kmetric(MOY_UI_K_ROW, MOY_UI_M_ROW_PAD) * fs;
     moy_ui_box_t inner = {(int16_t)(card.x + pad - lp), (int16_t)(card.y + pad),
                           (int16_t)(w - 2 * (pad - lp)), (int16_t)bh};
     mua_nest_open(c, 3, pid, inner, body, 0, NULL);
-    c->pop_card = card;
-    c->pop_id = pid;
-    return !c->pop_gone;
+    c->pop.card = card;
+    c->pop.id = pid;
+    return !c->pop.gone;
 }
 
 // -- menus ---------------------------------------------------------------------------
@@ -304,10 +315,10 @@ void moy_ui_api_menu_danger(moy_ui_ctx_t *c, uint32_t rows) {
 }
 
 void moy_ui_api_text(moy_ui_ctx_t *c, int lines, int centre, int tone, int role) {
-    c->txt_lines = (int8_t)(lines < 0 ? 0 : lines > 16 ? 16 : lines);
-    c->txt_centre = (int8_t)(centre == 2 || centre == 3 ? centre : centre != 0);
-    c->txt_tone = (int8_t)(tone < 0 || tone > MOY_UI_TONE_DANGER ? 0 : tone);
-    c->txt_role = (int8_t)(role < 0 || role > MOY_UI_FONT_RESULT ? -1 : role);
+    c->txt.lines = (int8_t)(lines < 0 ? 0 : lines > 16 ? 16 : lines);
+    c->txt.centre = (int8_t)(centre == 2 || centre == 3 ? centre : centre != 0);
+    c->txt.tone = (int8_t)(tone < 0 || tone > MOY_UI_TONE_DANGER ? 0 : tone);
+    c->txt.role = (int8_t)(role < 0 || role > MOY_UI_FONT_RESULT ? -1 : role);
 }
 
 void moy_ui_api_card_mark(moy_ui_ctx_t *c, moy_ui_span_t badge, int tone,
@@ -321,11 +332,11 @@ void moy_ui_api_card_mark(moy_ui_ctx_t *c, moy_ui_span_t badge, int tone,
 
 void moy_ui_api_grid_spread(moy_ui_ctx_t *c, int cols, int foot, int top, int margin,
                             int wrap) {
-    c->spread_wrap = (uint8_t)(wrap != 0);
-    c->spread_margin = (int16_t)(margin < 0 ? 0 : margin);
-    c->spread_cols = (uint8_t)(cols < 0 ? 0 : cols > 255 ? 255 : cols);
-    c->spread_foot = (int16_t)(foot < 0 ? 0 : foot);
-    c->spread_top = (int16_t)(top < 0 ? 0 : top);
+    c->spread.wrap = (uint8_t)(wrap != 0);
+    c->spread.margin = (int16_t)(margin < 0 ? 0 : margin);
+    c->spread.cols = (uint8_t)(cols < 0 ? 0 : cols > 255 ? 255 : cols);
+    c->spread.foot = (int16_t)(foot < 0 ? 0 : foot);
+    c->spread.top = (int16_t)(top < 0 ? 0 : top);
 }
 
 int moy_ui_api_note(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t icon,
@@ -458,8 +469,8 @@ void moy_ui_api_toast(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t tex
     moy_ui_span_t ic = kind.n ? kind : (moy_ui_span_t){check, 5};
     int slot = moy_ui_icon_slot(ic.p, ic.n), glyph = moy_ui_icon_glyph(ic.p, ic.n);
     moy_ui_box_t p = {0, 0, 0, 0};
-    c->fl_dirty = 1;                    // over the page, whole
-    c->fl_top = 1;
+    c->fl.dirty = 1;                    // over the page, whole
+    c->fl.top = 1;
     moy_ui_toast(s, m, text, slot, glyph, c->fs, mua_ground_of(c), flat, &p);
     if (out != NULL) {
         out[0] = p.x;
@@ -478,7 +489,7 @@ void mua_card_finish(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
     }
     c->fin_on = 0;
     clip_t k;
-    c->fl_cast = 1;
+    c->fl.cast = 1;
     EACH_ROW(c, k, s, c->fin_content, c->grid_open == 1, c->page) {
         if (c->fin_slot >= 0 || c->fin_glyph >= 0 || c->fin_tone == MOY_UI_TONE_DANGER
             || c->fin_tone == MOY_UI_TONE_LOCKED) {
@@ -504,7 +515,7 @@ void mua_grid_end(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
         }
         moy_ui_keep_t *k = mua_page_keep(c);
         if (k != NULL) {
-            k->b = c->y;
+            k->rows = c->y;
         }
         if (c->grp_open && c->grp_n == 0) {
             c->grp_top = c->y;
@@ -541,8 +552,8 @@ void moy_ui_api_grid(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
     } else {
         area = c->page;
         c->grid_open = 1;
-        c->y = (int16_t)(c->y + (c->spread_cols > 0 && c->spread_top > 0
-                                     ? c->spread_top * c->fs
+        c->y = (int16_t)(c->y + (c->spread.cols > 0 && c->spread.top > 0
+                                     ? c->spread.top * c->fs
                                      : mua_pmetric(c, MOY_UI_M_VALUE_ROW_GRID_TOP)));
         c->grid_y = c->y;
     }
@@ -554,21 +565,21 @@ void moy_ui_api_grid(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
     c->grid_x = (int16_t)(area.x + (area.w - span) / 2);
     c->grid_pitch = (int16_t)(w + gap);
     int foot = mua_pmetric(c, MOY_UI_M_VALUE_ROW_CARD_FOOT);
-    if (c->spread_cols > 0) {
+    if (c->spread.cols > 0) {
         // the columns spread across the rect, the gaps taking the rest
-        cols = c->spread_cols;
-        int m = c->spread_margin * c->fs;
+        cols = c->spread.cols;
+        int m = c->spread.margin * c->fs;
         c->grid_cols = (uint8_t)cols;
         c->grid_x = (int16_t)(area.x + m);
         c->grid_pitch = (int16_t)(cols > 1 ? (area.w - 2 * m - w) / (cols - 1) : w);
-        if (c->spread_foot > 0) {
-            foot = c->spread_foot * c->fs;
+        if (c->spread.foot > 0) {
+            foot = c->spread.foot * c->fs;
         }
-        c->spread_cols = 0;
-        c->spread_foot = c->spread_top = c->spread_margin = 0;
+        c->spread.cols = 0;
+        c->spread.foot = c->spread.top = c->spread.margin = 0;
     }
-    c->grid_wrap = c->spread_wrap;
-    c->spread_wrap = 0;
+    c->grid_wrap = c->spread.wrap;
+    c->spread.wrap = 0;
     c->grid_w = (int16_t)w;
     c->grid_h = (int16_t)h;
     c->grid_row = (int16_t)(mua_pmetric(c, MOY_UI_M_VALUE_ROW_CARD_TOP) + h + foot
@@ -593,7 +604,7 @@ void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
         c->y = (int16_t)(c->grid_y + c->grid_row);
         moy_ui_keep_t *k = mua_page_keep(c);
         if (k != NULL) {
-            k->b = c->y;
+            k->rows = c->y;
         }
     }
     if (c->grid_i < 0xffff) {
@@ -635,7 +646,7 @@ void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
         memcpy(&row->st[MOY_ST_CX0], saved, sizeof(saved));
         mua_pic_redraw(c, content);
     }
-    c->fl_cast = 1;
+    c->fl.cast = 1;
     EACH_ROW(c, k, s, b, stacked, c->page) {
         moy_ui_card(s, b, pic, title, sub, f | (c->grid_wrap ? MOY_UI_F_WRAP : 0), c->fs,
                     mua_ground_of(c), c->card_tone, &content, &g);
@@ -674,24 +685,24 @@ void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
 }
 
 int moy_ui_api_table_rows(const moy_ui_ctx_t *c, int32_t out[8]) {
-    out[0] = c->tbl_y0;
-    out[1] = c->tbl_rh;
-    out[2] = c->tbl_view.x;
-    out[3] = c->tbl_view.y;
-    out[4] = c->tbl_view.w;
-    out[5] = c->tbl_view.h;
-    out[6] = c->tbl_px;
-    out[7] = c->tbl_pw;
-    return c->tbl_pw > 0;
+    out[0] = c->tbl.y0;
+    out[1] = c->tbl.rh;
+    out[2] = c->tbl.view.x;
+    out[3] = c->tbl.view.y;
+    out[4] = c->tbl.view.w;
+    out[5] = c->tbl.view.h;
+    out[6] = c->tbl.px;
+    out[7] = c->tbl.pw;
+    return c->tbl.pw > 0;
 }
 
 void moy_ui_api_table_pics(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
-    if (c->tbl_pw <= 0) {
+    if (c->tbl.pw <= 0) {
         return;
     }
-    moy_ui_box_t v = c->tbl_view;
-    moy_ui_box_t pic = {c->tbl_px, v.y, c->tbl_pw, v.h};
-    mua_edge_fades(c, s, pic, c->tbl_n * c->tbl_rh, v.y - c->tbl_y0, MOY_UI_DEFAULT, 1, c->tbl_rh);
+    moy_ui_box_t v = c->tbl.view;
+    moy_ui_box_t pic = {c->tbl.px, v.y, c->tbl.pw, v.h};
+    mua_edge_fades(c, s, pic, c->tbl.n * c->tbl.rh, v.y - c->tbl.y0, MOY_UI_DEFAULT, 1, c->tbl.rh);
 }
 
 void moy_ui_api_end(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
@@ -703,8 +714,8 @@ void moy_ui_api_end(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
     }
     if (c->tip_at.w > 0 && c->tip[0]) {
         moy_ui_span_t t = {(const uint8_t *)c->tip, (uint16_t)strlen(c->tip)};
-        c->fl_dirty = 1;                // over the page, whole
-        c->fl_top = 1;
+        c->fl.dirty = 1;                // over the page, whole
+        c->fl.top = 1;
         moy_ui_tip_draw(s, c->tip_at, t, c->surface, c->fs, mua_ground_of(c));
         c->tip_at.w = 0;
         c->tip_shown = 1;
@@ -766,33 +777,33 @@ int32_t moy_ui_api_bar(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t ti
     (void)s;
     size_t n = title.n < MOY_UI_API_TIP - 1 ? title.n : MOY_UI_API_TIP - 1;
     if (n) {
-        memcpy(c->bar_title, title.p, n);
+        memcpy(c->bar.title, title.p, n);
     }
-    c->bar_title[n] = 0;
+    c->bar.title[n] = 0;
     int k = moy_ui_fields(tools, len);
     k = k < MOY_UI_API_BAR ? k : MOY_UI_API_BAR;
-    c->bar_chip[0] = 0;
-    c->bar_chip_at = -1;
+    c->bar.chip[0] = 0;
+    c->bar.chip_at = -1;
     for (int i = 0; i < k; i++) {
         moy_ui_span_t t = field_at(tools, len, i);
-        c->bar_slot[i] = (int16_t)moy_ui_icon_slot(t.p, t.n);
-        if (c->bar_slot[i] < 0 && t.n) {
+        c->bar.slot[i] = (int16_t)moy_ui_icon_slot(t.p, t.n);
+        if (c->bar.slot[i] < 0 && t.n) {
             size_t m = t.n < MOY_UI_API_CHIP - 1 ? t.n : MOY_UI_API_CHIP - 1;
-            memcpy(c->bar_chip, t.p, m);
-            c->bar_chip[m] = 0;
-            c->bar_chip_at = (int8_t)i;
+            memcpy(c->bar.chip, t.p, m);
+            c->bar.chip[m] = 0;
+            c->bar.chip_at = (int8_t)i;
         }
     }
-    c->bar_n = (uint8_t)k;
-    c->bar_off = (uint8_t)(off & ((1u << MOY_UI_API_BAR) - 1u));
-    c->bar_back = (off & MOY_UI_BAR_BACK) != 0;
-    c->bar_seen = 1;
-    int32_t got = c->bar_act;
-    c->bar_act = -1;
+    c->bar.n = (uint8_t)k;
+    c->bar.off = (uint8_t)(off & ((1u << MOY_UI_API_BAR) - 1u));
+    c->bar.back = (off & MOY_UI_BAR_BACK) != 0;
+    c->bar.seen = 1;
+    int32_t got = c->bar.act;
+    c->bar.act = -1;
     if (got == MOY_UI_BAR_UP) {
-        return c->bar_back ? got : -1;
+        return c->bar.back ? got : -1;
     }
-    if (got >= k || (got >= 0 && (c->bar_off >> got) & 1u)) {
+    if (got >= k || (got >= 0 && (c->bar.off >> got) & 1u)) {
         got = -1;
     }
     return got;
@@ -825,7 +836,7 @@ void moy_ui_api_rule(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
 
 int moy_ui_api_bar_lent(const moy_ui_ctx_t *c, const char **title, int16_t *slots, int *n,
                         uint32_t *off) {
-    if (!c->bar_seen) {
+    if (!c->bar.seen) {
         if (!c->page_title[0]) {
             return 0;
         }
@@ -834,37 +845,31 @@ int moy_ui_api_bar_lent(const moy_ui_ctx_t *c, const char **title, int16_t *slot
         *off = 0;
         return 1;
     }
-    *title = c->bar_title[0] ? c->bar_title : c->page_title;
-    for (int i = 0; i < c->bar_n; i++) {
-        slots[i] = c->bar_slot[i];
+    *title = c->bar.title[0] ? c->bar.title : c->page_title;
+    for (int i = 0; i < c->bar.n; i++) {
+        slots[i] = c->bar.slot[i];
     }
-    *n = c->bar_n;
-    *off = c->bar_off | (c->bar_back ? MOY_UI_BAR_BACK : 0u);
+    *n = c->bar.n;
+    *off = c->bar.off | (c->bar.back ? MOY_UI_BAR_BACK : 0u);
     return 1;
 }
 
 const char *moy_ui_api_bar_chip(const moy_ui_ctx_t *c, int *at) {
-    *at = c->bar_seen ? c->bar_chip_at : -1;
-    return *at >= 0 ? c->bar_chip : "";
+    *at = c->bar.seen ? c->bar.chip_at : -1;
+    return *at >= 0 ? c->bar.chip : "";
 }
 
 void moy_ui_api_bar_tap(moy_ui_ctx_t *c, int i) {
-    c->bar_act = (int8_t)((i >= 0 && i < MOY_UI_API_BAR) || i == MOY_UI_BAR_UP ? i : -1);
+    c->bar.act = (int8_t)((i >= 0 && i < MOY_UI_API_BAR) || i == MOY_UI_BAR_UP ? i : -1);
 }
 
 int moy_ui_api_back(moy_ui_ctx_t *c, int take) {
     if (moy_ui_api_cancel(c, take)) {
         return 1;
     }
-    if (c->pop_card.w > 0) {
+    if (c->bar.seen && c->bar.back) {
         if (take) {
-            c->pop_back = 1;
-        }
-        return 1;
-    }
-    if (c->bar_seen && c->bar_back) {
-        if (take) {
-            c->bar_act = MOY_UI_BAR_UP;
+            c->bar.act = MOY_UI_BAR_UP;
         }
         return 1;
     }
@@ -891,5 +896,5 @@ int moy_ui_api_moving(const moy_ui_ctx_t *c) {
 int32_t moy_ui_api_offset(moy_ui_ctx_t *c, int x, int y) {
     int pg = mua_page_at(c->cur, c->n_cur, x, y);
     moy_ui_keep_t *k = pg >= 0 ? mua_keep_of(c, c->cur[pg].id) : NULL;
-    return k != NULL ? k->a : -1;
+    return k != NULL ? k->scroll : -1;
 }

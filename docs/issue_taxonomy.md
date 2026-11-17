@@ -89,7 +89,7 @@ Filter what you can pick up today with `gh issue list --label build:host`. Color
 ## 5. `tracker` — living issues (marker)
 
 Some issues are **persistent, continuously-updated ledgers**, not one-shot tasks to
-close: the performance ledger (#66), the P4 port status (#58), the native-gap lever
+close: the performance story log (#66; its numbers are the generated `docs/perf/ledger.md`), the P4 port status (#58), the native-gap lever
 roadmap (#77). Tag these `tracker`. The dashboard rolls them into a
 **"Living trackers"** section and marks them ⏳ elsewhere so they're never mistaken for
 closeable work. Read a tracker for current state; don't try to finish it.

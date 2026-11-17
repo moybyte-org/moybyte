@@ -74,7 +74,7 @@ def page_runs(request, tmp_path_factory):
             from runtime import moy_play
             _CENSUS[:] = [tuple(moy_play.info()[5]),
                           moy_play.census(os.path.join(root, "app_ui.moy"))]
-        ws.exit()
+        ws.spine.exit()
     return out
 
 
@@ -83,7 +83,7 @@ _CENSUS = []
 
 def _frame(drv):
     quiesce(drv.ws)
-    drv.ws._dirty = True
+    drv.ws.mark_dirty()
     drv.frame(_DT)
 
 
@@ -101,7 +101,7 @@ def _pixels(ws):
 
 
 def _pmem(ws):
-    lua = getattr(ws.run.player, "_lua", None)
+    lua = getattr(ws.run.player, "lua", None)
     if lua is not None and hasattr(lua._run, "pmem"):
         return list(lua._run.pmem()[1])[:16]
     if lua is not None:
@@ -203,7 +203,7 @@ def test_an_apps_page_lies_in_its_content_rect_in_every_runtime(page_runs, tmp_p
     try:
         top = ws.app_content_rect()[1]
     finally:
-        ws.exit()
+        ws.spine.exit()
     assert top > 0
     for name, shots in page_runs.items():
         assert all(s[1][P_PAGE] == top for s in shots), (name, [s[1][P_PAGE] for s in shots])
@@ -767,7 +767,7 @@ def _first_page(root, title, theme, variant=None):
     for _ in range(3):
         _frame(drv)
     px = _pixels(ws)
-    ws.exit()
+    ws.spine.exit()
     return px
 
 
@@ -846,13 +846,13 @@ def test_an_app_cart_draws_on_change_unless_it_animates(tmp_path, ven, every):
         quiesce(ws)
         drv.frame(_DT)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
-    assert ws.run.player.animates() == every
+    assert ws.run.player.face.animates() == every
     n = ws.run.player.ns["frames"]
     for _ in range(20):
         quiesce(ws)
         drv.frame(_DT)
     assert ws.run.player.ns["frames"] - n == (20 if every else 0)
-    ws.exit()
+    ws.spine.exit()
 
 
 

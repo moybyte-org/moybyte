@@ -27,10 +27,10 @@ def hh(tmp_path):
 
 def _open(hh, tab):
     ws, drv = hh
-    ws.set_menu_view(tab)
+    ws.text.set_menu_view(tab)
     ws.pointer.visible = False
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
     for _ in range(3):
         drv.frame(DT)
     return ws, drv
@@ -187,7 +187,7 @@ def test_the_foot_picks_the_tools_the_size_and_the_zoom(hh):
     _tap(drv, page.host.box("Tool Select"))
     assert page.host.box("Copy") is None, "no selection: Copy is off"
     mu.mapedit.set_selection(0, 0, 1, 1)
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(DT)
     _tap(drv, page.host.box("Copy"))
     assert mu.mapedit.has_clip
@@ -255,7 +255,7 @@ def test_the_actors_verbs_flip_and_remove_the_picked_actor(hh):
     se = su.sceneedit
     se.place(64, 64, "coin")
     n = len(se.rows)
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(DT)
     _tap(drv, page.host.box("Flip"))
     assert se.selected().get("flip")
@@ -267,18 +267,19 @@ def test_a_tag_is_typed_in_its_popover(hh):
     ws, drv, su, page = _scene(hh)
     se = su.sceneedit
     se.place(64, 64, "coin")
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(DT)
     _tap(drv, page.host.box("Tag"))
-    assert page.pop == "tag"
+    drv.frame(DT)
+    assert page.pop == "tag" and ws.input.text_mode, "its field holds the keys"
     for ch in "gem":
         drv.type_char(ord(ch))
         drv.frame(DT)
     drv.type_char(0x0D)
-    for _ in range(2):
-        drv.frame(DT)
+    for _ in range(3):              # the page redraws without the popover
+        drv.frame(DT)               # and the input policy reads that
     assert se.selected()["tag"] == "coingem"
-    assert page.pop is None
+    assert page.pop is None and not ws.input.text_mode
 
 
 def test_snap_and_zoom_from_the_foot(hh):

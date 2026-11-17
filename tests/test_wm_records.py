@@ -86,8 +86,8 @@ def _open(ws, root, app):
         # every picture made stays: which ones a frame reaches decides what
         # is made first, and an eviction would then differ between the desks
         _settle_mtimes(os.path.dirname(str(ws.carts_root).rstrip("/")))
-        ws._apps_by_id["myart"].covers.KEEP = 1000
-        assert ws.open_app(ws._apps_by_id["myart"]) is not False
+        ws.app("myart").covers.KEEP = 1000
+        assert ws.spine.open_app(ws.app("myart")) is not False
     elif app == "blocks":
         from ws_helpers import select_on_home
         cart = select_on_home(ws, "Coin Quest")
@@ -97,20 +97,20 @@ def _open(ws, root, app):
         if d is not None and d() is not None:
             d().switch("code")
         ws.editor_app.set_tab("blocks")
-        ws._dirty = True
+        ws.mark_dirty()
     elif app == "getcarts":
         repo = Repo("https://mit.example/carts", "Test carts")
         for i in range(24):
             repo.add("c%02d" % i, name="Cart %02d" % i)
         ci.save_sources(str(root / "carts"), [repo.url("index.json")])
         ws.cart_net = MemNet(repo.routes())
-        a = ws._apps_by_id["getcarts"]
+        a = ws.app("getcarts")
         a._inst = _SameFree(a._inst)
-        assert ws.open_app(a) is not False
+        assert ws.spine.open_app(a) is not False
     else:
         if app == "storybook":
             seed_stories(ws)
-        assert ws.open_app(ws._apps_by_id[app]) is not False
+        assert ws.spine.open_app(ws.app(app)) is not False
 
 
 # The Waveshare P4's desk as it ships: the desk's size class at the scale 1
@@ -122,12 +122,12 @@ def _desk(tmp_path, app, ships, apps=(), board=None):
     root = tmp_path / ("ships" if ships else "whole")
     ws = build_desktop_ws(root, **(board or {}))
     no_unlock_banner(ws)
-    ws.bar_layer._clock_text = lambda: "10:30"
+    ws.bar_layer.clock_text = lambda: "10:30"
     ws.wallpaper.is_animating = lambda dt: False
     ws.pointer.visible = False
     settle_badges(ws)
-    ws._toast_until = 0
-    ws.open_desk()
+    ws.toast_until = 0
+    ws.home.open_desk()
     if not ships:
         ws.wm._speaks = lambda win: False
         ws.wm._vouches = lambda win: False
@@ -138,7 +138,7 @@ def _desk(tmp_path, app, ships, apps=(), board=None):
 
 
 def _owes(ws):
-    for app, _t in ws._apps:
+    for app in ws.app_layers:
         if getattr(app, "idle_owed", False):
             return True
     return False
@@ -157,7 +157,7 @@ class Pair:
         self._state = {}
         self.held = {}
         for ws in (self.a, self.b):
-            root = ws.wm._root_canvas
+            root = ws.wm.root_canvas
             root.RETAINED_FRAMES = bufs
             self.held[id(ws)] = [bytes(root._buf)]
         self.kinds = []
@@ -185,7 +185,7 @@ class Pair:
         floor reaches decides which are made first, so the desks would
         otherwise show a picture landing on different frames."""
         for ws in (self.a, self.b):
-            a = ws._apps_by_id["myart"]
+            a = ws.app("myart")
             sizes = set((e[0], e[1]) for v in a.covers._got.values() for e in v)
             w, h = a._pic_wh
             sizes.update(((w, h), (w + 10, h + 10)))
@@ -194,7 +194,7 @@ class Pair:
                     a.covers.get(name, w, h)
             del a._owed[:]
             a._gens_due = True
-            ws._dirty = True
+            ws.mark_dirty()
         self.settle(check=False)
 
     def _drive(self, ws, drv):
@@ -224,7 +224,7 @@ class Pair:
 
     def glass(self, ws):
         h = self.held[id(ws)]
-        return h[-1] if self.bufs > 1 else bytes(ws.wm._root_canvas._buf)
+        return h[-1] if self.bufs > 1 else bytes(ws.wm.root_canvas._buf)
 
     def frame(self, check=True):
         _NOW[0] += 33
@@ -236,7 +236,7 @@ class Pair:
             self._drive(ws, drv)
             if ws.frame_state.frames_drawn != k:
                 painted = True
-                root = ws.wm._root_canvas
+                root = ws.wm.root_canvas
                 h = self.held[id(ws)]
                 if ws is self.a and ws.wm._repeats_n == r:
                     self.kinds.append(ws.frame_change)     # a content frame, not a debt's copy
@@ -248,7 +248,7 @@ class Pair:
         if check:
             shot, want = self.glass(self.a), self.glass(self.b)
             if shot != want:
-                w = self.a.wm._root_canvas.w
+                w = self.a.wm.root_canvas.w
                 at = next(i for i in range(0, len(shot), 2) if shot[i:i + 2] != want[i:i + 2]) // 2
                 raise AssertionError("the glass (%s, %d buffers) differs from the whole "
                                      "repaints' at (%d, %d)" % (self.a.frame_change, self.bufs,
@@ -269,7 +269,7 @@ class Pair:
                     return
 
     def win(self, kind):
-        return self.a.wm._wins[kind]
+        return self.a.wm.windows[kind]
 
     def at(self, kind, fx=0.5, fy=0.75):
         cx, cy, cw, ch = self.win(kind).content_rect()
@@ -318,8 +318,8 @@ def test_drags_flings_keys_and_held_keys_match_whole_repaints(tmp_path, app, buf
     p = Pair(tmp_path, app, bufs)
     if app == "files":
         _files_list(p)
-    _, _, _, ch = p.win(p.a.wm._focus).content_rect()
-    kind = p.a.wm._focus
+    _, _, _, ch = p.win(p.a.wm.focus_key).content_rect()
+    kind = p.a.wm.focus_key
     p.drag(kind, -ch // 2)
     p.settle()
     p.drag(kind, -ch // 3, steps=3)
@@ -341,7 +341,7 @@ def test_drags_flings_keys_and_held_keys_match_whole_repaints(tmp_path, app, buf
 
 def _inst(ws, cls):
     """The open app whose class is named `cls`."""
-    for app, _t in ws._apps:
+    for app in ws.app_layers:
         a = getattr(app, "_inst", app)
         if type(a).__name__ == cls:
             return a
@@ -362,7 +362,7 @@ def _files_list(p):
             ws.covers.begin_frame()
             if all(f._nav.cover(r[4]) is not False for r in f.rows):
                 break
-        ws._dirty = True
+        ws.mark_dirty()
     p.settle()
 
 
@@ -377,7 +377,7 @@ P4_APPS = ("licences", "files", "storybook", "appearance", "getcarts")
 @pytest.mark.parametrize("app", P4_APPS)
 def test_the_p4_desk_shifts_its_apps_pages_byte_for_byte(tmp_path, app, bufs):
     p = Pair(tmp_path, app, bufs, board=P4)
-    kind = p.a.wm._focus
+    kind = p.a.wm.focus_key
     if app == "files":
         _files_list(p)
         assert _inst(p.a, "FilesAppLayer").layout.two
@@ -559,7 +559,7 @@ def test_a_change_the_page_shows_moves_its_gen(tmp_path, change, bufs):
     those frames draw the page again, not the last frame's pixels moved."""
     app, fn = CHANGES[change]
     p = Pair(tmp_path, app, bufs, board=P4)
-    kind = p.a.wm._focus
+    kind = p.a.wm.focus_key
     if app == "files":
         _art(p)
     p.keys("down", 2)
@@ -587,7 +587,7 @@ def test_a_change_the_page_shows_moves_its_gen(tmp_path, change, bufs):
 
 def _tap_widget(p, name):
     from runtime import shell_layout
-    lay = p.a.wm._root_ctx.layout
+    lay = p.a.wm.root_ctx.layout
     i, (x, y, w, h) = shell_layout.cell_of(lay.bars, name)
     bx, by = lay.bars[i][1][:2]
     p.both("click", bx + x + w // 2, by + y + h // 2)
@@ -608,12 +608,12 @@ def test_overlapping_windows_a_focus_change_and_a_move_mid_coast(tmp_path, bufs)
     w = p.a.wm
     c = p.win("calc")
     for ws in (p.a, p.b):
-        ws.wm._move_window(ws.wm._wins["settings"], 4, ws.wm._wins["settings"].y)
-        ws._dirty = True
+        ws.wm._move_window(ws.wm.windows["settings"], 4, ws.wm.windows["settings"].y)
+        ws.mark_dirty()
     p.settle()
     s = p.win("settings")
     sx, sy, sw, sh = s.content_rect()
-    assert sx + sw <= w._root_canvas.w and sy + sh <= w._root_canvas.h
+    assert sx + sw <= w.root_canvas.w and sy + sh <= w.root_canvas.h
     from runtime.wm_parts import _overlap
     assert _overlap((s.x, s.y, s.w, s.h), (c.x, c.y, c.w, c.h))
     _, _, _, ch = s.content_rect()
@@ -625,12 +625,12 @@ def test_overlapping_windows_a_focus_change_and_a_move_mid_coast(tmp_path, bufs)
                and w._resize_zone_at(x, y) is None)   # a tap on Calc, not a grab of an edge
     p.both("click", *vis)
     p.frame()
-    assert w._focus == "calc"
+    assert w.focus_key == "calc"
     p.settle()
     p.both("click", s.x + 24, _strip(p, "settings")[1])
     p.frame()
     p.settle()
-    assert w._focus == "settings"
+    assert w.focus_key == "settings"
     p.keys("down", 3, gap=4)
     p.drag("settings", -ch // 2, steps=3)
     p.frame()
@@ -739,7 +739,7 @@ def test_a_held_key_at_the_end_paints_nothing_full_screen(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     no_unlock_banner(ws)
-    ws.bar_layer._clock_text = lambda: "10:30"
+    ws.bar_layer.clock_text = lambda: "10:30"
     ws.pointer.visible = False
     ws.open_settings()
     drv = make_drv(ws)
@@ -774,7 +774,7 @@ def test_the_debt_is_paid_while_the_window_buffer_lags(tmp_path, bufs, refill):
     assert not win._buf_stale, "the idle frames never refilled the window's buffer"
     cx, cy, cw, chh = win.content_rect()
     glass = p.glass(p.a)
-    W = w._root_canvas.w
+    W = w.root_canvas.w
     for r in range(chh):
         a = ((cy + r) * W + cx) * 2
         assert bytes(win.buf._buf[r * cw * 2:(r + 1) * cw * 2]) == glass[a:a + cw * 2], r
@@ -797,7 +797,7 @@ def test_a_frame_whose_change_is_the_window_repaints_no_desk_or_chrome(tmp_path)
         d0, r0 = p.direct, w._repeats_n
         if p.frame() and w._repeats_n == r0:
             assert p.direct == d0 + 1, "a %s frame did not draw into the glass" % cls
-            assert not w._desk_painted and w._chrome_quiet, "a %s frame laid the desk" % cls
+            assert not w._desk_painted and w.chrome_quiet, "a %s frame laid the desk" % cls
             assert w._outside_f != p.a.frame_state.frames_drawn - 1, "a %s frame drew outside" % cls
             seen[cls] = seen.get(cls, 0) + 1
     x, y = p.at("settings")
@@ -819,4 +819,4 @@ def test_a_frame_whose_change_is_the_window_repaints_no_desk_or_chrome(tmp_path)
     p.settle()
     assert set(seen) >= {"press", "drag", "coast", "key"}, seen
     n = w._repeats_n - px0[1]
-    assert n > 0 and w._debt_px - px0[0] <= n * w._root_canvas.w * ch
+    assert n > 0 and w._debt_px - px0[0] <= n * w.root_canvas.w * ch

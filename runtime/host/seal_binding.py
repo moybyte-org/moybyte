@@ -20,16 +20,14 @@ import os
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
-try:                                    # the host's runtime package
-    from . import native_build
-except ImportError:                     # loaded flat, runtime/ on sys.path
-    import native_build
+import native_build
 
 NET = os.path.join(native_build.ROOT, "native", "moy_net")
 MBEDTLS = os.path.join(NET, "mbedtls")
 MONOCYPHER = os.path.join(NET, "monocypher")
 _CACHE = os.path.join(native_build.ROOT, ".build", "host")
-FLAGS = ["-std=gnu99", "-O2", "-fPIC", "-w", "-I", NET, "-I", os.path.join(MBEDTLS, "include"),
+SPINE = os.path.join(native_build.ROOT, "native", "moy_spine")
+FLAGS = ["-std=gnu99", "-O2", "-fPIC", "-w", "-I", NET, "-I", SPINE, "-I", native_build.PLATFORM_DIR, "-I", os.path.join(MBEDTLS, "include"),
          "-I", os.path.join(MBEDTLS, "library"), "-I", MONOCYPHER,
          "-DMBEDTLS_CONFIG_FILE=\"moy_seal_mbedtls.h\""]
 
@@ -52,7 +50,7 @@ def archive(cflags=(), verbose=False):
     paths = sources() + sorted(glob.glob(os.path.join(MBEDTLS, "**", "*.h"), recursive=True))
     paths += sorted(glob.glob(os.path.join(MONOCYPHER, "*.h")))
     paths += [os.path.join(NET, "moy_seal.h"), os.path.join(NET, "moy_crypto.h"),
-              os.path.join(NET, "moy_seal_mbedtls.h")]
+              os.path.join(NET, "moy_seal_mbedtls.h"), os.path.join(SPINE, "moy_codec.h")]
     for path in paths:
         h.update(path[len(native_build.ROOT):].encode())
         with open(path, "rb") as f:

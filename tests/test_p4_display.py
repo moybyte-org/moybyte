@@ -148,7 +148,7 @@ class FakeWS:
         self.screen = "home"
         self.wifi = None
         self.carts = _FakeCarts()
-        self._apps = ()
+        self.app_layers = ()
         self._psave_ms = 0
         self._psave_asleep = False
 
@@ -364,7 +364,7 @@ def test_the_reuse_fence_stays_unarmed_while_presents_keep_up():
 
 def test_the_blocking_game_fence_is_timed(stepped):
     """The blind spot: this runs inside FrameLoop's UNTIMED present() hook --
-    outside `ws._flush_ms` and unattributed inside `busy=`."""
+    outside `ws.flush_ms` and unattributed inside `busy=`."""
     _dsi, ppa, ctx = build()
     with ctx as mod:
         stepped(mod)
@@ -2063,13 +2063,13 @@ def test_crisp_pixels_leave_a_direct_colour_frame_bilinear():
     comp = types.SimpleNamespace(rotated=False, _composite_pending=False)
     ppa = FramePpa()
     P, cv = _frame_canvas(comp, ppa)
-    smooth = P._smooth
-    P._smooth = False                            # CRISP PIXELS on
+    from runtime import glass_binding
+    glass_binding.game_crisp(True)               # CRISP PIXELS on
     try:
         view = memoryview(bytearray(2 * 320 * 240))
         assert cv.present_frame(FrameStub(), view, FGC, 192, 60, 2) is True
     finally:
-        P._smooth = smooth
+        glass_binding.game_crisp(False)
     assert [c[0] for c in ppa.calls] == ["wait", "blit_scale", "snap"]
 
 

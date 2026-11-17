@@ -13,11 +13,10 @@ from __future__ import annotations
 import ctypes
 import os
 
-try:                                    # the host's runtime package
-    from . import host_native, native_build
-except ImportError:                     # loaded flat, runtime/ on sys.path
-    import host_native
-    import native_build
+import host_native
+import native_build
+from moy_media_face import (
+    moy_media_end_t as _End, moy_media_probe_t as _Probe, moy_media_status_t as _St)
 
 _MEDIA = os.path.join(native_build.ROOT, "native", "moy_media")
 _NET = os.path.join(native_build.ROOT, "native", "moy_net")
@@ -40,25 +39,6 @@ FIELDS = ("state", "paused", "pid", "gen", "entry", "entries", "kind", "armed", 
           "sram", "dec_us")
 
 _U32, _I, _P, _SZ = ctypes.c_uint32, ctypes.c_int, ctypes.c_void_p, ctypes.c_size_t
-
-
-class _St(ctypes.Structure):
-    _fields_ = [("state", _I), ("paused", _I), ("pid", _U32), ("client", _U32), ("gen", _U32),
-                ("entry", _I), ("entries", _I), ("kind", _I), ("armed", _I),
-                ("rate", _I), ("channels", _I), ("kbps", _I), ("volume", _I),
-                ("in_bytes", _U32), ("in_room", _U32), ("pcm_frames", _U32),
-                ("decoded", _U32), ("played", _U32), ("starved", _U32),
-                ("err", _I), ("text_gen", _U32), ("idle", _I), ("at_ms", _U32),
-                ("len_ms", _U32), ("feed_at", _U32), ("sram", _U32), ("dec_us", _U32)]
-
-
-class _End(ctypes.Structure):
-    _fields_ = [("runs", _U32), ("pid", _U32), ("client", _U32), ("state", _I), ("err", _I)]
-
-
-class _Probe(ctypes.Structure):
-    _fields_ = [("seconds", _U32), ("title", ctypes.c_char * 128),
-                ("artist", ctypes.c_char * 128)]
 
 
 _SIGS = (

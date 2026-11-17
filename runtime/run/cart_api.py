@@ -34,18 +34,9 @@ one function OBJECT, not three agreeing copies.
 
 import random
 
-try:                                    # staged/frozen flat namespace (boards, web)
-    from moy_image import Image
-except ImportError:                     # host: the runtime package
-    from runtime.moy_image import Image
-try:
-    from ticks import _since_ms
-except ImportError:
-    from runtime.ticks import _since_ms
-try:
-    from moy_input import pointer_state, P_NONE, P_HELD, P_CLICK
-except ImportError:
-    from runtime.moy_input import pointer_state, P_NONE, P_HELD, P_CLICK
+from moy_image import Image
+from ticks import _since_ms
+from moy_input import pointer_state, P_NONE, P_HELD, P_CLICK
 
 
 # owner -> the Image subclass a cart of that owner constructs (below).
@@ -83,10 +74,7 @@ def _rotate_indices(*args):
     """widgets.rotate_indices (#85/#93 all-around sprite rotation), bound
     lazily for the same leaf-module reason as color() above -- only the scene
     rotation path needs it, and widgets is not leaf-weight."""
-    try:
-        from widgets import rotate_indices
-    except ImportError:
-        from runtime.widgets import rotate_indices
+    from widgets import rotate_indices
     return rotate_indices(*args)
 
 # The logical buttons a CART may read (moy SPEC.md 7.3): four directions, a/b,
@@ -111,10 +99,7 @@ def color(name_or_index):
     has long imported chrome, so the lazy bind costs one getattr ever."""
     global _color
     if _color is None:
-        try:
-            from chrome import color as _c
-        except ImportError:
-            from runtime.chrome import color as _c
+        from chrome import color as _c
         _color = _c
     return _color(name_or_index)
 
@@ -128,10 +113,7 @@ def _decode_moyimg(text):
     one -- and a picture whose format the caller had not thought of came back as
     a silently blank image on whichever tier held the other half."""
     try:
-        try:
-            import moyimg
-        except ImportError:
-            from runtime import moyimg
+        import moyimg
         return moyimg.decode_moyimg(text)
     except Exception:  # noqa: BLE001 -- bad/absent image -> caller gets None
         return None
@@ -165,6 +147,7 @@ class _NoRun:
     namespace): its own view and a clock from 0."""
     view = None
     cart_start_ms = None
+    textmode = False
 
 
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
@@ -444,10 +427,11 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # btn() (true hold-to-move) but the keyboard yields no clean typeable ASCII.
         # textmode(True) switches to text mode so key()/keyp() return clean 1-byte
         # ASCII for typing (a password, a name); textmode(False) restores game mode.
-        # The Workstation applies it: on the host it gates char routing to the
+        # The flag is the run's; the console's input policy applies it while
+        # the run holds the keys: on the host it gates char routing to the
         # cart's key(); on the device it flips the T-Deck keyboard ASCII<->raw.
-        # Resets to game mode automatically when the cart exits.
-        input.text_mode = bool(on)
+        # A fresh cart starts in game mode.
+        run.textmode = bool(on)
 
     def view(w=0, h=0):
         # view(w, h) -> declare the cart's LOGICAL viewport: the composite scales
@@ -463,7 +447,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # The console's own exit is the pause menu (`start`); quit() is the cart's.
         # ADDITIVE to the frozen kid API, works for ANY cart type. Sets a flag
         # the Player honors AFTER this frame's _update runs (player.tick), popping to
-        # the run caller via ws._exit_to_caller(). `quit` shadows the site builtin
+        # the run caller via ws.spine.exit_to_caller(). `quit` shadows the site builtin
         # inside the cart's exec namespace, resolving to this closure.
         input.cart_quit = True
 
@@ -639,6 +623,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "sfx": _sfx, "beep": _beep, "music": _music,
         "music_stop": _music_stop, "sound_stop": _sound_stop, "volume": _volume,
         "rnd": lambda n=1.0: random.random() * n,
+        "srand": lambda seed=0: random.seed(int(seed)),
         "flr": lambda x: int(x // 1),
         "Image": _owned_image_cls(owner),
         "image": image,

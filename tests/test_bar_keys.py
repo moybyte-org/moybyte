@@ -41,8 +41,8 @@ def _press(drv, name, frames=2):
 
 
 def _editor(ws, drv):
-    ws._open_workspace(ws.launcher.selected())
-    ws._open_menu()
+    ws.open_workspace(ws.launcher.selected())
+    ws.text.open_menu()
     for _ in range(3):
         drv.frame(1 / 30)
 
@@ -92,7 +92,7 @@ def test_the_trackball_walks_the_bar(tmp_path):
     bl = ws.bar_layer
     _press(drv, "up")
     _walk_to(ws, drv, "cluster")
-    assert ws.ball_steps()
+    assert ws.input_policy.ball_steps()
     k = bl.focus
     drv.pan(1, 0)
     for _ in range(2):
@@ -148,7 +148,7 @@ def test_the_editors_bar_lands_on_its_open_tab_and_switches_tabs(tmp_path):
         if bl.focus is not None:
             break
     assert bl.focus_where == "menu"
-    assert bl.focus_item[1][0] <= ws.bar_open_x("menu") < bl.focus_item[1][0] + \
+    assert bl.focus_item[1][0] <= ws.router.bar_open_x("menu") < bl.focus_item[1][0] + \
         bl.focus_item[1][2], "the keys land on the open tab"
     _press(drv, "right")
     assert ws.menu_view == "cards", "the walk moves the focus and opens nothing"

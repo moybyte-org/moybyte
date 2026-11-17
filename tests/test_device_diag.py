@@ -80,6 +80,7 @@ class Obj:
 
     def __init__(self, **kw):
         self.__dict__.update(kw)
+        self.perf = self            # the console's perf service, answered here
 
 
 class FakeDiag:
@@ -211,7 +212,7 @@ def test_the_flush_hands_over_the_workstations_LIVE_sd_wrapper(dd):
     returns False rather than writing when it is None."""
     wrapper = object()
     diag = FlushDiag()
-    dd._diag_flush(diag, Obj(can_manage=True, _with_sd=wrapper))
+    dd._diag_flush(diag, Obj(can_manage=True, with_sd=wrapper))
     assert diag.flushed == [wrapper]
 
     diag = FlushDiag()
@@ -221,14 +222,14 @@ def test_the_flush_hands_over_the_workstations_LIVE_sd_wrapper(dd):
 
 def test_the_flush_returns_its_own_elapsed_ms_so_the_caller_neednt_time_it(dd):
     clock_ms(dd, 1000, 1075)
-    assert dd._diag_flush(FlushDiag(), Obj(can_manage=True, _with_sd=1)) == 75
+    assert dd._diag_flush(FlushDiag(), Obj(can_manage=True, with_sd=1)) == 75
 
 
 def test_a_failing_flush_reports_zero_ms_and_never_reaches_the_frame_loop(dd):
     """`_t["sd"]` feeds LOOP/HITCH. A raise here would take the frame with it."""
     wrapper = object()
     diag = FlushDiag(boom=True)
-    assert dd._diag_flush(diag, Obj(can_manage=True, _with_sd=wrapper)) == 0
+    assert dd._diag_flush(diag, Obj(can_manage=True, with_sd=wrapper)) == 0
     assert diag.flushed == [wrapper]               # it was attempted, then ate it
 
 

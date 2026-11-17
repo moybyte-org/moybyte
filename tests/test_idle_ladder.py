@@ -79,13 +79,13 @@ def test_the_saver_cycles_covers_on_a_fullscreen_console(tmp_path):
     ws.frame(1 / 30)
     n = ws.frame_state.frames_drawn
     ws.saver_state(True)
-    assert ws._saver is not None and not ws._saver.wallpaper
+    assert ws.saver is not None and not ws.saver.wallpaper
     ws.frame(1 / 30)
     assert ws.frame_state.frames_drawn == n + 1                      # the first card drew
     ws.frame(1 / 30)
     assert ws.frame_state.frames_drawn == n + 1                      # held until its period ends
     ws.saver_state(False)
-    assert ws._saver is None and ws._dirty
+    assert ws.saver is None and ws.frame_state.dirty
     ws.frame(1 / 30)
     assert ws.frame_state.frames_drawn == n + 2                      # the console repaints
 
@@ -93,7 +93,7 @@ def test_the_saver_cycles_covers_on_a_fullscreen_console(tmp_path):
 def test_the_saver_is_the_wallpaper_on_a_desk(tmp_path):
     ws = build_desktop_ws(tmp_path)
     ws.saver_state(True)
-    assert ws._saver is not None and ws._saver.wallpaper
+    assert ws.saver is not None and ws.saver.wallpaper
     n = ws.frame_state.frames_drawn
     ws.frame(1 / 30)
     ws.frame(1 / 30)
@@ -104,4 +104,4 @@ def test_the_saver_never_covers_a_running_cart(tmp_path):
     ws = build_ws(tmp_path)
     open_cart(ws, "Star Catcher")
     ws.saver_state(True)
-    assert ws._saver is None
+    assert ws.saver is None

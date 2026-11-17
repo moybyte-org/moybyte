@@ -11,7 +11,9 @@ decisions the code rests on.
 |---|---|
 | `../os_calls.json` | the ONE SOURCE of Moybyte's calls: a row with an `elf` ordinal is a row of this table, appended, never changed or removed |
 | `moy_os_table.h`, `moy_os_rows.h`, `moy_os_table.c` | generated from it (`tools/gen_os_table.py`): the row enum, the kernel's prototypes, the table, its retired rows' typed stubs, and the body of each app call (below) |
-| `moy_os.h`, `moy_os.c` | the process model and every row's body |
+| `moy_os.h`, `moy_os.c` | the process model: its platform, records, threads and handles, and the rows not below |
+| `moy_os_files.c`, `moy_os_net.c`, `moy_os_proc.c` | the file and stream rows, the socket rows, and a process from its start to its reaping (THE WATCHDOG) |
+| `moy_os_int.h` | what those four files share, and nothing else includes |
 | `moy_elf.h`, `moy_elf_check.c` | the verdict a module passes before it is relocated |
 | `moy_umode.h`, `moy_umode.c`, `moy_umode.S` | the P4s' isolation: the boot PMP layout, the trap side, the windows |
 | `moy_os_check.c` | generated from `os_table.json`'s `u`: each row's argument rule, checked before a U-mode call runs |
@@ -113,11 +115,11 @@ toolkit's `ui` rows are deferred for this tier (`"elf": "deferred"`).
   nothing drains for it. Its stop hangs the descriptor up; its wakes are
   charged to the one supervisor (`moy_super.h`); a service that returns by
   itself is swept on the console's task (`moy_os_reap`), at the
-  scheduler's poll (`runtime/system/scheduler.py`, COMPILED SERVICES),
+  scheduler's poll (`runtime/system/sched_compiled.py`, COMPILED SERVICES),
   which starts, stops and restarts it as any service.
 - Native code is not aborted where it stands by a timer. A wake that runs
   on without polling its descriptor again is struck at that poll by
-  `moy_os_reap`'s watchdog (`moy_os.c`, THE WATCHDOG), once for each
+  `moy_os_reap`'s watchdog (`moy_os_proc.c`, THE WATCHDOG), once for each
   `MOY_SUPER_ABORT_US` of its own time (a hop's wait and a here row's time
   are the console's), and killed (137) by the strike that suspends it; a
   kill deletes its threads where they stand, as a stop past its time does.

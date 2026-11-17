@@ -9,11 +9,9 @@ from __future__ import annotations
 import ctypes
 import os
 
-try:                                    # the host's runtime package
-    from . import host_native, native_build
-except ImportError:                     # loaded flat, runtime/ on sys.path
-    import host_native
-    import native_build
+import host_native
+import native_build
+from moy_gatt_face import moy_gatt_seen_t as _Seen, moy_gatt_uuid_t as _Uuid
 
 _INPUT = os.path.join(native_build.ROOT, "native", "moy_input")
 _SPINE = os.path.join(native_build.ROOT, "native", "moy_spine")
@@ -31,14 +29,6 @@ _U8, _U16, _U32, _I, _I8 = (ctypes.c_uint8, ctypes.c_uint16, ctypes.c_uint32, ct
                             ctypes.c_int8)
 _P = ctypes.c_void_p
 _B = ctypes.c_char_p
-
-
-class _Uuid(ctypes.Structure):
-    _fields_ = [("len", _U8), ("v", _U8 * 16)]
-
-
-class _Seen(ctypes.Structure):
-    _fields_ = [("addr", _U8 * 6), ("type", _U8), ("rssi", _I8), ("name", ctypes.c_char * 21)]
 
 
 _SIGS = (

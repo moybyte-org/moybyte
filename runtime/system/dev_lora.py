@@ -38,20 +38,9 @@ The receive windows are timed by the driver in C. On a board the driver's own
 task steps it; the host's stand-in is stepped by its test
 (runtime/host/lora_sim.py)."""
 
-try:
-    import moy_lora as _N
-except ImportError:  # host: the runtime package
-    from runtime import moy_lora as _N
-
-try:
-    import devices as _D
-except ImportError:  # host: the runtime package
-    from runtime import devices as _D
-
-try:
-    import moybyte as _moybyte
-except ImportError:  # host: the runtime package
-    from runtime import moybyte as _moybyte
+import moy_lora as _N
+import devices as _D
+import moybyte as _moybyte
 
 EV_RX, EV_TX_DONE, EV_JOINED = _N.EV_RX, _N.EV_TX_DONE, _N.EV_JOINED
 EV_JOIN_FAILED, EV_DOWN, EV_UP_DONE = _N.EV_JOIN_FAILED, _N.EV_DOWN, _N.EV_UP_DONE

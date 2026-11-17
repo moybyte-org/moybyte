@@ -28,12 +28,8 @@ Each function is one store op; the caller runs it inside the store's gate
 
 import os
 
-try:
-    from cart_files import key as _file_key
-    from moy_docs import system_store_path as _settings_path
-except ImportError:  # host: the runtime package
-    from runtime.cart_files import key as _file_key
-    from runtime.moy_docs import system_store_path as _settings_path
+from cart_files import key as _file_key
+from moy_docs import system_store_path as _settings_path
 
 DIR = "keys"
 NAME_MAX = 32
@@ -79,10 +75,7 @@ def _unhex(text):
 
 
 def _crypto():
-    try:
-        import moy_app
-    except ImportError:  # host: the runtime package
-        from runtime import moy_app
+    import moy_app
     return moy_app
 
 

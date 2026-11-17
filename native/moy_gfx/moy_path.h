@@ -14,7 +14,7 @@
 // 26.6 pixels; widths answer in 26.6.
 //
 // Colours are wire words, as moy_shape's; a partly covered pixel blends
-// into what is there, in the byte order moy_shape_wire_swapped set.
+// into what is there, in the wire order moy_gfx_wire set (moy_gfx_base.h).
 
 #ifndef MOY_PATH_H
 #define MOY_PATH_H
@@ -70,8 +70,5 @@ int moy_path_metrics(int face, int out[3]);
 // the scratch back its own (kept, grown on need). A quarter of the block is
 // the coverage, an int32 a column of the widest clip drawn.
 void moy_path_lend(void *mem, size_t n);
-
-// The byte order blends read and write in (moy_shape_wire_swapped calls it).
-void moy_path_wire_swapped(int swapped);
 
 #endif

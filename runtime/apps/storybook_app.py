@@ -32,24 +32,13 @@ an old story cart's deck) is not listed: it reads as absent.
 
 from array import array
 
-try:
-    import ui
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui
-
-try:
-    from app_shell import ListShellApp
-    from layout_base import bar_rows, content_of, metric_class, window_foot, DESK
-    from ticks import _ticks_ms, _ticks_diff
-    import story_doc as D
-    import story_render as R
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.app_shell import ListShellApp
-    from runtime.layout_base import (bar_rows, content_of, metric_class, window_foot,
-                                     DESK)
-    from runtime.ticks import _ticks_ms, _ticks_diff
-    from runtime import story_doc as D
-    from runtime import story_render as R
+import ui
+from app_shell import ListShellApp
+from layers import AppLayer
+from layout_base import bar_rows, content_of, metric_class, window_foot, DESK
+from ticks import _ticks_ms, _ticks_diff
+import story_doc as D
+import story_render as R
 
 KIND = "stories"
 DOC = "story.json"
@@ -351,7 +340,6 @@ class StorybookAppLayer(ListShellApp):
         self.ed = None                # the desk's editor (runtime/apps/story_edit.py)
         self._focus = None
         self._focused = None
-        self._key = 0
         self._edited_at = None
         self._scanned = False
         self._rows = []               # the stories' cards (`_cards`)
@@ -370,10 +358,7 @@ class StorybookAppLayer(ListShellApp):
         self.toast = None
         self._scan()
         if self.layout.desk and self.ed is None:
-            try:
-                from story_edit import Editor
-            except ImportError:  # pragma: no cover - host fallback
-                from runtime.story_edit import Editor
+            from story_edit import Editor
             self.ed = Editor(self)
         if self.stories:
             self._focus = self._card_id(self.stories[0]["name"])
@@ -423,6 +408,12 @@ class StorybookAppLayer(ListShellApp):
         if self.story is not None and self.page != "stories":
             return self.story.title() or "Untitled"
         return None
+
+    def typing(self):
+        """A field in focus types (a dialog's name), and so do a slide's
+        words while the desk's editor writes them."""
+        ed = self.ed
+        return (ed is not None and ed.writing) or AppLayer.typing(self)
 
     def has_page(self):
         return self.page != "stories" or self.asking is not None or self.menu is not None \
@@ -516,12 +507,7 @@ class StorybookAppLayer(ListShellApp):
 
     def _typed(self, inp):
         """The key typed this frame (each press once), or 0."""
-        k = getattr(inp, "last_key", 0) or 0
-        if not isinstance(k, int):
-            k = ord(k[0]) if k else 0
-        typed = k if k != 0 and k != self._key else 0
-        self._key = k
-        return typed
+        return getattr(inp, "typed", 0)
 
     def handle_input(self, inp):
         k = self._typed(inp)
@@ -535,8 +521,6 @@ class StorybookAppLayer(ListShellApp):
             if k == 27:
                 self.back()
                 return True
-            if self.asking == "rename":
-                self._type_into(k)
             if self._ui.keys(inp):
                 self._damage.all()
             return True
@@ -545,18 +529,6 @@ class StorybookAppLayer(ListShellApp):
         if self.page == "view":
             return self._view_keys(inp, k)
         return self._stories_keys(inp, k)
-
-    def _type_into(self, k):
-        """A dialog's field, typed into."""
-        if k == 8:
-            self.typed = self.typed[:-1]
-        elif 32 <= k < 127 and len(self.typed) < D.MAX_TITLE:
-            self.typed += chr(k)
-        elif k in (13, 10):
-            self._rename_done()
-        else:
-            return
-        self._damage.all()
 
     def _stories_keys(self, inp, k):
         entry = self._focused_story()

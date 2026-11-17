@@ -22,12 +22,8 @@ stay on the class. It owns no state of its own: the slots and seqs it reads
 are the WM's, made in `WindowedWM.__init__`.
 """
 
-try:
-    from wm_parts import _overlap, _inside, _bands, _grow
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.wm_parts import _overlap, _inside, _bands, _grow
-    from runtime import ui_draw as _ui_draw
+from wm_parts import _overlap, _inside, _bands, _grow
+import ui_draw as _ui_draw
 
 
 class WindowOverlays:
@@ -45,7 +41,7 @@ class WindowOverlays:
         """Wash the game's fresh frame where the system menu's scrim lies:
         the pixels this frame painted, so they darken once (D-01)."""
         x, y, w, h = self._game_rect(win)
-        root = self._root_canvas
+        root = self.root_canvas
         th = self.ws.theme_colors
         for r in self.ws.menu_ui.scrim_rects():
             x0 = x if x > r[0] else r[0]
@@ -60,14 +56,14 @@ class WindowOverlays:
         rect to every retained buffer -- a paint while it is open, the
         snapshot put back once it is closed. Otherwise the frame repaints."""
         if not self._pop_rides():
-            self.ws._dirty = True
+            self.ws.mark_dirty()
             return
         self._pop_seq += 1
         m = self.ws.sysmenu
         n = self._pop_n()
         self._pop_face_ok = False
         if not self._pop_wash_changed(n):
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         slots = self._pop_slots
         cur = self._pop_cur
         rect = self.ws.menu_ui.panel_rect() if m.open else None
@@ -80,12 +76,12 @@ class WindowOverlays:
         if cur is None:
             j = 0 if slots[0][1] is None or slots[0][2] <= 0 else 1
             if slots[j][1] is not None and slots[j][2] > 0:
-                self.ws._dirty = True     # both slots owed: repaint whole
+                self.ws.mark_dirty()     # both slots owed: repaint whole
                 self._pop_reset()
                 j = 0
             s = slots[j]
             if not self._room(s, rect):
-                self.ws._dirty = True     # no room for its snapshot: repaint whole
+                self.ws.mark_dirty()     # no room for its snapshot: repaint whole
                 self._pop_reset()
                 return
             s[1] = rect
@@ -106,14 +102,14 @@ class WindowOverlays:
         screen): owe its stamp, as it now draws, to every buffer. The
         system menu's wash keeps its own (`_wash_focus`); a window under
         another repaints whole."""
-        win = self._wins.get(self._focus) if self._focus is not None else None
+        win = self.windows.get(self.focus_key) if self.focus_key is not None else None
         if (win is None or win.minimized or win.kind == "desktop" or win.buf is None
                 or win._marked == self._marks_for(win)):
             return
         if self._wash_win[0] is win and not self._mark_kept:
             return
-        if self._order[-1] != self._focus:
-            self.ws._dirty = True
+        if self.z_order[-1] != self.focus_key:
+            self.ws.mark_dirty()
             return
         self._mark_owed = n
 
@@ -124,7 +120,7 @@ class WindowOverlays:
         paints over it."""
         if self._mark_owed <= 0:
             return
-        win = self._wins.get(self._focus) if self._focus is not None else None
+        win = self.windows.get(self.focus_key) if self.focus_key is not None else None
         if win is None or win.minimized or win.buf is None:
             self._mark_owed = 0
             return
@@ -137,11 +133,11 @@ class WindowOverlays:
                 self._mark_kept = False
                 self._wash_focus_back()
             else:
-                self._prewarm(win)
+                self.prewarm(win)
         else:
             self._fresh(win)              # the stamp reads its page
         cx, cy, cw, ch = win.content_rect()
-        self._root_canvas.blit_strip(win.buf, cx, cy)
+        self.root_canvas.blit_strip(win.buf, cx, cy)
         self._win_grip(win, True)         # the one piece of chrome inside the content
         self._pop_note((cx, cy, cw, ch))
         self._mark_owed -= 1
@@ -151,21 +147,21 @@ class WindowOverlays:
         its card is owed to every retained buffer, its scrim as the system
         menu's is; otherwise the frame repaints."""
         if not self._pop_rides():
-            self.ws._dirty = True
+            self.ws.mark_dirty()
             return
         self._pop_seq += 1
         w = self._pop_wash
         was = w[4]
         n = self._pop_n()
         if not self._pop_wash_changed(n):
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         elif self._pause_rides():
             if w[3] or w[2] > 0:
                 self._pause_owed = n      # its card, in every buffer
             else:
-                self.ws._dirty = True     # a whole frame since: no snapshot
+                self.ws.mark_dirty()     # a whole frame since: no snapshot
         elif not (was and w[2] > 0):
-            self.ws._dirty = True         # not its riding close
+            self.ws.mark_dirty()         # not its riding close
 
     def _wash_rects(self):
         """The rects the riding scrim washes: the pause menu's, or the
@@ -269,7 +265,7 @@ class WindowOverlays:
         self._win_sig = None
 
     def _pop_note(self, r):
-        nd = getattr(self._root_canvas, "note_damage", None)
+        nd = getattr(self.root_canvas, "note_damage", None)
         if nd is not None:
             nd(r[0], r[1], r[2], r[3])
 
@@ -277,7 +273,7 @@ class WindowOverlays:
         """Put back each closing popover's rect (and, on a full frame, the
         open one's, so the frame starts as if no popover were drawn), then
         the scrim's: a full frame repaints what it washed, and it is spent."""
-        root = self._root_canvas
+        root = self.root_canvas
         cur = self._pop_cur
         self._pop_restore_slots(root, cur, ride)
         if not ride:
@@ -306,7 +302,7 @@ class WindowOverlays:
             r = w[1]
             hole = None
             if self._pop_game_next:
-                win = self._wins.get("desktop")
+                win = self.windows.get("desktop")
                 if win is not None and not win.minimized:
                     hole = self._game_rect(win)   # the game's frame comes next, opaque
             lay = w[0]
@@ -355,7 +351,7 @@ class WindowOverlays:
         ow, oh = (lay.w, lay.h) if lay is not None else (0, 0)
         s[i] = None
         self._release_layer(lay)
-        lay = s[i] = self._root_canvas.new_layer(max(w, ow), max(h, oh))
+        lay = s[i] = self.root_canvas.new_layer(max(w, ow), max(h, oh))
         return lay
 
     def _snap(self, s):
@@ -370,7 +366,7 @@ class WindowOverlays:
         except MemoryError:
             self._ride_refused()
             return False
-        lay.blit_strip(self._root_canvas, -x, -y)
+        lay.blit_strip(self.root_canvas, -x, -y)
         s[3] = True
         return True
 
@@ -380,8 +376,8 @@ class WindowOverlays:
         them. An overlay's next change asks again: a failed ask costs that
         change, never every frame after it."""
         self._pop_reset()
-        self.ws._dirty = True
-        self.ws._frame_requested = True   # asked from within a draw (request_frame)
+        self.ws.mark_dirty()
+        self.ws.frame_requested = True   # asked from within a draw (request_frame)
 
     def _pop_capture(self, s):
         """Snapshot slot `s` (`_snap`), and note whether it lies over the
@@ -391,12 +387,12 @@ class WindowOverlays:
         # Whether the playtest's window repaints under it, read once here:
         # nothing moves a window while a popover is open (a tap outside
         # closes it), and a play frame allocates nothing.
-        win = self._wins.get("desktop")
+        win = self.windows.get("desktop")
         self._pop_over_game = (win is not None and not win.minimized
                                and _overlap(s[1], self._win_extent(win)))
         return True
 
-    def _pop_paint(self, ride):
+    def pop_paint(self, ride):
         """Paint the open popover: snapshot what it covers first (always on
         a full frame, whose stack just repainted it), then the panel. A ride
         paints it while a buffer is owed it, or every frame it overlaps the
@@ -419,17 +415,17 @@ class WindowOverlays:
                 return
         r = s[1]
         if (ride and not fresh and self._pop_over_game and self._pop_face_ok
-                and "desktop" in self._wins):
+                and "desktop" in self.windows):
             # The playtest repainted under it and it has settled: its face
             # put back, one copy rather than a paint of the component, in
             # every buffer it is still owed to as well.
-            self._root_canvas.blit_strip_rect(self._pop_face, r[0], r[1], r[0], r[1], r[2], r[3])
+            self.root_canvas.blit_strip_rect(self._pop_face, r[0], r[1], r[0], r[1], r[2], r[3])
             self._pop_note(r)
             if s[2] > 0:
                 s[2] -= 1
             return
         if ride and s[2] <= 0:
-            if "desktop" not in self._wins:
+            if "desktop" not in self.windows:
                 self._pop_note(r)         # a still frame: say so, not "all"
                 return
             if not self._pop_over_game:
@@ -439,7 +435,7 @@ class WindowOverlays:
             # copied, or copied itself.
             w = self._pop_wash[1]
             if ((self._pop_wash_f == self.ws.frame_state.frames_drawn and _inside(r, w))
-                    or self._root_canvas.copy_last(r[0], r[1], r[2], r[3])):
+                    or self.root_canvas.copy_last(r[0], r[1], r[2], r[3])):
                 self._pop_note(r)
                 s[2] -= 1
                 return
@@ -447,17 +443,17 @@ class WindowOverlays:
             # the look's card (the menu's or a component's) has rounded,
             # shadowed edges: paint it over what it covers, never over its
             # own last paint
-            self._root_canvas.blit_strip_rect(s[0], r[0], r[1], r[0], r[1], r[2], r[3])
+            self.root_canvas.blit_strip_rect(s[0], r[0], r[1], r[0], r[1], r[2], r[3])
         ws = self.ws
-        asked = ws._frame_requested
-        ws._frame_requested = False
+        asked = ws.frame_requested
+        ws.frame_requested = False
         ws.menu_ui._draw_sysmenu()
-        moving = ws._frame_requested
-        ws._frame_requested = asked
+        moving = ws.frame_requested
+        ws.frame_requested = asked
         if moving and ws.menu_ui.panel_rect() != r:
             # It sized itself again (the networks a scan found): the next
             # frame repaints whole, its snapshot taken at the new rect.
-            ws._frame_requested = True
+            ws.frame_requested = True
             self._pop_face_ok = False
         elif moving:
             # The card has not settled (it opens, its focus moves): its rect
@@ -471,9 +467,9 @@ class WindowOverlays:
             if face is None or face.w < r[2] or face.h < r[3]:
                 ow, oh = (face.w, face.h) if face is not None else (0, 0)
                 self._release_layer(face)
-                face = self._pop_face = self._root_canvas.new_layer(
+                face = self._pop_face = self.root_canvas.new_layer(
                     max(r[2], ow), max(r[3], oh))
-            face.blit_strip(self._root_canvas, -r[0], -r[1])
+            face.blit_strip(self.root_canvas, -r[0], -r[1])
             self._pop_face_ok = True
         if ride:
             self._pop_note(r)
@@ -500,7 +496,7 @@ class WindowOverlays:
             if self._pause_owed > 0:
                 self._pause_paint(False)
             return
-        if self._wash_repeats and w[3] and self._root_canvas.copy_last(*w[1]):
+        if self._wash_repeats and w[3] and self.root_canvas.copy_last(*w[1]):
             # The last frame washed this same scrim: its buffer's wash, with
             # what that frame's card left over it, which the card's own
             # paint puts back first where it changed.
@@ -513,8 +509,8 @@ class WindowOverlays:
         if self._pause_rides():
             # Its game's frame, held, composited where a quiet frame deferred
             # it past this buffer: what the wash goes over.
-            game = self._wins["desktop"]
-            self._draw_player_window(game, False, self._focus == "desktop", 0,
+            game = self.windows["desktop"]
+            self._draw_player_window(game, False, self.focus_key == "desktop", 0,
                                      full=False, defer=False)
         if not w[3]:
             if not self._snap(w):
@@ -523,7 +519,7 @@ class WindowOverlays:
         win = self._wash_win[0]
         if win is not None:
             cx, cy = win.content_rect()[:2]
-            self._root_canvas.blit_strip(win.buf, cx, cy)
+            self.root_canvas.blit_strip(win.buf, cx, cy)
             self._win_chrome(win, True, quiet=False)
         self._wash(self._wash_rects())
         self._pop_note(w[1])
@@ -533,7 +529,7 @@ class WindowOverlays:
 
     def _wash(self, rects, clip=None):
         """The scrim over `rects`, within `clip` where given."""
-        root = self._root_canvas
+        root = self.root_canvas
         th = self.ws.theme_colors
         for r in rects:
             if clip is not None:
@@ -561,7 +557,7 @@ class WindowOverlays:
             s = (sp[0], sp[1], sp[2] - sp[0], sp[3] - sp[1])
             if s[2] > 0 and ((self._pop_wash_f == ws.frame_state.frames_drawn
                               and _inside(s, self._pop_wash[1]))
-                             or self._root_canvas.copy_last(s[0], s[1], s[2], s[3])):
+                             or self.root_canvas.copy_last(s[0], s[1], s[2], s[3])):
                 self._pop_note(s)
                 self._pause_owed -= 1
                 if self._pause_owed <= 0 and r is not None:
@@ -571,7 +567,7 @@ class WindowOverlays:
             w = self._pop_wash
             o = w[1]
             r = (sp[0], sp[1], sp[2] - sp[0], sp[3] - sp[1])
-            self._root_canvas.blit_strip_rect(w[0], o[0], o[1], r[0], r[1], r[2], r[3])
+            self.root_canvas.blit_strip_rect(w[0], o[0], o[1], r[0], r[1], r[2], r[3])
             self._wash(self._wash_rects(), r)
         ws.pause.draw_card()
         r = ws.pause.card_rect()
@@ -579,15 +575,15 @@ class WindowOverlays:
             _grow(sp, r[0], r[1], r[0] + r[2], r[1] + r[3])
             self._pop_note((sp[0], sp[1], sp[2] - sp[0], sp[3] - sp[1]))
         self._pause_owed -= 1
-        if ws._frame_requested:
-            ws._frame_requested = False
+        if ws.frame_requested:
+            ws.frame_requested = False
             self._pause_owed = self._pop_n()
             self._pop_seq += 1
         elif self._pause_owed <= 0 and r is not None:
             # every buffer holds this paint now: the span is its rect
             sp[0], sp[1], sp[2], sp[3] = r[0], r[1], r[0] + r[2], r[1] + r[3]
 
-    def _pause_full(self, drawn=False):
+    def pause_full(self, drawn=False):
         """A full frame under the riding pause menu, before its scrim and
         card draw: what the scrim covers is snapshotted again, so its next
         change still rides; `drawn`, after: the span takes the card."""
@@ -609,7 +605,7 @@ class WindowOverlays:
         """Keep the focused window's buffer as it is, then render it as it
         shows under the menu: the wash stamps it into each buffer."""
         ww = self._wash_win
-        win = self._wins.get(self._focus) if self._focus is not None else None
+        win = self.windows.get(self.focus_key) if self.focus_key is not None else None
         if (win is None or win.minimized or win.kind == "desktop"
                 or win._marked == self._marks_for(win)):
             ww[0] = None                  # it shows under the menu as it is
@@ -625,7 +621,7 @@ class WindowOverlays:
         ww[2] = win._buf_stale
         ww[3][:] = win._lag
         ww[4] = win._marked
-        self._prewarm(win)
+        self.prewarm(win)
 
     def _wash_focus_back(self):
         """The close: the focused window's buffer as the menu found it."""
@@ -634,7 +630,7 @@ class WindowOverlays:
         if win is None:
             return
         ww[0] = None
-        if win.buf is None or win not in self._wins.values():
+        if win.buf is None or win not in self.windows.values():
             return
         win.buf.blit_strip_rect(ww[1], 0, 0, 0, 0, win.buf.w, win.buf.h)
         win._buf_stale = ww[2]

@@ -58,7 +58,7 @@ def _code_ws(tmp_path):
     settle_badges(ws)
     ws.ach.toast = None
     ws.screen = "menu"
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     drv = host_app.ConsoleDriver(ws)
     ui_draw.input_kind("touch")
     drv.frame(DT)

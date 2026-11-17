@@ -22,17 +22,16 @@ import os
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
-try:                                    # the host's runtime package
-    from . import host_native, native_build
-except ImportError:                     # loaded flat, runtime/ on sys.path
-    import host_native
-    import native_build
+import host_native
+import native_build
+from moy_sh_face import moy_sh_face_frame_t as _Frame
 
 SH = os.path.join(native_build.ROOT, "native", "moy_sh")
 _DASH = os.path.join(SH, "dash")
 _KERNEL = os.path.join(native_build.ROOT, "native", "moy_kernel")
 _STORE = os.path.join(native_build.ROOT, "native", "moy_store")
 _SPINE = os.path.join(native_build.ROOT, "native", "moy_spine")
+_NET = os.path.join(native_build.ROOT, "native", "moy_net")
 _UI = [os.path.join(native_build.ROOT, "native", n) for n in ("moy_ui", "moy_gfx", "moy_glass")]
 _CACHE = os.path.join(native_build.ROOT, ".build", "host")
 
@@ -45,7 +44,7 @@ _COLS_BYTES = 12                        # a line's bytes a column (moy_term.h, M
 def _sources():
     """[(source, own flags)]: dash's under its shim, the board's side plain."""
     shim = ["-include", os.path.join(SH, "dash_config.h"), "-I", SH, "-I", _DASH, "-I", _STORE]
-    plain = ["-I", SH, "-I", _KERNEL, "-I", _STORE, "-I", _SPINE]
+    plain = ["-I", SH, "-I", _KERNEL, "-I", _STORE, "-I", _SPINE, "-I", _NET]
     for d in _UI:
         plain += ["-I", d]
     dash = sorted(glob.glob(os.path.join(_DASH, "*.c")))
@@ -399,12 +398,6 @@ class Job:
 
     def interrupt(self):
         _lib().moy_sh_job_interrupt(self._job())
-
-
-class _Frame(ctypes.Structure):
-    _fields_ = [("cx", ctypes.c_int32), ("cy", ctypes.c_int32), ("cw", ctypes.c_int32),
-                ("ch", ctypes.c_int32), ("fs", ctypes.c_int32), ("desk", ctypes.c_int32),
-                ("bar", ctypes.c_char_p), ("bar_n", ctypes.c_uint32)]
 
 
 def face_row(desk):

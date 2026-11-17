@@ -24,7 +24,7 @@ from runtime import ui_draw
 from runtime.chrome import live_colors, theme_colors
 from runtime.host_canvas import indices_of
 from runtime.host_canvas import make_system_canvas as SystemCanvas
-from tools.gen_ui_tables import _luminance
+from tools.gen_os.style import _luminance
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 with open(os.path.join(ROOT, "native", "moy_ui", "style.json")) as _f:

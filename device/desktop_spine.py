@@ -82,7 +82,7 @@ class Desktop:
         re-pointed at the compositor's new back buffer (handle_input, after
         the kernel's present_pending), the trackball's pulses and click spent
         on a surface's keys, a caret or the cursor (handle_input, the
-        T-Deck, `Workstation.ball`), the boot's first-frame
+        T-Deck, `InputRouter.ball`), the boot's first-frame
         report and the console's PERF half (frame). `after_frame(drew)` is a
         board's per-frame Python inside the frame upcall (the T-Deck's offline
         diag), never an upcall of its own."""
@@ -113,9 +113,8 @@ class Desktop:
                 if n or ws.ball_owed:
                     dx = (n >> 12 & 4095) - 2048 if n else 0
                     dy = (n & 4095) - 2048 if n else 0
-                    if not ws.ball(dx, dy, n >> 24) & 1 and (dx or dy):
-                        pointer.move(cursor(dx), cursor(dy))
-            ws.handle_input()
+                    ws.router.ball_frame(dx, dy, n >> 24, pointer, cursor)
+            ws.router.handle_input()
 
         drawn = [0]
         rung = [0]
@@ -132,7 +131,7 @@ class Desktop:
             if not boot.done:
                 boot.first_frame(ws)
             if ws.perf_capture and moy_loop.perf_due():
-                ws.perf_push(moy_loop)
+                ws.perf.perf_push(moy_loop)
             if after_frame is not None:
                 after_frame(n != drawn[0])
             drawn[0] = n
@@ -151,7 +150,7 @@ class Desktop:
             serial.env["pump"] = _FrameClock(moy_loop)
         service = make_service(ws, moy_loop)
         _want_sched(moy_loop)
-        moy_loop.register(handle_input, ws.handle_pointer, frame, words, service)
+        moy_loop.register(handle_input, ws.router.handle_pointer, frame, words, service)
         moy_loop.fps(self.fps_cap)
         moy_loop.lit(boot.lit)
         moy_loop.capture(ws.perf_capture)
@@ -198,17 +197,16 @@ def _front_binder(ws, comp, game, sys_canvas, glass, loop):
                 return False
             r = getattr(ws, "render_scale", 1)
             ox, oy, scale = g[0] * r, g[1] * r, g[2] * r
-            smooth = bool(getattr(type(sys_canvas), "_smooth", True))
             if fold:
                 scr = sys_canvas.front_scratch(game.w, game.h)
-                took = glass.front(comp, (game._buf, game.w, game.h, ox, oy, scale, smooth,
-                                          scr), frames())
+                took = glass.front(comp, (game._buf, game.w, game.h, ox, oy, scale, scr),
+                                   frames())
             else:
                 bezel = getattr(ws.wm, "mode", None) != "desktop"
-                took = glass.front(comp, (game._buf, game.w, game.h, ox, oy, scale, smooth,
-                                          bezel), frames())
+                took = glass.front(comp, (game._buf, game.w, game.h, ox, oy, scale, bezel),
+                                   frames())
         if took:
-            ws.perf_push(loop, front=True)
+            ws.perf.perf_push(loop, front=True)
         return took
     return bind
 
@@ -244,7 +242,10 @@ def _want_sched(loop):
 def make_service(ws, loop):
     """The services' Python half, one upcall a frame while any is live (the
     kernel's MOY_SVC_* bits): the webhost's routes while it joins, serves or
-    says goodbye, the OTA confirm's pending marker, once, the scheduler's
+    says goodbye, the OTA confirm's pending marker, once, the browser
+    console add-on's step (web_addon.AddonStep) from the confirm until the
+    add-on fits this image and is the only one there (its `tidy`), the
+    scheduler's
     `woken` while a service's task wants the VM (MOY_SVC_TASKS, the loop's
     own bit), and the background scheduler while any wake is registered or a
     message queued, with the frame's slack. Answers the bits it still
@@ -255,6 +256,13 @@ def make_service(ws, loop):
     tick = sched.tick
     woken = sched.woken
     sched.kernel_woken()
+    addon = getattr(ws, "addon", None)
+    if addon is not None:
+        services = loop.services
+
+        def _wake():
+            services(services() | SVC_UPDATE)
+        addon.wake = _wake
 
     def service(bits):
         keep = 0
@@ -270,8 +278,14 @@ def make_service(ws, loop):
             if upd is not None:
                 try:
                     upd.confirmed_by_kernel()
+                    if addon is not None:
+                        addon.tidy()
+                        addon.start()
                 except Exception as exc:  # noqa: BLE001
                     print("Moybyte OTA: confirm failed: %s" % (exc,))
+        if addon is not None and addon.phase is not None:
+            if not (bits & SVC_UPDATE) or addon.tick():
+                keep |= SVC_UPDATE
         if bits & SVC_TASKS:
             woken()
         if bits & SVC_SCHED or wakes.queued:
@@ -471,7 +485,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
         # order as host build_workstation) so the persisted font scale is
         # applied before the root layout context is captured.
         ws.wm = wm(ws)
-        ws.open_desk()
+        ws.home.open_desk()
         _census("wm")
     wire_input.start_keyboards(ws, keyboard, ble_keyboard, _census)
     # A soft reset under a serving web console leaves the kernel's webhost up
@@ -480,7 +494,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     wh = getattr(ws, "webhost", None)
     try:
         if wh is not None and wh.adopt(ws):
-            ws.park_web_console()
+            ws.web.park()
             log("boot", "web console still serving: adopted")
     except Exception as exc:  # noqa: BLE001 -- the console boots regardless
         log("boot", "web console adopt failed: %s" % exc)
@@ -514,7 +528,7 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
         ws.run.player.release_radio()
         rec = kernel.resume()
         if rec:
-            ws.resume_launcher(rec)
+            ws.home.resume_launcher(rec)
         log("boot", "return start")
     else:
         report_update(ws, lambda m: log("OTA", m))

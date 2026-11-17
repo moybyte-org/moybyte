@@ -13,7 +13,6 @@
     "app": {
       "id": "calc",
       "entry": "calc_app:CalcAppLayer",
-      "text_mode": false,
       "order": 70
     },
     "permissions": [

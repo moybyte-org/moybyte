@@ -35,16 +35,10 @@ at the pace the host plays, as a board's speaker drains it.
 Canonical home is runtime/; tests import it as runtime.wasm_host.
 """
 
-try:
-    from runtime.lua_ext import (MOY_BUTTONS, snap_slots, audio_ops, snap_shared, run_room,
-                                 run_face, sync_view, drain_audio)
-    from runtime.moy_input import pointer_state
-    from runtime.ticks import _since_ms
-except ImportError:                                  # pragma: no cover
-    from lua_ext import (MOY_BUTTONS, snap_slots, audio_ops, snap_shared, run_room,
-                         run_face, sync_view, drain_audio)
-    from moy_input import pointer_state
-    from ticks import _since_ms
+from lua_ext import (MOY_BUTTONS, snap_slots, audio_ops, snap_shared, run_room,
+                     run_face, sync_view, drain_audio)
+from moy_input import pointer_state
+from ticks import _since_ms
 
 
 # What the host gives a compiled cart: the most any console board has, the
@@ -250,7 +244,7 @@ class WasmHostRun:
         self.draw_next = True
         self._I_SNAP = snap_slots(wasm_binding)
         self._aq_ops = audio_ops(wasm_binding)
-        pmem = getattr(ws, "pmem", None)
+        pmem = getattr(ws.run.project, "pmem", None)
         cells = getattr(pmem, "cells", None) if pmem is not None else None
         if cells is not None:
             self._run.pmem_load(cells)
@@ -375,7 +369,7 @@ class WasmHostRun:
 
     def flush_pmem(self):
         """The run's pmem image into the console's Pmem, if it moved."""
-        pmem = getattr(self._ws, "pmem", None)
+        pmem = getattr(self._ws.run.project, "pmem", None)
         cell = getattr(pmem, "cell", None) if pmem is not None else None
         if cell is None or getattr(self._run, "_r", None) is None:
             return False

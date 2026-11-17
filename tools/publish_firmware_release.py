@@ -18,20 +18,31 @@ That is deliberate -- the build workflow also runs per board -- and each image
 carries its own provenance beside it:
 
     firmware-latest/
-      tdeck-moybyte_tdeck.bin
+      tdeck-moybyte_tdeck_install.bin  <- the website's install: the image,
+                                          then a store holding the browser
+                                          console (tools/store_image.py)
       tdeck-source.json          <- commit, run, date for THAT image
-      p4-moybyte_p4.bin
+      p4-moybyte_p4_install.bin
       p4-source.json
+      c3_zero-moybyte_c3_zero.bin  <- the C3's update: its app, carts kept
       tdeck-moybyte_tdeck_app.bin  <- the OTA payload (app slot, not 0x0)
       latest-tdeck.json            <- the OTA manifest pointing at it
+      moybyte_web-<digest>.moy.zip <- the browser console add-on cart an image
+                                      names; every one ever published stays
+      moybyte.<cart>-<hex>.zip     <- each seed cart, an official cart, and
+      moybyte.<cart>-<hex>.png        its cover: one asset for every board,
+                                      kept while an index references it
+      carts-tdeck.json             <- the index listing this build's official
+      moybyte_web-licence.md          carts and every add-on for that board
+                                      (tools/web_pack.py)
 
 The `<board>-` prefix is how flat release assets keep the per-board layout that
 tools/fetch_ci_firmware.py rebuilds on the way back down; board ids therefore
 must not contain a dash.
 
-Which image each board publishes is NOT decided here: it is read out of
-site/build.py's BOARDS table, the same table the page's flasher writes from, so
-there is one list of "the image we flash" and not two.
+Which images each board publishes is NOT decided here: they are read out of
+site/build.py's BOARDS table (`downloads`), the same table the page's flasher
+writes from, so there is one list of "the image we flash" and not two.
 
     tools/publish_firmware_release.py --artifacts artifacts --channel stable
 
@@ -47,6 +58,7 @@ import importlib.util
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -54,6 +66,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ota_sign  # noqa: E402
+import web_pack  # noqa: E402
 from gen_ota_manifest import build_manifest, read_firmware_version  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -104,6 +117,11 @@ OTA_IMAGES = {
     # Waveshare.
     "guition_p4": "moybyte_guition_p4_app.bin",
 }
+# Boards whose partition table has ONE app slot, so no OTA payload can install
+# on them: their build is no miss in OTA_IMAGES, and the release publishes
+# only their browser console add-on and its index, which a cable flash
+# installs from (tools/board_flash.py). The C3 Zero (its board.toml).
+NO_OTA = {"c3_zero": "moybyte_c3_zero_app.bin"}
 OTA_STAMP = "ota_build.json"     # build.sh's baked identity, carried in the artifact
 
 
@@ -122,7 +140,8 @@ two can come from different commits — `<board>-source.json` beside each image
 records which. The tag itself is a fixed anchor, not the commit the images were
 built from.
 
-Flash it from the site, or over a cable:
+Flash it from the site, which installs a board fresh (its internal store
+erased, an SD card not touched), or over a cable, which keeps the store:
 
 {cable}
 """
@@ -131,7 +150,9 @@ NOTES_OTA = """
 ### Over the air
 
 `latest-<board>.json` is this channel's OTA manifest for that board, beside the
-app image it describes — the device's Settings → UPDATE ONLINE reads them
+app image it describes and the browser console add-on cart that image names
+(`moybyte_web-<digest>.moy.zip`, listed by `carts-<board>.json`; every one is
+kept, so an earlier image still finds its own) — the device's Settings → UPDATE ONLINE reads them
 directly, so no host of your own is needed. One per board on purpose: an OTA
 payload is an app-partition image, so the T-Deck's is Xtensa and the P4's is
 RISC-V, and the board is inside the signature.
@@ -167,13 +188,23 @@ def cable_block(boards):
     return "```\n" + "\n".join(lines) + "\n```"
 
 
-def boards_table():
-    """site/build.py's BOARDS -- the one list of what we flash per board."""
+def _site():
     path = os.path.join(ROOT, "site", "build.py")
     spec = importlib.util.spec_from_file_location("_moy_site_build", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.BOARDS
+    return mod
+
+
+def boards_table():
+    """site/build.py's BOARDS -- the one list of what we flash per board."""
+    return _site().BOARDS
+
+
+def site_downloads(board):
+    """site/build.py's downloads of `board`: [(kind, file name)], the
+    install (tools/store_image.py, which CI's build writes) first."""
+    return _site().downloads(board)
 
 
 def gh(*args, check=True):
@@ -192,14 +223,16 @@ def stage(boards, artifacts, workdir):
     for board in boards:
         assert "-" not in board["id"], "board ids carry the asset prefix"
         folder = os.path.join(artifacts, "moybyte-firmware-%s" % board["id"])
-        name = next((n for n in board["images"]
-                     if os.path.exists(os.path.join(folder, n))), None)
-        if not name:
+        names = [n for _kind, n in site_downloads(board)
+                 if os.path.exists(os.path.join(folder, n))]
+        if not names:
             print("%-6s not in this run's artifacts -- leaving the release's "
                   "copy alone" % board["id"])
             continue
-        shutil.copyfile(os.path.join(folder, name),
-                        os.path.join(workdir, "%s-%s" % (board["id"], name)))
+        name = names[0]
+        for n in names:
+            shutil.copyfile(os.path.join(folder, n),
+                            os.path.join(workdir, "%s-%s" % (board["id"], n)))
         source = {
             "board": board["id"],
             "image": name,
@@ -243,11 +276,16 @@ def asset_url(tag, name, repo=None):
     return "https://github.com/%s/releases/download/%s/%s" % (repo, tag, name)
 
 
-def stage_ota_all(tag, channel, artifacts, workdir, repo=None):
+def stage_ota_all(tag, channel, artifacts, workdir, repo=None, refused=None,
+                  earlier=None):
     """Stage every built board's OTA app image + its manifest.
 
     Returns {board: manifest}. A board absent from this run keeps whatever is
-    already published for it, exactly like its flashable image."""
+    already published for it, exactly like its flashable image, and so does a
+    board whose page cannot be published (web_pack.PageError), which is named
+    in `refused` and fails the run once the others are uploaded. `earlier`
+    answers a board's published add-on index (its bytes, or None), which the
+    new one keeps every entry of."""
     # A board that BUILT (its artifact folder is here) but is missing from
     # OTA_IMAGES would silently never get a manifest -- the miss that kept the
     # Guition's first beta off the channel on 2026-08-20 (the build emitted the
@@ -255,26 +293,65 @@ def stage_ota_all(tag, channel, artifacts, workdir, repo=None):
     prefix = "moybyte-firmware-"
     if os.path.isdir(artifacts):
         for entry in sorted(os.listdir(artifacts)):
-            if entry.startswith(prefix) and entry[len(prefix):] not in OTA_IMAGES:
+            if (entry.startswith(prefix) and entry[len(prefix):] not in OTA_IMAGES
+                    and entry[len(prefix):] not in NO_OTA):
                 print("::warning::%s built images but has no OTA_IMAGES entry "
                       "-- no OTA manifest will be published for it"
                       % entry[len(prefix):])
     out = {}
+    for board in sorted(NO_OTA):
+        try:
+            stage_addon_only(artifacts, workdir, board,
+                             earlier(board) if earlier else None)
+        except web_pack.PageError as exc:
+            print("::error::%s -- its add-on stays as published" % exc)
+            if refused is not None:
+                refused.append(board)
     for board in sorted(OTA_IMAGES):
-        got = stage_ota(tag, channel, artifacts, workdir, repo, board)
+        try:
+            got = stage_ota(tag, channel, artifacts, workdir, repo, board,
+                            earlier(board) if earlier else None)
+        except web_pack.PageError as exc:
+            print("::error::%s -- its manifest stays as published" % exc)
+            if refused is not None:
+                refused.append(board)
+            continue
         if got:
             out[board] = got
     return out
 
 
-def stage_ota(tag, channel, artifacts, workdir, repo=None, board="tdeck"):
-    """Stage one board's OTA app image + `latest-<board>.json`, or None."""
+def stage_addon_only(artifacts, workdir, board, earlier=None):
+    """Stage a NO_OTA board's add-on cart and its index, or nothing when this
+    run did not build the board. Raises web_pack.PageError like stage_ota."""
+    src = os.path.join(artifacts, "moybyte-firmware-%s" % board, NO_OTA[board])
+    if not os.path.exists(src):
+        print("%-6s no %s in this run -- add-on unchanged" % (board, NO_OTA[board]))
+        return None
+    page = web_pack.page_beside(src, board)
+    version = read_stamp(artifacts, board).get("version")
+    if version is None:
+        version = read_firmware_version()
+    addon = web_pack.publish_addon(page, workdir, board, version,
+                                   ota_sign.read_key(), earlier or b"")
+    print("%-6s staged %s, %d official carts and %s (no OTA)"
+          % (board, addon["cart"], addon["official"], addon["index"]))
+    return addon
+
+
+def stage_ota(tag, channel, artifacts, workdir, repo=None, board="tdeck",
+              earlier=None):
+    """Stage one board's OTA app image + `latest-<board>.json`, or None, and
+    beside them the add-on cart of the page the image names and the board's
+    add-on index over `earlier` (the published one's bytes). Raises
+    web_pack.PageError when the run carries no page its image names."""
     image = OTA_IMAGES[board]
     folder = os.path.join(artifacts, "moybyte-firmware-%s" % board)
     src = os.path.join(folder, image)
     if not os.path.exists(src):
         print("%-6s no %s in this run -- OTA manifest unchanged" % (board, image))
         return None
+    page = web_pack.page_beside(src, board)
 
     name = "%s-%s" % (board, image)
     shutil.copyfile(src, os.path.join(workdir, name))
@@ -295,6 +372,13 @@ def stage_ota(tag, channel, artifacts, workdir, repo=None, board="tdeck"):
     manifest = build_manifest(os.path.join(workdir, name),
                               asset_url(tag, name, repo),
                               version, channel, stamp.get("label"), board)
+    # The browser console add-on, beside the payload, named by the digest
+    # the image carries: where a console installs it from.
+    addon = web_pack.publish_addon(page, workdir, board, manifest["version"],
+                                   ota_sign.read_key(), earlier or b"")
+    manifest["cart"] = addon["cart"]
+    print("%-6s staged %s, %d official carts and %s"
+          % (board, addon["cart"], addon["official"], addon["index"]))
     stage_c6(manifest, folder, tag, workdir, repo)
 
     # Sign it, or say plainly that we did not. A device checking a BAKED channel
@@ -366,6 +450,71 @@ def stage_c6(manifest, folder, tag, workdir, repo=None):
           % (manifest.get("board", "?"), C6_IMAGE, version, len(data)))
 
 
+def published(tag, name):
+    """The bytes of the asset `name` on the release, or None."""
+    with tempfile.TemporaryDirectory(prefix="moy-asset-") as d:
+        got = gh("release", "download", tag, "-p", name, "-D", d, "--clobber",
+                 check=False)
+        path = os.path.join(d, name)
+        if got.returncode != 0 or not os.path.exists(path):
+            return None
+        with open(path, "rb") as f:
+            return f.read()
+
+
+def release_assets(tag):
+    """The names of the release's assets, or None when it cannot be read."""
+    got = gh("release", "view", tag, "--json", "assets", check=False)
+    if got.returncode != 0:
+        return None
+    try:
+        return [a["name"] for a in json.loads(got.stdout)["assets"]]
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+def prune_carts(tag, workdir, names, before, dry_run=False):
+    """Delete the official carts' zips and covers no index needs, after the
+    upload: kept is everything an index on the release references now (the
+    ones staged in `workdir`, and a board's this run did not build) or
+    referenced before this publish (`before`, each index's bytes by name, a
+    console a step behind its channel). The add-on carts are no official
+    assets and stay for good. `names` is the release's assets before the
+    upload. With `dry_run`, says what it would delete. -> those names."""
+    had = set(names)
+    names = had | set(os.listdir(workdir))
+    indexes = [b for b in before.values() if b is not None]
+    for name in sorted(names):
+        if not re.match(r"^carts-[^-]+\.json$", name):
+            continue
+        if name in had and name in before and before[name] is None:
+            print("::warning::%s could not be read before this publish "
+                  "-- no cart pruned" % name)
+            return []
+        staged = os.path.join(workdir, name)
+        if os.path.exists(staged):
+            with open(staged, "rb") as f:
+                indexes.append(f.read())
+        else:
+            data = before[name] if name in before else published(tag, name)
+            if data is None:
+                print("::warning::%s could not be read -- no cart pruned" % name)
+                return []
+            indexes.append(data)
+    try:
+        stale = web_pack.official_assets(names, indexes)
+    except ValueError:
+        print("::warning::an index on %s is not one -- no cart pruned" % tag)
+        return []
+    for name in stale:
+        if dry_run:
+            print("would delete %s" % name)
+        else:
+            gh("release", "delete-asset", tag, name, "--yes")
+            print("deleted %s" % name)
+    return stale
+
+
 def existing_source(tag, board_id, workdir):
     """The provenance of a board we did NOT rebuild, off the release itself."""
     got = gh("release", "download", tag, "-p", "%s-source.json" % board_id,
@@ -406,10 +555,11 @@ def notes(tag, channel, boards, workdir, site, manifests=None):
         for board in sorted(manifests):
             m = manifests[board]
             body += ("- **%s** — `%s` described by `%s`, running **%s** "
-                     "(version `%s`)\n"
+                     "(version `%s`)%s\n"
                      % (board, "%s-%s" % (board, OTA_IMAGES[board]),
                         manifest_name(board), m.get("label", "?"),
-                        m.get("version", "?")))
+                        m.get("version", "?"),
+                        ", its browser console `%s`" % m["cart"] if m.get("cart") else ""))
     return body
 
 
@@ -432,11 +582,18 @@ def main():
     workdir = tempfile.mkdtemp(prefix="moy-release-")
     try:
         staged = stage(boards, os.path.abspath(args.artifacts), workdir)
+        refused = []
+        before = {}
+
+        def earlier(board):
+            name = web_pack.INDEX_NAME % board
+            before[name] = published(tag, name)
+            return before[name]
         manifests = stage_ota_all(tag, channel, os.path.abspath(args.artifacts),
-                                  workdir)
+                                  workdir, refused=refused, earlier=earlier)
         if not staged and not manifests:
             print("nothing built in this run -- the release is unchanged")
-            return 0
+            return 1 if refused else 0
         if not staged:
             # A board can have an OTA manifest and NO cable-flash image on the
             # release: `stage()` walks site/build.py's BOARDS (the website's
@@ -449,10 +606,13 @@ def main():
             # not flash, so it stays whether or not the lists agree this week.
             print("no flashable images in this run -- publishing OTA manifests "
                   "only (%s)" % ", ".join(sorted(manifests)))
+        names = release_assets(tag)
         if args.dry_run:
             print("would upload to %s: %s"
                   % (tag, ", ".join(sorted(os.listdir(workdir)))))
-            return 0
+            if names is not None:
+                prune_carts(tag, workdir, names, before, dry_run=True)
+            return 1 if refused else 0
 
         # Create on first use; after that every publish just replaces assets.
         if gh("release", "view", tag, check=False).returncode != 0:
@@ -461,16 +621,22 @@ def main():
             print("created the %s release" % tag)
 
         # Everything staged, and only what was staged: a board this run did not
-        # build keeps the image already on the release.
+        # build keeps the image already on the release, and no page is ever
+        # removed, so an image rolled back to or installed by hand still finds
+        # the one it names.
         files = [os.path.join(workdir, n) for n in sorted(os.listdir(workdir))]
         gh("release", "upload", tag, *files, "--clobber")
         print("uploaded: %s" % ", ".join(os.path.basename(f) for f in files))
+        prune_carts(tag, workdir, names or [], before)
 
         # Written AFTER the upload, so the table describes what is now there.
         body = os.path.join(workdir, "notes.md")
         with open(body, "w", encoding="utf-8") as f:
             f.write(notes(tag, channel, boards, workdir, args.site, manifests))
         gh("release", "edit", tag, "--notes-file", body)
+        if refused:
+            print("refused (no page to publish): %s" % ", ".join(refused))
+            return 1
         return 0
     finally:
         shutil.rmtree(workdir, ignore_errors=True)

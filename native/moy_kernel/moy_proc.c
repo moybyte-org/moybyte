@@ -1,5 +1,7 @@
 // The process table (moy_proc.h has the contract).
 
+#include "moy_kmem.h"
+
 #include "moy_proc.h"
 
 #include <stdlib.h>
@@ -7,21 +9,9 @@
 
 #include "moy_htab.h"
 
-#if defined(__has_include)
-#if __has_include("esp_heap_caps.h")
-#include "esp_heap_caps.h"
-#define PROC_BOARD 1
-#endif
-#endif
-
 // PSRAM on a board: the table keeps out of internal RAM.
 static void *mem_alloc(size_t n) {
-    #ifdef PROC_BOARD
-    void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM);
-    return p != NULL ? p : calloc(1, n);
-    #else
-    return calloc(1, n);
-    #endif
+    return moy_kalloc(n, MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK | MOY_KMEM_ZERO);
 }
 
 static void mem_release(void *p, size_t n) {

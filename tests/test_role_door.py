@@ -94,7 +94,7 @@ def run(sp, ap, lp, say):
         seen.append((grant == g, table[r], args))
         if table[r] == "nav.open_app":
             return "x" * 100
-        if table[r] == "nav.text_mode":
+        if table[r] == "nav.projects":
             raise RuntimeError("the server raised")
         if table[r] == "theme.set":
             return -8
@@ -102,7 +102,7 @@ def run(sp, ap, lp, say):
     lp.role(disp)
     say("crossed", door("theme.set_variant", field("light")), seen[-1])
     say("full", door("nav.open_app", field("calc")))
-    say("raised", door("nav.text_mode", num(1)))
+    say("raised", door("nav.projects", b""))
     say("code", door("theme.set", field("x") + field("")))
     t2 = lp.upcalls()[1]
     say("role", t2[5] - t1[5], t2[4] - t1[4])

@@ -39,6 +39,7 @@ import sys
 
 from . import native_build
 from .lua_ext import cfg_blob
+from .moy_wasm_face import NativeSymbol as _NativeSymbol
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = native_build.ROOT
@@ -202,12 +203,6 @@ def build(verbose=False):
 
 
 _I, _P, _F, _C = ctypes.c_int, ctypes.c_void_p, ctypes.c_float, ctypes.c_char_p
-
-class _NativeSymbol(ctypes.Structure):
-    """WAMR's NativeSymbol: one row of the import table."""
-    _fields_ = [("symbol", ctypes.c_char_p), ("func_ptr", ctypes.c_void_p),
-                ("signature", ctypes.c_char_p), ("attachment", ctypes.c_void_p)]
-
 
 def _lib():
     if _LIB[0] is None:

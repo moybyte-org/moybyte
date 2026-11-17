@@ -31,7 +31,7 @@ Needs the `http` permission.
   Stream.readinto(buf) -> n   the window's oldest bytes taken (0: none now)
   Stream.close()
 
-The radio is a lease (`Workstation.wifi_hold`): a request holds the "http"
+The radio is a lease (`Spine.wifi_hold`): a request holds the "http"
 tag under its process's pid from its `get` until it finishes, is closed, or
 its process ends, and the process's last one out lets its hold go; another
 process's requests hold the radio under their own. A `get` with the station down asks for the
@@ -42,20 +42,9 @@ neither holds a frame.
 The host serves a request as it is queued (the driver's `run`), over the
 real client, which speaks plain TCP there."""
 
-try:
-    import moy_http as _N
-except ImportError:  # host: the runtime package
-    from runtime import moy_http as _N
-
-try:
-    import devices as _D
-except ImportError:  # host: the runtime package
-    from runtime import devices as _D
-
-try:
-    import moybyte as _moybyte
-except ImportError:  # host: the runtime package
-    from runtime import moybyte as _moybyte
+import moy_http as _N
+import devices as _D
+import moybyte as _moybyte
 
 CAP_MAX = _N.CAP_MAX
 TAG = "http"
@@ -160,7 +149,7 @@ def _settle():
     for pid in [p for p in _held if not _busy(p)]:
         _held.discard(pid)
         if ws is not None:
-            ws.wifi_release(TAG, pid)
+            ws.spine.wifi_release(TAG, pid)
 
 
 def take(pid=None):
@@ -174,7 +163,7 @@ def take(pid=None):
     if ws is None or pid in _held:
         return False
     _held.add(pid)
-    ws.wifi_hold(TAG, pid)
+    ws.spine.wifi_hold(TAG, pid)
     return True
 
 

@@ -402,6 +402,21 @@ int hl_exec(host_lua *r, const char *src, int len, const char *name,
     return moycore_lua_exec(src, (size_t)len, name, err, errlen > 0 ? (size_t)errlen : 0) != 0;
 }
 
+/* The run's `moybyte` table for process `pid` (moycore_lua_own), and its
+ * global `fn` called with a JSON array's values (moycore_lua_call): 0, or 1
+ * with the message in err. */
+int hl_own(host_lua *r, uint32_t pid, char *err, int errlen)
+{
+    if (!LIVE(r) || !RUN.L) return 0;
+    return moycore_lua_own(pid, err, errlen > 0 ? (size_t)errlen : 0) != 0;
+}
+
+int hl_call(host_lua *r, const char *fn, const char *json, int len, char *err, int errlen)
+{
+    if (!LIVE(r) || !RUN.L) return 0;
+    return moycore_lua_call(fn, json, (size_t)len, err, errlen > 0 ? (size_t)errlen : 0) != 0;
+}
+
 /* The cart's chunks in order, then _layout with `layout`'s (w, h, fs) where it
  * is not NULL, then _init (modmoycore.c's load). */
 int hl_load(host_lua *r, const char **srcs, const int *lens, const char **names,

@@ -3,7 +3,7 @@
 #   _hold                    a minimised game held; _unhold gives it back
 #   Proc                     a running game or app beside the front one
 #   Procs                    the running set (`ws.procs`)
-#   -- the running set       handheld, _front_live, _detachable, running, find
+#   -- the running set       handheld, playing, _front_live, _detachable, running, find
 #   -- launching             launch, refuse, title_of
 #   -- runs                  _fresh, detach, minimise, switch, promote, close
 #   -- the frame             frame, _step, _front_state, _pace
@@ -62,18 +62,10 @@ Admission (`launch`) is player_fit.admit over the running set; a refusal is
 the confirm dialog naming what to close.
 """
 
-try:
-    from ticks import _ticks_ms, _ticks_diff
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.ticks import _ticks_ms, _ticks_diff
-try:
-    import player_fit as _fit
-    import audio_session as _aud
-    from player import BAR_TYPES
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import player_fit as _fit
-    from runtime import audio_session as _aud
-    from runtime.player import BAR_TYPES
+from ticks import _ticks_ms, _ticks_diff
+import player_fit as _fit
+import audio_session as _aud
+from player import BAR_TYPES
 try:
     import moy_log as _L
 except ImportError:  # pragma: no cover - an image without the kernel
@@ -82,14 +74,8 @@ try:
     import moy_loop as _loop
 except ImportError:  # host: no kernel loop to pace
     _loop = None
-try:
-    import moy_app as _moy_app
-except ImportError:  # host: the runtime package
-    from runtime import moy_app as _moy_app
-try:
-    import scheduler as _sched
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import scheduler as _sched
+import moy_app as _moy_app
+import scheduler as _sched
 
 RUN = "run:"                    # a Proc window's key prefix
 FRONT = "desktop"               # the front run's window key
@@ -140,6 +126,9 @@ class Run:
         self.player = None          # its Player (player.Player, `Player.run` back)
         self.project = None         # its Project, the open cart's workspace
         self.audio = None           # its AudioSession, built on a start (#16)
+        # The cart's `textmode()`: it takes typed bytes, and the keyboard is
+        # in text mode while it holds the keys (`AppFace.typing`).
+        self.textmode = False
         # The game canvas it draws on: the boot canvas, a canvas made for a
         # Proc (`canvas_tag` names it), or one a bind gave it.
         self.canvas = canvas
@@ -178,23 +167,23 @@ def _is_app(cart):
 
 def _hold(pl):
     """A minimised game held: its clock stopped as the pause menu stops it
-    (`Player.pause`), what held it marked so `_unhold` gives back only its
+    (`Pace.pause`), what held it marked so `_unhold` gives back only its
     own hold. A pause the card made already counts as the hold."""
-    if pl._paused_at:
-        pl._min_held = True
+    if pl.paused_at:
+        pl.min_held = True
         return
     if pl.detached:
-        pl._paused_at = _ticks_ms() or 1    # a Proc's session is not the audible one
-        pl._audio_held = 0
+        pl.paused_at = _ticks_ms() or 1    # a Proc's session is not the audible one
+        pl.pace.audio_held = 0
     else:
-        pl.pause()
-    pl._min_held = True
+        pl.pace.pause()
+    pl.min_held = True
 
 
 def _unhold(pl):
-    if getattr(pl, "_min_held", False):
-        pl._min_held = False
-        pl.resume()
+    if getattr(pl, "min_held", False):
+        pl.min_held = False
+        pl.pace.resume()
 
 
 def _sample(pl, el):
@@ -203,7 +192,7 @@ def _sample(pl, el):
 
 
 def _grant(pl):
-    ctx = getattr(pl, "_app_ctx", None) if pl is not None else None
+    ctx = getattr(pl, "app_ctx", None) if pl is not None else None
     return ctx.grant if ctx is not None else None
 
 
@@ -264,16 +253,24 @@ class Procs:
         """The WM has no desk: the running set keeps no windows."""
         return not getattr(self.ws.wm, "has_desk", False)
 
+    def playing(self):
+        """A game runs: the front run is a live game, or one waits in the
+        running set (an app or a tool is no game)."""
+        for p in self.list:
+            if not p.app:
+                return True
+        return self._front_live() and not self.ws.run.player.is_app()
+
     def _front_live(self):
         """The front run is a live game in a desk window, or on a
         handheld's back-stack."""
         ws = self.ws
         pl = ws.run.player
-        if pl.cart_error is not None or (pl._update is None and pl._draw is None):
+        if pl.cart_error is not None or (pl.update is None and pl.draw is None):
             return False
         if self.handheld():
             return ws.wm.stack.has(FRONT)
-        wins = getattr(ws.wm, "_wins", None)
+        wins = getattr(ws.wm, "windows", None)
         return wins is not None and FRONT in wins
 
     def _detachable(self):
@@ -287,13 +284,13 @@ class Procs:
             return False
         pl = ws.run.player
         if not hand:
-            win = wm._wins[FRONT]
+            win = wm.windows[FRONT]
             if win.docked is not None or getattr(win, "own", False) \
-                    or getattr(wm, "_play_intent", None) == "dev":
+                    or getattr(wm, "play_intent", None) == "dev":
                 return False
-        if (pl._is_tool and not (hand and _is_app(ws.cart))) or pl._script \
-                or not _fit.shares_runtime(ws.cart) or pl._front \
-                or pl._netplay is not None:
+        if (pl.is_app() and not (hand and _is_app(ws.cart))) or pl.script \
+                or not _fit.shares_runtime(ws.cart) or pl.front \
+                or pl.netplay is not None:
             return False
         ed = getattr(ws, "editor_app", None)
         return ed is None or ed.project is not ws.run.project
@@ -334,7 +331,7 @@ class Procs:
         for p in self.list:
             total += _fit.app_need(p.run.project.cart)
         c = ws.cart
-        if c is not None and (self._front_live() or getattr(ws.run.player, "_front", False)):
+        if c is not None and (self._front_live() or getattr(ws.run.player, "front", False)):
             total += _fit.app_need(c, rts.get(c.get("runtime", "python")))
         return total
 
@@ -393,7 +390,7 @@ class Procs:
                 self.switch(p)
             else:
                 self.promote(p)
-                ws.wm._bring_forward(FRONT)
+                ws.wm.bring_to_front(FRONT)
             return False
         cart = cart or {}
         if cart.get("broken") or (cart.get("type") in BAR_TYPES
@@ -515,7 +512,7 @@ class Procs:
     def _mute(self, pl):
         pl.set_deaf(False)
         pl.detached = True
-        m = getattr(pl._lua, "mute", None)
+        m = getattr(pl.lua, "mute", None)
         if m is not None:
             m(True)                 # a Lua run's snapshot: no input table
         ns = pl.ns
@@ -525,28 +522,28 @@ class Procs:
                 if name in ns:
                     held[name] = ns[name]
                     ns[name] = MUTED[name]
-        pl._held_verbs = held
-        pl._held_edges = (pl._tick_edges, pl._keep_edges)
-        pl._tick_edges = pl._keep_edges = None
-        pl._keyp_latch = 0
+        pl.held_verbs = held
+        pl.held_edges = (pl.tick_edges, pl.keep_edges)
+        pl.tick_edges = pl.keep_edges = None
+        pl.keyp_latch = 0
 
     def _unmute(self, pl):
         pl.detached = False
-        m = getattr(pl._lua, "mute", None)
+        m = getattr(pl.lua, "mute", None)
         if m is not None:
             m(False)
         pl.quit_asked = False
         ns = pl.ns
-        held = getattr(pl, "_held_verbs", None)
+        held = getattr(pl, "held_verbs", None)
         if ns and held:
             for name in held:
                 ns[name] = held[name]
-        pl._held_verbs = None
-        e = getattr(pl, "_held_edges", None)
+        pl.held_verbs = None
+        e = getattr(pl, "held_edges", None)
         if e is not None:
-            pl._tick_edges, pl._keep_edges = e
-            pl._held_edges = None
-        pl.park()
+            pl.tick_edges, pl.keep_edges = e
+            pl.held_edges = None
+        pl.pace.park()
 
     def _install(self, p):
         """Serve `p`'s run (`ws.run`) for a step or a paint, until
@@ -588,7 +585,7 @@ class Procs:
         key = RUN + str(self._seq)
         self._seq += 1
         pl = ws.run.player
-        minimised = hand or getattr(pl, "_win_state", None) == MINIMISED
+        minimised = hand or getattr(pl, "win_state", None) == MINIMISED
         if hand:
             pl.window_event("_minimise")
         p = Proc(key, ws.run)
@@ -599,14 +596,14 @@ class Procs:
             p.state = MINIMISED
             if not p.app:
                 _hold(pl)
-            pl._audio_held = 0          # the front's session is the next run's
+            pl.pace.audio_held = 0          # the front's session is the next run's
         self.list.append(p)
         self.by_key[key] = p
         self.gen += 1
         if not hand:
             ws.wm.rekey(FRONT, key)
-            if ws.wm._focus == key:
-                ws.wm._focus = None     # the run about to open takes it
+            if ws.wm.focus_key == key:
+                ws.wm.focus_key = None     # the run about to open takes it
         if ws.run.audio is not None:
             ws.run.audio.focus()
         return True
@@ -618,7 +615,7 @@ class Procs:
         ws = self.ws
         if not self._detachable() or not self.detach():
             return False
-        ws.go_home()
+        ws.home.go_home()
         return True
 
     def switch(self, p):
@@ -630,10 +627,10 @@ class Procs:
             return
         if self._front_live():
             if not self._detachable() or not self.detach():
-                ws._exit_to_caller()    # a run that cannot join ends, as a launch ends it
+                ws.spine.exit_to_caller()    # a run that cannot join ends, as a launch ends it
         self.promote(p)
         ws.close_popover()
-        ws.play(ws.launcher_layer)
+        ws.spine.play(ws.launcher_layer)
 
     def promote(self, p):
         """Focus reached Proc `p`'s window: its run becomes the front one.
@@ -641,14 +638,14 @@ class Procs:
         Run becomes the spare."""
         ws = self.ws
         wm = ws.wm
-        live = FRONT in getattr(wm, "_wins", {})
+        live = FRONT in getattr(wm, "windows", {})
         held = p.state == MINIMISED
         front = ws.run
         ws.run = p.run
         p.run = front
         pl = ws.run.player
         self._unmute(pl)
-        pl._win_state = RUNNING
+        pl.win_state = RUNNING
         if held:
             _unhold(pl)
             pl.window_event("_restore")
@@ -661,7 +658,7 @@ class Procs:
             p.skip = p.owed = 0
         else:
             old = p.run.player
-            if old.ns or old._update is not None or old._draw is not None:
+            if old.ns or old.update is not None or old.draw is not None:
                 was = self._install(p)
                 try:
                     old.release_world()
@@ -675,7 +672,7 @@ class Procs:
         self._pace_front()
         if ws.run.audio is not None:
             ws.run.audio.focus()
-        ws._dirty = True
+        ws.mark_dirty()
 
     def close(self, p, window=True):
         """End Proc `p`: its run released as an exit releases one and
@@ -693,19 +690,19 @@ class Procs:
         finally:
             self._uninstall(p, was)
         pl.detached = False
-        pl._min_held = False
+        pl.min_held = False
         self._retire(p.run)
         self._pace_front()
         self.gen += 1
         if window and not self.handheld():
-            self.ws.wm._remove_kind(p.key)
-        self.ws._dirty = True
+            self.ws.wm.remove_kind(p.key)
+        self.ws.mark_dirty()
 
     def close_key(self, key):
         """Close the run `key` names: a Proc, the front's by its exit, or a
         service by its stop."""
         if key == FRONT:
-            self.ws._exit_to_caller()
+            self.ws.spine.exit_to_caller()
             return
         if key.startswith(SVC):
             self.stop_service(int(key[len(SVC):]))
@@ -735,13 +732,13 @@ class Procs:
         ws = self.ws
         wm = ws.wm
         if not self.list:
-            if self._front_min is not None or getattr(wm, "_wins", None) is not None:
+            if self._front_min is not None or getattr(wm, "windows", None) is not None:
                 self._front_state(wm, dt)
             return
-        f = getattr(wm, "_focus", None)
+        f = getattr(wm, "focus_key", None)
         if f is not None and f in self.by_key:
-            wm._sync_windows()          # a window pushed this frame first
-            f = wm._focus
+            wm.sync_windows()          # a window pushed this frame first
+            f = wm.focus_key
         if f is not None and f in self.by_key:
             self.promote(self.by_key[f])
             if not self.list:
@@ -749,7 +746,7 @@ class Procs:
                 return
         self._pace(dt)
         self._front_state(wm, dt)
-        horizon = wm._retained_n() if hasattr(wm, "_retained_n") else 1
+        horizon = wm.retained_n() if hasattr(wm, "retained_n") else 1
         i = 0
         while i < len(self.list):
             p = self.list[i]
@@ -765,7 +762,7 @@ class Procs:
             pl = p.player
             if pl.cart_error is not None or pl.quit_asked:
                 if pl.cart_error is not None:
-                    note = getattr(ws, "notice", None)
+                    note = getattr(getattr(ws, "notices", None), "notice", None)
                     if note is not None:
                         note("STOPPED", "%s stopped" % p.title()[:20], "warn")
                 self.close(p)
@@ -789,21 +786,21 @@ class Procs:
                 return
         if shown:
             draw = pl.frame_plan(dt)
-            if draw and pl._netplay is None:   # a match draws every tick it simulates
+            if draw and pl.netplay is None:   # a match draws every tick it simulates
                 p.skip += 1
                 if p.skip >= self.n:
                     p.skip = 0
                 else:
                     draw = False
             pl.tick(dt, render=draw)
-            p.ups += pl._n_ticks if pl.tick_ms else 1
+            p.ups += pl.n_ticks if pl.tick_ms else 1
             if draw:
                 p.draws += 1
                 p.owed = horizon
             return
         pl.frame_plan(dt)               # a minimised app: its update, no draw
         pl.tick(dt, render=False)
-        p.ups += pl._n_ticks if pl.tick_ms else 1
+        p.ups += pl.n_ticks if pl.tick_ms else 1
 
     def _front_state(self, wm, dt):
         """The front's window minimised (the console's frame does not tick
@@ -811,7 +808,7 @@ class Procs:
         front run is deaf while its desk window does not hold the keys."""
         ws = self.ws
         pl = ws.run.player
-        wins = getattr(wm, "_wins", None)
+        wins = getattr(wm, "windows", None)
         win = wins.get(FRONT) if wins is not None else None
         pl.set_deaf(win is not None and wm.input_holder() != FRONT)
         hidden = (win is not None and win.minimized and self._front_live())
@@ -820,7 +817,7 @@ class Procs:
             if self._front_min is not pl:
                 self._front_min = pl
                 self.gen += 1
-                pl._win_state = MINIMISED
+                pl.win_state = MINIMISED
                 pl.window_event("_minimise")
                 if not app:
                     _hold(pl)
@@ -832,8 +829,8 @@ class Procs:
             was = self._front_min
             self._front_min = None
             self.gen += 1
-            if was is pl and getattr(pl, "_win_state", None) == MINIMISED:
-                pl._win_state = RUNNING
+            if was is pl and getattr(pl, "win_state", None) == MINIMISED:
+                pl.win_state = RUNNING
                 _unhold(pl)
                 pl.window_event("_restore")
 
@@ -893,7 +890,7 @@ class Procs:
         if sp is not None and sp.cpu is not None:
             cpu = (cpu or 0) + sp.cpu
         mem = pl.mem
-        heap = getattr(pl._lua, "heap", None)
+        heap = getattr(pl.lua, "heap", None)
         if heap is not None:
             mem = heap()            # a Lua run's own heap, exact
         out.append((key, str((cart or {}).get("title") or "Game"),
@@ -910,13 +907,13 @@ class Procs:
         out = []
         pl = ws.run.player
         cart = ws.cart
-        if cart is not None and _fit.shares_runtime(cart) and not pl._script \
-                and (pl._update is not None or pl._draw is not None
+        if cart is not None and _fit.shares_runtime(cart) and not pl.script \
+                and (pl.update is not None or pl.draw is not None
                      or pl.cart_error is not None) \
-                and (ws.wm.stack.has(FRONT) or FRONT in getattr(ws.wm, "_wins", {})):
+                and (ws.wm.stack.has(FRONT) or FRONT in getattr(ws.wm, "windows", {})):
             if self.front_minimised():
                 state = MINIMISED
-            elif pl.paused or not ws.wm.top_is(FRONT) and self.handheld():
+            elif pl.pace.paused or not ws.wm.top_is(FRONT) and self.handheld():
                 state = PAUSED
             else:
                 state = RUNNING

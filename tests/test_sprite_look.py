@@ -34,9 +34,9 @@ def _open(tmp_path, config, theme, mode):
     ws = el._ws(tmp_path, config, theme, mode)
     if config == HANDHELD:
         return ws, el._sprites(ws), 0, 0
-    ws.open_desk()
+    ws.home.open_desk()
     ws.open_in_editor(el.g._cart_by_title(ws, "Star Catcher"))
-    ws.set_menu_view("paint")
+    ws.text.set_menu_view("paint")
     el._frame(ws)
     d = ws.editor_desk
     pane, r, _p = next(p for p in d.panes() if "paint" in p[0])

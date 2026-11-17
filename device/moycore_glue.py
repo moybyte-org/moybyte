@@ -62,33 +62,18 @@ split it justified.
 
 from array import array
 
-try:
-    from lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
-                         LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES, ROLE_NAMES,
-                         install_handles, end_handles, put_scenes, layer_restore,
-                         layer_restore_end,
-                         snap_slots, audio_ops, snap_shared, run_room, run_face, sync_view,
-                         drain_audio, cfg_blob, wants_layout)
-except ImportError:                      # host tests importing the device module
-    from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
-                                 LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES, ROLE_NAMES,
-                                 install_handles, end_handles, put_scenes,
-                                 layer_restore, layer_restore_end, snap_slots, audio_ops,
-                                 snap_shared, run_room, run_face, sync_view, drain_audio, cfg_blob,
-                                 wants_layout)
-
-try:
-    from moy_input import pointer_state
-except ImportError:                      # host tests importing the device module
-    from runtime.moy_input import pointer_state
+from lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
+                     LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES, ROLE_NAMES,
+                     install_handles, end_handles, put_scenes, layer_restore,
+                     layer_restore_end,
+                     snap_slots, audio_ops, snap_shared, run_room, run_face, sync_view,
+                     drain_audio, cfg_blob, wants_layout)
+from moy_input import pointer_state
 
 try:
     import moycore as _moycore
-except ImportError:
-    try:                                 # the host: its ctypes binding
-        import runtime.moycore as _moycore
-    except ImportError:                  # a build without the module
-        _moycore = None
+except ImportError:                  # a build without the module
+    _moycore = None
 
 try:
     import moy_wasm as _moy_wasm         # the compiled cart's engine
@@ -98,10 +83,7 @@ except ImportError:                      # a build without it: no wasm runtime
 try:
     import moy_play as _moy_play         # the kernel's Player: the run's frame
 except ImportError:
-    try:                                 # the host: its ctypes binding
-        import runtime.moy_play as _moy_play
-    except ImportError:
-        _moy_play = None
+    _moy_play = None
 
 # The cart's clock: ms since the Player's stamp, which snap_shared writes into
 # the snapshot's time slot -- the base libmoy's time() adds the milliseconds
@@ -111,15 +93,8 @@ try:
 except ImportError:                      # host tests: the ctypes binding
     from runtime import glass_binding as _glass
 
-try:
-    from ticks import _since_ms
-except ImportError:                      # host tests importing the device module
-    from runtime.ticks import _since_ms
-
-try:
-    from app_perms import run_admits_unsigned
-except ImportError:                      # host tests importing the device module
-    from runtime.app_perms import run_admits_unsigned
+from ticks import _since_ms
+from app_perms import run_admits_unsigned
 
 # What NOT to register on top of libmoy's table -- LIBMOY_VERBS (the names
 # libmoy's own binding installs) and NOT_REGISTRABLE (ours, each excluded for
@@ -256,7 +231,7 @@ class MoycoreRun:
         self.aq = array("i", bytearray(4 * (1 + _moycore.AQ_SLOTS * self.AUDIO_MAX)))
         self.pmem_img = array("i", bytearray(4 * 256))
 
-        pmem = getattr(ws, "pmem", None)
+        pmem = getattr(ws.run.project, "pmem", None)
         if pmem is not None:
             cells = getattr(pmem, "cells", None)
             if cells is not None:
@@ -322,7 +297,14 @@ class MoycoreRun:
                 if isinstance(blob, (str, bytes)):
                     _moycore.image_put(name, blob)
             put_scenes(ns, _moycore.scene_put)
-            self._pins = install_handles(ns, _moycore.register, self.exec)
+            self._pins = install_handles(ns, _moycore.register, self.call)
+            pid = ns.get("_moy_pid") if hasattr(ns, "get") else None
+            if pid:
+                # The run's `moybyte` table, its wakes the kernel's under
+                # its process (native/moycore/moycore_moybyte.h).
+                err = _moycore.own(pid)
+                if err:
+                    raise RuntimeError(err)
             if hasattr(_moycore, "layer_restore"):
                 layer_restore(_moycore.layer_restore, canvas, self)
             err = _moycore.exec(PRELUDE_HANDLES, "prelude")
@@ -533,7 +515,7 @@ class MoycoreRun:
 
     def play_begin(self, run, tick):
         """Hand this run's frame to the kernel's Player, which launched `run`
-        before this runtime loaded (the Player's _launch_play): `bind` gives
+        before this runtime loaded (`Pace.launch`): `bind` gives
         it the console's input table, the cart's audio session and the Tick a
         paced run notes its costs into (None: unpaced), `open` checks the
         runtime the constructor opened. Returns `play_frame`, which the Player
@@ -587,14 +569,12 @@ class MoycoreRun:
 
     def _sync_textmode(self):
         """The cart's `textmode()` (libmoy's host callback writes
-        SNAP_TEXTMODE) on the console's input as it changes, as a Python
-        cart's writes it: the keyboard's mode follows (`Player.tick`)."""
+        SNAP_TEXTMODE) on its run as it changes, as a Python cart's writes
+        it: the keyboard's mode follows (`AppFace.typing`)."""
         t = self.snap[self._I_TEXT]
         if t != self._textmode:
             self._textmode = t
-            inp = getattr(self.ws, "input", None)
-            if inp is not None:
-                inp.text_mode = bool(t)
+            self.ws.run.textmode = bool(t)
 
     def mute(self, on):
         """A run held aside (runtime/shell/procs.py) reads no input while
@@ -614,7 +594,7 @@ class MoycoreRun:
             return False
         if not _moycore.pmem_image(self.pmem_img):
             return False
-        pmem = getattr(self.ws, "pmem", None)
+        pmem = getattr(self.ws.run.project, "pmem", None)
         if pmem is None:
             return False
         cell = getattr(pmem, "cell", None)
@@ -645,6 +625,13 @@ class MoycoreRun:
         if not _moycore.use(self._h):
             return "the run has closed"
         return _moycore.exec(src, name)
+
+    def call(self, fn, args):
+        """The state's global `fn` called with the values of `args`, a JSON
+        array: None, or the error text."""
+        if not _moycore.use(self._h):
+            return "the run has closed"
+        return _moycore.call(fn, args)
 
     def heap(self):
         """The run's Lua heap in bytes, Lua's own count, or None: a run with
@@ -1129,7 +1116,7 @@ class WasmRun(MoycoreRun):
         self.snap = array("i", bytearray(4 * _moycore.SNAP_LEN))
         self.aq = array("i", bytearray(4 * (1 + _moycore.AQ_SLOTS * self.AUDIO_MAX)))
         self.pmem_img = array("i", bytearray(4 * 256))
-        pmem = getattr(ws, "pmem", None)
+        pmem = getattr(ws.run.project, "pmem", None)
         cells = getattr(pmem, "cells", None) if pmem is not None else None
         if cells is not None:
             for i in range(min(256, len(cells))):
@@ -1282,10 +1269,7 @@ class WasmRuntime:
     def __call__(self, ns, src):
         cart = getattr(self.ws, "cart", None) or {}
         if cart.get("wasi"):
-            try:
-                from wasi_run import WasiApp
-            except ImportError:                      # the host: the runtime package
-                from runtime.wasi_run import WasiApp
+            from wasi_run import WasiApp
             return WasiApp(self, self.ws, cart, ns.get("_moy_app"), ns.get("_moy_layout"))
         return WasmRun(self.ws, ns, src)
 
@@ -1312,7 +1296,7 @@ class WasmRuntime:
             return None
         main = cart.get("main", "main.wasm")
         import os
-        gate = getattr(self.ws, "_with_sd", None)
+        gate = getattr(self.ws, "with_sd", None)
 
         def _size(p):
             return gate(lambda: os.stat(p)[6]) if gate is not None else os.stat(p)[6]
@@ -1344,7 +1328,7 @@ class WasmRuntime:
         if table is None or not path:
             return []
         p = path + "/" + cart.get("main", "main.wasm")
-        gate = getattr(self.ws, "_with_sd", None)
+        gate = getattr(self.ws, "with_sd", None)
         try:
             head = gate(lambda: wasm_head(p)) if gate is not None else wasm_head(p)
         except OSError:
@@ -1353,7 +1337,7 @@ class WasmRuntime:
 
     def wants_layout(self, cart):
         """Whether the cart's module exports `_layout` (`wasm_wants_layout`)."""
-        return wasm_wants_layout(cart, getattr(self.ws, "_with_sd", None))
+        return wasm_wants_layout(cart, getattr(self.ws, "with_sd", None))
 
     def footprint_of(self, pages, module_len, interp):
         """`footprint` from the numbers alone: `pages` of declared memory and
@@ -1489,10 +1473,7 @@ def make_runtimes(ws):
     manifest name a cart gives it. An absent key is a runtime this build lacks,
     and the Player's runtime-missing panel is what a cart naming it gets."""
     out = {}
-    try:
-        from elf_run import make_elf_runtime
-    except ImportError:
-        from runtime.elf_run import make_elf_runtime
+    from elf_run import make_elf_runtime
     for name, make in (("lua", make_moycore_runtime), ("wasm", make_wasm_runtime),
                        ("elf", make_elf_runtime)):
         rt = make(ws)

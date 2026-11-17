@@ -88,7 +88,6 @@ class AppHost:
         self.tap = 0                    # 1 a press to begin, 3 held, 2 its release
         self.hold = False               # the pointer is down since the press
         self.owed = False
-        self.key = 0                    # the key typed last frame (a press is its change)
         self.px = self.py = -1          # where the pointer was last seen, in the app's space
         self.mid = False                # the middle button is held
         # What the frames before left of the page in their buffers, the
@@ -133,7 +132,6 @@ class AppHost:
         self.tap = 0
         self.hold = False
         self.owed = False
-        self.key = 0
 
     def keys(self, i):
         """Take this frame's buttons and typed key from input state `i`."""
@@ -142,13 +140,10 @@ class AppHost:
         for n in range(len(_HOST_BUTTONS)):
             if i.pressed(_HOST_BUTTONS[n]):
                 b |= 1 << n
-        k = getattr(i, "last_key", 0) or 0
-        if not isinstance(k, int):
-            k = ord(k[0]) if k else 0
+        k = getattr(i, "typed", 0)      # the engine sees each press once
         a[0] = a[1] = b
-        typed = k != 0 and k != self.key
-        self.key = k
-        a[5] = k if typed else 0        # the engine sees each press once
+        typed = k != 0
+        a[5] = k
         a[6] = getattr(i, "mods", 0) or 0
         a[7] = getattr(i, "wheel_x", 0)
         a[8] = getattr(i, "wheel_y", 0)
@@ -562,7 +557,7 @@ class Hold:
         changes nothing of it (`Workstation._animating`'s word)."""
         held = ws.held_pages
         if (self.key is None or held[1] is not self or self.key != key
-                or ws._animating(dt, pages)):
+                or ws.animating(dt, pages)):
             return False
         x, y, w, h = rect
         cv.blit_strip_rect(held[0], 0, 0, x, y, w, h)
@@ -574,7 +569,7 @@ class Hold:
         draws into its whole buffer (a pane's viewport is copied from as
         the buffer it lies in, so it is not). None otherwise, or with no
         room for it."""
-        if not still or ws._animating(dt) or not _whole_retained(cv):
+        if not still or ws.animating(dt) or not _whole_retained(cv):
             return None
         return held_layer(ws, cv)
 
@@ -701,7 +696,7 @@ class Hold:
         lies, so what the card draws outside its band (its corners and
         drop, blended over the page) is there as well."""
         w = _PF[_PF_WIN]
-        if self._drew != key or w == 1 or ws._animating(dt, pages):
+        if self._drew != key or w == 1 or ws.animating(dt, pages):
             return False
         if w == 2:
             return True
@@ -745,7 +740,7 @@ class Hold:
         self._ask[0] = self._ask[1] = None
         n = getattr(cv, "RETAINED_FRAMES", 0)
         if (ws is None or self.key is None or ws.held_pages[1] is not self or self.key != key
-                or n < 1 or n > self._at.size or plan[7] < n or ws._animating(dt)):
+                or n < 1 or n > self._at.size or plan[7] < n or ws.animating(dt)):
             return False
         f = _PAINT[0]
         for k in range(n):
@@ -759,7 +754,7 @@ class Hold:
         banner, overlay, cursor or pill over it, nothing animating)."""
         alone = getattr(ws.wm, "content_alone", None)
         ok = (still and not getattr(cv, "covered", False) and alone is not None
-              and alone() and not ws._animating(dt) and _whole_retained(cv))
+              and alone() and not ws.animating(dt) and _whole_retained(cv))
         self._shown = ws.frame_state.frames_drawn if ok else -1
 
     def opened(self, ws):
@@ -768,7 +763,7 @@ class Hold:
         (`last`), where that frame drew it (`shown`) and no change was
         reported since (the console's `_dirty_in`)."""
         f = ws.frame_state.frames_drawn
-        self._over = f if self._shown == f - 1 and not ws._dirty_in else -1
+        self._over = f if self._shown == f - 1 and not ws.frame_state.dirty_in else -1
 
     def last(self, ws, cv, rect, dt=0):
         """Whether this frame, the first of the dialog `opened` over the
@@ -779,7 +774,7 @@ class Hold:
         over = self._over
         self._over = -1
         self._src = None
-        if over != ws.frame_state.frames_drawn or ws._animating(dt) or not _whole_retained(cv):
+        if over != ws.frame_state.frames_drawn or ws.animating(dt) or not _whole_retained(cv):
             return False
         if cv.RETAINED_FRAMES == 1:
             return True
@@ -840,7 +835,7 @@ def text_at(host, id, x, y):
 class _Wheel:
     """A frame's input carrying the wheel alone (`AppHost.wheel`)."""
 
-    last_key = mods = rep_word = key_repeats = repeat_key = pointer_buttons = 0
+    last_key = typed = mods = rep_word = key_repeats = repeat_key = pointer_buttons = 0
 
     def __init__(self):
         self.wheel_x = self.wheel_y = 0
@@ -965,21 +960,11 @@ def _release(lay):
 
 
 # ui_draw's frame state and helpers, imported last (see above).
-try:
-    from ui_draw import (
-        UI_IN_LEN, UI_TARGET, _AGAIN, _APP_SHIFT, _CHANGE, _DESK, _EDGE, _ELSEWHERE,
-        _HOST_BUTTONS, _IN_KEYREP, _IN_REP, _KEYS_HOST, _KEY_EDGE, _MOVING, _ON_BAR,
-        _PAINT, _PANEL, _PB_MIDDLE, _PF, _PF_WIN, _P_MIDDLE, _ROWS, _SHIFT, _TAP, _TAP_FLOOR,
-        _WHOLE, _WINDOW, KEY_PASTE,
-        _app_row, _drew_last, _fs, _look, _rep_dirs, paste_text, rows_drawn, ui_context,
-        window_frame, within)
-    from ui_scroll import PaintRing
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.ui_draw import (
-        UI_IN_LEN, UI_TARGET, _AGAIN, _APP_SHIFT, _CHANGE, _DESK, _EDGE, _ELSEWHERE,
-        _HOST_BUTTONS, _IN_KEYREP, _IN_REP, _KEYS_HOST, _KEY_EDGE, _MOVING, _ON_BAR,
-        _PAINT, _PANEL, _PB_MIDDLE, _PF, _PF_WIN, _P_MIDDLE, _ROWS, _SHIFT, _TAP, _TAP_FLOOR,
-        _WHOLE, _WINDOW, KEY_PASTE,
-        _app_row, _drew_last, _fs, _look, _rep_dirs, paste_text, rows_drawn, ui_context,
-        window_frame, within)
-    from runtime.ui_scroll import PaintRing
+from ui_draw import (
+    UI_IN_LEN, UI_TARGET, _AGAIN, _APP_SHIFT, _CHANGE, _DESK, _EDGE, _ELSEWHERE,
+    _HOST_BUTTONS, _IN_KEYREP, _IN_REP, _KEYS_HOST, _KEY_EDGE, _MOVING, _ON_BAR,
+    _PAINT, _PANEL, _PB_MIDDLE, _PF, _PF_WIN, _P_MIDDLE, _ROWS, _SHIFT, _TAP, _TAP_FLOOR,
+    _WHOLE, _WINDOW, KEY_PASTE,
+    _app_row, _drew_last, _fs, _look, _rep_dirs, paste_text, rows_drawn, ui_context,
+    window_frame, within)
+from ui_scroll import PaintRing

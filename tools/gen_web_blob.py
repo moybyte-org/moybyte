@@ -1,47 +1,32 @@
 #!/usr/bin/env python3
-"""Bake `firmware/web_runner/dist` INTO the firmware image.
+"""Pack `firmware/web_runner/dist` for the browser console add-on, and name it
+in the image.
 
-The board serves a browser console (the webhost), and until now it served it
-from a copy of the web build somebody had put on the board's storage by hand.
-That copy drifts silently: on 2026-08-15 a board served a bundle old enough to
-still carry a desktop-blackout bug that had been fixed in `dist/` hours before,
-and nothing anywhere said so. The T-Deck could not be pushed to at all then --
-the push tool handed the board a url over serial, and that board took no serial
-input under the desktop until #201 -- so its bundle went on by card reader or
-not at all.
+The browser console is not in the firmware: it is an add-on cart a console
+installs into its store (native/moy_net/moy_page.h), whose payload is the
+PACK this writes (native/moy_net/moy_page.h's layout: a 4 KiB head naming each asset,
+then the PRE-GZIPPED assets of the ASSETS table in
+native/moy_net/moy_webhost.c). The image carries only the sha256 of the
+pack's body, the page it fits, and the bundle's stamp, in the C file this
+emits; a release publishes the cart for that digest beside the payload
+(tools/web_pack.py), and the console's webhost serves a pack only when its
+head names the same digest.
 
-So the image carries one. This emits a C translation unit that `.incbin`s the
-PRE-GZIPPED assets (every one in the ASSETS table of
-native/moy_net/moy_webhost.c -- 609,268 B against 1,230,814 B raw; raw does
-not fit the T-Deck's slot at all) and exposes them as a table the webhost
-serves from flash and the `moy_web` module hands out as memoryviews. There is
-no copy on storage; the gzipped asset wins over a raw one of the same name.
+Usage (every board's build.sh, through tools/esp32_build_lib.sh):
 
-WHY .incbin AND NOT ESP-IDF's EMBED_FILES: `EMBED_FILES` is an argument to
-`idf_component_register`, and a MicroPython usermod is not a component -- it is
-an INTERFACE library linked into the port's main component, whose registration
-we do not own. `.incbin` is a toolchain feature, so
-one generated file works on Xtensa, on RISC-V, and on the host compiler that
-the test suite checks it with. What was never on the table is a Python `bytes`
-literal: 573 KB of escaped source is ~2 MB of text through mpy-cross, and it
-would land in the frozen heap rather than in flash.
+    tools/gen_web_blob.py --out <native>/moy_web/moy_web_blob.gen.c \
+        --pack dist/<board>/moybyte_web.pack [--require]
 
-Usage (both boards' build.sh call this before staging the module):
-
-    tools/gen_web_blob.py --out <native>/moy_web/moy_web_blob.gen.c [--require]
-
-With no usable bundle it emits an EMPTY table and says so loudly -- that is
-the stated meaning of a missing bundle, the same image a `--no-web` worktree
-builds -- and `--require` (set by CI and by `MOYBYTE_REQUIRE_WEB_BUNDLE=1`)
-makes it a hard failure instead. "Usable" is decided by the bytes: every asset's
-raw file is present, and a `.gz` beside it inflates to exactly that file (a `.gz`
-left behind by a removed bundle, or one a half-finished build did not refresh,
-is not a bundle). The output file is rewritten whenever its text differs, and
-its text carries each asset's digest, so what is baked never depends on a file's
-timestamp. The default is soft because building the bundle needs emsdk (~1.7 GB)
-and a firmware flash is the daily loop -- but an image published to a device
-must never be the one that quietly has no console, which is what --require is
-for. Same doctrine as `MOYBYTE_REQUIRE_UNIX_MP` (.claude/rules/testing.md).
+With no usable bundle it names no page and says so loudly, and `--require`
+(set by CI and by `MOYBYTE_REQUIRE_WEB_BUNDLE=1`) makes that a failure.
+"Usable" is decided by the bytes: every asset's raw file is present, and a
+`.gz` beside it inflates to exactly that file (a `.gz` left behind by a
+removed bundle, or one a half-finished build did not refresh, is not a
+bundle). The output is rewritten whenever its text differs. The default is
+soft because building the bundle needs emsdk (~1.7 GB) and a firmware flash
+is the daily loop; an image published to a device must never be the one that
+names no console, which is what --require is for. Same doctrine as
+`MOYBYTE_REQUIRE_UNIX_MP` (.claude/rules/testing.md).
 """
 
 from __future__ import annotations
@@ -51,6 +36,7 @@ import gzip
 import hashlib
 import re
 import os
+import struct
 import sys
 import zlib
 
@@ -61,6 +47,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_RUNNER = os.path.join(ROOT, "firmware", "web_runner")
 WEBHOST_C = os.path.join(ROOT, "native", "moy_net", "moy_webhost.c")
 DEFAULT_DIST = os.path.join(ROOT, "firmware", "web_runner", "dist")
+PACK_MAGIC = b"MOYWEB01"           # moy_page.h's MOY_WEB_PACK_* and its head
+PACK_HEAD = 4096
+PACK_MAX = 12
+PACK_NAME = 40
 DEFAULT_OUT = os.path.join(
     ROOT, "native", "moy_web",
     "moy_web_blob.gen.c")
@@ -71,8 +61,8 @@ def asset_names():
     (native/moy_net/moy_webhost.c).
 
     Not a second list. The allowlist the server serves from and the set the
-    image bakes have to be the same set -- an asset in one and not the other is
-    either a 404 on a board that has the bytes, or dead weight in an app slot.
+    pack holds have to be the same set -- an asset in one and not the other is
+    either a 404 on a board that has the bytes, or dead weight in every pack.
     """
     with open(WEBHOST_C) as f:
         text = f.read()
@@ -101,15 +91,14 @@ def pick(dist, name):
     The RAW file is the bundle -- it is what the web build copies into `dist/`
     -- and the `.gz` beside it is derived from it. The board serves
     `<name>.gz` with `Content-Encoding: gzip` and the browser inflates it, so
-    the gz is what gets baked when it IS that file's gzip, and the served name
-    keeps the `.gz` suffix exactly as the on-storage lookup does, which is what
-    lets `_asset()` use one rule for both sources.
+    the gz is what gets packed when it IS that file's gzip, and the served name
+    keeps the `.gz` suffix, which the webhost looks up first.
 
     Decided by CONTENT, never by which file exists or is newer: a `.gz` whose
-    raw file is gone is the leftover of a bundle that was removed (baking it
+    raw file is gone is the leftover of a bundle that was removed (packing it
     ships a console nobody has built in a while), and a `.gz` that does not
     inflate to the raw file beside it is a build that stopped between the two.
-    Neither is a bundle. A raw file with no `.gz` bakes as it is.
+    Neither is a bundle. A raw file with no `.gz` is packed as it is.
     """
     gz = os.path.join(dist, name + ".gz")
     raw = os.path.join(dist, name)
@@ -148,17 +137,53 @@ def collect(dist):
     return out, []
 
 
-def render(assets, dist):
-    """The C file. One `.incbin` per asset plus the table that names them."""
+def stamp_of(assets):
+    """"<count> <total bytes> <12 hex of the bundle digest>"."""
     total = sum(a[2] for a in assets)
     digest = hashlib.sha256()
     for served, _path, size, sha in assets:
         digest.update(("%s:%d:%s;" % (served, size, sha)).encode())
-    stamp = "%d %d %s" % (len(assets), total, digest.hexdigest()[:12])
+    return "%d %d %s" % (len(assets), total, digest.hexdigest()[:12])
 
+
+def pack_bytes(items):
+    """(pack bytes, body sha256) of [(served name, bytes)] in moy_web_blob.h's
+    PACK layout: the head, then each asset 4-byte aligned at the offset its
+    entry names."""
+    if len(items) > PACK_MAX:
+        raise SystemExit("gen_web_blob: %d assets, a pack holds %d"
+                         % (len(items), PACK_MAX))
+    body = bytearray()
+    entries = []
+    for served, data in items:
+        if len(served.encode()) >= PACK_NAME:
+            raise SystemExit("gen_web_blob: %s is too long a name for a pack" % served)
+        body += b"\0" * (-len(body) % 4)
+        entries.append((served, PACK_HEAD + len(body), len(data)))
+        body += data
+    body += b"\0" * (-len(body) % 4)
+    digest = hashlib.sha256(bytes(body)).digest()
+    head = bytearray(PACK_HEAD)
+    struct.pack_into("<8sII32s", head, 0, PACK_MAGIC, len(entries),
+                     PACK_HEAD + len(body), digest)
+    for i, (served, off, size) in enumerate(entries):
+        struct.pack_into("<%dsII" % PACK_NAME, head, 48 + i * (PACK_NAME + 8),
+                         served.encode(), off, size)
+    return bytes(head) + bytes(body), digest
+
+
+def pack(assets):
+    """pack_bytes of collect()'s assets."""
+    return pack_bytes([(served, _read(path)) for served, path, _s, _h in assets])
+
+
+def render(assets, dist, want=None):
+    """The C file: the digest of the pack this image names and the stamp of
+    the bundle in it, or none of either when no bundle was built."""
+    total = sum(a[2] for a in assets)
     L = []
     L.append("/* AUTO-GENERATED by tools/gen_web_blob.py -- do not edit, do")
-    L.append(" * not commit (gitignored). Regenerated by both boards' build.sh")
+    L.append(" * not commit (gitignored). Regenerated by every board's build.sh")
     L.append(" * before the moy_web module is staged.")
     L.append(" *")
     L.append(" * Source bundle: %s" % dist)
@@ -168,58 +193,14 @@ def render(assets, dist):
     L.append(" */")
     L.append('#include "moy_web_blob.h"')
     L.append("")
-    if not assets:
-        L.append("/* No web bundle was built when this image was compiled. The")
-        L.append(" * module still exists and reports zero assets, so the server")
-        L.append(" * falls through to its \"no bundle\" 404 rather than to an")
-        L.append(" * ImportError in the middle of a request. */")
-        L.append("static const unsigned char moy_web_blob_none[1] = { 0 };")
-        L.append("const moy_web_asset_t moy_web_assets[1] = {")
-        L.append('    { "", moy_web_blob_none, 0u },')
-        L.append("};")
-        L.append("const unsigned int moy_web_asset_count = 0u;")
-        L.append('const char moy_web_stamp[] = "0 0 none";')
-        return "\n".join(L) + "\n"
-
-    # The blobs, in ONE asm block: `.section .rodata` puts them where the ESP32
-    # linker maps flash (DROM, memory-mapped and readable by an ordinary load),
-    # so nothing is copied into RAM at boot and a memoryview over one costs the
-    # object header and no bytes. `.balign 4` because an unaligned symbol is
-    # legal here but makes every downstream word access a trap on some targets;
-    # `.previous` restores whatever section the compiler was in.
-    L.append("__asm__(")
-    L.append('    ".section .rodata\\n"')
-    for i, (served, path, size, _sha) in enumerate(assets):
-        # The path goes inside a C string inside an asm string. A quote or a
-        # backslash in it would produce an assembler error naming a line
-        # nobody wrote, so say the real thing instead.
-        if '"' in path or "\\" in path:
-            raise SystemExit("gen_web_blob: cannot .incbin a path containing "
-                             "a quote or backslash: %s" % path)
-        L.append('    /* %s (%d B) */' % (served, size))
-        L.append('    ".balign 4\\n"')
-        L.append('    ".global moy_web_blob%d\\n"' % i)
-        L.append('    "moy_web_blob%d:\\n"' % i)
-        L.append('    ".incbin \\"%s\\"\\n"' % path)
-    L.append('    ".balign 4\\n"')
-    L.append('    ".previous\\n"')
-    L.append(");")
-    L.append("")
-    for i in range(len(assets)):
-        L.append("extern const unsigned char moy_web_blob%d[];" % i)
-    L.append("")
-    L.append("const moy_web_asset_t moy_web_assets[] = {")
-    for i, (served, _path, size, _sha) in enumerate(assets):
-        L.append('    { "%s", moy_web_blob%d, %du },' % (served, i, size))
-    L.append("};")
-    L.append("const unsigned int moy_web_asset_count = %du;" % len(assets))
-    # The stamp is CODE, not a comment, and that is deliberate: ccache hashes
-    # the PREPROCESSED source, where comments are already gone -- and `.incbin`
-    # content is not part of that hash at all. Without a real string carrying
-    # the bundle's digest, a rebuild after a new web build would be a ccache
-    # HIT and the image would keep the old console. It is also the answer to
-    # "which bundle is on this board?": moy_web.stamp() over serial.
-    L.append('const char moy_web_stamp[] = "%s";' % stamp)
+    # The stamp and the digest are CODE, not comments: ccache hashes the
+    # PREPROCESSED source, where comments are gone, so they are what makes a
+    # new bundle a new object.
+    L.append("const unsigned char moy_web_named = %du;" % (want is not None))
+    hexes = ", ".join("0x%02x" % b for b in (want or bytes(32)))
+    L.append("const unsigned char moy_web_want[32] = {%s};" % hexes)
+    L.append('const char moy_web_stamp[] = "%s";'
+             % (stamp_of(assets) if assets and want is not None else "0 0 none"))
     return "\n".join(L) + "\n"
 
 
@@ -258,12 +239,12 @@ def watched_sources(root=ROOT):
 
 
 def stale_sources(assets, root=ROOT, limit=3):
-    """Console sources NEWER than the bundle about to be baked in.
+    """Console sources NEWER than the bundle about to be packed.
 
-    The staleness baking cannot fix. Baking makes a board's console current
-    with its own firmware, but a dist that is itself behind `runtime/` bakes a
-    stale console while reporting success -- and the image then serves a
-    browser console older than the firmware it is part of.
+    The staleness the digest cannot catch: the image names the pack it was
+    built with, but a dist that is itself behind `runtime/` packs a stale
+    console while reporting success -- and the image then names a browser
+    console older than the firmware it is part of.
 
     A warning, never fatal: mtimes are a heuristic (a checkout reorders them, a
     touched file means nothing), and a build that refuses on a heuristic is a
@@ -303,6 +284,8 @@ def main(argv=None):
                     help="the web runner's built bundle (default: %(default)s)")
     ap.add_argument("--out", default=DEFAULT_OUT,
                     help="the C file to write (default: the moy_web module)")
+    ap.add_argument("--pack", metavar="PATH",
+                    help="where to write the pack (the add-on cart's payload)")
     ap.add_argument("--require", action="store_true",
                     help="fail instead of emitting an empty bundle")
     ap.add_argument("--quiet", action="store_true",
@@ -314,7 +297,7 @@ def main(argv=None):
 
     assets, missing = collect(args.dist)
     if missing:
-        msg = ("no web console to bake into this image: %s unusable in %s"
+        msg = ("no browser console for this image: %s unusable in %s"
                % (", ".join(diagnose(args.dist, n) for n in missing), args.dist))
         # Strict under CI unless explicitly opted out: an image PUBLISHED to a
         # device must never be the one that quietly has no console, which is
@@ -328,32 +311,35 @@ def main(argv=None):
                 "!! %s\n"
                 "!! build it first:  firmware/web_runner/build.sh\n"
                 "!! (unset MOYBYTE_REQUIRE_WEB_BUNDLE / drop --require to build\n"
-                "!!  an image whose WEB CONSOLE row serves nothing)\n" % msg)
+                "!!  an image that names no browser console)\n" % msg)
             return 1
         if not args.quiet:
             sys.stderr.write(
                 "\n"
                 "!! ============================================================\n"
                 "!! %s\n"
-                "!! This image will have NO BROWSER CONSOLE baked in. The board\n"
-                "!! will serve one only if a bundle is copied onto its storage.\n"
+                "!! This image names NO BROWSER CONSOLE: no add-on cart fits it.\n"
                 "!! Build it with firmware/web_runner/build.sh and rebuild.\n"
                 "!! ============================================================\n"
                 "\n" % msg)
 
-    changed = write_if_changed(args.out, render(assets, args.dist))
+    want = None
     if assets:
-        total = sum(a[2] for a in assets)
-        print("web console baked in: %d assets, %d B (%d KB)%s"
-              % (len(assets), total, total // 1024,
-                 "" if changed else " -- unchanged"))
+        data, want = pack(assets)
+        if args.pack:
+            os.makedirs(os.path.dirname(os.path.abspath(args.pack)), exist_ok=True)
+            with open(args.pack, "wb") as f:
+                f.write(data)
+            print("browser console packed: %s, %d B, digest %s"
+                  % (args.pack, len(data), want.hex()[:12]))
         stale = [] if args.quiet else stale_sources(assets)
         if stale:
             sys.stderr.write(
-                "!! the bundle being baked in is OLDER than console sources, "
+                "!! the bundle being packed is OLDER than console sources, "
                 "e.g.\n%s\n!! rebuild it (firmware/web_runner/build.sh) or "
-                "this image ships a stale browser console\n"
+                "this image names a stale browser console\n"
                 % "\n".join("!!     " + s for s in stale))
+    write_if_changed(args.out, render(assets, args.dist, want))
     return 0
 
 

@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "moy_codec.h"
 #include "moy_img.h"
 #include "moy_json.h"
 
@@ -27,25 +28,6 @@ typedef struct {
 
 size_t moy_img_work_size(void) {
     return sizeof(img_work_t);
-}
-
-static int b64_value(char c) {
-    if (c >= 'A' && c <= 'Z') {
-        return c - 'A';
-    }
-    if (c >= 'a' && c <= 'z') {
-        return c - 'a' + 26;
-    }
-    if (c >= '0' && c <= '9') {
-        return c - '0' + 52;
-    }
-    if (c == '+') {
-        return 62;
-    }
-    if (c == '/') {
-        return 63;
-    }
-    return -1;
 }
 
 // The next character of the JSON string's DECODED text at *p, or -1 at its
@@ -97,7 +79,7 @@ static bool b64_ok(const char *p, const char *end) {
     }
     const char *at = p;
     while ((c = next_char(&p, end)) >= 0 && c != '=') {
-        if (b64_value((char)c) >= 0) {
+        if (moy_b64_value(c) >= 0) {
             n++;
         }
         at = p;
@@ -114,7 +96,7 @@ static bool b64_ok(const char *p, const char *end) {
     while (pads < want && (c = next_char(&p, end)) >= 0) {
         if (c == '=') {
             pads++;
-        } else if (b64_value((char)c) >= 0) {
+        } else if (moy_b64_value(c) >= 0) {
             return false;
         }
     }
@@ -129,7 +111,7 @@ static int b64_byte(void *data) {
         if (c < 0 || c == '=') {
             return -1;
         }
-        int v = b64_value((char)c);
+        int v = moy_b64_value(c);
         if (v >= 0) {
             w->acc = (w->acc << 6) | (uint32_t)v;
             w->bits += 6;
@@ -308,7 +290,7 @@ static int b64_fill(void *data) {
             }
             continue;
         }
-        int v = c < 0 ? -1 : b64_value((char)c);
+        int v = c < 0 ? -1 : moy_b64_value(c);
         if (v < 0 || st->pads) {
             st->bad = true;
             break;

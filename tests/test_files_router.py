@@ -24,11 +24,11 @@ def _open_files(ws):
     ws.open()
     ws.input.begin_frame()
     ws.frame(1 / 30)
-    return ws.files_app
+    return ws.app("files")
 
 
 def _a_project(ws):
-    return ws.files_app._nav.projects()[0]
+    return ws.app("files")._nav.projects()[0]
 
 
 def _seed_drawing(carts, name):
@@ -177,10 +177,11 @@ def test_a_missing_app_degrades_to_the_status_line(tmp_path):
     ws.carts.apply([c for c in ws.carts.all
                     if not system_api.is_text_app(c)])
     assert app.route("story", kind="docs") is None
-    assert app.status == "No text app"
-    ws._apps_by_id.pop("artwork")
+    assert app.status == "No app opens it"
+    ws.carts.apply([c for c in ws.carts.all
+                    if "image/x-moyimg" not in (c.get("handles") or ())])
     assert app.route("dragon", kind="drawings") is None
-    assert app.status == "No Paint app"
+    assert app.status == "No app opens it"
     assert app.route("gone.moy", kind=files_app.PROJECTS) is None
     assert app.status == "Can't open"
 
@@ -204,7 +205,7 @@ def _tap_x(ws):
     x, y, w, h = ws.layout.context_x_btn
     ws.pointer.place(x + w // 2, y + h // 2)
     ws.pointer.click = True
-    ws.handle_pointer()
+    ws.router.handle_pointer()
     ws.pointer.click = False
     ws.input.begin_frame()
     ws.frame(1 / 30)
@@ -305,11 +306,11 @@ def test_going_home_from_inside_ends_the_return(tmp_path):
     ws.input.begin_frame()
     ws.frame(1 / 30)
 
-    ws.go_home()
+    ws.home.go_home()
     assert ws.wm.top_kind() == "launcher"
     assert ws.returns.back() is None
     ws.open_settings()
-    ws.exit()
+    ws.spine.exit()
     assert ws.wm.top_kind() == "launcher"
 
 
@@ -342,7 +343,7 @@ def _key(ws, app, name):
 
 def _page(ws, place=files_app.PROJECTS):
     """The handheld's page of `place`'s files, focus on its rows."""
-    app = ws.files_app
+    app = ws.app("files")
     app.open_place(place)
     app.level = "files"
     app._focus = "files"

@@ -15,6 +15,15 @@ from runtime import host_api
 from device import device_api
 
 from ws_helpers import StubInput
+import spec_table
+
+# The names Moybyte's Python namespace answers beyond moy-spec's table: its own
+# verbs (docs/moy_cart_api.md: a colour's name, the mouse, the paint images)
+# and the run's handles a C tier reads by name, which no cart calls.
+PY_OWN = frozenset((
+    "col", "mouse", "Image", "image",
+    "_moy_restore_bg", "_moy_cfg", "_moy_images",
+))
 
 
 def test_one_make_api_object():
@@ -48,10 +57,8 @@ def test_host_app_reexports_survive():
     assert host_app._decode_moyimg is cart_api._decode_moyimg
 
 
-def test_the_base_namespace_keyset_is_pinned():
-    """The frozen kid API's base key-set -- the cart vocabulary contract
-    (docs/moy_cart_api.md). A key appearing or vanishing here is a PUBLIC API
-    change on all four tiers at once and should be a loud, deliberate diff."""
+def _base_namespace():
+    """make_api's namespace for a cart granted nothing."""
 
     class _P:
         x = y = 0
@@ -75,20 +82,40 @@ def test_the_base_namespace_keyset_is_pinned():
         def __getattr__(self, name):
             return lambda *a, **k: None
 
-    ns = cart_api.make_api(_Canvas(), _In(), {})
-    assert set(ns) == {
-        "W", "H", "cls", "pix", "line", "rect", "rectb", "circ", "circb",
-        "spr", "tri", "trib", "oval", "ovalb", "fillp",
-        "sspr", "tline", "background",
-        "_moy_restore_bg", "make_layer", "draw_layer", "map", "mget", "mset",
-        "sget", "sset", "fget", "fset",
-        "print", "touch", "mouse", "clip", "camera", "pal", "palt",
-        "btn", "btnp", "players", "key", "keyp", "time", "pmem",
-        "textmode", "quit", "view", "cfg", "col",
-        "sfx", "beep", "music", "music_stop", "sound_stop", "volume",
-        "rnd", "flr", "Image", "image",
-        "_moy_cfg", "_moy_images",
-    }
+    return cart_api.make_api(_Canvas(), _In(), {})
+
+
+def test_the_base_namespace_is_the_spec_table_and_moybytes_own():
+    """The base key-set is the cart vocabulary contract (docs/moy_cart_api.md):
+    moy-spec's verb table as vendored (tests/spec_table.py), its canvas size,
+    and Moybyte's own names. A key appearing or vanishing here is a PUBLIC API
+    change on all four tiers at once; a verb the spec gains fails here until
+    the Python tier answers it."""
+    keys = set(_base_namespace())
+    assert keys - spec_table.verbs() - spec_table.VALUES - PY_OWN == set(), \
+        "names neither the spec's nor declared Moybyte's own"
+    assert spec_table.verbs() | spec_table.VALUES | PY_OWN <= keys, \
+        "the Python tier lacks these"
+
+
+def test_python_lua_and_wasm_name_the_spec_verb_table():
+    """"Python and Lua must agree verbatim" (CLAUDE.md), and the compiled
+    binding is the same table: every verb moy-spec's table names is a Python
+    name, a name the Lua tier leaves to libmoy's C (`LIBMOY_VERBS`, less the
+    two its prelude replaces), and an import of the same name in the wasm
+    table every tier registers."""
+    from runtime.lua_ext import LIBMOY_VERBS, NOT_REGISTRABLE
+
+    table = spec_table.verbs()
+    replaced = {"make_layer", "draw_layer"}
+    assert replaced <= NOT_REGISTRABLE
+    assert table - set(_base_namespace()) == set(), "the Python tier lacks these"
+    assert LIBMOY_VERBS | replaced == table, (
+        "the Lua tier's libmoy names and the table differ: only the table's %s, "
+        "only the Lua tier's %s" % (sorted(table - LIBMOY_VERBS - replaced),
+                                    sorted(LIBMOY_VERBS - table)))
+    assert table - set(spec_table.wasm_imports()) == set(), \
+        "the wasm import table lacks these"
 
 
 def test_the_lua_tier_gets_the_config_DICT_beside_the_cfg_closure():

@@ -12,6 +12,7 @@ import time
 import pytest
 
 from runtime import moy_evq, moybyte, os_log, scheduler as S
+from runtime import sched_proc as P, sched_python as Y
 from runtime import moy_log as L
 from unix_mp import find_unix_mp, require_unix_mp, runtime_tree
 
@@ -34,7 +35,7 @@ class Guard:
         self._next = 0
         if self.abort:
             self._cost = budget
-            return S.ABORTED
+            return Y.ABORTED
         r = fn()
         self._cost = self._next
         return r
@@ -109,8 +110,8 @@ def test_a_suspended_processs_messages_wait_and_cost_no_frame(sched):
     pid = _app("t.held")
     got = []
     _as(pid, lambda: sched.wakes.on("ping", lambda who, n: got.append(n)))
-    for _ in range(S.MOY_BG_STRIKES):
-        sched._charge(pid, 0, True)
+    for _ in range(Y.MOY_BG_STRIKES):
+        sched.python._charge(pid, 0, True)
     assert sched.held(pid)
     sched.send(pid, "ping", (1,))
     sched.mail()
@@ -192,7 +193,7 @@ def test_each_overrun_rung_warning_strike_suspend_and_resume(sched):
 
     def slow():
         calls.append(1)
-        g.spend(S.MOY_BG_CALLBACK_US + 5000)
+        g.spend(Y.MOY_BG_CALLBACK_US + 5000)
     _as(pid, lambda: sched.wakes.every(1, slow))
     since = _since()
 
@@ -210,7 +211,7 @@ def test_each_overrun_rung_warning_strike_suspend_and_resume(sched):
     g.abort = True
     step()                                      # an abort: strike 2
     assert p.strikes == 2 and "aborted after 300 ms" in _lines(since, pid)[-1][1]
-    assert g.budgets[-1] == S.MOY_BG_ABORT_US
+    assert g.budgets[-1] == Y.MOY_BG_ABORT_US
     g.abort = False
     step()                                      # strike 3: suspended
     assert p.state == S.SUSPENDED
@@ -230,7 +231,7 @@ def test_each_overrun_rung_warning_strike_suspend_and_resume(sched):
 def test_a_callback_within_its_slice_is_no_overrun(sched):
     g = sched.guard
     pid = _app("t.fine")
-    _as(pid, lambda: sched.wakes.every(1, lambda: g.spend(S.MOY_BG_CALLBACK_US)))
+    _as(pid, lambda: sched.wakes.every(1, lambda: g.spend(Y.MOY_BG_CALLBACK_US)))
     for _ in range(4):
         time.sleep(0.003)
         sched.tick(0)
@@ -301,7 +302,7 @@ def test_a_service_starts_runs_and_stops_on_its_term(sched):
     assert sched.stop(pid)
     assert p.ns is None and p.state == S.EXITED and p.code == S.EXIT_OK
     assert sched.wakes.count(pid) == 0
-    assert sched.guard.budgets[-1] == S.MOY_SERVICE_STOP_MS * 1000
+    assert sched.guard.budgets[-1] == P.MOY_SERVICE_STOP_MS * 1000
     assert [t for _l, t in _lines(since, pid)] == ["start t.svc", "stop", "exit 0"]
 
 
@@ -434,7 +435,7 @@ def test_autostart_starts_what_holds_it_at_the_first_frame(console):
     drv.frame(1 / 60)
     assert p.ns["n"] >= 1                       # ticked by the host's frame
     for tab in ("games", "mine"):               # no service on a home tab
-        assert not [c for c in ws._launcher_items(ws.carts.all, tab)
+        assert not [c for c in ws.home.launcher_items(ws.carts.all, tab)
                     if c.get("type") == "service"]
 
 
@@ -445,14 +446,14 @@ def test_a_vm_stop_starts_its_services_again_after_it(console):
     drv.frame(1 / 60)
     manual = [c for c in ws.carts.all if c.get("id") == "t.manual"][0]
     assert S.start_cart(ws, manual) is not None
-    rec = json.loads(ws.resume_record())
+    rec = json.loads(ws.home.resume_record())
     assert sorted(p.rsplit("/", 1)[-1] for p in rec["svc"]) == [
         "moybyte.achievements.moy", "t.auto.moy", "t.manual.moy", "t.off.moy"]
     S.SCHED.pause()                             # the Player's, before the stop
     assert _running() == []
     S.SCHED.reset()
     ws2, drv2 = console()                       # the console after the stop
-    ws2.resume_launcher(json.dumps(rec))
+    ws2.home.resume_launcher(json.dumps(rec))
     drv2.frame(1 / 60)
     drv2.frame(1 / 60)
     assert _running() == ["t.auto", "t.manual", "t.off"]
@@ -513,11 +514,11 @@ import gc, time
 import moy_input as I
 import moy_guard
 import moybyte
-import scheduler as S
+import scheduler as S, sched_proc, sched_python
 moybyte.bind(I.HostInputTable())
 s = S.SCHED
 print("CAN", moy_guard.can_abort())
-S.MOY_BG_ABORT_US = 30000
+sched_python.MOY_BG_ABORT_US = 30000
 SPIN = """
 import moybyte
 def spin():
@@ -538,7 +539,7 @@ for _ in range(4):
     time.sleep_ms(2)
     s.tick(0)
 print("STRIKES", p.strikes, p.state)
-S.MOY_SERVICE_STOP_MS = 40
+sched_proc.MOY_SERVICE_STOP_MS = 40
 t0 = time.ticks_ms()
 s.stop(pid)
 print("KILLED", p.code, time.ticks_diff(time.ticks_ms(), t0) < 1000, len(moybyte.WAKES.list))
@@ -648,7 +649,7 @@ def test_a_process_on_a_task_wants_the_vm_and_nothing_else_does():
         assert E.wants() == E.WANT_MAIL
         assert E.charge(svc, 1000, False) == E.FINE
         assert E.wanted(E.WANT_MAIL) == E.WANT_MAIL and E.wants() == 0
-        assert E.charge(svc, S.MOY_BG_CALLBACK_US + 1, False) == E.WARNED
+        assert E.charge(svc, Y.MOY_BG_CALLBACK_US + 1, False) == E.WARNED
         assert E.wanted(E.WANT_MAIL) == 0 and E.wants() == E.WANT_POLL
         assert E.wanted(E.WANT_POLL) == E.WANT_POLL and E.wants() == 0
         assert E.listening("pong") == 1 and E.listening("ping") == 0

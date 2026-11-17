@@ -1,18 +1,12 @@
 // The volume seam's three backends (moy_vol.h has the contract).
 
-// The lock's clock and recursive mutex are POSIX's, which a strict C99
-// build on Linux leaves out unless asked.
-#if defined(__linux__) && !defined(_GNU_SOURCE) && !defined(_XOPEN_SOURCE)
-#define _XOPEN_SOURCE 700
-#endif
+#include "moy_platform.h"
 
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(__has_include) && __has_include("esp_heap_caps.h")
-#include "esp_heap_caps.h"
-#endif
+#include "moy_kmem.h"
 
 #include "moy_vol.h"
 
@@ -26,19 +20,19 @@
 // f_open in first. There the calls are WEAK references: they pull nothing, and
 // bind to the f_ symbols VfsFat already brings in, oofatfs's.
 #if MOY_VOL_FAT_WEAK
-extern __typeof__(f_open) f_open __attribute__((weak));
-extern __typeof__(f_read) f_read __attribute__((weak));
-extern __typeof__(f_write) f_write __attribute__((weak));
-extern __typeof__(f_close) f_close __attribute__((weak));
-extern __typeof__(f_lseek) f_lseek __attribute__((weak));
-extern __typeof__(f_stat) f_stat __attribute__((weak));
-extern __typeof__(f_opendir) f_opendir __attribute__((weak));
-extern __typeof__(f_readdir) f_readdir __attribute__((weak));
-extern __typeof__(f_closedir) f_closedir __attribute__((weak));
-extern __typeof__(f_mkdir) f_mkdir __attribute__((weak));
-extern __typeof__(f_unlink) f_unlink __attribute__((weak));
-extern __typeof__(f_rename) f_rename __attribute__((weak));
-extern __typeof__(f_chdir) f_chdir __attribute__((weak));
+#pragma weak f_open
+#pragma weak f_read
+#pragma weak f_write
+#pragma weak f_close
+#pragma weak f_lseek
+#pragma weak f_stat
+#pragma weak f_opendir
+#pragma weak f_readdir
+#pragma weak f_closedir
+#pragma weak f_mkdir
+#pragma weak f_unlink
+#pragma weak f_rename
+#pragma weak f_chdir
 #endif
 #define FF(fn) fn
 #endif
@@ -56,15 +50,7 @@ extern __typeof__(f_chdir) f_chdir __attribute__((weak));
 
 // -- the store's lock (moy_vol.h, THE STORE'S LOCK) ------------------------------
 
-#if defined(__has_include) && __has_include("esp_heap_caps.h")
-#define LOCK_RTOS 1
-#include "esp_timer.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/semphr.h"
-#include "freertos/task.h"
-#elif !defined(__EMSCRIPTEN__) || defined(__EMSCRIPTEN_PTHREADS__)
-#define LOCK_THREADS 1
-#include <pthread.h>
+#ifndef MOY_ON_BOARD
 #include <time.h>
 #endif
 
@@ -74,99 +60,55 @@ static uintptr_t s_owner;
 static int s_depth;
 static uint32_t s_held_at;
 static moy_store_lock_stats_t s_stats;
+static moy_mutex_t s_mu = MOY_MUTEX_INIT;
 
-#if LOCK_RTOS
-static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
-static StaticSemaphore_t s_mu_buf;
-static SemaphoreHandle_t s_mu;
-
-static SemaphoreHandle_t mu(void) {
-    if (s_mu == NULL) {
-        portENTER_CRITICAL(&s_mux);
-        if (s_mu == NULL) {
-            s_mu = xSemaphoreCreateMutexStatic(&s_mu_buf);
-        }
-        portEXIT_CRITICAL(&s_mux);
-    }
-    return s_mu;
-}
-
+#if defined(MOY_ON_BOARD)
 uintptr_t moy_store_me(void) {
     return (uintptr_t)xTaskGetCurrentTaskHandle();
-}
-
-static uint32_t now_us(void) {
-    return (uint32_t)esp_timer_get_time();
-}
-
-static int try_take(void) {
-    return xSemaphoreTake(mu(), 0) == pdTRUE;
 }
 
 static void nap(void) {
     vTaskDelay(1);
 }
-
-static void take(void) {
-    xSemaphoreTake(mu(), portMAX_DELAY);
-}
-
-static void give(void) {
-    xSemaphoreGive(mu());
-}
-#elif LOCK_THREADS
-static pthread_mutex_t s_mu = PTHREAD_MUTEX_INITIALIZER;
-
+#elif defined(MOY_THREADS)
 uintptr_t moy_store_me(void) {
     return (uintptr_t)pthread_self() | 1u;
-}
-
-static uint32_t now_us(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint32_t)((uint64_t)ts.tv_sec * 1000000u + (uint64_t)ts.tv_nsec / 1000u);
-}
-
-static int try_take(void) {
-    return pthread_mutex_trylock(&s_mu) == 0;
 }
 
 static void nap(void) {
     struct timespec ts = { 0, 100000 };
     nanosleep(&ts, NULL);
 }
-
-static void take(void) {
-    pthread_mutex_lock(&s_mu);
-}
-
-static void give(void) {
-    pthread_mutex_unlock(&s_mu);
-}
 #else
 uintptr_t moy_store_me(void) {
     return 1u;
 }
 
-static uint32_t now_us(void) {
-    return 0u;
-}
-
-static int try_take(void) {
-    return 1;
-}
-
 static void nap(void) {
-}
-
-static void take(void) {
-}
-
-static void give(void) {
 }
 #endif
 
-int moy_store_on_vm(void) __attribute__((weak));
+static uint32_t now_us(void) {
+    #ifdef MOY_BROWSER
+    return 0u;
+    #else
+    return (uint32_t)moy_now_us();
+    #endif
+}
+
+static int try_take(void) {
+    return moy_mutex_trylock(&s_mu);
+}
+
+static void take(void) {
+    moy_mutex_lock(&s_mu);
+}
+
+static void give(void) {
+    moy_mutex_unlock(&s_mu);
+}
+
+#pragma weak moy_store_on_vm
 
 // The VM's task goes first: while it waits, another task does not take the
 // lock it let go, so the VM waits for one op at most, never for a task that
@@ -264,12 +206,7 @@ static mount_t (*s_table)[MOY_VOL_TABLE_N];
 // Under the store's lock.
 static bool table_made(void) {
     if (s_table == NULL) {
-        #if defined(__has_include) && __has_include("esp_heap_caps.h")
-        s_table = heap_caps_calloc(1, sizeof *s_table, MALLOC_CAP_SPIRAM);
-        #endif
-        if (s_table == NULL) {
-            s_table = calloc(1, sizeof *s_table);
-        }
+        s_table = moy_kalloc(sizeof *s_table, MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK | MOY_KMEM_ZERO);
     }
     return s_table != NULL;
 }

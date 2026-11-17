@@ -1,6 +1,7 @@
 // moy_store's MicroPython binding: the store's crash-safe write and file verbs
-// (moy_fs.h) as the module runtime/carts/moy_fs.py delegates to wherever it imports
-// -- every board, the browser and the desktop MicroPython. Names follow
+// (moy_fs.h) as the module runtime/carts/moy_fs.py names -- every board, the
+// browser and the desktop MicroPython; CPython's face of the same module is
+// runtime/host/moy_store_binding.py. Names follow
 // moy_fs.py's: publish is its _write_atomic, read_recover its _read_recover,
 // claim its _claim_bak, and the plain verbs its _read, _write, _write_bytes,
 // _read_bytes, _remove, _mkdir and _exists.
@@ -14,6 +15,8 @@
 // under nlr_push and the store's lock, and an exception closes the files the
 // call opened, frees its scratch and lets go of the lock before it goes on. Scratch and the marker cache are PSRAM on a board,
 // malloc elsewhere, never the gc heap.
+
+#include "moy_platform.h"
 
 #include <string.h>
 
@@ -40,13 +43,7 @@
 #include "extmod/vfs_posix.h"
 #endif
 
-#if __has_include("esp_heap_caps.h")
-#define MOY_STORE_PSRAM 1
-#include "esp_heap_caps.h"
-#else
-#define MOY_STORE_PSRAM 0
-#include <stdlib.h>
-#endif
+#include "moy_kmem.h"
 
 #include "moy_cat.h"
 #include "moy_fs.h"
@@ -56,6 +53,7 @@
 #include "moy_pack.h"
 #include "moy_seed.h"
 #include "moy_shelf.h"
+#include "moy_removed.h"
 
 // -- the allocator -------------------------------------------------------------
 //
@@ -73,28 +71,9 @@ typedef struct blk {
 static blk_t *scratch;
 static size_t mem_now, mem_high;
 
-#if MOY_STORE_PSRAM
-// The kernel's small-block pool (moy_kernel.h), where the image has it.
-void *moy_kpool_alloc(size_t n) __attribute__((weak));
-bool moy_kpool_free(void *p) __attribute__((weak));
-#endif
-
+// The kernel's small-block pool first (moy_kernel.h).
 static void *raw_alloc(size_t n) {
-    #if MOY_STORE_PSRAM
-    if (moy_kpool_alloc != NULL) {
-        void *q = moy_kpool_alloc(n);
-        if (q != NULL) {
-            return q;
-        }
-    }
-    void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (p == NULL && heap_caps_get_total_size(MALLOC_CAP_SPIRAM) == 0) {
-        p = heap_caps_calloc(1, n, MALLOC_CAP_8BIT);
-    }
-    return p;
-    #else
-    return calloc(1, n);
-    #endif
+    return moy_kalloc(n, MOY_KMEM_SMALL | MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_IF_NONE | MOY_KMEM_ZERO);
 }
 
 // A block outside the gc heap that is never freed: the owned card volume's.
@@ -103,14 +82,7 @@ void *moy_store_raw_alloc(size_t n) {
 }
 
 static void raw_free(void *p) {
-    #if MOY_STORE_PSRAM
-    if (moy_kpool_free != NULL && moy_kpool_free(p)) {
-        return;
-    }
-    heap_caps_free(p);
-    #else
-    free(p);
-    #endif
+    moy_kfree(p);
 }
 
 static void *alloc_blk(size_t n, int keep) {
@@ -144,14 +116,14 @@ void *moy_store_alloc(size_t n) {
 // The kernel's task watchdog (native/moy_kernel), on a board that takes it:
 // fed while the frame loop has it armed, at most every half second, so a long
 // store call never reads as a hang. Weak, since not every image links it.
-#if MOY_STORE_PSRAM
-extern bool moy_kernel_watchdog(uint32_t *timeout_ms, uint32_t *max_gap_ms,
-                                uint32_t *frames, bool reset) __attribute__((weak));
-extern void moy_kernel_feed(void) __attribute__((weak));
+#if MOY_ON_BOARD
+#include "moy_kernel.h"
+#pragma weak moy_kernel_watchdog
+#pragma weak moy_kernel_feed
 #endif
 
 void moy_store_tick(void) {
-    #if MOY_STORE_PSRAM
+    #if MOY_ON_BOARD
     if (!moy_store_on_vm()) {
         return;
     }
@@ -242,9 +214,9 @@ extern const mp_obj_type_t mp_type_vfs_lfs2;
 #endif
 
 // The kernel's internal volume (moy_kvfs.c), where the image has one.
-extern void *moy_kvfs_lfs(mp_obj_t obj) __attribute__((weak));
-extern void moy_kvol_state(int *mounted, int *err, uint32_t *blocks,
-                           uint32_t *bsize) __attribute__((weak));
+#include "moy_vol.h"
+#pragma weak moy_kvfs_lfs
+#pragma weak moy_kvol_state
 
 // The card's FATFS while it is mounted over its native driver, or NULL
 // (moy_card.c); a task other than the VM's never reaches any other FAT.
@@ -664,7 +636,7 @@ static mp_obj_t mod_unmark(mp_obj_t path) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_unmark_obj, mod_unmark);
 
-// _remove and _mkdir: an error is the caller's to ignore, as the twin does.
+// _remove and _mkdir: an error is the caller's to ignore.
 static mp_obj_t mod_remove(mp_obj_t path) {
     const char *p = path_arg(path);
     GUARD_BEGIN
@@ -888,6 +860,9 @@ static mp_obj_t entry_dict(const cat_ctx_t *c, const moy_cat_entry_t *e) {
         mp_obj_list_append(tg, new_str(e->tags[i], strlen(e->tags[i])));
     }
     put(d, MP_QSTR_tags, tg);
+    if (e->animates) {
+        put(d, MP_QSTR_animates, mp_const_true);
+    }
     if (e->broken != NULL) {
         put(d, MP_QSTR_broken, mp_obj_new_str(e->broken, strlen(e->broken)));
     }
@@ -1253,13 +1228,39 @@ static mp_obj_t mod_pack(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_pack_obj, 4, 4, mod_pack);
 
-// unpack(archive, dest) -> (files, top folder)
-static mp_obj_t mod_unpack(mp_obj_t archive, mp_obj_t dest) {
-    const char *a = path_arg(archive), *d = path_arg(dest);
+// pack_paths(base, rels, folder, dest, history) -> files written
+static mp_obj_t mod_pack_paths(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    const char *base = path_arg(args[0]), *dest = path_arg(args[3]);
+    const char *folder = mp_obj_str_get_str(args[2]);
+    size_t n;
+    mp_obj_t *items;
+    mp_obj_get_array(args[1], &n, &items);
+    const char **rels = m_new(const char *, n ? n : 1u);
+    for (size_t i = 0; i < n; i++) {
+        rels[i] = mp_obj_str_get_str(items[i]);
+    }
+    int history = mp_obj_is_true(args[4]);
+    int rc = 0;
+    GUARD_BEGIN
+    rc = moy_pack_paths(base, rels, n, folder, dest, history);
+    GUARD_END
+    m_del(const char *, rels, n ? n : 1u);
+    if (rc < 0) {
+        raise_rc(-rc);
+    }
+    return MP_OBJ_NEW_SMALL_INT(rc);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_pack_paths_obj, 5, 5, mod_pack_paths);
+
+// unpack(archive, dest, history=False) -> (files, top folder)
+static mp_obj_t mod_unpack(size_t n_args, const mp_obj_t *args) {
+    const char *a = path_arg(args[0]), *d = path_arg(args[1]);
+    int history = n_args > 2 && mp_obj_is_true(args[2]);
     char top[128];
     int rc = 0;
     GUARD_BEGIN
-    rc = moy_unpack(a, d, top, sizeof top);
+    rc = moy_unpack_all(a, d, top, sizeof top, history);
     GUARD_END
     if (rc < 0) {
         raise_rc(-rc);
@@ -1267,7 +1268,7 @@ static mp_obj_t mod_unpack(mp_obj_t archive, mp_obj_t dest) {
     mp_obj_t t[2] = { MP_OBJ_NEW_SMALL_INT(rc), mp_obj_new_str(top, strlen(top)) };
     return mp_obj_new_tuple(2, t);
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(mod_unpack_obj, mod_unpack);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_unpack_obj, 2, 3, mod_unpack);
 
 static mp_obj_t mod_adopt(mp_obj_t stage, mp_obj_t target) {
     const char *s = path_arg(stage), *t = path_arg(target);
@@ -1407,6 +1408,57 @@ static mp_obj_t mod_shelf_find(mp_obj_t root, mp_obj_t ident) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_shelf_find_obj, mod_shelf_find);
 
+// -- the removal record (moy_removed.h) ------------------------------------------------
+
+// removed_load(root) -> the record's folders, one a line, each ending in "\n".
+static mp_obj_t mod_removed_load(mp_obj_t root) {
+    const char *r = path_arg(root);
+    moy_buf_t b = { NULL, 0 };
+    int rc = 0;
+    GUARD_BEGIN
+    rc = moy_removed_load(r, &b);
+    GUARD_END
+    if (rc) {
+        raise_rc(rc);
+    }
+    return take(&b, 1);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_removed_load_obj, mod_removed_load);
+
+// removed_note(root, folder) -> whether `folder` was recorded now.
+static mp_obj_t mod_removed_note(mp_obj_t root, mp_obj_t folder) {
+    const char *r = path_arg(root), *f = mp_obj_str_get_str(folder);
+    int rc = 0;
+    GUARD_BEGIN
+    rc = moy_removed_note(r, f);
+    GUARD_END
+    if (rc == MOY_FS_NONE) {
+        return mp_const_false;
+    }
+    if (rc) {
+        raise_rc(rc);
+    }
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_removed_note_obj, mod_removed_note);
+
+// removed_drop(root, folder) -> whether the record held `folder`.
+static mp_obj_t mod_removed_drop(mp_obj_t root, mp_obj_t folder) {
+    const char *r = path_arg(root), *f = mp_obj_str_get_str(folder);
+    int rc = 0;
+    GUARD_BEGIN
+    rc = moy_removed_drop(r, f);
+    GUARD_END
+    if (rc == MOY_FS_NONE) {
+        return mp_const_false;
+    }
+    if (rc) {
+        raise_rc(rc);
+    }
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_removed_drop_obj, mod_removed_drop);
+
 // canon(text): what json.dumps(json.loads(text)) writes, the C's way.
 static mp_obj_t mod_canon(mp_obj_t text) {
     size_t n;
@@ -1470,10 +1522,10 @@ static mp_obj_t mod_seed(size_t n_args, const mp_obj_t *args) {
                 progress = mp_const_none;
             }
         }
-        size_t fn = moy_seed_folder(title, tn, ns, NULL, 0);
+        size_t fn = moy_cat_folder(title, tn, ns, NULL, 0);
         vstr_t folder;
         vstr_init_len(&folder, fn);
-        moy_seed_folder(title, tn, ns, folder.buf, fn + 1u);
+        moy_cat_folder(title, tn, ns, folder.buf, fn + 1u);
         mp_obj_t fobj = mp_obj_new_str_from_vstr(&folder);
         mp_map_elem_t *had = mp_map_lookup(mp_obj_dict_get_map(present), fobj, MP_MAP_LOOKUP);
         if (had != NULL && mp_binary_op(MP_BINARY_OP_LESS_EQUAL,
@@ -1504,15 +1556,15 @@ static mp_obj_t mod_seed(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_seed_obj, 3, 5, mod_seed);
 
-// folder(title, ns): the folder a seeded cart takes (moy_seed_folder).
+// folder(title, ns): the folder a cart named `title` is stored in (moy_cat_folder).
 static mp_obj_t mod_folder(mp_obj_t title, mp_obj_t ns) {
     size_t tn;
     const char *t = mp_obj_str_get_data(title, &tn);
     const char *n = ns != mp_const_none ? mp_obj_str_get_str(ns) : NULL;
-    size_t fn = moy_seed_folder(t, tn, n, NULL, 0);
+    size_t fn = moy_cat_folder(t, tn, n, NULL, 0);
     vstr_t vs;
     vstr_init_len(&vs, fn);
-    moy_seed_folder(t, tn, n, vs.buf, fn + 1u);
+    moy_cat_folder(t, tn, n, vs.buf, fn + 1u);
     return mp_obj_new_str_from_vstr(&vs);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_folder_obj, mod_folder);
@@ -1615,20 +1667,14 @@ static int task_round(task_t *k, int i) {
     return rc;
 }
 
-static int64_t task_now_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-}
-
 static void task_walk(task_t *k, int ms) {
     int g = moy_vol_gate_enter(k->dir);
     if (g < 0) {
         k->refused++;
         return;
     }
-    int64_t end = task_now_ms() + ms;
-    while (task_now_ms() < end) {
+    int64_t end = (int64_t)moy_now_ms() + ms;
+    while ((int64_t)moy_now_ms() < end) {
         moy_store_yield();
         moy_vol_stat_t st;
         if (moy_fs_stat(k->dir, &st) == 0) {
@@ -1808,6 +1854,7 @@ static const mp_rom_map_elem_t moy_store_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_load), MP_ROM_PTR(&mod_load_obj) },
     { MP_ROM_QSTR(MP_QSTR_skip), MP_ROM_PTR(&mod_skip_obj) },
     { MP_ROM_QSTR(MP_QSTR_pack), MP_ROM_PTR(&mod_pack_obj) },
+    { MP_ROM_QSTR(MP_QSTR_pack_paths), MP_ROM_PTR(&mod_pack_paths_obj) },
     { MP_ROM_QSTR(MP_QSTR_unpack), MP_ROM_PTR(&mod_unpack_obj) },
     { MP_ROM_QSTR(MP_QSTR_adopt), MP_ROM_PTR(&mod_adopt_obj) },
     { MP_ROM_QSTR(MP_QSTR_journal_append), MP_ROM_PTR(&mod_journal_append_obj) },
@@ -1826,6 +1873,9 @@ static const mp_rom_map_elem_t moy_store_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_shelf_take), MP_ROM_PTR(&mod_shelf_take_obj) },
     { MP_ROM_QSTR(MP_QSTR_shelf_written), MP_ROM_PTR(&mod_shelf_written_obj) },
     { MP_ROM_QSTR(MP_QSTR_shelf_find), MP_ROM_PTR(&mod_shelf_find_obj) },
+    { MP_ROM_QSTR(MP_QSTR_removed_load), MP_ROM_PTR(&mod_removed_load_obj) },
+    { MP_ROM_QSTR(MP_QSTR_removed_note), MP_ROM_PTR(&mod_removed_note_obj) },
+    { MP_ROM_QSTR(MP_QSTR_removed_drop), MP_ROM_PTR(&mod_removed_drop_obj) },
     { MP_ROM_QSTR(MP_QSTR_copy_files), MP_ROM_PTR(&mod_copy_files_obj) },
     { MP_ROM_QSTR(MP_QSTR_canon), MP_ROM_PTR(&mod_canon_obj) },
     { MP_ROM_QSTR(MP_QSTR_seed), MP_ROM_PTR(&mod_seed_obj) },

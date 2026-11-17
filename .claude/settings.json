@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.command // empty' | grep -qE '(^|[;&|(] *)git( -C [^ ]+)? push' || exit 0; python3 \"$CLAUDE_PROJECT_DIR/tools/worktree.py\" prune 2>&1 | grep -v '^kept ' || true",
+            "timeout": 120,
+            "statusMessage": "Removing landed worktrees"
+          }
+        ]
+      }
+    ]
+  }
+}

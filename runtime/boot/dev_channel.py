@@ -70,16 +70,11 @@ only tools/push_cart.py builds one -- and `moy-rescan` says so in a
 `moy-note` line the tool shows to the person pushing.
 """
 
-try:                                    # device: ticks is frozen flat
-    from ticks import _ticks_diff, _ticks_ms
-except ImportError:                     # host: the runtime package
-    from runtime.ticks import _ticks_diff, _ticks_ms
-try:                                    # each subsystem's words
-    import devch_input
-    import devch_audio
-    import devch_links
-except ImportError:                     # host: the runtime package
-    from runtime import devch_input, devch_audio, devch_links
+from ticks import _ticks_diff, _ticks_ms
+# each subsystem's words
+import devch_input
+import devch_audio
+import devch_links
 try:                       # device (device_util is staged from device/)
     from device_util import _diag_log
 except ImportError:        # host / test -- no diag ring; print is it
@@ -108,12 +103,8 @@ except ImportError:        # host, and a board without the kernel
 # serial words below are derived from it -- an entry with a `dev` name IS the
 # command, gate and all, so a new toggle reaches the channel without a branch
 # being written here.
-try:
-    from settings_layer import SETTINGS_TOGGLES
-    from crash_guard import core_dump, last_crash
-except ImportError:        # host / test -- the runtime package
-    from runtime.settings_layer import SETTINGS_TOGGLES
-    from runtime.crash_guard import core_dump, last_crash
+from settings_layer import SETTINGS_TOGGLES
+from crash_guard import core_dump, last_crash
 
 # A partial line longer than this is noise; drop it. NOT sized for a human:
 # the on-glass harness's `pyexec` uploads code in 768-char chunks wrapped in a
@@ -431,10 +422,7 @@ def stale_handle_probe(ws):
     times and still serves the live handle. `impl` is where the spine runs:
     `native` is native/moy_spine, which every tier runs; `python` is the
     suites' oracle, tests/spine_twin.py."""
-    try:
-        import moy_spine as sp
-    except ImportError:        # host / test -- the runtime package
-        from runtime import moy_spine as sp
+    import moy_spine as sp
     reg = ws.apps
     live = reg.handles()[0]
     scratch = sp.Table(sp.KIND_APP, "app", 4)
@@ -732,7 +720,7 @@ def _remote_state(ws):
         st["psave"] = None if idle is None else [idle[0] >= 3, idle[3]]
         st["idle"] = None if idle is None else {
             "state": idle[0], "dim": idle[1], "saver": idle[2], "blank": idle[3]}
-        # Expensive-event counters (ws.note_cost): cache builds + storage
+        # Expensive-event counters (ws.perf.note_cost): cache builds + storage
         # reads. A cache that is silently missing shows up here as a count that
         # tracks the frame count.
         st["costs"] = dict(getattr(ws, "costs", {}) or {})
@@ -749,18 +737,18 @@ def _remote_state(ws):
             # The process back-stack, which on the fullscreen tier IS the whole
             # window model: `ws.screen` is a read-only projection of its top.
             st["stack"] = wm.stack.kinds()
-        if hasattr(wm, "_wins"):
+        if hasattr(wm, "windows"):
             # The windowed tier's window model (#73/#105).
             desk = getattr(wm, "desk_open", None)
             st["desk"] = bool(desk()) if desk is not None else None
-            st["order"] = list(getattr(wm, "_order", ()) or ())
-            st["focus"] = getattr(wm, "_focus", None)
+            st["order"] = list(getattr(wm, "z_order", ()) or ())
+            st["focus"] = getattr(wm, "focus_key", None)
             # Console mode's parked window slots (docs/theme_and_shell_2026-11.md §8.1).
-            parked = getattr(wm, "_parked", None)
+            parked = getattr(wm, "parked", None)
             st["parked"] = list(parked.order) if parked is not None else []
             wins = {}
             for k in st["order"]:
-                win = wm._wins.get(k)
+                win = wm.windows.get(k)
                 if win is not None:
                     wins[k] = [win.x, win.y, win.w, win.h, win.title_h,
                                win.kind, bool(win.minimized)]
@@ -768,9 +756,9 @@ def _remote_state(ws):
             # #113: a window buffer is ONE retained surface -- 2 here means a
             # blit-scroll would measure against the wrong paint and ghost.
             st["win_retained"] = dict(
-                (k, getattr(wm._wins[k].buf, "RETAINED_FRAMES", None))
+                (k, getattr(wm.windows[k].buf, "RETAINED_FRAMES", None))
                 for k in st["order"]
-                if wm._wins.get(k) is not None and wm._wins[k].buf is not None)
+                if wm.windows.get(k) is not None and wm.windows[k].buf is not None)
     except Exception as exc:  # noqa: BLE001
         st["wm_err"] = str(exc)
     try:
@@ -790,12 +778,12 @@ def _remote_state(ws):
             "sel": sl.set_msel, "rows": len(sl._settings_rows()),
             # the focused row and where it drew (the page's scroll moves it)
             "focus": f, "focus_box": None if box is None else list(box),
-            "wifi_view": bool(sl.wifi_view),
-            "bt_view": bool(getattr(sl, "bt_view", False)),
+            "wifi_view": sl.showing("wifi"),
+            "bt_view": sl.showing("bt"),
             # the kernel's last-crash panel is up (Settings -> LAST CRASH)
-            "crash_view": bool(getattr(sl, "crash_view", False)),
+            "crash_view": sl.showing("crash"),
         }
-        win = ws.wm._wins.get("settings") if hasattr(ws.wm, "_wins") else None
+        win = ws.wm.windows.get("settings") if hasattr(ws.wm, "windows") else None
         if win is not None and win.ctx is not None:
             lay = win.ctx.layout
             st["settings"]["content"] = [lay.cx, lay.cy, lay.cw, lay.ch]
@@ -882,7 +870,7 @@ def _remote_state(ws):
     except Exception as exc:  # noqa: BLE001
         st["stages_err"] = str(exc)
     try:
-        app = getattr(ws, "appearance_app", None)
+        app = ws.app("appearance")
         cart = None
         for c in ws.carts.all:
             if c.get("title") == "Appearance":
@@ -898,7 +886,7 @@ def _remote_state(ws):
                 "is_app": bool(app.is_app(cart)) if app is not None else None,
             }
         claims = {}
-        for _app, _text in getattr(ws, "_apps", ()):
+        for _app in getattr(ws, "app_layers", ()):
             claims[_app.id] = sum(1 for c in ws.carts.all if _app.is_app(c))
         st["app_claims"] = claims
     except Exception as exc:  # noqa: BLE001
@@ -923,7 +911,7 @@ def _remote_state(ws):
         # (CONSOLE, APP, DRIVER, SERVICE, REFUSED). None while the run ticks
         # through Python, or with no cart in front.
         info = None
-        if st.get("cart") and getattr(pl, "_play", None) is not None:
+        if st.get("cart") and getattr(pl, "play", None) is not None:
             import moy_play
             info = moy_play.info()
         # The launch's stop verdict and whether the run had the VM down
@@ -1372,7 +1360,7 @@ class DevChannel:
         stops there and says the firmware is too old, rather than blasting
         bytes at a board that is still reading lines.
 
-        The transfer runs inside the console's storage gate (`ws._with_sd`):
+        The transfer runs inside the console's storage gate (`ws.with_sd`):
         on the T-Deck the card shares the panel's SPI host, and a store op
         that overlaps a panel transfer hangs the board.
 
@@ -1415,7 +1403,7 @@ class DevChannel:
         console = _console_rate() if fast else None
         if not console or fast == console:
             fast = 0
-        gate = getattr(ws, "_with_sd", None)
+        gate = getattr(ws, "with_sd", None)
         args = (ws, total, window, path + ".new", fast, console)
         err, said = (self._recv_file(*args) if gate is None
                      else gate(lambda: self._recv_file(*args)))
@@ -1423,7 +1411,7 @@ class DevChannel:
             return
         if not said:
             print("RECV ERR %s" % err)
-        say = getattr(ws, "notice", None)
+        say = getattr(getattr(ws, "notices", None), "notice", None)
         if err.startswith("store full") and say is not None:
             say("CAN'T ADD CART", "the store is full", "warn")
 
@@ -1631,12 +1619,12 @@ class DevChannel:
             # past the sender's ten-second wait, and whatever the sender asks
             # next queues behind it on the line.
             print("moy-ok")
-            rescan = getattr(ws, "rescan_carts", None)
+            rescan = getattr(getattr(ws, "carts", None), "synced", None)
             if rescan is not None:
                 rescan()
         elif cmd == "moy-run":
             name = line.split(None, 1)[1] if len(parts) > 1 else ""
-            launch = getattr(ws, "launch_named", None)
+            launch = getattr(getattr(ws, "home", None), "launch_named", None)
             if launch is not None and launch(name):
                 print("moy-ok")
             else:
@@ -1658,7 +1646,7 @@ class DevChannel:
         if dst is None or size < 0:
             print("moy-err usage: moy-put <path in the cart store> <bytes>")
             return
-        gate = getattr(ws, "_with_sd", None)
+        gate = getattr(ws, "with_sd", None)
         if gate is None:
             self._moy_put_open(ws, parts[1], dst, size)
         else:
@@ -1794,7 +1782,7 @@ class DevChannel:
             except OSError:
                 pass
             print("moy-err %s: %s" % (rel, err))
-            say = getattr(ws, "notice", None)
+            say = getattr(getattr(ws, "notices", None), "notice", None)
             if err.startswith("store full") and say is not None:
                 say("CAN'T ADD CART", "the store is full", "warn")
             return
@@ -1841,12 +1829,12 @@ class DevChannel:
             print("STATE %s" % json.dumps(_remote_state(ws)))
             return
         if cmd == "run":
-            # The lookup is ws.launch_named -- the SAME body the browser's PLAY
+            # The lookup is ws.home.launch_named -- the SAME body the browser's PLAY
             # ON DEVICE goes through (moy_webhost POST /run), so a name that
             # works over serial works from the page and neither can grow its own
             # idea of what a cart is called.
             name = " ".join(parts[1:]) if len(parts) > 1 else ""
-            title = ws.launch_named(name)
+            title = ws.home.launch_named(name)
             if title:
                 print("REMOTE run %s" % title)
             else:
@@ -1859,11 +1847,11 @@ class DevChannel:
             # silently undone. persist=False -- a serial A/B must not rewrite the
             # kid's system/settings.
             try:
-                ws.set_diag_live(on, persist=False)
+                ws.toggles.set_diag_live(on, persist=False)
             except Exception:  # noqa: BLE001 -- older console: flag only
                 ws.diag_live = on
             ws.show_fps = on
-            ws._dirty = True
+            ws.mark_dirty()
             print("REMOTE diag %s" % ("on" if on else "off"))
             return
         if cmd == "verbs":
@@ -1891,16 +1879,16 @@ class DevChannel:
                 print("REMOTE %s: not available on this board" % cmd)
                 return
             on = not (len(parts) == 2 and parts[1] == "0")
-            getattr(ws, setter)(on, persist=False)
+            getattr(getattr(ws, "toggles", None), setter)(on, persist=False)
             print("REMOTE %s %s"
                   % (cmd, "on" if getattr(ws, key, on) else "off"))
             return
         if cmd == "uncap":
             on = not (len(parts) == 2 and parts[1] == "0")
-            ws._uncap = on                    # the next run starts uncapped
+            ws.uncap = on                    # the next run starts uncapped
             pl = getattr(getattr(ws, "run", None), "player", None)
             if pl is not None and getattr(pl, "tick_ms", 0):
-                pl.uncap_mode(on)             # ...and the running one flips now
+                pl.pace.uncap_mode(on)             # ...and the running one flips now
             print("REMOTE uncap %s" % ("on" if on else "off"))
             return
         if cmd in ("skip", "gov"):
@@ -1990,8 +1978,8 @@ class DevChannel:
             # open_app's claim result -- a False is the silent no-op an on-glass
             # harness needs to SEE; `open wifi` deep-links Settings -> wifi.
             what = parts[1] if len(parts) > 1 else ""
-            if what == "appearance" and getattr(ws, "appearance_app", None) is not None:
-                ok = ws.open_app(ws.appearance_app)
+            if what == "appearance" and ws.app("appearance") is not None:
+                ok = ws.spine.open_app(ws.app("appearance"))
                 print("REMOTE open appearance -> %s" % ok)
                 return
             if what == "log" and hasattr(ws, "open_log"):
@@ -2004,7 +1992,7 @@ class DevChannel:
                 print("REMOTE open wifi")
                 return
             fn = {"settings": getattr(ws, "open_settings", None),
-                  "projects": getattr(ws, "open_projects", None)}.get(what)
+                  "projects": getattr(getattr(ws, "home", None), "open_projects", None)}.get(what)
             if fn is not None:
                 fn()
                 print("REMOTE open %s" % what)

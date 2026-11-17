@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "moy_sb.h"
 #include "moy_perf.h"
 
 typedef struct {
@@ -120,53 +121,40 @@ int moy_perf_field_parts(int field) {
     return field >= 0 && field < MOY_PF_FIELDS ? FIELDS[field].parts : 0;
 }
 
-typedef struct {
-    char *p;
-    size_t cap, n;
-} out_t;
-
-static void put(out_t *o, const char *s) {
-    while (*s && o->n + 1 < o->cap) {
-        o->p[o->n++] = *s++;
-    }
-    o->p[o->n] = 0;
-}
-
 size_t moy_perf_format(const moy_perf_values_t *v, char *out, size_t cap) {
-    out_t o = {out, cap, 0};
+    moy_sb_t o = moy_sb_fixed(out, cap);
     if (cap == 0) {
         return 0;
     }
-    out[0] = 0;
-    put(&o, "PERF");
+    moy_sb_str(&o, "PERF");
     char tmp[32];
     for (int f = 0; f < MOY_PF_FIELDS; f++) {
-        put(&o, " ");
-        put(&o, FIELDS[f].name);
-        put(&o, "=");
+        moy_sb_str(&o, " ");
+        moy_sb_str(&o, FIELDS[f].name);
+        moy_sb_str(&o, "=");
         if (v->has[f] == 0) {
-            put(&o, "-");
+            moy_sb_str(&o, "-");
             continue;
         }
         if (f == MOY_PF_CART) {
-            put(&o, v->cart[0] ? v->cart : "?");
+            moy_sb_str(&o, v->cart[0] ? v->cart : "?");
             continue;
         }
         int parts = moy_perf_field_parts(f);
         for (int i = 0; i < parts; i++) {
             if (i) {
-                put(&o, "/");
+                moy_sb_str(&o, "/");
             }
             if (v->has[f] & (1u << i)) {
                 number(tmp, v->v[f][i], FIELDS[f].decimals);
-                put(&o, tmp);
-                put(&o, FIELDS[f].unit);
+                moy_sb_str(&o, tmp);
+                moy_sb_str(&o, FIELDS[f].unit);
             } else {
-                put(&o, "-");
+                moy_sb_str(&o, "-");
             }
         }
     }
-    return o.n;
+    return moy_sb_end(&o);
 }
 
 void moy_perf_init(moy_perf_t *p, uint32_t now, uint32_t period_ms) {

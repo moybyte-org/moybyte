@@ -214,29 +214,34 @@ it refuses (a key, a secret, a count) raises ValueError.
                      True where the 64-byte `sig` is the 32-byte public key
                      `pub`'s signature of `msg`, else False
 
-on/every/after/at answer the wake's id. A timer means "no earlier than": a wake is
-served in the shell loop's slack, so up to a frame late, and a late `every`
-keeps its period from the deadline, never bursting to catch up. Precise timing
-is C's (hardware.md section 2). A process whose callbacks are not the VM's (a
-compiled program; a Lua service for its alarms) holds timers and alarms of
-the kernel's instead (native/moy_kernel/moy_evq.h, TIMERS: they go off with
-no VM, through an S3's VM stop), TIMERS_MAX at once, FULL past them: a
-compiled program's on, every, after, at and cancel are C rows (native/
-moy_app/moy_app.c, timer_row, at_row), a Lua service's at the kernel's
-(moy_evq_at, which turns a wall time into the kernel's clock, the kernel
-moving it with each step of the wall clock, moy_evq_clock), each alarm
-under the `alarms` its queue was opened with.
+on/every/after/at answer the wake's id. Every timer of every tier is a row
+of the kernel's table (native/moy_kernel/moy_evq.h, TIMERS: they go off with
+no VM, through an S3's VM stop), TIMERS_MAX a process at once, FULL past
+them, and every wake's id is the kernel's one counter's. A timer means "no
+earlier than": a Python process's goes off at the frame the kernel's run
+finds it due and is served in the shell loop's slack, so up to a frame late,
+and a late `every` keeps its period from the deadline, never bursting to
+catch up. Precise timing is C's (hardware.md section 2). An alarm is the
+kernel's timer at as many ms from now as its wall time is away, moved with
+each step of the wall clock (moy_evq_clock); a compiled program's and a Lua
+program's turn the wall time in C (moy_evq_at), under the `alarms` its queue
+was opened with. A compiled program's on, every, after, at and cancel are C
+rows (native/moy_app/moy_app.c, timer_row, at_row), a Lua program's the C
+table native/moycore/moycore_moybyte.h opens.
 
 THE REGISTRY (`WAKES`) is what the cooperative scheduler drives: once a frame
-it asks `due(now_ms, out)` for the wakes due (allocation-free, into a
-preallocated list) and runs each with `call(wid)`, which points events() at the
-wake's reader for the call; `count(pid)` answers how many wakes a process
-holds; `end(pid)` drops a process's wakes and readers and tells `ended`, the
-scheduler's hook; `alarm(t, fn, wake)` is `at` with the screen's waking a
-choice (cron's and at's jobs, runtime/system/cron.py, wake nothing), and
-`woke(pid)` the console's hook an alarm that wakes calls. Each wake belongs
-to the process that made it (the OS log's `current`). This module registers and queues; running a callback under a
-slice is the scheduler's (runtime/system/scheduler.py).
+it asks `pending(out)` for the reader wakes whose rings hold records
+(allocation-free, into a preallocated list) and the kernel for each timer
+that went off (`moy_evq.fired`), and runs each with `call(wid)`, which points
+events() at the wake's reader for the call; `count(pid)` answers how many
+wakes a process holds; `end(pid)` drops a process's wakes and readers and
+tells `ended`, the scheduler's hook; `alarm(t, fn, wake)` is `at` with the
+screen's waking a choice (cron's and at's jobs, runtime/system/cron.py, wake
+nothing; one that wakes names its process to the kernel's `woke`, which the
+scheduler hands the console's hook `woke(pid)`); `set(wid, ms)` moves a
+timer's next deadline. Each wake belongs to the process that made it (the OS
+log's `current`). This module registers and queues; running a callback under
+a slice is the scheduler's (runtime/system/scheduler.py).
 
 The rings are the input table the shell binds (`bind`, the Workstation's
 input), so a host and a board read the same records.
@@ -273,25 +278,16 @@ it too, so a run the kernel drives makes no crossing for a message its
 launch sent.
 """
 
-try:
-    from ticks import _ticks_ms, _ticks_diff, _ticks_add
-except ImportError:  # host: the runtime package
-    from runtime.ticks import _ticks_ms, _ticks_diff, _ticks_add
-
-try:
-    import moy_input as _I
-except ImportError:  # host: the runtime package
-    from runtime import moy_input as _I
+from ticks import _ticks_ms, _ticks_diff, _ticks_add
+import moy_input as _I
 
 try:
     import moy_log as _L
 except ImportError:  # pragma: no cover - an image without the kernel
     _L = None
 
-try:
-    import moy_evq as _E
-except ImportError:  # host: the runtime package
-    from runtime import moy_evq as _E
+import moy_evq as _E
+import face_errors as _C
 
 try:
     import json as _json
@@ -320,18 +316,20 @@ _RADIO_KINDS = (1 << NET) | (1 << BLE)
 
 SHELL = 1
 FULL = -_E.FULL             # send's answer under BACKPRESSURE (moy_evq.h)
-ABSENT = -8                 # service_*'s answer where the app declares no service
+ABSENT = -_C.ABSENT         # service_*'s answer where the app declares no service
 ALARMS = "alarms"           # the permission `at` needs
 EPERM = 1
 EMFILE = 24
 ERR, WARNING, INFO = 3, 4, 6    # the OS log's severities `log` names most (syslog's)
-_ON, _EVERY, _AFTER, _MAIL, _RING, _ALARM = 0, 1, 2, 3, 4, 5
-# A wake: [wid, owner, how, ms, deadline, fn, reader]; a message wake's
-# `ms` is its name (its messages wait on its process's event queue), a ring
-# wake's `ms` the ring source it reads alone and its `deadline` the kinds,
-# an alarm's `ms` whether it wakes the screen and its `deadline` its Unix
-# seconds.
-_WID, _OWNER, _HOW, _MS, _AT, _FN, _READER = range(7)
+_ON, _TIMER, _MAIL, _RING = 0, 1, 3, 4
+# A wake: [wid, owner, how, ms, arg, fn, reader]; an `on`'s `ms` is its
+# source, a message wake's its name (its messages wait on its process's event
+# queue), a ring wake's the ring source it reads alone and its `arg` the
+# kinds, a timer's (every, after, an alarm: a row of the kernel's table,
+# moy_evq.h's TIMERS, its wid the kernel's id) its period and its `arg`
+# whether its call spends it. Every wid is the kernel's (moy_evq_id).
+_WID, _OWNER, _HOW, _MS, _ARG, _FN, _READER = range(7)
+_FAR_MS = 4294967                   # an alarm's farthest, seconds as ms (moy_evq_at's)
 
 
 def _pid():
@@ -350,7 +348,6 @@ class Wakes:
         self.by_id = {}
         self.readers = {}           # pid -> its events() reader
         self.cur = [-1]             # the reader events() reads; -1: the current process's
-        self.next_id = 1
         self.ended = None           # fn(pid) told when a process's wakes end
         self.added = None           # fn() told when a wake is made (a board's
                                     # loop then makes the scheduler's upcall)
@@ -382,15 +379,15 @@ class Wakes:
                 w[_READER] = table.reader(SOURCES[w[_MS]])
             elif w[_HOW] == _RING:
                 try:
-                    w[_READER] = table.reader(w[_AT], w[_MS])
+                    w[_READER] = table.reader(w[_ARG], w[_MS])
                 except (OSError, ValueError):  # the source is not this table's
                     w[_READER] = -1
         self.radio_sync()
 
-    def _add(self, how, ms, at, fn, reader):
-        wid = self.next_id
-        self.next_id += 1
-        w = [wid, _pid(), how, ms, at, fn, reader]
+    def _add(self, how, ms, arg, fn, reader, wid=0, pid=None):
+        if not wid:
+            wid = _E.wake_id()
+        w = [wid, _pid() if pid is None else pid, how, ms, arg, fn, reader]
         self.by_id[wid] = w
         if how == _MAIL:
             self.mail.append(w)
@@ -436,17 +433,37 @@ class Wakes:
 
     def every(self, ms, fn):
         ms = max(1, int(ms))
-        return self._add(_EVERY, ms, _ticks_add(_ticks_ms(), ms), fn, -1)
+        pid = _pid()
+        self.queue(pid)
+        return self._timer(pid, _E.timer(pid, ms, ms), ms, False, fn)
 
     def after(self, ms, fn):
         ms = max(0, int(ms))
-        return self._add(_AFTER, ms, _ticks_add(_ticks_ms(), ms), fn, -1)
+        pid = _pid()
+        self.queue(pid)
+        return self._timer(pid, _E.timer(pid, ms, 0), 0, True, fn)
 
     def alarm(self, t, fn, wake=True):
-        """Wake `fn()` once at wall time `t` (Unix seconds, rounded up),
-        `woke` told as it goes off when `wake`."""
+        """Wake `fn()` once at wall time `t` (Unix seconds, rounded up): the
+        kernel's alarm at as many ms from now, which names its process to
+        the screen's wake (moy_evq_woke) as it goes off when `wake`."""
         t = int(-(-t // 1))
-        return self._add(_ALARM, bool(wake), t, fn, -1)
+        pid = _pid()
+        self.queue(pid)
+        s = t - _wall()
+        ms = 0 if s <= 0 else _FAR_MS * 1000 if s >= _FAR_MS else s * 1000
+        return self._timer(pid, _E.alarm(pid, ms, bool(wake)), 0, True, fn)
+
+    def _timer(self, pid, got, ms, once, fn):
+        rc, wid = got
+        if rc != _E.OK:
+            raise OSError(EMFILE, "process %d holds %d timers" % (pid, TIMERS_MAX))
+        return self._add(_TIMER, ms, once, fn, -1, wid, pid)
+
+    def set(self, wid, ms):
+        """Timer `wid` due `ms` from now, its period kept: whether it is one."""
+        w = self.by_id.get(wid)
+        return w is not None and w[_HOW] == _TIMER and _E.timer_set(w[_OWNER], wid, max(0, int(ms)))
 
     def post(self, pid, name, args, frm=SHELL):
         """Message `name` with `args` (a tuple of JSON values) from process
@@ -512,8 +529,7 @@ class Wakes:
         if self._rbuf is None:
             from array import array
             self._rbuf = array("i", [0] * (EV_FIELDS * 4))
-        wid = self.next_id
-        self.next_id += 1
+        wid = _E.wake_id()
         w = [wid, SHELL, _RING, src, _RADIO_KINDS, self._route, r]
         self.by_id[wid] = w
         self.list.append(w)
@@ -546,6 +562,12 @@ class Wakes:
         return _E.queued(pid)
 
     def cancel(self, wid):
+        w = self.by_id.get(wid)
+        if w is not None and w[_HOW] == _TIMER:
+            _E.timer_cancel(w[_OWNER], wid)
+        return self._forget(wid)
+
+    def _forget(self, wid):
         w = self.by_id.pop(wid, None)
         if w is None:
             return False
@@ -598,44 +620,21 @@ class Wakes:
                 n += 1
         return n
 
-    def due(self, now, out):
-        """The wakes due at `now` (ticks_ms) into `out`, a list of at least
-        one slot a wake; answers how many. A timer due is re-armed (`every`)
-        or spent (`after`, an alarm: cancelled by its `call`). Allocates
-        nothing."""
+    def pending(self, out):
+        """The reader wakes whose readers hold records into `out`, a list of
+        at least one slot a wake; answers how many. The timers are the
+        kernel's: the scheduler takes each that went off (moy_evq_fired).
+        Allocates nothing."""
         n = 0
         cap = len(out)
         t = self.table
-        wall = None
+        if t is None:
+            return 0
         for w in self.list:
             if n == cap:
                 break
-            how = w[_HOW]
-            if how == _ON or how == _RING:
-                if t is None or w[_READER] < 0 or not t.pending(w[_READER]):
-                    continue
-            elif how == _ALARM:
-                at = w[_AT]
-                if at is None:
-                    continue
-                if wall is None:
-                    wall = _wall()
-                if wall < at:
-                    continue
-                w[_AT] = None
-                if w[_MS] and self.woke is not None:
-                    self.woke(w[_OWNER])
-            else:
-                at = w[_AT]
-                if at is None or _ticks_diff(now, at) < 0:
-                    continue
-                if how == _EVERY:
-                    at = _ticks_add(at, w[_MS])
-                    if _ticks_diff(now, at) >= 0:
-                        at = _ticks_add(now, w[_MS])
-                    w[_AT] = at
-                else:
-                    w[_AT] = None
+            if w[_HOW] == _TIMER or w[_READER] < 0 or not t.pending(w[_READER]):
+                continue
             out[n] = w[_WID]
             n += 1
         return n
@@ -643,7 +642,8 @@ class Wakes:
     def call(self, wid):
         """Run wake `wid`'s function, events() reading its reader (an `on`)
         or its process's. Its exception is the caller's. An `after` is spent
-        by the call, and so is an alarm."""
+        by the call, and so is an alarm (the kernel freed its row as it was
+        taken)."""
         w = self.by_id.get(wid)
         if w is None or w[_HOW] == _MAIL:
             return
@@ -654,8 +654,8 @@ class Wakes:
             w[_FN]()
         finally:
             cur[0] = was
-            if w[_HOW] == _AFTER or w[_HOW] == _ALARM:
-                self.cancel(wid)
+            if w[_HOW] == _TIMER and w[_ARG]:
+                self._forget(wid)
 
     def _reader_of(self, pid):
         r = self.readers.get(pid)
@@ -682,17 +682,32 @@ def _wall():
     """The wall clock's Unix seconds (wallclock.now)."""
     wc = _WC[0]
     if wc is None:
-        try:
-            import wallclock as wc
-        except ImportError:  # host: the runtime package
-            from runtime import wallclock as wc
+        import wallclock as wc
         _WC[0] = wc
     return wc.now()
 
 
-# fn(pid) told when a process ends, before its wakes go: the lease sweep
-# (runtime/system/leases.py) registers here.
-ENDS = []
+# The sweeps told when a process ends, before its wakes go, run in this
+# order: the handles it left open close (dev_handles), the device faces that
+# stop ahead of their leases (dev_midi), the shell's own (sound, status items,
+# achievements, intents, items), the leases, the other device faces, and its
+# asyncio tasks.
+END_ORDER = ("handles", "devices_first", "shell", "leases", "devices", "tasks")
+ENDS = []       # fn(pid), in END_ORDER
+_END_AT = []    # each one's place in END_ORDER
+
+
+def on_end(stage, fn):
+    """Run `fn(pid)` as a process ends, at `stage` of END_ORDER, after what
+    that stage holds already; once however often it registers."""
+    if fn in ENDS:
+        return
+    s = END_ORDER.index(stage)
+    i = len(_END_AT)
+    while i and _END_AT[i - 1] > s:
+        i -= 1
+    ENDS.insert(i, fn)
+    _END_AT.insert(i, s)
 
 WAKES = Wakes()
 
@@ -723,10 +738,7 @@ def after(ms, fn):
 
 
 def _may_alarm(pid):
-    try:
-        import devices
-    except ImportError:  # host: the runtime package
-        from runtime import devices
+    import devices
     if not devices.may(pid, ALARMS):
         raise OSError(EPERM, 'needs "%s"' % ALARMS)
 
@@ -748,9 +760,10 @@ def at(t, fn):
 
 
 # The messages a process whose callbacks are not the VM's gets from the system
-# for its alarms and timers (the kernel's), each carrying the id: an alarm's
-# AT (MOY_EVQ_AT), a timer's (`every`, `after`) TIMER (MOY_EVQ_TIMER), two
-# names of the MOY_EVQ_LISTEN a process listens on.
+# for its alarms and timers, each carrying the id: an alarm's AT
+# (MOY_EVQ_AT), a timer's (`every`, `after`) TIMER (MOY_EVQ_TIMER), two names
+# of the MOY_EVQ_LISTEN a process listens on. A Python process's go off with
+# no message (moy_evq_fired).
 AT, TIMER = "moybyte.at", "moybyte.timer"
 TIMERS_MAX = 16             # the kernel's timers and alarms one process holds (MOY_EVQ_TIMERS)
 
@@ -772,10 +785,7 @@ def pins():
 
 
 def _leases():
-    try:
-        import leases
-    except ImportError:  # host: the runtime package
-        from runtime import leases
+    import leases
     return leases
 
 
@@ -793,12 +803,8 @@ def _aud():
         try:
             import moy_audio
             _AUD[0] = moy_audio
-        except ImportError:  # host: the runtime package's ctypes build of the same C
-            try:
-                from runtime import audio_binding
-            except ImportError:  # pragma: no cover - a host without its audio
-                return None
-            _AUD[0] = audio_binding.get()
+        except ImportError:  # an image without audio, a host without a compiler
+            return None
     return _AUD[0]
 
 
@@ -842,22 +848,19 @@ def _snd_end(pid):
         snd_close()
 
 
-ENDS.append(_snd_end)
+on_end("shell", _snd_end)
 
 
 def notify(summary, body="", icon=None, actions=(), urgency=1, replaces_id=0):
-    try:
-        from notifications import NOTES
-    except ImportError:  # host: the runtime package
-        from runtime.notifications import NOTES
-    return NOTES.post(_pid(), summary, body, icon, actions, urgency, replaces_id)
+    from notifications import NOTES
+    pid = _pid()
+    if pid > SHELL:
+        WAKES.queue(pid)            # the kernel's post reads its `notifications`
+    return NOTES.post(pid, summary, body, icon, actions, urgency, replaces_id)
 
 
 def _items():
-    try:
-        from status_items import ITEMS
-    except ImportError:  # host: the runtime package
-        from runtime.status_items import ITEMS
+    from status_items import ITEMS
     if ITEMS.post is None:
         ITEMS.post = WAKES.post     # a compiled item's panel posts its presses
     return ITEMS
@@ -867,7 +870,7 @@ def status(icon, section, order=0):
     return _items().add(_pid(), icon, section, order)
 
 
-STALE, BAD = -1, -7         # moy_app.h's codes a status row answers, negated
+STALE, BAD = -_C.STALE, -_C.BAD     # moy_app.h's codes a status row answers, negated
 
 
 def panel_of(pid, h, rows=None):
@@ -881,10 +884,7 @@ def panel_of(pid, h, rows=None):
     it = items.of(pid, h)
     if it is None:
         return ABSENT
-    try:
-        from status_items import parse, STATUS
-    except ImportError:  # host: the runtime package
-        from runtime.status_items import parse, STATUS
+    from status_items import parse, STATUS
     got = parse(rows or "") if rows is None or isinstance(rows, str) else None
     if got is None:
         return BAD
@@ -911,14 +911,11 @@ def _status_end(pid):
     _items().sweep(pid)
 
 
-ENDS.append(_status_end)
+on_end("shell", _status_end)
 
 
 def _intents():
-    try:
-        from intents import INTENTS
-    except ImportError:  # host: the runtime package
-        from runtime.intents import INTENTS
+    from intents import INTENTS
     return INTENTS
 
 
@@ -953,10 +950,7 @@ def name():
         got = fn()
         if got:
             return got
-    try:
-        import ssh_service as _ssh
-    except ImportError:  # host: the runtime package
-        from runtime import ssh_service as _ssh
+    import ssh_service as _ssh
     return _ssh.default_name()
 
 
@@ -1004,7 +998,7 @@ def _ach_end(pid):
     _E.notes_end(pid)
 
 
-ENDS.append(_ach_end)
+on_end("shell", _ach_end)
 
 
 def share(data, mime):
@@ -1019,7 +1013,7 @@ def _intents_end(pid):
     _intents().end(pid)
 
 
-ENDS.append(_intents_end)
+on_end("shell", _intents_end)
 
 
 # An item handed to a process: the message `moy_open` its queue takes, and
@@ -1054,17 +1048,25 @@ def hand_item(pid, g):
     return False
 
 
-def _compiled_events(ns, pid):
-    """`_minimise`, `_restore`, `moy_action(id, key)` and `moy_open(item)`
-    of the run of process `pid` into its namespace `ns`, each posted to it,
-    `moy_open` by `hand_item`. Its event queue opens here, the VM serving
-    none of it, so its `send` and `recv` (native/moy_app's C rows, on its
-    own task) find it from its first call."""
+def own_queue(pid):
+    """Process `pid`'s event queue opened, the VM serving none of it: a run
+    whose runtime serves its queue itself (a compiled app's C rows on its own
+    task, a Lua run's wakes at its frame's start, native/moycore/
+    moycore_moybyte.h), so its messages and its timers' wait for it."""
     if pid and not _E.has(pid):
         if WAKES.opener is not None:
             WAKES.opener(pid, False)
         else:
             _E.open(pid, "pid%d" % pid, "", False)
+
+
+def _compiled_events(ns, pid):
+    """`_minimise`, `_restore`, `moy_action(id, key)` and `moy_open(item)`
+    of the run of process `pid` into its namespace `ns`, each posted to it,
+    `moy_open` by `hand_item`. Its event queue opens here (`own_queue`), so
+    its `send` and `recv` (native/moy_app's C rows, on its own task) find it
+    from its first call."""
+    own_queue(pid)
 
     def post(name, *args):
         WAKES.post(pid, name, args)
@@ -1080,7 +1082,7 @@ def _items_end(pid):
     _E.items_end(pid)
 
 
-ENDS.append(_items_end)
+on_end("shell", _items_end)
 
 
 def log(level, text):
@@ -1093,10 +1095,7 @@ _A = []
 
 def _app():
     if not _A:
-        try:
-            import moy_app
-        except ImportError:  # host: the runtime package
-            from runtime import moy_app
+        import moy_app
         _A.append(moy_app)
     return _A[0]
 
@@ -1150,18 +1149,12 @@ def ed25519_verify(pub, msg, sig):
 
 
 def clock_synced():
-    try:
-        import wallclock
-    except ImportError:  # host: the runtime package
-        from runtime import wallclock
+    import wallclock
     return wallclock.synced()
 
 
 def clock(local=False):
-    try:
-        import wallclock
-    except ImportError:  # host: the runtime package
-        from runtime import wallclock
+    import wallclock
     t = wallclock.now()
     if not local:
         return t
@@ -1169,10 +1162,11 @@ def clock(local=False):
 
 
 def __getattr__(name):
-    if name in ("http", "mic", "lora", "ble", "usb", "midi", "camera", "media"):
+    if not name.startswith("_"):
         try:
             import devices
-        except ImportError:  # host: the runtime package
-            from runtime import devices
-        return devices.api(name)
+        except ImportError:  # an image without the device APIs
+            devices = None
+        if devices is not None and name in devices.NAMES:
+            return devices.api(name)
     raise AttributeError(name)

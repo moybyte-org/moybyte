@@ -12,7 +12,7 @@
 package opened in the console's Editor with two tabs and nothing a cart has
 -- no Code, Blocks, Map, Music and no Play: an edit applies live, so there is
 nothing to run. Appearance's Edit theme… opens it (`Appearance.edit_file`,
-which makes `custom` from a seed first), `Workstation.edit_theme` hands it
+which makes `custom` from a seed first), `Text.edit_theme` hands it
 to the Editor (`EditorApp.open_theme`), and Done (‹, K, Esc) brings the
 Editor back to where it was opened from.
 
@@ -45,34 +45,22 @@ workspace), the tab following the focused one (F6).
 
 import json as _json
 
-try:
-    import iconsets as _iconsets
-    import ui as _ui
-    import ui_draw as _ui_draw
-    import text_modes as _modes
-    import layout_base as _lb
-    from code_layer import CodeLayer, _status_line
-    from chrome import CodeLayout
-    from editors_code import CodeEditor
-    from editors_paint_map import PaintEditor
-    from editor_map import checker as _checker
-    from moy_input import CTRL as _CTRL
-    from theme_custom import dumps as _dumps
-    from widgets import _in
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import iconsets as _iconsets
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-    from runtime import text_modes as _modes
-    from runtime import layout_base as _lb
-    from runtime.code_layer import CodeLayer, _status_line
-    from runtime.chrome import CodeLayout
-    from runtime.editors_code import CodeEditor
-    from runtime.editors_paint_map import PaintEditor
-    from runtime.editor_map import checker as _checker
-    from runtime.moy_input import CTRL as _CTRL
-    from runtime.theme_custom import dumps as _dumps
-    from runtime.widgets import _in
+import iconsets as _iconsets
+import ui as _ui
+import ui_draw as _ui_draw
+from bar_layer import glyph as _bar_glyph
+from layers import Layer
+import text_modes as _modes
+import layout_base as _lb
+from code_layer import CodeLayer, _status_line
+from chrome import CodeLayout
+from editors_code import CodeEditor
+from op_history import History, OpCodec
+from editors_paint_map import PaintEditor
+from editor_map import checker as _checker
+from moy_input import CTRL as _CTRL
+from theme_custom import dumps as _dumps
+from widgets import _in
 
 TAB_CONFIG = "theme_config"
 TAB_SPRITES = "theme_sprites"
@@ -111,54 +99,25 @@ def _dot():
 # -- the package ------------------------------------------------------------------
 
 
-class _SlotOps:
-    """The Sprites tab's undo: each step one slot's tile before and after
-    and whether it drew from the sheet (a smooth slot painted is pixels
-    after, smooth before). History's face (`can_undo`, `undo`, ...) so the
-    bar's pair walks it as it walks a cart tab's."""
+class _SlotOps(OpCodec):
+    """The Sprites tab's undo codec: an op is one slot's tile before and
+    after and whether it drew from the sheet (a smooth slot painted is
+    pixels after, smooth before)."""
 
-    DEPTH = 32
+    def apply(self, doc, op):
+        doc._put(op[0], op[2], op[4])
 
-    def __init__(self, doc):
-        self.doc = doc
-        self._undo = []
-        self._redo = []
+    def invert(self, doc, op):
+        doc._put(op[0], op[1], op[3])
 
-    def record(self, op):
-        self._undo.append(op)
-        if len(self._undo) > self.DEPTH:
-            self._undo.pop(0)
-        self._redo = []
 
-    def can_undo(self):
-        return bool(self._undo)
-
-    def can_redo(self):
-        return bool(self._redo)
-
-    def undo(self):
-        if not self._undo:
-            return None
-        op = self._undo.pop()
-        self._redo.append(op)
-        self.doc._put(op[0], op[1], op[3])
-        return op
-
-    def redo(self):
-        if not self._redo:
-            return None
-        op = self._redo.pop()
-        self._undo.append(op)
-        self.doc._put(op[0], op[2], op[4])
-        return op
-
-    def brings_back(self, slot):
-        """Whether undo brings slot `slot`'s smooth icon back: a step on
-        the stack turned it to pixels."""
-        for op in self._undo:
-            if op[0] == slot and not op[3] and op[4]:
-                return True
-        return False
+def _brings_back(hist, slot):
+    """Whether undo brings slot `slot`'s smooth icon back: a step on the
+    stack turned it to pixels."""
+    for op in hist._undo:
+        if op[0] == slot and not op[3] and op[4]:
+            return True
+    return False
 
 
 class ThemeDoc:
@@ -198,7 +157,7 @@ class ThemeDoc:
         self.slot = FIRST_SLOT
         self.pe.n = self.slot
         self.cur = [0, 0]
-        self.hist = _SlotOps(self)
+        self.hist = History(self, _SlotOps(), max_undo=32, persisted=False)
         self.sprites_dirty = False
         self._pre = None               # the open edit's (slot, tile, flag)
         self._look_gen = look.look_gen
@@ -307,7 +266,7 @@ class ThemeDoc:
         s = self.slot
         if not self.flags[s]:
             return slot_name(s) + _dot() + "smooth"
-        if self.hist.brings_back(s):
+        if _brings_back(self.hist, s):
             return slot_name(s) + _dot() + "pixels" + _dot() + "Undo brings it back"
         return slot_name(s) + _dot() + "pixels"
 
@@ -474,10 +433,7 @@ class ThemeDoc:
 
 
 def _builtin_names():
-    try:
-        from chrome import THEME_NAMES
-    except ImportError:  # pragma: no cover - host fallback when not yet aliased
-        from runtime.chrome import THEME_NAMES
+    from chrome import THEME_NAMES
     return THEME_NAMES
 
 
@@ -542,7 +498,7 @@ def draw_zone(app, cv, rect):
     y = rect[1] + (rect[3] - ic) // 2
     bx = back[0] + (back[2] - ic) // 2 if _floor(app) else back[0] + 2 * fs
     if not ws.draw_icon("back", (bx, y, ic, ic), ink, cv):
-        ws._glyph("arr_l", (bx, y, ic, ic), ink, cv, fs)
+        _bar_glyph("arr_l", (bx, y, ic, ic), ink, cv, fs)
     sets = ws.icon_spec() is not None
     for tab, label, icon, r, labelled in tabs:
         if tab == app.tab:
@@ -550,7 +506,7 @@ def draw_zone(app, cv, rect):
             tink = ink if mark is None else mark
             if labelled:
                 _ui_draw.tab(cv, th, r, False, label, True, tink,
-                             ws._icon_image_keyed(icon),
+                             ws.icon_image_keyed(icon),
                              icon_draw=app._set_icon(cv, tink) if sets else None, kind=icon)
                 continue
             _icon_in(ws, cv, icon, r, tink)
@@ -579,7 +535,7 @@ def _icon_in(ws, cv, icon, r, ink):
     x = r[0] + (r[2] - ic) // 2
     y = r[1] + (r[3] - ic) // 2
     if not ws.draw_icon(icon, (x, y, ic, ic), ink, cv):
-        ws._icon(icon, x, y, cv, ink=ink)
+        ws.icon(icon, x, y, cv, ink=ink)
 
 
 def zone_targets(app, rect):
@@ -639,7 +595,7 @@ def draw_row(app, cv, rect):
         kind = next((i for t, _l, i, _r, _o in tabs if t == app.tab), None)
         draw = app._set_icon(cv, open_kind=kind, open_ink=_ui_draw.current_ink(cv, th),
                              lead=True)
-    icon_for = getattr(ws, "_icon_image_keyed", None)
+    icon_for = getattr(ws, "icon_image_keyed", None)
     for t, label, icon, r, on in tabs:
         _ui_draw.tab(cv, th, r, t == app.tab, label, on, band_ink,
                      icon_for(icon) if icon_for is not None else None,
@@ -727,6 +683,9 @@ class ConfigLayer(CodeLayer):
     language JSON, the theme's status line under it. The buffer is the open
     ThemeDoc's (`ws.editor` while the theme mode is open), its keys the Code
     tab's less what JSON has no use for (completion, Go to, the scripts)."""
+    # Esc closes theme mode back to Appearance (its handle_input), not
+    # the Editor's leave.
+    ESC_LEAVES = False
 
     id = TAB_CONFIG
 
@@ -817,7 +776,7 @@ class ConfigLayer(CodeLayer):
             ink = th["value"] if not _contrast(th) else th["ink"]
             x0 = lay.x0 - 2 * fs
             if not ws.draw_icon("dup", (x0, ty + (tbh - ic) // 2, ic, ic), ink, cv):
-                ws._glyph("dup", (x0, ty + (tbh - ic) // 2, ic, ic), ink, cv, fs)
+                _bar_glyph("dup", (x0, ty + (tbh - ic) // 2, ic, ic), ink, cv, fs)
             was = _ui_draw.print_font(_ui_draw.font("caption")[0])
             try:
                 cv.print(_ui_draw.print_cut(text, max(0, tx + tw - x0 - ic - 4 * fs), fs),
@@ -834,24 +793,21 @@ class ConfigLayer(CodeLayer):
         doc = self._doc()
         if doc is None:
             return True
-        k = getattr(i, "last_key", 0) or 0
+        k = i.typed
         app = self.ws.editor_app
-        if k and self._ekey.prev != k:
+        if k:
             mods = getattr(i, "mods", 0)
             if k == 0x09 and mods & _CTRL:
-                self._ekey.hit(k)
                 app.theme_tab(TAB_SPRITES)
                 return True
             if k == 27 and not (self._find_open or self._cmp_open or self._jump_open):
-                self._ekey.hit(k)
                 self.ws.defer(app.close_theme)
                 return True
         if _ui_draw.input_kind() == "pad" and i.pressed("b"):
             self.ws.defer(app.close_theme)          # a gamepad types nothing here
             return True
-        typed = k and self._ekey.prev != k
         got = self._with(CodeLayer.handle_input, self, i)
-        if typed and doc.ed.dirty:
+        if k and doc.ed.dirty:
             doc.saved = False
             doc.note = None
         return got if got is not None else True
@@ -965,12 +921,18 @@ class SpritesLayout:
         return (x0 + (k % self.cols) * self.pitch, y0 + (k // self.cols) * self.pitch_y)
 
 
-class SpritesLayer:
+class SpritesLayer(Layer):
     """The Sprites tab's content layer (system domain, as the sprite tab's)."""
+    # Esc closes theme mode back to Appearance (its handle_input), not
+    # the Editor's leave.
+    ESC_LEAVES = False
+    KEYS_IDLE = True                # its keys move the cursor and act on a press
 
     id = TAB_SPRITES
     domain = "system"
-    ball_steps = False              # the trackball points at the icon and its colours
+    def ball_steps(self):
+        """The trackball points at the icon and its colours."""
+        return False
 
     def __init__(self, ws, names):
         self.ws = ws
@@ -979,7 +941,6 @@ class SpritesLayer:
         self._args = None
         self._drag = None
         self._shape0 = None
-        self._kprev = 0
 
     def relayout(self, w, h, fs, cs=None):
         self._args = (w, h, fs, cs)
@@ -1021,7 +982,6 @@ class SpritesLayer:
             self._side(cv, th, lay, doc)
             self._palette(cv, th, lay, doc)
             self._foot(cv, th, lay, doc)
-        ws.bar_layer._draw_status_strip("menu")
 
     def _greys(self):
         return self.ws.look.live.fixed[:2]
@@ -1131,7 +1091,7 @@ class SpritesLayer:
                 ox = x + (t - box) // 2
                 oy = y + (t - box) // 2
                 if not ws.draw_icon(kind, (ox, oy, box, box), th["ink"], cv):
-                    ws._icon(kind, ox, oy, cv, ink=th["ink"])
+                    ws.icon(kind, ox, oy, cv, ink=th["ink"])
             if lay.desk:
                 was = _ui_draw.print_font(cap[0])
                 try:
@@ -1209,7 +1169,7 @@ class SpritesLayer:
             cv.spr(img, x, y, max(1, box // 16))
             return
         if not ws.draw_icon(kind, (x, y, box, box), th["ink"], cv):
-            ws._icon(kind, x, y, cv, ink=th["ink"])
+            ws.icon(kind, x, y, cv, ink=th["ink"])
 
     def _palette(self, cv, th, lay, doc):
         keyline, white = self.ws.look.live.fixed[2:]
@@ -1246,33 +1206,31 @@ class SpritesLayer:
         if doc is None:
             return True
         app = ws.editor_app
-        k = getattr(i, "last_key", 0) or 0
-        if k != self._kprev:
-            self._kprev = k
-            if k:
-                mods = getattr(i, "mods", 0)
-                if k == 0x09 and mods & _CTRL:
-                    app.theme_tab(TAB_CONFIG)
-                    return True
-                if k == 27:
-                    ws.defer(app.close_theme)
-                    return True
-                if k == 0x1A:
-                    ws.history.undo()
-                    return True
-                if k == 0x19:
-                    ws.history.redo()
-                    return True
-                if k in (0x71, 0x51):
-                    doc.select(doc.slot - 1)
-                    return True
-                if k in (0x77, 0x57, 0x65, 0x45):
-                    doc.select(doc.slot + 1)
-                    return True
-                op = _KEY_OPS.get(k)
-                if op is not None:
-                    self._op(doc, op)
-                    return True
+        k = i.typed
+        if k:
+            mods = getattr(i, "mods", 0)
+            if k == 0x09 and mods & _CTRL:
+                app.theme_tab(TAB_CONFIG)
+                return True
+            if k == 27:
+                ws.defer(app.close_theme)
+                return True
+            if k == 0x1A:
+                ws.history.undo()
+                return True
+            if k == 0x19:
+                ws.history.redo()
+                return True
+            if k in (0x71, 0x51):
+                doc.select(doc.slot - 1)
+                return True
+            if k in (0x77, 0x57, 0x65, 0x45):
+                doc.select(doc.slot + 1)
+                return True
+            op = _KEY_OPS.get(k)
+            if op is not None:
+                self._op(doc, op)
+                return True
         if i.pressed("b"):
             ws.defer(app.close_theme)
             return True

@@ -41,20 +41,14 @@ offers nothing, unless a test or the simulator gives the board's rows and a
 stand-in (`stand_in`, runtime/host/lease_sim.py).
 """
 
-try:
-    import moy_lease as _N
-except ImportError:  # host: the runtime package
-    from runtime import moy_lease as _N
+import moy_lease as _N
 
 try:
     import moy_log as _L
 except ImportError:  # pragma: no cover - an image without the kernel
     _L = None
 
-try:
-    import moybyte as _moybyte
-except ImportError:  # host: the runtime package
-    from runtime import moybyte as _moybyte
+import moybyte as _moybyte
 
 try:
     import machine as _machine
@@ -482,7 +476,7 @@ class Leases:
 
 
 LEASES = Leases(_machine)
-_moybyte.ENDS.append(LEASES.sweep)
+_moybyte.on_end("leases", LEASES.sweep)
 
 
 def lease(name, **cfg):

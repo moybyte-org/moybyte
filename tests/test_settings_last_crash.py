@@ -39,12 +39,11 @@ def test_the_row_opens_a_panel_that_a_press_closes(tmp_path, monkeypatch):
     assert ("crash", "LAST CRASH", "crash") in rows
     sl.set_msel = [r[0] for r in rows].index("crash")
     sl.settings_adjust(1)
-    assert sl.crash_view is True
+    assert sl.showing("crash") is True
     drv.frame(DT)                       # the panel draws without raising
     ws.input.begin_frame()
-    sl.crash_view = True
-    sl.close_crash()
-    assert sl.crash_view is False
+    sl.close_page()
+    assert sl.showing("crash") is False
     drv.frame(DT)
 
 
@@ -52,7 +51,7 @@ def test_the_row_with_no_record_reads_none(tmp_path, monkeypatch):
     _kernel(monkeypatch, None)
     ws, drv = _open(tmp_path)
     ws.settings_layer.set_msel = [r[0] for r in ws.settings_layer._settings_rows()].index("crash")
-    ws.settings_layer.open_crash()
+    ws.settings_layer.open_page("crash")
     drv.frame(DT)
     assert crash_lines(None) == ["NO CRASH RECORDED"]
 
@@ -75,7 +74,7 @@ def test_a_core_dump_in_flash_is_on_the_page_and_the_row_without_a_record(
     ws, drv = _open(tmp_path)
     sl = ws.settings_layer
     assert sl._value("crash", "crash") == "Dump"
-    sl.open_crash()
+    sl.open_page("crash")
     drv.frame(DT)                       # the dump's line and its button draw
     assert crash_lines(None, 40960)[-1] == "CORE DUMP 40 KB IN FLASH"
 
@@ -90,9 +89,9 @@ def test_the_page_clears_the_dump_on_its_button(tmp_path, monkeypatch):
         return True
     monkeypatch.setattr(settings_layer, "clear_core_dump", clear)
     ws, drv = _open(tmp_path)
-    ws.settings_layer.open_crash()
+    ws.settings_layer.open_page("crash")
     drv.frame(DT)
     drv.press("a")                      # the page's first button: Clear core dump
     drv.frame(DT)
     assert size[0] is None
-    assert ws.settings_layer.crash_view is True
+    assert ws.settings_layer.showing("crash") is True

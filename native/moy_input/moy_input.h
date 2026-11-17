@@ -37,6 +37,16 @@
 // control byte (Ctrl+Z 0x1A), any other Ctrl, Alt or Super chord nothing, so
 // a shortcut reads the event and a text surface reads the byte.
 //
+// THE PRESS. The merge publishes the typed-key press edge: the byte the
+// frame's key event types where it differs from the one at the merge before,
+// else 0 (moy_input_key_press). It is the one edge every surface reads, so a
+// held key -- a BLE keyboard holds its byte as a level, the T-Deck's comes
+// for one frame -- types once whoever reads it, and a byte pressed again
+// after a frame with none (or with another) is a press again. Spending it
+// (moy_input_spend_key) takes this frame's and makes the byte held now the
+// one before, so a key down as a surface takes the keyboard types nothing
+// into it until it is let go and pressed again.
+//
 // THE MODIFIERS a source holds are a level of their own (moy_input_set_mods),
 // so a button pressed with Ctrl held reads it too: moy_input_mods is the
 // frame's key event's modifiers and every source's held ones.
@@ -122,19 +132,14 @@
 #ifndef MOY_INPUT_H
 #define MOY_INPUT_H
 
+#include "moy_platform.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include "moy_event.h"
 
-// ESP_PLATFORM is not defined for a usermod's sources on the esp32 port, so a
-// board is recognised by the header it has.
-#if defined(__has_include)
-#if __has_include("esp_heap_caps.h")
-#define MOY_INPUT_BOARD 1
-#endif
-#endif
 
 #define MOY_INPUT_BUTTONS 16u
 #define MOY_INPUT_HOST_BUTTONS 8u
@@ -159,7 +164,7 @@
 // Steps a trackball roll delivers above MOY_INPUT_BALL_COAST_RATE a second
 // become a coast instead: MOY_INPUT_BALL_COAST thousandths of a step a ms per
 // surplus step, delivered on as steps that decay as a fling does
-// (runtime/shell/console.py Workstation._ball_steps); 0 is no momentum.
+// (runtime/shell/console.py InputRouter._ball_steps); 0 is no momentum.
 #ifndef MOY_INPUT_BALL_COAST
 #define MOY_INPUT_BALL_COAST 0
 #endif
@@ -174,7 +179,7 @@
 #ifndef MOY_INPUT_ISR_IRAM
 #define MOY_INPUT_ISR_IRAM 0
 #endif
-#if defined(MOY_INPUT_BOARD) && MOY_INPUT_ISR_IRAM
+#if defined(MOY_ON_BOARD) && MOY_INPUT_ISR_IRAM
 #include "esp_attr.h"
 #define MOY_INPUT_ISR_TEXT IRAM_ATTR
 #else
@@ -395,10 +400,13 @@ int moy_input_add_steps(moy_input_t *t, uint8_t button, uint32_t n);
 int32_t moy_input_ball_coast(int32_t *rate);
 // Everybody lets go: every source and the merged set; the edge snapshot stays.
 void moy_input_release_all(moy_input_t *t);
-// A surface took this frame's edges and counts: nothing after it sees them,
-// and a button still held stays held, so it neither presses again nor loses
-// its place in the repeat.
+// A surface took this frame's edges and counts, the key's press with them:
+// nothing after it sees them, and a button still held stays held, so it
+// neither presses again nor loses its place in the repeat.
 void moy_input_spend_edges(moy_input_t *t);
+// The key's press alone (THE PRESS): none this frame, and the byte held now
+// is not a press at the next merge.
+void moy_input_spend_key(moy_input_t *t);
 // The same, and every held repeat's delay starts over: a modal opening on a
 // key must not act on it.
 void moy_input_clear_edges(moy_input_t *t);
@@ -428,11 +436,15 @@ uint32_t moy_input_rep_word(const moy_input_t *t);
 uint32_t moy_input_key_repeats(const moy_input_t *t, int32_t *ev);
 int32_t moy_input_last_key(const moy_input_t *t);    // the byte the frame's key event types
 int32_t moy_input_key_event(const moy_input_t *t);   // the frame's key event
+int32_t moy_input_key_press(const moy_input_t *t);   // the frame's typed byte where it is a fresh press (THE PRESS)
 // Between merges, for a run that holds the frame (the shell's Ctrl-C,
 // native/moy_sh/moy_sh_screen.h): whether a source's latch holds now, or has
 // queued, a key that types `byte`, or holds one of `buttons`.
 bool moy_input_holds(const moy_input_t *t, int32_t byte, uint32_t buttons);
-void moy_input_set_last_key(moy_input_t *t, int32_t key);   // a direct write of an event; the next source write heals it
+// A direct write of the frame's key event, and its press where it differs
+// from the byte at the last merge (THE PRESS); the next source write heals
+// the event, and the next merge publishes the press anew.
+void moy_input_set_last_key(moy_input_t *t, int32_t key);
 uint8_t moy_input_mods(const moy_input_t *t);
 // The frame's wheel notches, every source's summed.
 void moy_input_wheel(const moy_input_t *t, int32_t *dx, int32_t *dy);
@@ -458,5 +470,20 @@ void moy_input_ptr_tick(moy_input_ptr_t *p, uint32_t now);
 // down. Returns MOY_INPUT_P_HELD while down, with MOY_INPUT_P_CLICK on its
 // press edge; 0, and the pointer untouched, when no source has a sample.
 int moy_input_ptr_apply(const moy_input_t *t, moy_input_ptr_t *p, uint32_t now);
+
+// The loop's input stages (modmoy_input.c, over what moy_input.loop_bind
+// bound; moy_loop_board.c calls them): the inputs a frame merges, the
+// pointer's, a tap fed in, the tail after present; and the kernel's table
+// made fresh for a new VM.
+void moy_input_loop_inputs(uint32_t now, bool *click, bool *active);
+void moy_input_loop_pointer(uint32_t now, bool click, bool swallow);
+void moy_input_loop_point(int32_t x, int32_t y, bool down, bool edge);
+void moy_input_loop_tail(void);
+void moy_input_vm_fresh(void);
+
+#ifdef MICROPY_INCLUDED_PY_OBJ_H
+// The cursor a Pointer holds, or NULL for another object (modmoy_input.c).
+moy_input_ptr_t *moy_input_pointer_ptr(mp_obj_t o);
+#endif
 
 #endif // MOY_INPUT_H

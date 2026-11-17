@@ -137,6 +137,14 @@ input. Flip this the day it does."""
 # NOTE the two files that are NOT denied here and ARE on the S3 boards:
 # `wm_windowed.py` and its halves. See [board].tier_why.
 
+[[modules.shared.deny]]
+file = "one_buffer.py"
+kind = "tier"
+why  = """
+The one-buffer compositor: the browser's and the host's presentation tier,
+one RGB565 buffer and no flush. A board's compositor is its panel's
+(native/moy_glass), so nothing on a board constructs this class."""
+
 # -- staged under another name -----------------------------------------------
 
 [[modules.shared.rename]]
@@ -176,7 +184,7 @@ isr_ring_max = 1024
 isr_iram = 1
 
 [image]
-# The OTA-slot headroom this board's app image keeps, browser console baked in.
+# The OTA-slot headroom this board's app image keeps.
 # The build FAILS under it (moybyte_app_size_guard, tools/esp32_build_lib.sh,
 # MOYBYTE_ALLOW_UNDER_FLOOR=1 for an experiment). The headroom is the build's
 # to print; the floor is the design.
@@ -190,6 +198,9 @@ isr_iram = 1
 # to 7.875 MiB (owner, 2026-11-06) for the SSH server and its mDNS responder
 # (native/moy_ssh, about 67 KB, and the IDF's mdns, about 27 KB), which at
 # 7.75 MiB left the image under the floor; the internal vfs went to 192 KiB.
+# They are 6.5 MiB since 2026-11-17, when the browser console left the image
+# for its add-on cart (native/moy_net/moy_page.h), and the internal vfs has
+# the 2.5 MiB back.
 # Floor 0 (owner, 2026-11-07): with no users the slots are still ours to
 # resize, so a growing image costs nothing yet; at the first release the
 # choice is to reject a feature, shrink, or re-cut the slots by cable,
@@ -349,8 +360,7 @@ why = """
 USB mass storage wants the high-speed OTG port, and which connector, if any,
 reaches it on this unit is not known (README's USB row). The USB-C is the
 USB-Serial/JTAG on full-speed PHY 0; moving the OTG controller there puts
-USB-Serial/JTAG on PHY 1, whose pad 27 is the panel's reset, and ESP-IDF
-v5.5.1's usb_wrap_ll_phy_select falls through its PHY 0 case, so that route
+USB-Serial/JTAG on PHY 1, whose pad 27 is the panel's reset, so that route
 is not taken."""
 
 [[native.shared.deny]]
@@ -518,7 +528,7 @@ after normalising those three, so the ONE-STRING rule, the self-terminating
 smokes and the keep-the-REPL guards now land once instead of four times."""
 
 [[modules.device.group]]
-files = ["desktop_spine.py", "wire_input.py", "wire_links.py"]
+files = ["desktop_spine.py", "wire_input.py", "wire_links.py", "cart_net.py"]
 why = """
 The console desktop's boot spine: ONE `build_desktop` (the boot order and the
 service set every console board wires) and ONE hand-over of the console to
@@ -530,7 +540,8 @@ canvas, inputs, keyboard, store, constants -- and takes the rest.
 
 The spine constructs each subsystem through its provider: wire_input.py (the
 pointer, the keyboards' start, a BLE-keyboard input state) and wire_links.py
-(the radio link, the updaters, Get Carts' network, the web console). Audio has
+(the radio link, the updaters, Get Carts' network, the web console), and
+cart_net.py, that network's transport, which the Zero takes too. Audio has
 no provider: the kernel's moy_audio needs no construction at boot."""
 
 [[modules.device.group]]

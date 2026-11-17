@@ -27,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: board-modules check-venv device-port firmware-build-guition-s3 firmware-build-guition-p4 firmware-flash-guition-p4 firmware-monitor-guition-p4 firmware-build-zero firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-flash-zero firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-zero firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install preflight preflight-web release setup site site-firmware site-gifs site-tiles sync-issues test vendor-jet vendor-jet-carts vendor-libmoy vendor-dash vendor-dropbear vendor-elf-loader vendor-mbedtls vendor-monocypher vendor-p8-import vendor-wamr
+.PHONY: board-modules check-venv device-port firmware-build-guition-s3 firmware-build-guition-p4 firmware-flash-guition-p4 firmware-monitor-guition-p4 firmware-build-zero firmware-build-c3-zero firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-flash-zero firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-zero firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install preflight preflight-web release setup site site-firmware site-gifs site-tiles sync-issues test vendor-jet vendor-jet-carts vendor-libmoy vendor-dash vendor-dropbear vendor-elf-loader vendor-mbedtls vendor-monocypher vendor-p8-import vendor-wamr vendor-advisories
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -77,7 +77,8 @@ VENV_TARGETS := test preflight preflight-web board-modules \
                 ota-publish-stable ota-host ota-serve-install firmware-flash-p4 \
                 firmware-monitor-p4 firmware-flash-guition-s3 firmware-monitor-guition-s3 \
                 firmware-flash-guition-p4 firmware-monitor-guition-p4 \
-                firmware-flash-zero firmware-monitor-zero
+                firmware-flash-zero firmware-monitor-zero \
+                firmware-flash-c3-zero firmware-monitor-c3-zero
 $(VENV_TARGETS): check-venv
 
 # Flashing/monitoring needs a board on a serial port, and the T-Deck images need the
@@ -200,7 +201,8 @@ preflight-web:  ## ...plus the browser suites in real Chrome
 # would answer "MicroPython cannot write this format" -- about itself, not about
 # the boards -- which is the sort of false negative this whole target exists to
 # stop.
-UNIX_MP_TAG ?= v1.28.0
+include tools/upstream_pins.env
+UNIX_MP_TAG ?= $(MOYBYTE_MPY_TAG)
 UNIX_MP_DIR ?= .build/unix_micropython
 UNIX_MP_SRC := $(UNIX_MP_DIR)/micropython
 UNIX_MP_USERMODS := $(UNIX_MP_DIR)/usermods
@@ -253,7 +255,7 @@ UNIX_MP_NATIVE := native
 # glass. Its blob table is generated (see the recipe below). moy_png is the
 # cover reader, here so tests/test_cover_png.py holds the boards' C to the
 # host's Python reader and to moy-spec's vectors. moy_index is the store's
-# native index, built as the twin UNIX_MP_INDEX names (tools/moy_index_spike.py
+# native index, built as the twin UNIX_MP_INDEX names (tools/native_check.py
 # has the hook): it registers extensible, so a run with runtime/ on its path
 # still imports runtime/carts/moy_index.py, and tests/test_moy_index_twins.py and the
 # store trace reach the native one with the path emptied. moy_spine is the
@@ -273,9 +275,9 @@ UNIX_MP_JOBS ?= $(shell nproc 2>/dev/null || echo 4)
 .PHONY: unix-micropython
 unix-micropython:
 	@mkdir -p $(UNIX_MP_DIR) $(UNIX_MP_USERMODS)
-# moy_web's blob table is build OUTPUT (gitignored): it .incbin's the web
-# runner's bundle, so on a tree that has never built one it has to exist as an
-# empty table or this build stops on a missing source file. REQUIRE=0 and quiet
+# moy_web's generated file is build OUTPUT (gitignored): it names the digest of
+# the web runner's bundle, so on a tree that has never built one it has to
+# exist naming none or this build stops on a missing source file. REQUIRE=0 and quiet
 # on purpose: the generator is strict under CI, where this binary is built and
 # where no wasm bundle exists -- and "this image has no browser console" is not
 # news about a test binary that is not an image.
@@ -452,6 +454,13 @@ vendor-jet:
 #   make vendor-jet-carts CARTS_REPO=/path/to/carts COMMIT=<sha>
 vendor-jet-carts:
 	$(PYTHON) tools/vendor_jet_carts.py $(if $(CARTS_REPO),--carts $(CARTS_REPO)) $(if $(COMMIT),--commit $(COMMIT))
+
+# Each vendor pin above against OSV.dev, NVD and its upstream's GitHub security
+# advisories; fails on one tools/vendor_advisories_ack.json does not acknowledge.
+# Needs the network; .github/workflows/vendor-advisories.yml runs it weekly.
+#   make vendor-advisories
+vendor-advisories:
+	$(PYTHON) tools/vendor_advisories.py
 
 # The T-Deck build (mainline MicroPython -- the only T-Deck build since the
 # fork's deletion, 2026-08-17). The `lilygo-micropython` names below are the
@@ -677,6 +686,22 @@ firmware-monitor-zero:
 	$(REQUIRE_PORT)
 	$(REQUIRE_PYSERIAL)
 	$(PYTHON) tools/board_flash.py monitor firmware/seeed_xiao_esp32s3_zero --port $(PORT)
+
+# The C3 Zero -- the Zero on an ESP32-C3 (firmware/esp32c3_zero/). One app
+# slot, so a new image goes on by cable only, through these targets.
+
+firmware-build-c3-zero:
+	firmware/esp32c3_zero/build.sh
+
+firmware-flash-c3-zero:
+	$(REQUIRE_PORT)
+	$(REQUIRE_ESPTOOL)
+	$(PYTHON) tools/board_flash.py flash firmware/esp32c3_zero --port $(PORT)
+
+firmware-monitor-c3-zero:
+	$(REQUIRE_PORT)
+	$(REQUIRE_PYSERIAL)
+	$(PYTHON) tools/board_flash.py monitor firmware/esp32c3_zero --port $(PORT)
 
 # T-Deck recovery note: the flash target reaches the ROM loader on its own
 # (board.toml `before = "usb_reset"`), so this is only for a board so wedged

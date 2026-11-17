@@ -20,6 +20,7 @@ from pathlib import Path
 from ws_helpers import build_ws, quiesce, select_on_home
 from runtime import history_router
 from tools.board_config import runtime_file
+from ws_services import classdef as ws_classdef, services
 
 ROOT = Path(__file__).resolve().parent.parent
 CONSOLE = runtime_file("console.py")
@@ -39,7 +40,7 @@ def _cart_ws(tmp_path, src=SRC, title="Router", **kw):
 
 
 def _open_code(ws, text=None):
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.screen = "menu"
     if text is not None:
         ws.editor.set_text(text)
@@ -56,22 +57,9 @@ def _stroke(pe, x, y, color):
 
 def _fn(name):
     """The AST of one `Workstation` method: on the class, or on one of the
-    mixins it lists as bases (each a class in the runtime module of the same
-    name console.py imports it from)."""
-    tree = ast.parse(CONSOLE.read_text(encoding="utf-8"))
-    cls = next(n for n in tree.body
-               if isinstance(n, ast.ClassDef) and n.name == "Workstation")
-    bases = {b.id for b in cls.bases if isinstance(b, ast.Name)}
-    classes = [cls]
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module:
-            for alias in node.names:
-                if alias.name in bases:
-                    bases.discard(alias.name)
-                    path = runtime_file(node.module.split(".")[-1] + ".py")
-                    mod = ast.parse(path.read_text(encoding="utf-8"))
-                    classes += [n for n in mod.body if isinstance(n, ast.ClassDef)
-                                and n.name == alias.name]
+    services it builds (tests/ws_services.py)."""
+    classes = [ws_classdef(CONSOLE, "Workstation")]
+    classes += [cls for _a, _n, _m, cls in services()]
     return next(n for c in classes for n in c.body
                 if isinstance(n, ast.FunctionDef) and n.name == name)
 
@@ -108,12 +96,12 @@ def test_undo_takes_the_local_op_before_the_journal(tmp_path):
     only once they are exhausted. With a committed sprite AND a live stroke on
     top, one press reverts the stroke and leaves the FILE alone."""
     ws = _cart_ws(tmp_path)
-    ws._open_paint()
+    ws.text.open_paint()
     pe = ws.paint
     pe.n = 0
     ox, oy = ws.sheet.tile_origin(0)
     _stroke(pe, 0, 0, 5)
-    ws.save_sprites()                    # commit: (0,0)=5 is now on disk
+    ws.saves.save_sprites()                    # commit: (0,0)=5 is now on disk
     on_disk = (Path(ws.cart["path"]) / "sprites.moygfx").read_text()
     _stroke(pe, 1, 1, 7)                 # a live, uncommitted stroke on top
 
@@ -126,14 +114,14 @@ def test_undo_takes_the_local_op_before_the_journal(tmp_path):
 def test_undo_falls_through_to_the_journal_once_the_local_stack_is_empty(tmp_path):
     """...and the NEXT press crosses the boundary into the durable walk."""
     ws = _cart_ws(tmp_path)
-    ws._open_paint()
+    ws.text.open_paint()
     pe = ws.paint
     pe.n = 0
     ox, oy = ws.sheet.tile_origin(0)
     _stroke(pe, 0, 0, 5)
-    ws.save_sprites()                    # commit V1: (0,0)=5
+    ws.saves.save_sprites()                    # commit V1: (0,0)=5
     _stroke(pe, 2, 2, 6)
-    ws.save_sprites()                    # commit V2: + (2,2)=6
+    ws.saves.save_sprites()                    # commit V2: + (2,2)=6
     _stroke(pe, 1, 1, 7)                 # a live stroke on top of both
     assert ws.history.undo() is True     # local
     assert ws.sheet.pget(ox + 2, oy + 2) == 6
@@ -174,9 +162,9 @@ def test_bar_undo_bits_never_reads_the_journal(tmp_path, monkeypatch):
     find."""
     ws = _cart_ws(tmp_path)
     ed = _open_code(ws, SRC + "# c1\n")
-    assert ws.save_code() is True
+    assert ws.saves.save_code() is True
     ed.set_text(SRC + "# c2\n"); ed.dirty = True
-    assert ws.save_code() is True        # two commits -> the walk has a target
+    assert ws.saves.save_code() is True        # two commits -> the walk has a target
     reads = []
     for name in ("journal_can_undo", "journal_can_redo", "journal_undo",
                  "journal_redo"):
@@ -198,9 +186,9 @@ def test_can_both_answers_the_two_checks_of_one_journal_read(tmp_path, monkeypat
     in-RAM history answers alone."""
     ws = _cart_ws(tmp_path)
     ed = _open_code(ws, SRC + "# c1\n")
-    assert ws.save_code() is True
+    assert ws.saves.save_code() is True
     ed.set_text(SRC + "# c2\n"); ed.dirty = True
-    assert ws.save_code() is True
+    assert ws.saves.save_code() is True
     reads = []
     real = history_router.moy_catalogue.journal_can_both
     monkeypatch.setattr(history_router.moy_catalogue, "journal_can_both",
@@ -365,7 +353,7 @@ def test_the_idle_tick_disarms_when_the_edit_was_saved_elsewhere(tmp_path):
     from runtime import console as C
     ws = _cart_ws(tmp_path)
     ed = _open_code(ws, SRC + "# hard\n")
-    assert ws.save_code() is True
+    assert ws.saves.save_code() is True
     assert ed.dirty is False
     ws.history.edit_ms = C._ticks_ms() - 5000
     calls = []
@@ -384,9 +372,9 @@ def test_writes_disabled_means_no_walk_and_no_check(tmp_path):
     has no SD."""
     ws = _cart_ws(tmp_path)
     ed = _open_code(ws, SRC + "# c1\n")
-    assert ws.save_code() is True
+    assert ws.saves.save_code() is True
     ed.set_text(SRC + "# c2\n"); ed.dirty = True
-    assert ws.save_code() is True
+    assert ws.saves.save_code() is True
     assert ws.history.can_undo() is True
     ws.can_manage = False
     assert ws.history.can_undo() is False
@@ -414,9 +402,9 @@ def test_a_failing_store_is_reported_and_never_crashes_the_shell(tmp_path,
     the whole console down with it."""
     ws = _cart_ws(tmp_path)
     ed = _open_code(ws, SRC + "# c1\n")
-    assert ws.save_code() is True
+    assert ws.saves.save_code() is True
     ed.set_text(SRC + "# c2\n"); ed.dirty = True
-    assert ws.save_code() is True
+    assert ws.saves.save_code() is True
 
     def _boom(*a, **k):
         raise OSError("card gone")
@@ -435,9 +423,9 @@ def test_a_walk_invalidates_the_bar_so_the_icons_re_check(tmp_path):
     the bar."""
     ws = _cart_ws(tmp_path)
     ed = _open_code(ws, SRC + "# c1\n")
-    assert ws.save_code() is True
+    assert ws.saves.save_code() is True
     ed.set_text(SRC + "# c2\n"); ed.dirty = True
-    assert ws.save_code() is True
+    assert ws.saves.save_code() is True
     ws.bar_layer.invalidate()
     gen = ws.bar_layer._bar_cache_gen
     assert ws.history.undo() is True
@@ -452,9 +440,9 @@ def test_a_walk_keeps_the_kids_place_in_the_code(tmp_path):
     ws = _cart_ws(tmp_path, src=base)
     ed = _open_code(ws)
     ed.set_text(base + "# v1\n"); ed.dirty = True
-    assert ws.save_code() is True
+    assert ws.saves.save_code() is True
     ed.set_text(base + "# v2\n"); ed.dirty = True
-    assert ws.save_code() is True
+    assert ws.saves.save_code() is True
     ed.goto_row(9, 0)
     assert ws.history.undo() is True
     assert ws.editor is not ed                     # a FRESH editor over fresh data
@@ -476,11 +464,11 @@ def test_the_frame_loop_calls_the_router_directly(tmp_path):
 
 
 def test_the_keypress_site_stores_the_tick_it_does_not_call(tmp_path):
-    """`handle_input` re-arms the debounce on EVERY keystroke that reaches the
+    """`_route_keys` re-arms the debounce on EVERY keystroke that reaches the
     code tab. Doc 3e: one attribute store, never a method call."""
-    src = ast.dump(_fn("handle_input"))
+    src = ast.dump(_fn("_route_keys"))
     assert "edit_ms" in src
-    stores = [n for n in ast.walk(_fn("handle_input"))
+    stores = [n for n in ast.walk(_fn("_route_keys"))
               if isinstance(n, ast.Assign)
               and any(isinstance(t, ast.Attribute) and t.attr == "edit_ms"
                       for t in n.targets)]

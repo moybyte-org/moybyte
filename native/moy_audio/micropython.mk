@@ -21,3 +21,7 @@ CFLAGS_USERMOD += -I$(MOY_AUDIO_MOD_DIR) -I$(MOY_AUDIO_MOD_DIR)/libmoy -I$(MOY_A
 # (moy_audio_snd.h): in the web runner a compiled cart's `snd` is mixed into
 # what render() hands the page. The unix build carries no wasm engine.
 CFLAGS_USERMOD += -DMOY_AUDIO_SND=1
+# A generated face (gen_os, *_face.h) holds names only its includer uses, and
+# the qstr pass re-scans a source only when that source changed: a face that
+# changes alone re-scans every source, as a QSTR_GLOBAL_DEPENDENCIES entry.
+QSTR_GLOBAL_DEPENDENCIES += $(wildcard $(MOY_AUDIO_MOD_DIR)/*_face.h)

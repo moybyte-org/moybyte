@@ -24,7 +24,8 @@ SLOTS = 32
 ID_MAX = 63
 KEY_MAX = 127
 _ROLES = ("damage", "surface", "theme", "files", "carts", "nav", "prefs",
-          "notify", "wallpaper", "artwork", "clipboard", "install", "ui", "moybyte")
+          "notify", "wallpaper", "artwork", "clipboard", "install", "wifi", "bt", "usb",
+          "ui", "moybyte")
 # The roles every grant holds (moy_app.h's MOY_ROLE_FLOOR).
 _FLOOR = ("moybyte",)
 _ROWS = ("damage.all", "damage.again",
@@ -325,7 +326,7 @@ class App:
                 self._grants[h] = [app_id, bool(run), set(mask), kind, ns, owner]
                 self._surf[h] = (0, 0, 0, 0, 0, (0, 0, 0, 0), 0, 0, False)
                 return h
-        raise OSError(_ENOSPC, "the grant table is full")
+        raise OSError(_ENOSPC, "no room")
 
     def regrant(self, app_id, roles, svc, kind=None):
         mask, smask = set(), set()
@@ -698,6 +699,15 @@ def _layer():
     return moy_ufiles
 
 
+def _delete_or_none(kind, name, root):
+    try:
+        return _layer().delete_file(kind, name, root)
+    except OSError as e:
+        if e.args and e.args[0] == 2:       # ENOENT: nothing by that name
+            return None
+        raise
+
+
 class Files(_Role):
     def _row(self, row, kind=None, need="read"):
         """(True, None) when the row may run, else (False, its `err`)."""
@@ -758,7 +768,8 @@ class Files(_Role):
         return self._op("save", kind, "write", _layer().save_file, kind, name, blob)
 
     def delete(self, kind, name):
-        return self._op("delete", kind, "write", _layer().delete_file, kind, name)
+        """(None, None) where `name` names nothing, as load answers."""
+        return self._op("delete", kind, "write", _delete_or_none, kind, name)
 
     def duplicate(self, kind, name):
         return self._op("duplicate", kind, "write", _layer().duplicate_file, kind, name)
@@ -853,7 +864,10 @@ _SERVED = {
     "notify": "award groups today",
     "wallpaper": "current carts id_for title select preview thumbnail",
     "install": ("hold release fit memory chip runtimes home can_pick pick root "
-                "writable op rescan free find net keep wifi wifi_open consent"),
+                "writable op rescan free find net keep wifi wifi_open consent own board"),
+    "wifi": "hold release station",
+    "bt": "keyboard",
+    "usb": "drive turn_on turn_off poll",
 }
 
 
@@ -870,6 +884,9 @@ Carts = _served_role("carts")
 Nav = _served_role("nav")
 Notify = _served_role("notify")
 Install = _served_role("install")
+Wifi = _served_role("wifi")
+Bt = _served_role("bt")
+Usb = _served_role("usb")
 
 
 class Wallpaper(_served_role("wallpaper")):

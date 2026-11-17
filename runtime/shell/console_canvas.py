@@ -5,20 +5,19 @@ canvas of that size (SPEC.md 3.1), `bind_app_canvas` gives a responsive app
 cart the whole system surface (#181) -- or, on the desk, a window surface of
 its own (`_bind_window_canvas`) -- and `release_run_canvas` undoes either at
 the run's death. `release_held` frees one of the layers a modal holds the
-surface under it in. A mixin of `Workstation`; the composite and the
+surface under it in. The console's `ws.binding`; the composite and the
 coordinates the frame reads every frame (`_composite_game`, `game_view`,
-`_game_xy`, `app_window_size`) stay on the class.
+`game_xy`, `app_window_size`) stay on the class.
 """
 
-try:
-    from chrome import _err_text
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.chrome import _err_text
-    from runtime import ui_draw as _ui_draw
+from chrome import _err_text
+import ui_draw as _ui_draw
 
 
 class CanvasBinding:
+
+    def __init__(self, ws):
+        self.ws = ws
 
     def bind_run_canvas(self, w, h):
         """Bind a per-run GAME canvas for a cart whose manifest declares a
@@ -30,11 +29,12 @@ class CanvasBinding:
         when bound (or already native-size); False when this backend has no
         factory -- the caller refuses the cart cleanly (SPEC.md 3.1), never
         runs it at dimensions it did not ask for."""
-        run = self.run
+        ws = self.ws
+        run = ws.run
         stock = run.canvas
         if w == stock.w and h == stock.h:
             return True                 # declared == native raster: nothing to bind
-        mk = self.make_game_canvas
+        mk = ws.make_game_canvas
         if mk is None:
             return False
         # The run's own: its pixels are on loan to the run ("cart"), so the
@@ -48,10 +48,10 @@ class CanvasBinding:
             return False
         run.bound = small
         run.stock = stock
-        run.promoted = self._sys_canvas is None
+        run.promoted = ws.bound_sys_canvas is None
         if run.promoted:
-            self._sys_canvas = stock    # promote: the boot canvas is the glass
-            self._surface_write()
+            ws.bound_sys_canvas = stock    # promote: the boot canvas is the glass
+            ws.surface_write()
         run.canvas = small
         return True
 
@@ -79,10 +79,11 @@ class CanvasBinding:
         There the app takes a window surface of its own instead
         (`_bind_window_canvas`). In console mode (`windowed_chrome` False) it
         gets the whole system surface."""
-        sc = self._sys_canvas
-        if self.windowed_chrome:
+        ws = self.ws
+        sc = ws.bound_sys_canvas
+        if ws.windowed_chrome:
             return self._bind_window_canvas()
-        run = self.run
+        run = ws.run
         if sc is None or sc is run.canvas or run.bound is not None:
             # ...or a cart-declared small canvas already holds the slot: a
             # manifest asking for 128x128 AND a _layout is contradictory, and
@@ -93,7 +94,7 @@ class CanvasBinding:
         run.promoted = False
         run.canvas = sc
         run.app_full_canvas = True
-        self._surface_write()             # the strip is the responsive one now
+        ws.surface_write()             # the strip is the responsive one now
         return True
 
     def _bind_window_canvas(self):
@@ -101,9 +102,10 @@ class CanvasBinding:
         desk's work area (`WindowedWM.app_surface`) on loan to the run, of
         which its window shows the content rect (`app_window_size`). True
         when bound; False where the tier has no factory or the WM no desk."""
-        mk = self.make_game_canvas
-        size = getattr(self.wm, "app_surface", None)
-        run = self.run
+        ws = self.ws
+        mk = ws.make_game_canvas
+        size = getattr(ws.wm, "app_surface", None)
+        run = ws.run
         if mk is None or size is None or run.bound is not None:
             return False
         w, h = size()
@@ -120,7 +122,7 @@ class CanvasBinding:
         run.canvas = cv
         run.app_full_canvas = True
         run.app_window_canvas = True
-        self._surface_write()
+        ws.surface_write()
         return True
 
     def release_run_canvas(self):
@@ -128,23 +130,25 @@ class CanvasBinding:
         (Player.release_world) -- the cart_quit pattern, idempotent.
         Identity-guarded so a backend that swapped ws.run.canvas mid-run (the
         web-view Tee) is never clobbered."""
-        run = self.run
+        ws = self.ws
+        run = ws.run
         run.app_full_canvas = False
         run.app_window_canvas = False
         stock = run.stock
         if stock is None:
-            self._surface_write()
+            ws.surface_write()
             return
         if run.canvas is run.bound:
             run.canvas = stock
-        if run.promoted and self._sys_canvas is stock:
-            self._sys_canvas = None     # back to the shared-canvas degradation
+        if run.promoted and ws.bound_sys_canvas is stock:
+            ws.bound_sys_canvas = None     # back to the shared-canvas degradation
         run.bound = run.stock = None
         run.promoted = False
-        self._surface_write()
+        ws.surface_write()
 
     def release_held(self):
         """Free one of the layers a modal holds what is under it in -- a
         page held washed, the frame under the pause card (`ui_draw.Hold`) --
         the fit check's last releases: True when there was one."""
-        return _ui_draw.release_held(self)
+        ws = self.ws
+        return _ui_draw.release_held(ws)

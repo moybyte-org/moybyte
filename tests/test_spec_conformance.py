@@ -34,6 +34,7 @@ import os
 
 import pytest
 
+import pixel_goldens
 from runtime import editors_sheet
 from runtime import host_canvas
 from runtime import moy_carts
@@ -264,6 +265,8 @@ def test_scene_is_pixel_identical_to_the_spec_golden(scene, core, golden):
         "%s produced %d bytes, not a %dx%d index framebuffer"
         % (scene, len(frame), W, H))
     got = hashlib.sha256(frame).hexdigest()
+    png = pixel_goldens.check(scene, got, golden,
+                              lambda: pixel_goldens.index_rows(frame, W, H), W, H)
     if got == golden:
         return
     # Say WHERE, not just that. A hash tells you nothing about a one-pixel
@@ -272,7 +275,8 @@ def test_scene_is_pixel_identical_to_the_spec_golden(scene, core, golden):
                 "  regenerate diffs with moy-spec:\n"
                 "    python3 conformance/run.py --diff out/"
                 % (scene, "core scene (SPEC.md 6)" if core
-                   else "provisional scene (SPEC.md 6.1)", golden, got))
+                   else "provisional scene (SPEC.md 6.1)", golden, got)
+                + pixel_goldens.message([png]))
 
 
 def test_every_core_scene_is_present_and_counted():

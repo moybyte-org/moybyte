@@ -8,6 +8,7 @@ relies on, so each is pinned by name.
 """
 
 import json
+from tests import journal_files as jf
 import os
 import sys
 from pathlib import Path
@@ -388,7 +389,7 @@ def test_the_receiver_journals_a_push_and_only_when_asked(tmp_path):
               journal=True)
     apply_ops(str(root), [{"p": "hop.moy/main.py", "t": "cls(4)\n"}],
               journal=True)
-    entries = moy_journal._journal_load_entries(
+    entries = jf.entries(
         str(root / "hop.moy" / "journal" / "journal.jsonl"))
     assert [e["file"] for e in entries] == ["main.py", "main.py"], entries
     # The commit is REAL: an undo walks the live file back a step.
@@ -409,10 +410,10 @@ def test_a_chunked_publish_is_journaled_from_what_landed(tmp_path):
         {"p": "hop.moy/big.lua", "t": big[20:], "part": 1},
         {"p": "hop.moy/big.lua", "pub": 1}], journal=True)
     assert (root / "hop.moy" / "big.lua").read_text() == big
-    entries = moy_journal._journal_load_entries(
+    entries = jf.entries(
         str(root / "hop.moy" / "journal" / "journal.jsonl"))
     assert len(entries) == 1 and entries[0]["file"] == "big.lua"
-    assert moy_journal._journal_read_snap(
+    assert jf.read_snap(
         str(root / "hop.moy" / "journal"), entries[0]) == big, \
         "the snapshot is one chunk, not the file"
 

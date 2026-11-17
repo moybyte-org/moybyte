@@ -1,0 +1,2 @@
+#moyfs1 165 2876220845
+{"format": "moybyte-cart-v1", "title": "Bench", "id": "moybyte.bench", "runtime": "python", "main": "main.py", "version": 3, "moybyte": {"type": "game", "edit": []}}

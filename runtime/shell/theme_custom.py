@@ -29,10 +29,8 @@ naming neither key leaves the desk to the console's default.
 
 import json
 
-try:                    # the name grammar, re-exported for the look
-    from moy_store_base import theme_name_ok as name_ok  # noqa: F401
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import theme_name_ok as name_ok  # noqa: F401
+# the name grammar, re-exported for the look
+from moy_store_base import theme_name_ok as name_ok  # noqa: F401
 
 CUSTOM = "custom"
 PICTURE_FILE = "desk.moyimg"

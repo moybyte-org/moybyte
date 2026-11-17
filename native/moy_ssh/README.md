@@ -38,7 +38,8 @@ it (the mbedTLS Curve25519 a console image carries is the apps'
 
 ## What runs where
 
-- **the server** (`moy_ssh`, priority 1, core 0, a 16 KB PSRAM stack) owns
+- **the server** (`moy_ssh`, priority 1, core 0, a 16 KB PSRAM stack, or
+  10 KB of internal SRAM on a board without PSRAM) owns
   the network and the crypto, one connection at a time (one that has not
   signed in is closed 30 s after it connects, `AUTH_TIMEOUT` in
   `port/localoptions.h`); it reads a
@@ -68,6 +69,13 @@ pointer of internal SRAM, the server's state one more. A session's shell and
 its arena are the face's (`native/moy_tty/README.md`, Memory); `stats()`'s
 `arena_peak` reports it.
 
+On a board without PSRAM (`MOY_HAS_PSRAM` unset,
+`native/moy_kernel/moy_platform.h`) every one of these is internal SRAM, so
+the server's stack and the face's are sized to what a session was measured to
+use there, and the `sftp` subsystem is refused (`moy_ssh_command`): an SFTP
+face's buffers do not fit beside a session, and a refusal is what the client
+reports. `firmware/esp32c3_zero/README.md` says how that board fits the rest.
+
 ## Sign-in
 
 At every connection's start the server reads the store's system folder
@@ -85,6 +93,6 @@ a key on a Dropbear server in the first, a current one in the home's.
 Every board takes the module (each board.toml's `[native.shared]`) with
 `native/moy_tty`; the image cost and the internal SRAM are in #246. On the
 headless Zero SSH and the web terminal are the shell's faces, their hops
-served by its poll loop and its door `firmware/seeed_xiao_esp32s3_zero/modules/zero_shell.py`;
+served by its poll loop and its door `device/zero_shell.py`;
 it holds no `ssh` lease, its station and mDNS name being up while it serves
 its webhost (`runtime/system/ssh_service.py`).

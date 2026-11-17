@@ -6,40 +6,31 @@
 #pragma GCC optimize("O3")
 #endif
 
+#include "moy_platform.h"
+
 #include "moy_shape.h"
 
 #include <stdlib.h>
 #include <string.h>
 
+#include "moy_gfx_base.h"
 #include "moy_gfx_kernels.h"
 
 // The corner and shadow caches are PSRAM where the board has it. Each is under
 // the boards' SPIRAM_MALLOC_ALWAYSINTERNAL, so a plain malloc would put it in
 // internal SRAM, and the desk draws corners and shadows from its first frame:
 // the idle desk would hold them there for good.
-#if __has_include("esp_heap_caps.h")
-#include "esp_heap_caps.h"
-#define SHAPE_ALLOC(n) heap_caps_malloc_prefer((n), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT)
-#else
-#define SHAPE_ALLOC(n) malloc(n)
-#endif
+#include "moy_kmem.h"
 
-static int s_swapped = 1;
+#define SHAPE_ALLOC(n) moy_kalloc((n), MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK)
+
 static uint32_t s_st[MOY_SHAPE_STATS];
-
-void moy_shape_wire_swapped(int swapped) {
-    s_swapped = swapped != 0;
-}
 
 void moy_shape_stats(uint32_t out[MOY_SHAPE_STATS]) {
     memcpy(out, s_st, sizeof(s_st));
 }
 
-static inline uint16_t can(uint16_t w) {
-    return s_swapped ? (uint16_t)((w << 8) | (w >> 8)) : w;
-}
-
-#define wire can
+#define wire moy_gfx_order
 
 uint16_t moy_shape_wire(uint16_t canonical) {
     return wire(canonical);
@@ -400,7 +391,7 @@ static void paint_row(const moy_shape_paint_t *p, int row, int ph, int Y, prow_t
         }
         return;
     }
-    o->c0 = o->c1 = wire(lerp565(can(p->c[k]), can(p->c[k + 1]), f));
+    o->c0 = o->c1 = wire(lerp565(moy_gfx_order(p->c[k]), moy_gfx_order(p->c[k + 1]), f));
 }
 
 static inline uint16_t prow_at(const prow_t *o, int X) {
@@ -474,9 +465,9 @@ static int rr_px(const rr_t *s, const tgt_t *g, int mask, int i, int j, int X, u
         row[X] = wr ? ring_col(s, i, j) : prow_at(pr, X);   // whole: no mix
         return 1;
     }
-    uint16_t rc = wr ? can(ring_col(s, i, j)) : 0;
-    uint16_t fc = wf ? can(prow_at(pr, X)) : 0;
-    uint16_t under = wu ? can(row[X]) : 0;
+    uint16_t rc = wr ? moy_gfx_order(ring_col(s, i, j)) : 0;
+    uint16_t fc = wf ? moy_gfx_order(prow_at(pr, X)) : 0;
+    uint16_t under = wu ? moy_gfx_order(row[X]) : 0;
     if (wu) {
         s_st[MOY_SHAPE_ST_BLENDS]++;
     }
@@ -795,7 +786,7 @@ static struct {
 } s_run = {{0}, {0}, {0}, -1, -1, -1};
 
 static void run_tables(uint16_t col, int a) {
-    if (s_run.col == col && s_run.a == a && s_run.swapped == s_swapped) {
+    if (s_run.col == col && s_run.a == a && s_run.swapped == moy_gfx_swapped) {
         return;
     }
     int iw = 256 - a;
@@ -810,7 +801,7 @@ static void run_tables(uint16_t col, int a) {
     }
     s_run.col = col;
     s_run.a = a;
-    s_run.swapped = s_swapped;
+    s_run.swapped = moy_gfx_swapped;
 }
 
 // Where the shadows' pixels come from and go to besides the target
@@ -848,7 +839,7 @@ static int shadow_run_io(uint16_t *row, const uint16_t *src, uint16_t *also, int
     memcpy(tr, s_run.tr, sizeof(tr));
     memcpy(tg, s_run.tg, sizeof(tg));
     memcpy(tb, s_run.tb, sizeof(tb));
-    if (s_swapped) {
+    if (moy_gfx_swapped) {
         for (int X = X0; X < X1; X++) {
             uint16_t w = src[X];
             uint16_t o = (uint16_t)(tr[(w >> 3) & 31] | tg[((w & 7) << 3) | ((w >> 13) & 7)]
@@ -884,11 +875,11 @@ static int shadow_run(uint16_t *row, int X0, int X1, uint16_t col, int a) {
         return X1 - X0;
     }
     if (X1 - X0 < 64) {
-        uint16_t from = row[X0], to = wire(over(col, can(from), a));
+        uint16_t from = row[X0], to = wire(over(col, moy_gfx_order(from), a));
         for (int X = X0; X < X1; X++) {
             if (row[X] != from) {
                 from = row[X];
-                to = wire(over(col, can(from), a));
+                to = wire(over(col, moy_gfx_order(from), a));
             }
             row[X] = to;
         }
@@ -904,7 +895,7 @@ static int shadow_run(uint16_t *row, int X0, int X1, uint16_t col, int a) {
     // Two pixels a 32-bit word once `p` is 4-byte aligned, the lower address
     // in the low half (every tier is little-endian): half the loads and
     // stores of a pixel at a time, the same three lookups each.
-    if (s_swapped) {
+    if (moy_gfx_swapped) {
         // The words as the buffer holds them: each channel read straight off
         // the swapped word, the tables' results swapped already.
         #define SW(w) ((uint32_t)(tr[((w) >> 3) & 31] | tg[(((w) & 7) << 3) | (((w) >> 13) & 7)] \
@@ -945,6 +936,208 @@ static int shadow_run(uint16_t *row, int X0, int X1, uint16_t col, int a) {
     return X1 - X0;
 }
 
+// The per-pixel blends' tables: for each of the 16 mask levels, each
+// channel's 32 or 64 results of over() at that level's weight of `col`, as
+// the buffer holds them -- run_tables' at every level at once, kept for the
+// next shadow of the same colour and strength.
+#define LUT_N 128
+static struct {
+    uint16_t *t;     // 16 x (tr[32], tg[64], tb[32])
+    int col, alpha, swapped;
+} s_lut = {NULL, -1, -1, -1};
+
+static const uint16_t *lut_get(uint16_t col, int alpha, const int wt[16]) {
+    if (s_lut.t == NULL) {
+        s_lut.t = (uint16_t *)SHAPE_ALLOC((size_t)16 * LUT_N * sizeof(uint16_t));
+        if (s_lut.t == NULL) {
+            return NULL;
+        }
+        s_lut.col = -1;
+    }
+    if (s_lut.col == col && s_lut.alpha == alpha && s_lut.swapped == moy_gfx_swapped) {
+        return s_lut.t;
+    }
+    for (int k = 0; k < 16; k++) {
+        int a = wt[k];
+        if (a <= 0 || a >= 256) {
+            continue;                       // never looked up: a copy or the colour
+        }
+        uint16_t *tr = s_lut.t + k * LUT_N, *tg = tr + 32, *tb = tr + 96;
+        int iw = 256 - a;
+        int fr = ((col >> 11) & 31) * a + 128, fg = ((col >> 5) & 63) * a + 128,
+            fb = (col & 31) * a + 128;
+        for (int v = 0; v < 32; v++) {
+            tr[v] = wire((uint16_t)(((fr + v * iw) >> 8) << 11));
+            tb[v] = wire((uint16_t)((fb + v * iw) >> 8));
+        }
+        for (int v = 0; v < 64; v++) {
+            tg[v] = wire((uint16_t)(((fg + v * iw) >> 8) << 5));
+        }
+    }
+    s_lut.col = col;
+    s_lut.alpha = alpha;
+    s_lut.swapped = moy_gfx_swapped;
+    return s_lut.t;
+}
+
+// Buffer word `w` under one level's tables (lut_get).
+static inline uint16_t lut_px(const uint16_t *T, uint16_t w) {
+    if (moy_gfx_swapped) {
+        return (uint16_t)(T[(w >> 3) & 31] | T[32 + (((w & 7) << 3) | ((w >> 13) & 7))]
+                          | T[96 + ((w >> 8) & 31)]);
+    }
+    return (uint16_t)(T[w >> 11] | T[32 + ((w >> 5) & 63)] | T[96 + (w & 31)]);
+}
+
+// What one shadow draws with, fixed for the call.
+typedef struct {
+    const mask_t *m;
+    const int *wt;
+    const uint16_t *lut;     // lut_get's, or NULL: over() a pixel
+    int sx, w, b, C, Ia, Ib;
+    uint16_t col;            // canonical
+} sh_t;
+
+// Pixels [X0, X1) of buffer row `row` at mask row `ii`, blended over the
+// same pixels of `src` (`row` itself, or a row of another buffer laid out as
+// the target) and stored to `row` and to `also` (NULL: none); where the mask
+// is clear, `src`'s pixel is stored as it is. Answers the pixels blended.
+static int shadow_span(const sh_t *h, uint16_t *row, const uint16_t *src, uint16_t *also,
+                       int ii, int X0, int X1) {
+    int n = 0, X = X0, wa = -1;
+    while (X < X1) {
+        if (X >= h->Ia && X < h->Ib) {
+            // past the corner boxes: the row's one weight (mask_at)
+            int stop = imin(h->Ib, X1);
+            if (wa < 0) {
+                wa = h->wt[mask_at(h->m, ii, h->C)];
+            }
+            n += src == row && also == NULL ? shadow_run(row, X, stop, h->col, wa)
+                                            : shadow_run_io(row, src, also, X, stop, h->col, wa);
+            X = stop;
+            continue;
+        }
+        int stop = X < h->Ia ? imin(h->Ia, X1) : X1;
+        for (; X < stop; X++) {
+            int j = X - h->sx;
+            int k = mask_at(h->m, ii, imin(j, h->w - 1 - j) + h->b);
+            int a = h->wt[k];
+            uint16_t o;
+            if (a == 0) {
+                o = src[X];
+                if (src != row) {
+                    row[X] = o;
+                }
+            } else {
+                o = a >= 256 ? wire(h->col)
+                    : h->lut != NULL ? lut_px(h->lut + k * LUT_N, src[X])
+                    : wire(over(h->col, moy_gfx_order(src[X]), a));
+                row[X] = o;
+                n++;
+            }
+            if (also != NULL) {
+                also[X] = o;
+            }
+        }
+    }
+    return n;
+}
+
+// The restore the next shadow lays with its own pixels (moy_shape_shadow_fill):
+// `src` (NULL: none pending) into buffer rect [x0, x1) x [y0, y1) less
+// [ix0, ix1) x [iy0, iy1).
+static struct {
+    const uint16_t *src;
+    int x0, y0, x1, y1, ix0, iy0, ix1, iy1;
+} s_fill;
+
+void moy_shape_shadow_fill(const uint16_t *src, const int outer[4], const int inner[4]) {
+    s_fill.src = src;
+    if (src == NULL) {
+        return;
+    }
+    s_fill.x0 = outer[0];
+    s_fill.y0 = outer[1];
+    s_fill.x1 = outer[0] + outer[2];
+    s_fill.y1 = outer[1] + outer[3];
+    s_fill.ix0 = inner[0];
+    s_fill.iy0 = inner[1];
+    s_fill.ix1 = inner[0] + inner[2];
+    s_fill.iy1 = inner[1] + inner[3];
+}
+
+// The pending fill's spans on buffer row Y, inside [0, dw): up to two
+// [f[2k], f[2k+1]) left to right. Answers how many.
+static int fill_spans(int Y, int dw, int f[4]) {
+    int x0 = imax(s_fill.x0, 0), x1 = imin(s_fill.x1, dw), n = 0;
+    if (Y >= s_fill.iy0 && Y < s_fill.iy1 && s_fill.ix1 > s_fill.ix0) {
+        int a = imin(s_fill.ix0, x1), b = imax(s_fill.ix1, x0);
+        if (a > x0) {
+            f[0] = x0;
+            f[1] = a;
+            n = 1;
+        }
+        if (x1 > b) {
+            f[2 * n] = b;
+            f[2 * n + 1] = x1;
+            n++;
+        }
+        return n;
+    }
+    if (x1 > x0) {
+        f[0] = x0;
+        f[1] = x1;
+        n = 1;
+    }
+    return n;
+}
+
+static void copy_px(uint16_t *row, const uint16_t *src, int X0, int X1) {
+    if (X1 > X0) {
+        memcpy(row + X0, src + X0, (size_t)(X1 - X0) * sizeof(uint16_t));
+    }
+}
+
+int moy_shape_shadow_fill_end(const moy_text_target_t *t) {
+    const uint16_t *src = s_fill.src;
+    s_fill.src = NULL;
+    if (src == NULL || t == NULL || t->px == NULL || t->dw <= 0) {
+        return 0;
+    }
+    int rows = (int)(t->cap / (size_t)t->dw), n = 0;
+    for (int Y = imax(s_fill.y0, 0); Y < imin(s_fill.y1, rows); Y++) {
+        int f[4], nf = fill_spans(Y, t->dw, f);
+        size_t off = (size_t)Y * (size_t)t->dw;
+        for (int k = 0; k < nf; k++) {
+            copy_px(t->px + off, src + off, f[2 * k], f[2 * k + 1]);
+            n += f[2 * k + 1] - f[2 * k];
+        }
+    }
+    return n;
+}
+
+// Shadow pixels [X0, X1) of row Y: those inside the fill's spans `f` blended
+// over the fill's source, the rest over `src` as moy_shape_shadow_io says.
+static int shadow_seg(const sh_t *h, uint16_t *row, const uint16_t *src, uint16_t *also,
+                      const uint16_t *frow, const int *f, int nf, int ii, int X0, int X1) {
+    int n = 0;
+    for (int k = 0; k < nf && X0 < X1; k++) {
+        int a0 = imax(f[2 * k], X0), a1 = imin(f[2 * k + 1], X1);
+        if (a0 >= a1) {
+            continue;
+        }
+        if (a0 > X0) {
+            n += shadow_span(h, row, src, also, ii, X0, a0);
+        }
+        n += shadow_span(h, row, frow, NULL, ii, a0, a1);
+        X0 = a1;
+    }
+    if (X0 < X1) {
+        n += shadow_span(h, row, src, also, ii, X0, X1);
+    }
+    return n;
+}
+
 int moy_shape_shadow(const moy_text_target_t *t, int x, int y, int w, int h,
                      const moy_shape_shadow_t *s, const moy_shape_hole_t *hole) {
     tgt_t g;
@@ -961,56 +1154,64 @@ int moy_shape_shadow(const moy_text_target_t *t, int x, int y, int w, int h,
     for (int k = 0; k < 16; k++) {
         wt[k] = weight(k, alpha);
     }
-    uint16_t col = can((uint16_t)s->col);
+    uint16_t col = moy_gfx_order((uint16_t)s->col);
     int sx = x + s->dx - g.cam_x, sy = y + s->dy - g.cam_y;
     int n = 0;
     int Ya = imax(sy - b, g.y0), Yb = imin(sy + h + b, g.y1);
     int Xa = imax(sx - b, g.x0), Xb = imin(sx + w + b, g.x1);
     // Columns whose mask cell lies past its corner box take the row's one
     // weight (mask_at): [Ia, Ib) on the buffer.
-    int C = m->C, Ia = imax(sx + C - b, Xa), Ib = imin(sx + w - (C - b), Xb);
-    for (int Y = Ya; Y < Yb; Y++) {
-        tgt_row(&g, Y);
-        int i = Y - sy;
-        int ii = imin(i, h - 1 - i) + b;
+    int C = m->C;
+    sh_t sh = {m, wt, lut_get(col, alpha, wt), sx, w, b, C, imax(sx + C - b, Xa),
+               imin(sx + w - (C - b), Xb), col};
+    // A pending fill is laid in the same pass: its rows, the shadow's or not.
+    const uint16_t *fsrc = s_fill.src;
+    s_fill.src = NULL;
+    int rows = (int)(t->cap / (size_t)t->dw);
+    int Fy0 = fsrc != NULL ? imax(s_fill.y0, 0) : 0, Fy1 = fsrc != NULL ? imin(s_fill.y1, rows) : 0;
+    if (Xa >= Xb) {
+        Yb = Ya;
+    }
+    int Y0 = Fy1 > Fy0 ? imin(Ya, Fy0) : Ya, Y1 = Fy1 > Fy0 ? imax(Yb, Fy1) : Yb;
+    for (int Y = Y0; Y < Y1; Y++) {
+        int inS = Y >= Ya && Y < Yb, inF = Y >= Fy0 && Y < Fy1;
+        if (!inS && !inF) {
+            continue;
+        }
         size_t off = (size_t)Y * (size_t)g.stride;
         uint16_t *row = g.px + off;
+        int f[4], nf = inF ? fill_spans(Y, g.stride, f) : 0;
+        const uint16_t *frow = inF ? fsrc + off : NULL;
+        if (!inS) {
+            for (int k = 0; k < nf; k++) {
+                copy_px(row, frow, f[2 * k], f[2 * k + 1]);
+            }
+            continue;
+        }
+        // the shadow stores [Xa, Xb) but the hole's [hx0, hx1)
+        tgt_row(&g, Y);
+        int hx0 = imax(g.hx0, Xa), hx1 = imin(g.hx1, Xb);
+        if (hx1 <= hx0) {
+            hx0 = hx1 = Xb;
+        }
+        for (int k = 0; k < nf; k++) {
+            int a0 = f[2 * k], a1 = f[2 * k + 1];
+            copy_px(row, frow, a0, imin(a1, Xa));
+            copy_px(row, frow, imax(a0, hx0), imin(a1, hx1));
+            copy_px(row, frow, imax(a0, Xb), a1);
+        }
+        int i = Y - sy;
+        int ii = imin(i, h - 1 - i) + b;
         const uint16_t *src = row;
         uint16_t *also = NULL;
-        if (s_io.src != NULL || s_io.also != NULL) {
-            if (s_io.src != NULL) {
-                src = s_io.src + off;
-            }
-            if (s_io.also != NULL) {
-                also = s_io.also + off;
-            }
+        if (s_io.src != NULL) {
+            src = s_io.src + off;
         }
-        int X = Xa;
-        while (X < Xb) {
-            if (X >= g.hx0 && X < g.hx1) {
-                X = g.hx1;
-                continue;
-            }
-            if (X >= Ia && X < Ib) {
-                int stop = g.hx1 > g.hx0 && g.hx0 > X && g.hx0 < Ib ? g.hx0 : Ib;
-                int wa = wt[mask_at(m, ii, C)];
-                n += src == row && also == NULL ? shadow_run(row, X, stop, col, wa)
-                                                : shadow_run_io(row, src, also, X, stop, col, wa);
-                X = stop;
-                continue;
-            }
-            int j = X - sx;
-            int a = wt[mask_at(m, ii, imin(j, w - 1 - j) + b)];
-            uint16_t o = a == 0 ? src[X] : wire(a >= 256 ? col : over(col, can(src[X]), a));
-            if (a != 0 || src != row) {
-                row[X] = o;
-            }
-            if (also != NULL) {
-                also[X] = o;
-            }
-            n += a != 0;
-            X++;
+        if (s_io.also != NULL) {
+            also = s_io.also + off;
         }
+        n += shadow_seg(&sh, row, src, also, frow, f, nf, ii, Xa, hx0);
+        n += shadow_seg(&sh, row, src, also, frow, f, nf, ii, hx1, Xb);
     }
     s_st[MOY_SHAPE_ST_BLENDS] += (uint32_t)n;
     return n;
@@ -1027,6 +1228,8 @@ void moy_shape_reset(int caches) {
         free(s_mask[k].T);
         s_mask[k].T = NULL;
     }
+    free(s_lut.t);
+    s_lut.t = NULL;
 }
 
 static void flat_target(moy_text_target_t *t, uint16_t *dst, size_t cap, int dw, int cam_x,
@@ -1148,7 +1351,7 @@ int mg_cover(uint16_t *dst, size_t cap, int dw, int x, int y, int w, int h,
             }
             uint16_t p = srow[u >> 16];
             if (co < 15) {
-                p = wire(mix3(can(row[X]), 15 - co, can(p), co, 0, 0));
+                p = wire(mix3(moy_gfx_order(row[X]), 15 - co, moy_gfx_order(p), co, 0, 0));
                 s_st[MOY_SHAPE_ST_BLENDS]++;
             }
             row[X] = p;
@@ -1286,7 +1489,7 @@ int mg_face(uint16_t *dst, size_t cap, int dw, int x, int y, int w, int h,
                 if (src != NULL) {
                     if (co > 0) {
                         uint16_t p = srow[((uint32_t)j * fx + (fx >> 1)) >> 16];
-                        row[X] = wire(mix3(can(row[X]), 15 - co, can(p), co, 0, 0));
+                        row[X] = wire(mix3(moy_gfx_order(row[X]), 15 - co, moy_gfx_order(p), co, 0, 0));
                         wrote = 1;
                     }
                 } else {
@@ -1314,7 +1517,7 @@ int mg_tint(uint16_t *dst, size_t dcap, const uint16_t *src, size_t scap, int sw
         return 0;
     }
     int wt = (imax(0, imin(alpha, 255)) * 256 + 127) / 255;
-    uint16_t c = can(col);
+    uint16_t c = moy_gfx_order(col);
     // over(c, b, wt) a channel at a time, through each channel's 32 or 64
     // results (shadow_run's tables): the same sums, a lookup a channel.
     int iw = 256 - wt;
@@ -1329,7 +1532,7 @@ int mg_tint(uint16_t *dst, size_t dcap, const uint16_t *src, size_t scap, int sw
         tg[v] = (uint16_t)(((fg + v * iw) >> 8) << 5);
     }
     // The byte order is read once, not a pixel at a time: a loop each way.
-    const bool swapped = s_swapped;
+    const bool swapped = moy_gfx_swapped;
     for (int i = 0; i < h; i++) {
         const uint16_t *s = src + (size_t)(sy + i) * (size_t)sw + sx;
         uint16_t *d = dst + (size_t)(dy + i) * (size_t)dw + dx;

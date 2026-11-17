@@ -197,7 +197,7 @@ def _driver(ws):
 
 def test_blocks_view_opens_and_renders(tmp_path):
     ws, _, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     assert ws.menu_view == "blocks" and ws.block_ui.blocks_ed is not None
     # renders without error
     for _ in range(2):
@@ -218,7 +218,7 @@ def _menu_focus(ws, item):
 
 def _tap_stop(ws, drv, stop):
     """Tap stop `stop` of the handheld Blocks page where it drew last."""
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     drv.frame(1 / 30)
     x, y, w, h = ws.block_ui.page().host.box(stop)
@@ -231,7 +231,7 @@ def test_insert_flow_through_the_menu_then_runs(tmp_path):
     """Press A on an insert point -> category menu -> block list -> a block is
     inserted, the program compiles, and the cart runs through the Workstation."""
     ws, cart, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     drv = _driver(ws)
     be = ws.block_ui.blocks_ed
     # park on the trailing insert under on_draw and press A. An idle frame between
@@ -264,7 +264,7 @@ def test_insert_flow_through_the_menu_then_runs(tmp_path):
 
 def test_save_persists_blocks_and_main_and_reloads(tmp_path):
     ws, cart, root = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     be.add_var("score")
     go_to_insert(be, 1)                                # under on_start
@@ -282,7 +282,7 @@ def test_save_persists_blocks_and_main_and_reloads(tmp_path):
 
 def test_dropdown_slot_picker_sets_the_value(tmp_path):
     ws, _, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     go_to_insert(be, 1)
     be.insert_block("cls", {"color": "black"})
@@ -304,7 +304,7 @@ def test_variable_slot_picker_leads_with_new_variable(tmp_path):
     compiles. The kid never hits an empty/uncreatable slot."""
     import runtime.console as C
     ws, _, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     go_to_insert(be, 1)
     be.insert_block("set_var")                      # no vars declared yet
@@ -327,7 +327,7 @@ def test_variable_slot_picker_leads_with_new_variable(tmp_path):
 
 def test_graduate_to_code_opens_code_editor_on_generated_source(tmp_path):
     ws, cart, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     go_to_insert(be, 1)
     be.insert_block("cls", {"color": "indigo"})
@@ -342,7 +342,7 @@ def test_graduate_to_code_opens_code_editor_on_generated_source(tmp_path):
 def test_block_authored_cart_runs_normally(tmp_path):
     """A cart authored from blocks RUNs like any other cart (its compiled main.py)."""
     ws, cart, root = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     be.add_var("x")
     go_to_insert(be, 1)                                # on_start: set x = 100
@@ -363,7 +363,7 @@ def test_pointer_taps_insert_and_action_bar(tmp_path):
     """The outline is fully pointer/touch-drivable (no dragging): a tap selects a
     row, a second tap on an insert opens the menu, and the action-bar buttons fire."""
     ws, _, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     drv = _driver(ws)
     drv.frame(1 / 30)
     # tap Add -> the category menu opens
@@ -380,7 +380,7 @@ def test_pointer_taps_insert_and_action_bar(tmp_path):
 
 def test_forever_compiles_to_the_bounded_loop(tmp_path):
     ws, _, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     go_to_insert(be, 1)
     be.insert_block("forever")
@@ -423,7 +423,7 @@ def test_blocks_on_handwritten_cart_does_not_lose_code(tmp_path):
     the kid opens BLOCKS and saves an (empty) block program."""
     ws, cart, root = _ws_with_code_cart(tmp_path, _HANDWRITTEN_SRC)
     # the editor opens in PROTECTED mode (hand-written main.py, no blocks.json)
-    ws._open_blocks()
+    ws.text.open_blocks()
     assert ws.menu_view == "blocks"
     assert ws.block_ui.blk_protect is True
     # try to SAVE the empty block program -- it must refuse and keep the code
@@ -435,7 +435,7 @@ def test_blocks_on_handwritten_cart_does_not_lose_code(tmp_path):
     assert reloaded["src"] == _HANDWRITTEN_SRC
     assert reloaded["blocks"] is None
     # leaving the editor re-runs the kid's real code (not an empty blocks cart)
-    ws._leave_menu()
+    ws.text.leave_menu()
     for _ in range(3):
         ws.frame(1 / 30)
     assert ws.cart_error is None
@@ -446,7 +446,7 @@ def test_blocks_protect_blocks_graduate_overwrite(tmp_path):
     """In protected mode, 'graduate to code' opens the EXISTING code (it must not
     compile the empty blocks over it)."""
     ws, cart, _ = _ws_with_code_cart(tmp_path, _HANDWRITTEN_SRC)
-    ws._open_blocks()
+    ws.text.open_blocks()
     assert ws.block_ui.blk_protect is True
     ws.block_ui.graduate_to_code()
     assert ws.menu_view == "code" and ws.editor is not None
@@ -458,7 +458,7 @@ def test_block_authored_cart_is_not_protected(tmp_path):
     """A genuinely block-authored cart (has blocks.json) stays fully editable --
     the guard only fires on hand-written code. Round-trip is unchanged."""
     ws, cart, root = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     assert ws.block_ui.blk_protect is False                       # new-template cart: editable
     be.add_var("score")
@@ -470,7 +470,7 @@ def test_block_authored_cart_is_not_protected(tmp_path):
     ws.launcher.items = shelf(root)
     select_on_home(ws, cart["title"])
     ws.open()
-    ws._open_blocks()
+    ws.text.open_blocks()
     assert ws.block_ui.blk_protect is False
     assert ws.block_ui.save_blocks() is True
 
@@ -486,7 +486,7 @@ def test_new_variable_entry_creates_names_and_is_usable(tmp_path):
     generated Python under that exact name."""
     import runtime.console as C
     ws, cart, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     # open the insert menu -> Variables category
     go_to_insert(be, 1)
@@ -521,7 +521,7 @@ def test_new_variable_name_is_sanitized_and_renames_references(tmp_path):
     """Free-typed names are coerced to safe identifiers, and renaming a variable
     rewrites every slot that referenced it (so set/change/expr keep working)."""
     ws, _, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     name = be.new_var("var")                             # default-named variable
     go_to_insert(be, 1)
@@ -542,7 +542,7 @@ def test_name_prompt_keyboard_flow_through_the_driver(tmp_path):
     (type_char == on-screen keyboard, press('a') == confirm), end to end."""
     import runtime.console as C
     ws, _, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     drv = _driver(ws)
     # drive to the Variables block list and pick "+ new variable"
@@ -574,7 +574,7 @@ def test_new_variable_prompt_survives_the_opening_keypress(tmp_path):
     the held Enter byte) -- the prompt must stay open, no commit -- and only a name
     the kid then types becomes the variable's name (compiled under that name)."""
     ws, cart, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     drv = _driver(ws)
     # drill to Variables -> "+ new variable" highlighted
@@ -585,24 +585,19 @@ def test_new_variable_prompt_survives_the_opening_keypress(tmp_path):
     # SELECT it with A *while ALSO* holding the Enter byte (0x0D) -- on the device A
     # is the Enter/z alias, so last_key carries that byte; with no idle frame between
     # the select and the next pass the trigger could leak into the prompt's commit.
+    # The Enter byte is a BLE keyboard's level, held on its own source across
+    # the open frame and the next (the driver's typed queue ships one-frame
+    # bytes with a 0 gap between two, so it cannot express a latched hold).
+    ble = ws.input.source("ble")
     drv.hold("a", True)
-    drv.type_char(0x0D)
+    ble.last_key = 0x0D
     drv.frame(1 / 30)                                    # this frame opens the prompt
     assert ws.block_ui.blk_kbd is not None, "prompt should open"
-    # A + the Enter byte STILL held the very next frame: the prompt must NOT
-    # commit. The held byte is the DEVICE keyboard's latch (the same byte
-    # repeating across adjacent frames), injected directly -- the driver's
-    # typed queue is device-faithful now and ships a 0 gap between two queued
-    # discrete repeats, so it can no longer express a latched hold.
-    ws.input.begin_frame()
-    ws.input.last_key = 0x0D
-    ws.handle_input()
-    ws.frame(1 / 30)
-    ws.input.last_key = 0
+    drv.frame(1 / 30)                                    # A and Enter STILL held
+    ble.last_key = 0
     assert ws.block_ui.blk_kbd is not None, "opening keypress must not auto-commit the prompt"
     assert not be.variables() or be.variables() == [ws.block_ui.blk_kbd["var"]]
     drv.hold("a", False)
-    drv.type_char(0)
     drv.frame(1 / 30)                                    # release the trigger
     # now the kid actually types a name and confirms -> the TYPED name sticks
     for ch in "lives":
@@ -628,7 +623,7 @@ def test_new_variable_prompt_survives_the_opening_tap(tmp_path):
     carry into the new prompt and hit OK. Open the prompt by tapping its menu row,
     then assert it stays open across the next frame (the opening click is cleared)."""
     ws, _, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     drv = _driver(ws)
     # drill to Variables block list
@@ -637,7 +632,7 @@ def test_new_variable_prompt_survives_the_opening_tap(tmp_path):
     ws.block_ui._blk_menu_select()
     assert ws.block_ui.blk_menu["mode"] == "blk"
     # tap the "+ new variable" row (index 0) to select it -> opens the name prompt
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     drv.frame(1 / 30)                                  # the popover settles in place
     x, y, w, h = ws.block_ui.page().host.box(ws.block_ui.page().menu_word(0))
@@ -660,7 +655,7 @@ def test_expr_slot_defaults_to_a_typeable_literal(tmp_path):
     """Editing an expr slot opens the number pad by default (not the block menu), so
     a kid can TYPE a literal -- the previously-impossible `set score to 0`."""
     ws, _, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     # a fresh set_var: its {value} expr slot defaults to the literal 0
     be.new_var("score")
@@ -678,7 +673,7 @@ def test_type_a_literal_into_an_expr_slot_compiles_to_bare_value(tmp_path):
     """The headline fix: typing 5 into a set_var value (an expr slot) compiles to the
     BARE literal `score = 5` -- no quotes, no code injection -- and runs."""
     ws, _, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     be.new_var("score")
     go_to_insert(be, 1)
@@ -699,7 +694,7 @@ def test_set_var_to_zero_and_three_roundtrip_and_execute(tmp_path):
     """`set score to 0` and `set lives to 3` -- the exact cases that were impossible --
     round-trip through the model and EXECUTE with the right values."""
     ws, _, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     be.new_var("score")
     be.new_var("lives")
@@ -726,7 +721,7 @@ def test_set_var_to_zero_and_three_roundtrip_and_execute(tmp_path):
 def test_negative_and_decimal_literals_type_correctly(tmp_path):
     """A leading '-' and a single '.' are accepted; the slot stores a real int/float."""
     ws, _, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     be.new_var("v")
     go_to_insert(be, 1)
@@ -748,7 +743,7 @@ def test_number_slot_is_typeable(tmp_path):
     """A plain number slot (repeat times) also opens the number pad -- no more dozens
     of +1 taps to reach a value like 440."""
     ws, _, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     go_to_insert(be, 1)
     blk = be.insert_block("beep", {"freq": 440})
@@ -768,7 +763,7 @@ def test_expr_menu_leads_with_type_a_number_and_keeps_reporters(tmp_path):
     input / variable reporters are all still there."""
     import runtime.console as C
     ws, _, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     go_to_insert(be, 1)
     blk = be.insert_block("spr", {"id": 0, "x": 0, "y": 0})
@@ -790,7 +785,7 @@ def test_expr_slot_can_still_hold_a_reporter_block(tmp_path):
     """Dropping a reporter into an expr slot still works (the white oval accepts a
     block too): a var reporter in spr's x compiles to the bare variable name."""
     ws, _, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     be.new_var("px")
     go_to_insert(be, 1)
@@ -813,7 +808,7 @@ def test_number_prompt_typing_through_the_driver(tmp_path):
     """End-to-end through the real input model: open a number slot, type via last_key,
     confirm with A -- the slot holds the typed value and compiles bare."""
     ws, _, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     drv = _driver(ws)
     go_to_insert(be, 1)
@@ -837,7 +832,7 @@ def test_number_prompt_survives_the_opening_keypress(tmp_path):
     """Regression parity with the var prompt (#29): the A/Enter that OPENS the number
     pad must not carry in and instantly commit it on the first frame."""
     ws, _, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     drv = _driver(ws)
     go_to_insert(be, 1)
@@ -860,7 +855,7 @@ def test_left_nudges_an_expr_literal_slot(tmp_path):
     """The quick -1 nudge (left) works on an expr slot holding a numeric literal,
     not just plain number slots -- but leaves a slot holding a block alone."""
     ws, _, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     be.new_var("x")
     go_to_insert(be, 1)
@@ -883,7 +878,7 @@ def test_left_nudges_an_expr_literal_slot(tmp_path):
 def test_lists_category_block_list_leads_with_new_list(tmp_path):
     import runtime.console as C
     ws, _, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     go_to_insert(be, 1)
     ws.block_ui._blk_open_categories()
@@ -900,7 +895,7 @@ def test_list_slot_picker_leads_with_new_list_and_fills_the_slot(tmp_path):
     program compiles (the kid never hits an empty/uncreatable list slot)."""
     import runtime.console as C
     ws, _, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     go_to_insert(be, 1)
     blk = be.insert_block("list_add")               # no lists declared yet
@@ -925,7 +920,7 @@ def test_list_slot_picker_leads_with_new_list_and_fills_the_slot(tmp_path):
 def test_for_each_block_inserts_and_saves(tmp_path):
     """A for-each over a list builds, saves, and the compiled cart runs."""
     ws, cart, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     be.add_var("it")
     be.new_list("nums")
@@ -1189,7 +1184,7 @@ def test_undo_stack_is_bounded():
 def test_actions_menu_copy_then_paste_ui(tmp_path):
     from runtime import block_editor_ui as B
     ws, _, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     bu = ws.block_ui
     be = bu.blocks_ed
     go_to_insert(be, 1)
@@ -1215,7 +1210,7 @@ def test_actions_menu_copy_then_paste_ui(tmp_path):
 def test_move_flow_via_ui_taps_a_destination(tmp_path):
     from runtime import block_editor_ui as B
     ws, _, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     bu = ws.block_ui
     be = bu.blocks_ed
     go_to_insert(be, 1)                                  # under on_draw
@@ -1235,15 +1230,15 @@ def test_move_flow_via_ui_taps_a_destination(tmp_path):
 
 def test_undo_redo_buttons_ui(tmp_path):
     ws, _, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     bu = ws.block_ui
     be = bu.blocks_ed
     go_to_insert(be, 1)
     be.insert_block("cls", {"color": "red"})
     assert _select_type(be, "cls")
-    bu._blk_undo()
+    ws.history.undo()                                     # the bar's UNDO
     assert not _select_type(be, "cls")                   # the insert was reverted
-    bu._blk_redo()
+    ws.history.redo()
     assert _select_type(be, "cls")                       # and re-applied
     ws.frame(1 / 30)
     assert ws.cart_error is None
@@ -1253,7 +1248,7 @@ def test_ctrl_z_keyboard_shortcut_undoes(tmp_path):
     """Host convenience: Ctrl+Z (0x1A via last_key) undoes in the outline, like the
     code editor. Driven through the real Workstation input path."""
     ws, _, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     drv = _driver(ws)
     be = ws.block_ui.blocks_ed
     go_to_insert(be, 1)
@@ -1282,7 +1277,7 @@ def test_undo_after_save_does_not_leak_into_cart_blocks(tmp_path):
     program to a restored snapshot) leaves cart["blocks"] holding the un-undone
     state (matching neither disk nor the editor; the graduation compare reads it)."""
     ws, cart, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     go_to_insert(be, 1)
     be.insert_block("cls", {"color": "black"})
@@ -1304,7 +1299,7 @@ def test_in_ram_save_and_build_fallback_do_not_alias_cart_blocks(tmp_path):
     snapshots too, and build()'s fallback (prog from cart["blocks"]) clones the
     cart's tree before handing it to the editor."""
     ws, cart, _ = _ws_with_block_cart(tmp_path)
-    ws._open_blocks()
+    ws.text.open_blocks()
     be = ws.block_ui.blocks_ed
     go_to_insert(be, 1)
     be.insert_block("cls", {"color": "black"})

@@ -26,21 +26,11 @@ and the surface on top on a handheld, where it holds the front game while
 it shows.
 """
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-    import layout_base as _lb
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-    from runtime import layout_base as _lb
-
-try:
-    from layers import Layer
-    from notifications import NOTES
-except ImportError:  # pragma: no cover - host fallback
-    from runtime.layers import Layer
-    from runtime.notifications import NOTES
+import ui as _ui
+import ui_draw as _ui_draw
+import layout_base as _lb
+from layers import Layer
+from notifications import NOTES
 
 TITLE = "Tasks"
 COLUMNS = ("Name", "State", "CPU", "Mem")
@@ -109,6 +99,8 @@ class TasksLayer(Layer):
 
     id = "tasks"
     domain = "system"
+    TITLE = TITLE                   # its window's and its chip's (the app table)
+    BAR = None                      # its bar has no keys
     back_title = TITLE              # the bar's chevron and title (BarLayer)
     zone_gen = 0                    # ...whose cache key: the title never moves
 
@@ -172,9 +164,19 @@ class TasksLayer(Layer):
                 self.note_cur = self.notes.index(note)
         self._focus = True           # the first frame puts the focus on the list
 
-    def back(self):
+    B_BACK = True
+
+    def is_app(self, cart):
+        """No cart is the task manager: it opens from the system menu."""
+        return False
+
+    def leave(self):
+        """Back where it was opened from (`Workstation.close_tasks`)."""
         self.ws.close_tasks()
         return True
+
+    def ui_host(self):
+        return self.host
 
     def draw_zone(self, cv, rect):
         return None
@@ -186,13 +188,13 @@ class TasksLayer(Layer):
         ws = self.ws
         if i.pressed("home"):
             ws.close_tasks()
-            ws.home_key()
+            ws.home.home_key()
             return True
         if i.pressed("b") or i.pressed("stop"):
-            self.back()
+            ws.input_policy.back(leave=True)
             return True
         if self.host.keys(i):
-            ws._dirty = True
+            ws.mark_dirty()
         return True
 
     def handle_pointer(self, px, py, click):
@@ -200,7 +202,7 @@ class TasksLayer(Layer):
         if click and ws.bar_layer.handle_bar_tap("tasks", px, py):
             return True
         if self.host.point(px, py, click, bool(getattr(ws.pointer, "down", False))):
-            ws._dirty = True
+            ws.mark_dirty()
         return True
 
     # -- draw ---------------------------------------------------------------
@@ -234,8 +236,6 @@ class TasksLayer(Layer):
         if x + w < cv.w:
             cv.rect(x + w, y, cv.w - x - w, h, g)
         self._page()
-        if not ws.windowed_chrome:
-            ws.bar_layer._draw_status_strip("tasks")
 
     def _page(self):
         ws = self.ws
@@ -338,7 +338,7 @@ class TasksLayer(Layer):
 
     def _do(self, verb, row):
         ws = self.ws
-        ws._dirty = True
+        ws.mark_dirty()
         if verb == HOME:
             ws.close_tasks(home=True)
             return

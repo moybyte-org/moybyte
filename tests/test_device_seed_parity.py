@@ -28,7 +28,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 import gen_device_carts as _gdc  # noqa: E402
-from tools.board_config import runtime_file
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -48,14 +47,8 @@ TITLE_TO_FOLDER = _gdc.title_to_folder(str(SYSTEM_CARTS))
 
 
 def _load_moy_runtime():
-    # Mirror tests/test_device_make_api.py::_load_moy_runtime: the device does
-    # `from audio import ...` / `from console import ...`, frozen from runtime/
-    # (audio first -- console imports it).
-    for name in ("audio", "console"):
-        spec = importlib.util.spec_from_file_location(name, runtime_file(name + ".py"))
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        sys.modules[name] = mod
+    # The device does `from console import ...`: on the host that bare name is
+    # runtime.console (runtime.FlatFinder).
     # moy_runtime also imports the device-only leaves (device_api, device_canvas,
     # moy_lua_glue, ...). conftest's _DeviceModuleFinder resolves those from the
     # authored modules/ tree on demand, so there is deliberately no list here --
@@ -460,8 +453,8 @@ def test_every_system_app_claims_its_device_seeded_folder(tmp_path):
     from runtime import host_app, moy_carts
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    assert ws._apps, "no system apps registered"
-    for app, _text in ws._apps:
+    assert ws.app_layers, "no system apps registered"
+    for app in ws.app_layers:
         claimed = [c for c in ws.carts.all if app.is_app(c)]
         assert len(claimed) == 1, \
             "%s claims %d carts on the host store" % (app.id, len(claimed))
@@ -540,8 +533,8 @@ def test_the_seed_mesh_leaves_a_store_the_installed_mesh_does_not(tmp_path):
     for d in (seeded, installed):
         d.mkdir()
         (d / "manifest.json").write_text('{"title": "Mesh"}')
-    with open(moy_carts.retired_version_path(root), "w") as f:
-        f.write("7")
+    with open(moy_carts.store_version_path(root), "w") as f:
+        f.write("moystore 1 7\n")
     assert moy_carts.sweep_store(root) == 1
     assert not seeded.exists() and installed.is_dir()
     assert moy_carts.load_retired_version(root) == moy_carts.RETIRED_GEN
@@ -560,8 +553,8 @@ def test_the_legacy_written_folder_leaves_a_store_once(tmp_path):
     (written / "doom" / "saves" / "slot0").write_bytes(b"x" * 64)
     (written / "wasm_files").mkdir()
     (apps / "doom").mkdir(parents=True)
-    with open(moy_carts.retired_version_path(root), "w") as f:
-        f.write("7")
+    with open(moy_carts.store_version_path(root), "w") as f:
+        f.write("moystore 1 7\n")
     assert moy_carts.sweep_store(root) == 1
     assert not written.exists() and (apps / "doom").is_dir()
     written.mkdir()
@@ -619,8 +612,8 @@ def test_the_rename_sweeps_the_bare_built_ins_once(tmp_path):
              "version": 2}]
     moy_carts.seed_builtins(seed, root, ns=None)     # a store from before #162
     mine = moy_carts.create("My Game", root, src=body)
-    with open(moy_carts.retired_version_path(root), "w") as f:
-        f.write("4")
+    with open(moy_carts.store_version_path(root), "w") as f:
+        f.write("moystore 1 4\n")
     carts, _root = Boot().load_carts(moy_catalogue, seed, root=root)
     names = sorted(p.name for p in Path(root).iterdir() if p.is_dir())
     assert names == ["local.my_game.moy", "moybyte.bench.moy"]

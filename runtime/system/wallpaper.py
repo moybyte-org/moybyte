@@ -50,18 +50,9 @@ try:
     from binascii import crc32
 except ImportError:  # pragma: no cover - no proof: every compile arms
     crc32 = None
-try:
-    from ui_draw import cart_text as _cart_text
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.ui_draw import cart_text as _cart_text
-try:
-    from widgets import Pmem, _Blit, _err_text
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import Pmem, _Blit, _err_text
-try:
-    from file_widgets import Bitmap, cover_indices
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.file_widgets import Bitmap, cover_indices
+from ui_draw import cart_text as _cart_text
+from widgets import Pmem, _Blit, _err_text
+from file_widgets import Bitmap, cover_indices
 # #186: the picture's resampled indices. Off-heap for the same reason its
 # RGB565 bake is (device_canvas._paint_bake_buf) -- a screenful of indices is
 # 153,600 bytes on the Guition's 480x320 desk, and that board's largest
@@ -69,19 +60,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # bytearray on the host and wherever PSRAM is out, so this stays one code path.
 try:
     import moybuf as _moybuf
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    try:
-        from runtime import moybuf as _moybuf
-    except ImportError:
-        _moybuf = None
-try:
-    from moyimg import cover_stream, file_sig, text_sig
-    from moy_image import (load_picture_bake, load_wallpaper_preview,
-                           save_picture_bake, save_wallpaper_preview)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moyimg import cover_stream, file_sig, text_sig
-    from runtime.moy_image import (load_picture_bake, load_wallpaper_preview,
-                                   save_picture_bake, save_wallpaper_preview)
+except ImportError:
+    _moybuf = None
+from moyimg import file_sig, text_sig
+from moy_image import (load_picture_bake, load_wallpaper_preview,
+                       save_picture_bake, save_wallpaper_preview)
 
 
 def _rect(v):
@@ -344,15 +327,8 @@ class Wallpaper:
         sig = file_sig(f)
         if folder and load_picture_bake(folder, cw, ch, sig, pix):
             return True
-        cover = getattr(self.ws.carts_store, "cover_image", None)
-        got = None
-        try:
-            if cover is None:
-                raise ImportError("no cover_image")
-            got = cover(f, pix, cw, ch, self.PIC_MAX_W, self.PIC_MAX_H)
-        except ImportError:    # the host without its C library: the reference
-            f.seek(0)
-            got = cover_stream(f, pix, cw, ch, self.PIC_MAX_W, self.PIC_MAX_H)
+        got = self.ws.carts_store.cover_image(f, pix, cw, ch, self.PIC_MAX_W,
+                                              self.PIC_MAX_H)
         if got is None:
             return False
         if folder:
@@ -477,8 +453,8 @@ class Wallpaper:
             return
         try:
             glass = bool(cart.get("glass"))
-            sheet = ws._build_sheet(cart)
-            tilemap = ws._build_tilemap(cart)
+            sheet = ws.build_sheet(cart)
+            tilemap = ws.build_tilemap(cart)
             ns = ws.make_api(ws.sys_canvas if glass else ws.run.canvas, ws.input,
                              dict(cart.get("cfg", {})),
                              # A wallpaper is silent: it holds no audio session.
@@ -486,8 +462,8 @@ class Wallpaper:
                              tilemap, Pmem(), None, cart.get("images") or {},
                              # A wallpaper is a cart, so it gets the fourth asset
                              # type too: sakura sheds its petals from a scene.
-                             ws._build_scenes(cart),
-                             flags=ws._build_flags(cart),   # SPEC.md 3.5 tile flags
+                             ws.build_scenes(cart),
+                             flags=ws.build_flags(cart),   # SPEC.md 3.5 tile flags
                              owner="wallpaper")   # #63: layer loans reclaimed on clear()
             exec(compile(cart["src"], "<wallpaper>", "exec"), ns)
             if glass:               # after the module's own default, before _init
@@ -766,7 +742,7 @@ class Wallpaper:
         if ws.look.wallpaper_id == ws.look.PICTURE or self._wp_pics is not None:
             try:
                 if self.draw_picture(ws.sys_canvas):
-                    ws._reset_canvas_state()
+                    ws.reset_canvas_state()
                     self._painted(False)
                     return
             except Exception as exc:  # noqa: BLE001 -- fall back to the fill
@@ -789,7 +765,8 @@ class Wallpaper:
                 # The safe area is the layout's content rect: the wallpaper
                 # cart draws its world there, clear of the bar.
                 lay = ws.layout
-                safe = ws.screen in ("launcher", "settings")
+                top = ws.layer_of(ws.screen)
+                safe = top is not None and top.ON_WALLPAPER
                 # Two-domain tiers (#39/#58): the wallpaper cart draws on the 320x240
                 # GAME canvas but the content rect is SYSTEM-layout units (36px bar
                 # at font 2) -- shifting 240 game rows by that cut the scene's bottom
@@ -821,7 +798,7 @@ class Wallpaper:
                 # Clear any camera/clip/pal/palt (#11) the wallpaper cart set (and the
                 # safe-area camera/clip above), so the home/settings foreground (icons,
                 # status strip) draws clean at full extent.
-                ws._reset_canvas_state()
+                ws.reset_canvas_state()
                 # Two-domain seam (#39): a wallpaper CART draws on the fixed 320x240
                 # game canvas (it runs under the kid cart API). On a DISTINCT (big)
                 # system canvas the desktop backdrop lives on the SYSTEM canvas, so
@@ -836,7 +813,7 @@ class Wallpaper:
                 return
             except Exception as exc:  # noqa: BLE001 -- drop a broken wallpaper to the fill
                 print("Moybyte wallpaper draw error:", _err_text(exc))
-                ws._reset_canvas_state()
+                ws.reset_canvas_state()
                 self._wp_ns = self._wp_update = self._wp_draw = None
                 guard = getattr(ws, "wallpaper_guard", None)
                 if guard is not None:
@@ -848,7 +825,7 @@ class Wallpaper:
         if self._refused is not None:
             title = self._refused
             self._refused = None
-            note = getattr(ws, "notice", None)
+            note = getattr(getattr(ws, "notices", None), "notice", None)
             if note is not None:
                 note("WALLPAPER OFF", "%s couldn't start" % title, "warn")
         # The desk's fill: the theme's backdrop over its `desktop` (NONE, a
@@ -997,10 +974,10 @@ class Wallpaper:
         size`, injected by all four heads (runtime/host/host_app.py, web_boot.py and
         both boards' moy_runtime.py) and pinned as a service by
         tests/test_board_service_parity.py. Each head hands back a canvas over
-        ITS OWN compositor -- HostCompositor, WebCompositor, an moy_alloc-backed
-        _LayerComp in board PSRAM -- so there is nothing left to choose between
-        and no per-tier name in this file at all. It is the same factory
-        `Workstation.bind_run_canvas` uses to give a cart with a small raster
+        ITS OWN compositor -- the one-buffer compositor on the host and in the
+        browser, an moy_alloc-backed _LayerComp in board PSRAM -- so there is
+        nothing left to choose between and no per-tier name in this file at
+        all. It is the same factory `CanvasBinding.bind_run_canvas` uses to give a cart with a small raster
         (SPEC.md 3.1) a canvas to play on, which is the same request: an
         offscreen surface the size of a cart frame.
 
@@ -1036,13 +1013,13 @@ class Wallpaper:
             # dance the look's `_show_wallpaper` does for the backdrop compile.
             ws.carts.rehydrate(cart)
             try:
-                sheet = ws._build_sheet(cart)
-                tilemap = ws._build_tilemap(cart)
+                sheet = ws.build_sheet(cart)
+                tilemap = ws.build_tilemap(cart)
                 ns = ws.make_api(pv, ws.input, dict(cart.get("cfg", {})),
                                  sheet, None,
                                  tilemap, Pmem(), None, cart.get("images") or {},
-                                 ws._build_scenes(cart),
-                                 flags=ws._build_flags(cart),
+                                 ws.build_scenes(cart),
+                                 flags=ws.build_flags(cart),
                                  owner="wallpaper_pv")
                 exec(compile(cart["src"], "<wallpaper-preview>", "exec"), ns)
                 if cart.get("glass"):
@@ -1132,7 +1109,7 @@ class Wallpaper:
             if (pix is not None and path and sig is not None
                     and getattr(self.ws, "can_manage", False)):
                 try:
-                    self.ws._with_sd(lambda: save_wallpaper_preview(
+                    self.ws.with_sd(lambda: save_wallpaper_preview(
                         path, vw, vh, sig, pix))
                 except Exception:  # noqa: BLE001 -- regenerable cache
                     pass

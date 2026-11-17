@@ -13,14 +13,9 @@ details" and a crash notification open.
 
 from array import array
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-    import os_log as _log
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-    from runtime import os_log as _log
+import ui as _ui
+import ui_draw as _ui_draw
+import os_log as _log
 
 KEEP = 240                  # the lines the page holds, the oldest dropped first
 TITLE = "System log"

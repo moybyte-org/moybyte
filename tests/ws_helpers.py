@@ -131,7 +131,7 @@ def select_on_home(ws, title):
             ws.launcher.sel = i
             return c
     cart = next((c for c in ws.carts.all if c["title"] == title), None)
-    if cart is None or not ws.select_cart(cart):
+    if cart is None or not ws.home.select_cart(cart):
         return None
     return ws.launcher.selected()
 
@@ -147,8 +147,8 @@ def open_cart(ws, title):
         return
     cart = next((c for c in ws.carts.all if c["title"] == title), None)
     assert cart is not None, "seed cart not found: " + title
-    ws._open_workspace(cart)
-    ws.play(ws.launcher_layer)
+    ws.open_workspace(cart)
+    ws.spine.play(ws.launcher_layer)
 
 
 def make_drv(ws):
@@ -170,7 +170,7 @@ def settle_badges(ws=None):
     for p in list(s.procs.values()):
         ns = p.ns
         if p.state != scheduler.EXITED and ns and "SAVE_MS" in ns and "_later" in ns:
-            s._guarded(p.pid, ns["_later"])
+            s.python._guarded(p.pid, ns["_later"])
     return ws
 
 
@@ -184,7 +184,7 @@ def quiesce(ws):
     deadline is up. The badges' queued events run first (`settle_badges`)."""
     settle_badges(ws)
     ws.pointer.visible = False
-    ws._toast_until = 0
+    ws.toast_until = 0
 
 
 def no_unlock_banner(ws):
@@ -245,8 +245,8 @@ def device_frames(ws, n=1, dt=1 / 30):
     refreshed by `handle_pointer`)."""
     for _ in range(n):
         ws.input.begin_frame()
-        ws.handle_input()
-        ws.handle_pointer()
+        ws.router.handle_input()
+        ws.router.handle_pointer()
         ws.frame(dt)
 
 
@@ -328,7 +328,7 @@ def settings_back(ws, drv):
     look draws it, else the bar's context X."""
     bl = ws.bar_layer
     if bl.draws_back("settings"):
-        x, y, w, h = bl._zone_rect("settings")
+        x, y, w, h = bl.zone_rect("settings")
         bx, by = bl.cell("settings", "zone")[0][1][:2]
         drv.click(bx + x + h // 2, by + y + h // 2)
         return

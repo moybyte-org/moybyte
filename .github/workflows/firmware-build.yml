@@ -66,7 +66,7 @@ on:
         description: "Which board(s) to build ('both' = all boards)"
         type: choice
         default: tdeck
-        options: [tdeck, p4, guition_s3, xiao_zero, guition_p4, both]
+        options: [tdeck, p4, guition_s3, xiao_zero, guition_p4, c3_zero, both]
 
 concurrency:
   group: firmware-${{ github.ref }}
@@ -111,6 +111,12 @@ jobs:
           - board: guition_p4
             dir: firmware/guition_jc8012p4a1c
             make_target: firmware-build-guition-p4
+          # The C3 Zero: the Zero on an ESP32-C3, one app slot and no OTA. It
+          # has no OTA manifest (publish_firmware_release.NO_OTA); its flasher
+          # card offers the install and the app image, its only update.
+          - board: c3_zero
+            dir: firmware/esp32c3_zero
+            make_target: firmware-build-c3-zero
     # Only run the boards the dispatcher asked for. A PUSH sets no input, so a
     # branch build does every board in the matrix; a dispatch honours the
     # choice.
@@ -182,14 +188,23 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: python3 -m pip install --quiet 'zopfli==0.4.3'
 
-      # Cache the installed Xtensa/RISC-V toolchains (the expensive part); the
-      # .build/ clone itself is too big for the 10 GB cache, so it is fetched fresh.
+      # The upstream releases (tools/upstream_pins.env) as this job's step
+      # outputs: steps.pins.outputs.MOYBYTE_IDF_VER and MOYBYTE_MPY_TAG.
+      - name: Read the upstream pins
+        id: pins
+        if: steps.gate.outputs.run == 'true'
+        run: grep -E '^[A-Z][A-Z0-9_]*=' tools/upstream_pins.env >> "$GITHUB_OUTPUT"
+
+      # Cache the installed Xtensa/RISC-V toolchains (the expensive part).
+      # The key names the ESP-IDF release (MOYBYTE_IDF_VER): a release that
+      # wants other tools installs them over the restored ones once and saves
+      # them under its own key.
       - name: Cache ESP-IDF toolchains
         if: steps.gate.outputs.run == 'true'
         uses: actions/cache@v4
         with:
           path: ~/.espressif
-          key: idf-${{ matrix.board }}-${{ runner.os }}-v1
+          key: idf-${{ matrix.board }}-${{ runner.os }}-${{ steps.pins.outputs.MOYBYTE_IDF_VER }}
           restore-keys: idf-${{ matrix.board }}-${{ runner.os }}-
 
       # ccache 4 writes ~/.cache/ccache unless told; name the directory the
@@ -242,7 +257,7 @@ jobs:
             pip-${{ runner.os }}-
 
       # The BIG win: cache the per-board `.build` UPSTREAM CLONES (esp-idf +
-      # micropython). They are PINNED in build.sh, so an
+      # micropython). They are PINNED (tools/upstream_pins.env), so an
       # otherwise-fresh runner re-clones ~1.5 GB of esp-idf on every run -- and for
       # the T-Deck that late esp-idf fetch is exactly why the build had to run
       # twice (the #43 patch can't land until esp-idf exists). Keyed on build.sh so
@@ -270,7 +285,7 @@ jobs:
           path: |
             ${{ matrix.dir }}/.build
             !${{ matrix.dir }}/.build/micropython/ports/esp32/build-*
-          key: build-${{ matrix.board }}-${{ runner.os }}-${{ hashFiles(format('{0}/build.sh', matrix.dir), format('{0}/patches/**', matrix.dir), 'patches/**', 'tools/esp32_build_lib.sh', 'tools/board_config.py') }}
+          key: build-${{ matrix.board }}-${{ runner.os }}-${{ hashFiles(format('{0}/build.sh', matrix.dir), format('{0}/patches/**', matrix.dir), 'patches/**', 'tools/esp32_build_lib.sh', 'tools/board_config.py', 'tools/upstream_pins.env') }}
 
       # The wasm toolchain, shared with the Pages workflow by key (~1.8 GB:
       # emsdk + a micropython checkout, both pinned by web_runner/build.sh).
@@ -279,7 +294,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: firmware/web_runner/.build
-          key: web-runner-${{ runner.os }}-${{ hashFiles('firmware/web_runner/build.sh') }}
+          key: web-runner-${{ runner.os }}-${{ hashFiles('firmware/web_runner/build.sh', 'tools/upstream_pins.env') }}
           restore-keys: web-runner-${{ runner.os }}-
 
       - name: Host venv (make setup)
@@ -317,6 +332,17 @@ jobs:
           fi
           ccache -s | head -12 || true
 
+      # Every patch in patches/ against the stock releases the build just put
+      # at their pins, read from the trees' indexes (tools/patch_check.py), so
+      # a restored, already-patched tree still answers. It runs when the build
+      # failed too: a release bump then names every patch it breaks at once.
+      - name: Check patches/ against the pinned releases
+        if: ${{ !cancelled() && steps.gate.outputs.run == 'true' }}
+        run: >-
+          python3 tools/patch_check.py
+          --mpy ${{ matrix.dir }}/.build/micropython
+          --idf ${{ matrix.dir }}/.build/esp-idf
+
       # The P4's radio is a SECOND processor with its own firmware: the C6
       # slave (the espnow shim -- docs/espnow_p4_2026-08.md). Built from the
       # SAME managed-component checkout the P4 image just built against, so
@@ -326,6 +352,14 @@ jobs:
       - name: Build the C6 co-processor image
         if: steps.gate.outputs.run == 'true' && matrix.board == 'p4'
         run: firmware/esp32_p4_wifi6_touch_lcd_7b/c6_slave/build.sh
+
+      # The website's install of this board (tools/store_image.py): the
+      # merged image, then the internal store holding the browser console
+      # add-on that fits it, as `<stem>_install.bin` beside the image, which
+      # the collect below carries. `make setup`'s venv has littlefs-python.
+      - name: The website's install image
+        if: steps.gate.outputs.run == 'true'
+        run: .venv/bin/python tools/store_image.py ${{ matrix.dir }}
 
       - name: Collect images
         if: steps.gate.outputs.run == 'true'
@@ -352,9 +386,15 @@ jobs:
           cp dist/guition_s3/ota_build.json out/ 2>/dev/null || true
           cp dist/zero/ota_build.json out/ 2>/dev/null || true
           cp dist/guition_p4/ota_build.json out/ 2>/dev/null || true
+          cp dist/c3_zero/ota_build.json out/ 2>/dev/null || true
           # The C6 slave's identity stamp (P4 job only) -- the publisher reads
           # c6.version out of it; the .bin itself rode the find above.
           cp dist/p4/c6_build.json out/ 2>/dev/null || true
+          # The browser console add-on every board's build packs: the
+          # publisher puts it beside the payload under the digest the image
+          # names (tools/web_pack.py), and refuses that board's manifest when
+          # the run carries no page its image names.
+          cp dist/*/moybyte_web.pack out/ 2>/dev/null || true
           ls -l out || true
           # A build whose identity did not travel would publish a manifest that
           # lies about the image, so say it loudly rather than shipping it.

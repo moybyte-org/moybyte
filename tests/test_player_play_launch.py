@@ -7,7 +7,7 @@ whose runtime offers no C frame ends at once and ticks through Python."""
 import os
 import shutil
 
-from runtime import player as player_mod
+from runtime import player as player_mod, player_pace as pace_mod
 from ws_helpers import build_ws, open_cart
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "placement_lua.moy")
@@ -32,7 +32,9 @@ def _ws(tmp_path, monkeypatch, log, make=None):
     root.mkdir(parents=True)
     shutil.copytree(FIXTURE, str(root / "placement_lua.moy"))
     ws = build_ws(tmp_path)
-    monkeypatch.setattr(player_mod, "_moy_play", FakePlay(log))
+    play = FakePlay(log)
+    monkeypatch.setattr(player_mod, "_moy_play", play)
+    monkeypatch.setattr(pace_mod, "_moy_play", play)
     real = ws.runtimes["lua"]
 
     def factory(ns, src):
@@ -54,7 +56,7 @@ def test_the_run_is_launched_before_its_runtime_loads(tmp_path, monkeypatch):
     assert log[1] == ("load",)
     # The runtime offers the C frame (play_begin), so the run is the
     # runtime's from here, ended at its close.
-    assert ws.run.player._lua._run == 0x15A
+    assert ws.run.player.lua._run == 0x15A
     assert len(log) == 2
 
 
@@ -75,7 +77,7 @@ def test_a_runtime_that_will_not_load_ends_its_run_as_a_crash(tmp_path, monkeypa
 # ticks it runs, the keys, the lockstep step, the crash capture, the tail and
 # the slow-logic gate under the perf brackets, and the input a cart owns.
 PLAYER_FRAME_PATH = ("frame_plan", "_run_ticks", "tick", "_tick_keys", "_lockstep_step",
-                     "_capture_frame_error", "_tick_tail", "_maybe_diag_slow_logic",
+                     "capture_frame_error", "_tick_tail", "_maybe_diag_slow_logic",
                      "handle_input", "handle_pointer")
 
 

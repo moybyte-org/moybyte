@@ -1,0 +1,8 @@
+{
+  "moy_usb": {
+    "about": "the P4's USB host, native/p4/moy_usb/moy_usb.h",
+    "host": "moy_usb",
+    "lazy": true,
+    "structs": ["moy_usb_dev_t"]
+  }
+}

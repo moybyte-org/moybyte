@@ -17,15 +17,23 @@
 #include "moy_midi.h"
 
 // The USB host (native/p4/moy_usb/moy_usb.h), where the image has one.
-int moy_usb_open(uint32_t owner) __attribute__((weak));
-int moy_usb_close(uint32_t owner) __attribute__((weak));
-uint32_t moy_usb_owner(void) __attribute__((weak));
-int moy_usb_class_of(uint8_t addr) __attribute__((weak));
-int moy_usb_write(uint32_t owner, uint8_t addr, const uint8_t *d, size_t n)
-    __attribute__((weak));
+#if __has_include("moy_usb.h")
+#include "moy_usb.h"
+#else
+int moy_usb_open(uint32_t owner);
+int moy_usb_close(uint32_t owner);
+uint32_t moy_usb_owner(void);
+int moy_usb_class_of(uint8_t addr);
+int moy_usb_write(uint32_t owner, uint8_t addr, const uint8_t *d, size_t n);
+#endif
+#pragma weak moy_usb_open
+#pragma weak moy_usb_close
+#pragma weak moy_usb_owner
+#pragma weak moy_usb_class_of
+#pragma weak moy_usb_write
 #define USB_CLASS_MIDI 3        // moy_usb.h's MOY_USB_MIDI
 
-moy_input_t *moy_input_kernel(void) __attribute__((weak));
+#pragma weak moy_input_kernel
 
 #define REC 3u                  // a message read: status, data1, data2
 #define WRITE_MAX 256u          // the bytes one write carries

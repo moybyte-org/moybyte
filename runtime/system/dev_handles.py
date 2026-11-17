@@ -72,13 +72,12 @@ of its own), so a device's records never ride the event queue, whose
 messages are text for the console's events. Python's callbacks (`irq`, a
 face's `on`) stay Python's."""
 
-try:
-    import moybyte as _moybyte
-except ImportError:  # host: the runtime package
-    from runtime import moybyte as _moybyte
+import face_errors as _C
+import moybyte as _moybyte
 
 # moy_app.h's codes, negated: what a row answers when it fails.
-STALE, FULL, NOMEM, DENIED, BAD, ABSENT, IO, BUSY = -1, -2, -3, -4, -7, -8, -6, -11
+STALE, FULL, NOMEM, DENIED, BAD, ABSENT, IO, BUSY = (
+    -_C.STALE, -_C.FULL, -_C.NOMEM, -_C.DENIED, -_C.BAD, -_C.ABSENT, -_C.IO, -_C.BUSY)
 
 EPERM, ENOENT, EIO, EBADF, ENOMEM, EACCES, EBUSY, ENODEV, EINVAL, ENOSPC = (
     1, 2, 5, 9, 12, 13, 16, 19, 22, 28)
@@ -98,10 +97,7 @@ def _code(exc):
 
 
 def _face(name):
-    try:
-        import devices
-    except ImportError:  # host: the runtime package
-        from runtime import devices
+    import devices
     f = devices.api(name)
     if f is None:
         raise OSError(ENODEV, "this console has no %s" % name)
@@ -196,10 +192,7 @@ _NET_CODE = {-1: EINVAL, -2: ENOSPC, -3: EBUSY, -4: EBADF, -5: EIO, -6: EBUSY}
 
 
 def _link():
-    try:
-        import devices
-    except ImportError:  # host: the runtime package
-        from runtime import devices
+    import devices
     ws = devices.console
     link = getattr(ws, "link", None)
     if link is None:
@@ -228,7 +221,7 @@ class _Net(_Handle):
             raise OSError(ENOSPC, "a process holds %d ports" % NET_PORTS)
         ws, self.link = _link()
         self.port = port
-        hold = getattr(ws, "wifi_hold", None)
+        hold = getattr(getattr(ws, "spine", None), "wifi_hold", None)
         if hold is not None:
             hold("net", pid)
         try:
@@ -274,7 +267,7 @@ class _Net(_Handle):
 
     def _let_go(self, ws, pid):
         if not any(type(x) is _Net for x in HANDLES.get(pid, {}).values()):
-            release = getattr(ws, "wifi_release", None)
+            release = getattr(getattr(ws, "spine", None), "wifi_release", None)
             if release is not None:
                 release("net", pid)
 
@@ -291,10 +284,7 @@ _PERMS = {"net": ("multiplayer",)}
 
 
 def _need(pid, name):
-    try:
-        import devices
-    except ImportError:  # host: the runtime package
-        from runtime import devices
+    import devices
     perms = _PERMS.get(name, (name,))
     for perm in perms:
         if devices.may(pid, perm):
@@ -374,4 +364,4 @@ def sweep(pid):
     return len(held or ())
 
 
-_moybyte.ENDS.insert(0, sweep)
+_moybyte.on_end("handles", sweep)

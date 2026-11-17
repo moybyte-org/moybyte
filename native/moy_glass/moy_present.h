@@ -61,7 +61,9 @@ int moy_banded_last(const moy_banded_t *b);
 // moves to the next buffer, and a buffer still read by a queued op is fenced
 // before it is drawn into again. A show takes effect at the panel's next
 // refresh, so with three the buffer the next frame draws into is never the one
-// on glass: a queued window stamp that has landed is shown when the next frame
+// on glass: a queued window stamp that has landed is shown before the next
+// frame draws (the loop's `landed` stage), or after a drag frame's restore
+// (`show_landed`, asked by the WM), or, landing later still, when that frame
 // flushes, a whole frame before the buffer it leaves is drawn into; when every
 // other buffer still holds a queued show they are fenced and shown; and the
 // pre-frame hook waits out the refresh that takes the drawn-into buffer off
@@ -269,5 +271,27 @@ void moy_rot_fence(moy_rot_t *r);
 // of it into the one this frame paints (`copy_last`): a deferred stamp it
 // queued into that buffer has landed. -1 before a frame was flushed.
 int moy_rot_last(moy_rot_t *r);
+
+// THE GAME COMPOSITE (moy_present_game.c): a game canvas, `scale` times,
+// into a P4 compositor's picture -- the console's canvas, the rotated
+// compositor's paint route and the kernel's front all take it. CRISP
+// PIXELS (moy_game_crisp) picks the PPA's banded nearest, else the PPA's
+// bilinear scale, and the CPU kernel's nearest where the PPA does not take
+// it; an error on the bilinear scale demotes the composite to the CPU
+// kernel for the kernel's life. `frame`: a compiled cart's direct-colour
+// frame, which keeps the bilinear scale under CRISP PIXELS. Picture sizes in
+// pixels.
+enum {
+    MOY_GAME_DONE = 0,          // composited, nothing in flight
+    MOY_GAME_QUEUED = 1,        // a PPA op still writes dst: the show waits for it
+    MOY_GAME_DEMOTED = -1,      // the PPA failed, now demoted; composited on the CPU
+};
+void moy_game_crisp(bool on);
+// Whether the PPA's bilinear scale would take this composite: what a quiet
+// frame of the rotated compositor scales straight from the game canvas.
+bool moy_game_direct(int dw, int dh, int dx, int dy, int sw, int sh, int scale);
+int moy_game_composite(uint16_t *dst, size_t dcap, int dw, int dh, int dx, int dy,
+                       const uint16_t *src, size_t scap, int sw, int sh, int scale,
+                       bool defer, bool frame);
 
 #endif // MOY_PRESENT_H

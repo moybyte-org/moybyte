@@ -1,6 +1,10 @@
 // A Lua cart's VM over the console, with no MicroPython in it (moycore_lua.h
 // has the contract; native/moycore/README.md the allocator's design).
 
+#include "moy_platform.h"
+
+#include "moy_kmem.h"
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,6 +12,7 @@
 
 #include "lua.h"
 #include "lauxlib.h"
+#include "lualib.h"
 
 #include "moy.h"
 #include "moycore_layers.h"
@@ -18,6 +23,7 @@
 #include "moycore_ui.h"
 #endif
 #include "moycore_scene.h"
+#include "moy_codec.h"
 #include "moy_img.h"
 #include "moy_buf.h"
 #include "moy_proc.h"
@@ -26,13 +32,12 @@
 
 #define HOOK(name, ...) moycore_lua_hooks.name(__VA_ARGS__)
 
-// The board allocator, probed the way moy_lua probes it: present on an ESP-IDF
-// build, absent on the host/unix/wasm ones, which then use plain realloc.
-#if defined(__has_include)
-#if __has_include("esp_heap_caps.h")
+// The board allocator, on a board (moy_platform.h); the host/unix/wasm
+// builds use plain realloc.
+#ifdef MOY_ON_BOARD
 #include "esp_heap_caps.h"
-#define MOYCORE_PSRAM 1
 #endif
+#if defined(__has_include)
 // Which REGION a pointer is in, for the allocator census. Its own probe and
 // its own INCLUDE: the S3 gets esp_ptr_internal transitively through
 // esp_heap_caps.h and the P4 does not, so a probe that tests for the header
@@ -89,7 +94,7 @@ static uint32_t g_sram_denied;
 // never allocated big is not a run with zero headroom.
 static size_t g_sram_free_min = SIZE_MAX;
 static uint8_t g_psram_fallback;
-#ifndef MOYCORE_PSRAM
+#ifndef MOY_ON_BOARD
 // Off-board there is ONE region, so the split above cannot happen and the
 // report is None. `sram_sim(bytes)` supplies the free figure the boards read
 // from the heap, which is what makes the floor arithmetic and the fallback
@@ -157,7 +162,7 @@ static void *big_realloc(void *ptr, size_t osize, size_t nsize)
     // is not readable from an indeterminate value (see census_sub_region).
     int oregion = (ptr != NULL) ? mc_region(ptr) : 0;
     void *np;
-#ifdef MOYCORE_PSRAM
+#ifdef MOY_ON_BOARD
     int tried_sram = 0;
     np = NULL;
     size_t sram_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
@@ -268,7 +273,7 @@ static const uint16_t POOL_SZ[POOL_CLASSES] = {16, 32, 48, 64, 96, 128, 192, 256
 #endif
 #define MOYCORE_POOL_CHUNK_MIN (4 * 1024)
 
-#if !defined(MOYCORE_PSRAM) && \
+#if !defined(MOY_ON_BOARD) && \
     (defined(__unix__) || defined(__APPLE__) || defined(__EMSCRIPTEN__))
 // Declared here rather than reached through a feature macro: which of
 // _POSIX_C_SOURCE / _DEFAULT_SOURCE stdlib.h wants depends on the port's -std,
@@ -316,7 +321,7 @@ static inline int pool_class(size_t n)
 static mc_chunk *chunk_new(size_t sz)
 {
     void *raw, *base;
-#ifdef MOYCORE_PSRAM
+#ifdef MOY_ON_BOARD
     raw = heap_caps_aligned_alloc(sz, sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (raw == NULL) return NULL;
     base = raw;
@@ -334,7 +339,7 @@ static mc_chunk *chunk_new(size_t sz)
 
 static void chunk_free(mc_chunk *c)
 {
-#ifdef MOYCORE_PSRAM
+#ifdef MOY_ON_BOARD
     heap_caps_free(c->raw);           // aligned or not: TLSF blocks are the same
 #else
     free(c->raw);
@@ -605,14 +610,6 @@ static void *l_alloc(void *ud, void *ptr, size_t osize, size_t nsize)
 #define g_p8rom (RUN.p8rom)
 static uint8_t *g_p8_next_mem, *g_p8_next_rom;   // the next open's, the row's from then
 
-static int mc_unhex(int ch)
-{
-    if (ch >= '0' && ch <= '9') return ch - '0';
-    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
-    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
-    return -1;
-}
-
 // __moy_map_flags(hex): the baked __gff__ table, two hex chars per sprite,
 // crossed ONCE at shim boot. A bad nibble reads as 0, exactly like the shim's
 // own tonumber(..., 16). Non-string clears.
@@ -626,8 +623,8 @@ static int l_map_flags(lua_State *L)
     n = len / 2;
     if (n > sizeof(RUN.c.flags)) n = sizeof(RUN.c.flags);
     for (i = 0; i < n; i++) {
-        int hi = mc_unhex((unsigned char)s[2 * i]);
-        int lo = mc_unhex((unsigned char)s[2 * i + 1]);
+        int hi = moy_hex_value((unsigned char)s[2 * i]);
+        int lo = moy_hex_value((unsigned char)s[2 * i + 1]);
         if (hi >= 0 && lo >= 0) RUN.c.flags[i] = (uint8_t)((hi << 4) | lo);
     }
     lua_pushboolean(L, 1);
@@ -774,7 +771,7 @@ void moycore_lua_meters_reset(void)
 
 size_t moycore_lua_set_sram_floor(size_t bytes)
 {
-#ifdef MOYCORE_PSRAM
+#ifdef MOY_ON_BOARD
     if (bytes < 16 * 1024) bytes = 16 * 1024;
     if (bytes > 256 * 1024) bytes = 256 * 1024;
     g_sram_floor = bytes;
@@ -787,7 +784,7 @@ size_t moycore_lua_set_sram_floor(size_t bytes)
 
 int moycore_lua_two_regions(void)
 {
-#ifdef MOYCORE_PSRAM
+#ifdef MOY_ON_BOARD
     return 1;
 #else
     return g_sram_sim != 0;
@@ -796,7 +793,7 @@ int moycore_lua_two_regions(void)
 
 size_t moycore_lua_sram_sim(size_t bytes)
 {
-#ifdef MOYCORE_PSRAM
+#ifdef MOY_ON_BOARD
     (void)bytes;
     return 0;
 #else
@@ -870,16 +867,12 @@ typedef struct {
 
 static void *media_alloc(size_t n)
 {
-#ifdef MOYCORE_PSRAM
-    void *p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (p) return p;
-#endif
-    return calloc(1, n);
+    return moy_kalloc(n, MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK | MOY_KMEM_ZERO);
 }
 
 static void media_free(void *p)
 {
-#ifdef MOYCORE_PSRAM
+#ifdef MOY_ON_BOARD
     heap_caps_free(p);
 #else
     free(p);
@@ -909,10 +902,8 @@ static uint32_t g_owner_next;
 // on the S3s), held only while its run is, so the idle desk pays nothing.
 static void *row_alloc(void)
 {
-#ifdef MOYCORE_PSRAM
-    void *p = heap_caps_calloc(1, sizeof(moycore_run), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    void *p = moy_kalloc(sizeof(moycore_run), MOY_KMEM_INTERNAL | MOY_KMEM_ZERO);
     if (p) return p;
-#endif
     return media_alloc(sizeof(moycore_run));
 }
 
@@ -1252,7 +1243,64 @@ static void media_open(lua_State *L)
 // The app ABI's Lua face (native/moy_app/moy_app_lua.h): the role names of
 // the app's run, opened before the cart can capture a global. Weak: an image
 // without native/moy_app opens none.
-int moy_app_lua_open(lua_State *L, const struct moy_app_run *app) __attribute__((weak));
+#if __has_include("moy_app_lua.h")
+#include "moy_app_lua.h"
+#else
+int moy_app_lua_open(lua_State *L, const struct moy_app_run *run);
+#endif
+#pragma weak moy_app_lua_open
+
+static const char *const SANDBOX_BANNED[] = {
+    "load", "loadstring", "dofile", "loadfile", "require", "collectgarbage",
+    "io", "os", "debug", "package", NULL
+};
+
+void moycore_lua_sandbox(lua_State *L)
+{
+    static const luaL_Reg libs[] = {
+        { LUA_GNAME, luaopen_base }, { LUA_COLIBNAME, luaopen_coroutine },
+        { LUA_TABLIBNAME, luaopen_table }, { LUA_STRLIBNAME, luaopen_string },
+        { LUA_MATHLIBNAME, luaopen_math }, { NULL, NULL },
+    };
+    for (const luaL_Reg *v = libs; v->name; v++) {
+        luaL_requiref(L, v->name, v->func, 1);
+        lua_pop(L, 1);
+    }
+    for (const char *const *b = SANDBOX_BANNED; *b; b++) {
+        lua_pushnil(L);
+        lua_setglobal(L, *b);
+    }
+}
+
+static int l_own(lua_State *L)
+{
+    moycore_mb_open(L, &RUN.mb, (uint32_t)lua_tointeger(L, 1), moycore_mb_call);
+    RUN.mb_open = 1;
+    return 0;
+}
+
+int moycore_lua_own(uint32_t pid, char *err, size_t n)
+{
+    if (RUN.L == NULL) {
+        put_err(err, n, "moycore: no VM");
+        return -1;
+    }
+    lua_pushcfunction(RUN.L, l_own);
+    lua_pushinteger(RUN.L, (lua_Integer)pid);
+    if (lua_pcall(RUN.L, 1, 0, 0) != LUA_OK) {
+        const char *m = lua_tostring(RUN.L, -1);
+        put_err(err, n, m != NULL ? m : "moycore: no moybyte table");
+        lua_pop(RUN.L, 1);
+        return -1;
+    }
+    return 0;
+}
+
+int moycore_lua_call(const char *fn, const char *json, size_t len, char *err, size_t n)
+{
+    if (RUN.L == NULL) return 0;
+    return moycore_mb_global(RUN.L, fn, json, len, err, n);
+}
 
 int moycore_lua_open(const struct moy_app_run *app, char *err, size_t n)
 {
@@ -1261,6 +1309,7 @@ int moycore_lua_open(const struct moy_app_run *app, char *err, size_t n)
         put_err(err, n, "moycore: no VM");
         return -1;
     }
+    moycore_lua_sandbox(RUN.L);
     if (moy_lua_open(RUN.L, &RUN.c.con) != 0) {
         lua_close(RUN.L);
         RUN.L = NULL;
@@ -1470,6 +1519,11 @@ int moycore_lua_tick(float dt, int draw, char *err, size_t n)
     // errors out never reaches frame_end, because half a tick would move the
     // profilers' ratios without being a tick.
     uint32_t pm[4];
+    // The run's wakes gone off since its last frame (moycore_moybyte.h),
+    // before its _update: what one raises is the frame's error.
+    if (RUN.mb_open && moycore_mb_serve(RUN.L, &RUN.mb, err, n) < 0) {
+        return -1;
+    }
     HOOK(frame_begin, pm);
     uint32_t t0 = moycore_run_now_us();
     if (moy_lua_update(RUN.L, dt, err, n) != 0) {
@@ -1527,6 +1581,11 @@ void moycore_lua_unstuck(void)
 
 void moycore_lua_close(void)
 {
+    if (RUN.L && RUN.mb_open) {
+        lua_settop(RUN.L, 0);
+        moycore_mb_end(RUN.L, &RUN.mb);
+    }
+    RUN.mb_open = 0;
     if (RUN.L) lua_close(RUN.L);
     RUN.L = NULL;
     media_release();                 // after the VM: its canvases point at the layers

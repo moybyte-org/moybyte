@@ -38,10 +38,12 @@
 // back (the store's crash-safe write) and everything is closed before the
 // next VM starts, the shell's session made again in its folder last.
 
+#include "moy_platform.h"
+
 #include "py/mpconfig.h"
 
 #if defined(__has_include)
-#if __has_include("esp_heap_caps.h") && defined(MOY_VM_STOP) && MOY_VM_STOP \
+#if defined(MOY_ON_BOARD) && defined(MOY_VM_STOP) && MOY_VM_STOP \
     && defined(MOY_KERNEL_PANEL) && MOY_WASM
 
 #include <stdio.h>
@@ -52,6 +54,7 @@
 #include "py/gc.h"
 #include "sdkconfig.h"
 #include "esp_heap_caps.h"
+#include "moy_kmem.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -98,27 +101,55 @@
 void moy_kernel_heaps(const char *tag, const char *when, const char *extra);
 // The app's run the stop carries (native/moy_app/moy_app.h), weak: an image
 // without native/moy_app has none.
-const struct moy_app_run *moy_app_stopped(void) __attribute__((weak));
+#if __has_include("moy_app.h")
+#include "moy_app.h"
+#else
+const moy_app_run_t *moy_app_stopped(void);
+#endif
+#pragma weak moy_app_stopped
 // The serial shell's idle session (native/moy_sh/moy_sh_board.h's stopped
 // run's room), weak: an image without native/moy_sh has none.
-size_t moy_sh_board_idle_bytes(void) __attribute__((weak));
-bool moy_sh_board_release(char *cwd, size_t cap) __attribute__((weak));
+#if __has_include("moy_sh_board.h")
+#include "moy_sh_board.h"
+#else
+size_t moy_sh_board_idle_bytes(void);
+bool moy_sh_board_release(char *cwd, size_t cap);
+#endif
+#pragma weak moy_sh_board_idle_bytes
+#pragma weak moy_sh_board_release
 // The media service's run (moy_media.h): weak, for an image without it.
-uint32_t moy_media_pid(void) __attribute__((weak));
-bool moy_sh_board_restore(const char *cwd) __attribute__((weak));
+#if __has_include("moy_media.h")
+#include "moy_media.h"
+#else
+uint32_t moy_media_pid(void);
+#endif
+#pragma weak moy_media_pid
+#if __has_include("moy_sh_board.h")
+#include "moy_sh_board.h"
+#else
+bool moy_sh_board_restore(const char *cwd);
+#endif
+#pragma weak moy_sh_board_restore
 void moy_kernel_say(const char *line);
 void moy_kernel_feed(void);
 void moy_kernel_stamp(int part);
 bool moy_loop_board_serial(void);
 // The updater's state (native/moy_net), where the image has it.
-typedef struct {
+#if !__has_include("moy_ota.h")
+typedef struct {                        // moy_ota.h's, field for field
     uint8_t phase;
     uint8_t sink;
     uint32_t dl_done, dl_total;
     uint32_t done, total;
     char err[96];
-} stop_ota_state_t;
-void moy_ota_state(stop_ota_state_t *out) __attribute__((weak));
+} moy_ota_state_t;
+#endif
+#if __has_include("moy_ota.h")
+#include "moy_ota.h"
+#else
+void moy_ota_state(moy_ota_state_t *out);
+#endif
+#pragma weak moy_ota_state
 
 // The panel's kernel entry points (the board's MOY_KERNEL_PANEL module): its
 // C-owned framebuffers, shipped by the board's flush feeder. Strong: a weak
@@ -234,7 +265,7 @@ uint8_t moy_play_stop_verdict(const moy_cat_entry_t *e, const char *path, uint32
         return MOY_PLAY_KEEP_LEASE;
     }
     if (moy_ota_state != NULL) {
-        stop_ota_state_t st;
+        moy_ota_state_t st;
         moy_ota_state(&st);
         if (st.phase == 1 || st.phase == 3) {       // FETCHING, WRITING
             return MOY_PLAY_KEEP_OTA;
@@ -362,7 +393,7 @@ static int read_head(const char *p) {
         e = moy_vol_size(f, &size);
     }
     size_t want = size < HEAD_MAX ? size : HEAD_MAX;
-    S->head = e == 0 ? heap_caps_malloc(want ? want : 1, PSRAM_CAPS) : NULL;
+    S->head = e == 0 ? moy_kalloc(want ? want : 1, MOY_KMEM_PSRAM) : NULL;
     size_t got = 0;
     if (e == 0 && S->head == NULL) {
         e = MOY_ENOMEM;
@@ -422,7 +453,7 @@ static int sha_of(const char *p) {
     if (e == 0) {
         e = moy_vol_open(&v, rest, MOY_VOL_READ, &f);
     }
-    uint8_t *buf = e == 0 ? heap_caps_malloc(16384, PSRAM_CAPS) : NULL;
+    uint8_t *buf = e == 0 ? moy_kalloc(16384, MOY_KMEM_PSRAM) : NULL;
     if (e == 0 && buf == NULL) {
         e = MOY_ENOMEM;
     }
@@ -441,7 +472,7 @@ static int sha_of(const char *p) {
     uint8_t d[32];
     mbedtls_sha256_finish(&c, d);
     mbedtls_sha256_free(&c);
-    heap_caps_free(buf);
+    moy_kfree(buf);
     if (f != NULL) {
         moy_vol_close(f);
     }
@@ -577,7 +608,7 @@ static void pmem_save(const char *path) {
     if (!moycore_RUN.open || !moycore_run_pmem_image(&moycore_RUN.c, S->pmem_out, 256)) {
         return;
     }
-    char *text = heap_caps_malloc(256 * 13 + 4, PSRAM_CAPS);
+    char *text = moy_kalloc(256 * 13 + 4, MOY_KMEM_PSRAM);
     if (text == NULL) {
         return;
     }
@@ -595,7 +626,7 @@ static void pmem_save(const char *path) {
     if (e != 0) {
         printf("STOP pmem: errno %d\n", e);
     }
-    heap_caps_free(text);
+    moy_kfree(text);
 }
 
 // -- the kernel's present -----------------------------------------------------------
@@ -668,7 +699,7 @@ static void panel_wait(uint32_t run, const char *title, const char *text, bool n
         }
         if (has_touch) {
             moy_touch_pt_t pt;
-            moy_touchdev_poll(touch, (uint32_t)(esp_timer_get_time() / 1000)
+            moy_touchdev_poll(touch, (uint32_t)(moy_now_us() / 1000)
                               & (MOY_INPUT_TICKS_PERIOD - 1u), &pt);
             tap |= pt.down && pt.edge;
         }
@@ -772,7 +803,7 @@ static __attribute__((noinline)) bool sh_release(char **cwd) {
         return false;
     }
     size_t n = strlen(at) + 1;
-    *cwd = heap_caps_malloc(n, PSRAM_CAPS);
+    *cwd = moy_kalloc(n, MOY_KMEM_PSRAM);
     if (*cwd != NULL) {
         memcpy(*cwd, at, n);
     }
@@ -783,7 +814,7 @@ static __attribute__((noinline)) bool sh_release(char **cwd) {
 static __attribute__((noinline)) void sh_restore(bool kept, char *cwd) {
     char at[MOY_SH_CWD_MAX];
     snprintf(at, sizeof(at), "%s", cwd != NULL ? cwd : "");
-    heap_caps_free(cwd);
+    moy_kfree(cwd);
     if (kept) {
         moy_sh_board_restore(at);
     }
@@ -807,7 +838,7 @@ void moy_play_stopped_run(void) {
     bool sh_kept = sh_release(&sh_cwd);
     // The gate's reading: PSRAM after the stop, before the load.
     moy_kernel_heaps("STOP", "down", "");
-    S = heap_caps_calloc(1, sizeof(stop_t), PSRAM_CAPS);
+    S = moy_kalloc(sizeof(stop_t), MOY_KMEM_PSRAM | MOY_KMEM_ZERO);
     if (S == NULL) {
         moy_play_end(run, MOY_PLAY_END_CRASH);
         sh_restore(sh_kept, sh_cwd);
@@ -890,8 +921,8 @@ void moy_play_stopped_run(void) {
     }
     moy_play_front_ops(NULL);
     MOY_KERNEL_PANEL(wait)();
-    heap_caps_free(S->head);
-    heap_caps_free(S);
+    moy_kfree(S->head);
+    moy_kfree(S);
     S = NULL;
     moy_kernel_heaps("STOP", "ended", "");
     sh_restore(sh_kept, sh_cwd);

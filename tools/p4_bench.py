@@ -94,7 +94,7 @@ The live theme is put back.
 
 `--icons` benches the icon home (phase 6 step 11) beside the grid
 arrangement it is drawn from, on the same image and store: each set on the
-console (`ws.set_home_arrangement`, no package), then `home idle`, the slow
+console (`ws.home.set_home_arrangement`, no package), then `home idle`, the slow
 drag and a fling with its frames until idle on the Make tab (the longest
 list on every board), and `tab` (the four tabs, then back). The scenario
 names carry the arrangement (`icon home drag`, `grid home drag`...). The
@@ -270,9 +270,9 @@ def win_geom(b, key):
 def home(b):
     """Home, and on a windowed tier the desk: go_home in console mode lands
     on the fullscreen Library, where an app opens without a window."""
-    pyexec(b, "ws.go_home()"); b.drain(2.0)
+    pyexec(b, "ws.home.go_home()"); b.drain(2.0)
     if b.state().get("desk") is False:
-        pyexec(b, "ws.open_desk()"); b.drain(1.0)
+        pyexec(b, "ws.home.open_desk()"); b.drain(1.0)
 
 
 def pick_layout(b, bars):
@@ -320,7 +320,7 @@ class _TK:
         # the swatches stop at their ends: seven steps right, seven back
         return n == ('right' if (ws._th_i // 7) % 2 == 0 else 'left')
 ws._th_key = _TK()
-ws._th_app = getattr(ws, 'appearance_app', None)
+ws._th_app = ws.app("appearance")
 if ws._th_app is not None and not hasattr(ws._th_app, 'show_row'):
     ws._th_app = None
 ws._th_acc = [a for _n, a, _d in moy_ui.theme_accents()]
@@ -367,7 +367,7 @@ def edit_thrash(b, bench):
         return
     keys = bool(pyval(b, "ws._th_app is not None"))
     if keys:
-        pyexec(b, "ws.open_app(ws._th_app)\n"
+        pyexec(b, "ws.spine.open_app(ws._th_app)\n"
                   "ws._th_app.show_row('Accent')")
         b.drain(2.0)
     print("  edit thrash: %s" % ("the Accent swatches by keys" if keys
@@ -395,7 +395,7 @@ def edit_thrash(b, bench):
     pyexec(b, "ws.look.set_theme(ws._th_was)")
     if keys:
         pyexec(b, "if hasattr(ws.wm, 'close_window_kind'): ws.wm.close_window_kind('appearance')\n"
-                  "else: ws.go_home()")
+                  "else: ws.home.go_home()")
     b.drain(2.0)
 
 
@@ -542,16 +542,16 @@ def sprite_scenarios(b, bench, tag):
     b.open("settings"); b.drain(2.0)
     o = win_geom(b, "settings")
     if o is not None:
-        pyval(b, "ws.open_app(ws._apps_by_id['calc'])"); b.drain(2.0)
+        pyval(b, "ws.spine.open_app(ws.app('calc'))"); b.drain(2.0)
         bench.start(); b.cmd("drag 60 6"); b.wait_line("drag done", 30); b.drain(1.0)
         bench.stop("sprite chrome drag %s" % tag)
         home(b)
         b.open("settings"); b.drain(2.0)
         o = win_geom(b, "settings")
-        lay = pyval(b, "ws.wm._wins['settings'].ctx.layout.set_row_h")
-        sx = pyval(b, "ws.wm._wins['settings'].ctx.layout.set_x")
-        sw = pyval(b, "ws.wm._wins['settings'].ctx.layout.set_w")
-        sy = pyval(b, "ws.wm._wins['settings'].ctx.layout.set_row_y0")
+        lay = pyval(b, "ws.wm.windows['settings'].ctx.layout.set_row_h")
+        sx = pyval(b, "ws.wm.windows['settings'].ctx.layout.set_x")
+        sw = pyval(b, "ws.wm.windows['settings'].ctx.layout.set_w")
+        sy = pyval(b, "ws.wm.windows['settings'].ctx.layout.set_row_y0")
         x0, y0 = o[0] + sx + sw // 2, o[1] + sy
     else:
         lay = pyval(b, "ws.layout.set_row_h")
@@ -714,7 +714,7 @@ def bench_shadows(b, out_path):
     bench = Bench(b)
     pyexec(b, HOME_KEY)
     was = pyval(b, "(ws.look.theme_name, ws.look.theme_variant)")
-    windowed = bool(pyval(b, "hasattr(ws.wm, '_draw_unders')"))
+    windowed = bool(pyval(b, "hasattr(ws.wm, 'draw_unders')"))
     themes = [("live", None), ("moy day", "light"), ("moy night", "dark")]
     for tag, variant in themes:
         if variant is not None:
@@ -722,14 +722,14 @@ def bench_shadows(b, out_path):
         if windowed:
             home(b)
             for app in ("files", "calc"):
-                pyval(b, "ws.open_app(ws._apps_by_id['%s'])" % app)
+                pyval(b, "ws.spine.open_app(ws.app('%s'))" % app)
                 b.drain(2.5)
             bench.start(); b.cmd("drag 60 6"); b.wait_line("drag done", 30)
             b.drain(1.0)
             bench.stop("window drag (calc over files), %s" % tag)
             bench.start(); b.drain(2.0)
             bench.stop("desk idle after it, %s" % tag)
-        pyexec(b, "ws.open_library()"); b.drain(6.0)
+        pyexec(b, "ws.home.open_library()"); b.drain(6.0)
         bench.start(); b.drain(2.0); bench.stop("home idle, %s" % tag)
         pyexec(b, "ws.launcher.sel = 0\nws.launcher.scroll = 0\nws.mark_dirty()")
         b.drain(1.5)
@@ -832,7 +832,7 @@ def bench_backdrop(b, out_path):
     if desk:
         bench.start(); b.drain(3.0); bench.stop("desk idle over the backdrop")
         rows.append(("desk", pyval(b, "ws._bd_raster('desk')", timeout=60)))
-    pyexec(b, "ws.open_library()"); b.drain(4.0)
+    pyexec(b, "ws.home.open_library()"); b.drain(4.0)
     rows.append(("home", pyval(b, "ws._bd_raster('home')", timeout=60)))
     b.drain(2.0)
     bench.start(); b.drain(3.0); bench.stop("home idle over the backdrop")
@@ -888,20 +888,20 @@ def bench_desk_scale(b, out_path):
         r = pyval(b, "ws.render_scale") or 1
         tag = "%dx" % r
         home(b)
-        pyexec(b, "ws.open_app(ws._apps_by_id['files'])\n"
-                  "ws.open_app(ws._apps_by_id['calc'])\n"
+        pyexec(b, "ws.spine.open_app(ws.app('files'))\n"
+                  "ws.spine.open_app(ws.app('calc'))\n"
                   "ws.open_settings()")
         b.drain(4.0)
         bench.start(); b.drain(3.0); bench.stop("desk idle, three windows, " + tag)
         bench.start(); b.cmd("drag 60 6"); b.wait_line("drag done", 30); b.drain(1.0)
         bench.stop("window drag (settings), " + tag)
-        pyexec(b, "ws.open_app(ws._apps_by_id['files'])\n"
-                  "ws._apps_by_id['files'].open_place('projects')")
+        pyexec(b, "ws.spine.open_app(ws.app('files'))\n"
+                  "ws.app('files').open_place('projects')")
         b.drain(2.0)
         o = win_geom(b, "files")
         # the projects' table: its rows scroll under a drag in the list rect
-        rows = pyval(b, "ws._apps_by_id['files'].layout.list"
-                        " if 'files' in ws.wm._wins else None")
+        rows = pyval(b, "ws.app('files').layout.list"
+                        " if 'files' in ws.wm.windows else None")
         if o and rows:
             cx = (o[0] + rows[0] + rows[2] // 2) * r
             y0 = (o[1] + rows[1] + rows[3] * 3 // 4) * r
@@ -936,7 +936,7 @@ def bench_all(b, out_path):
     # -- the desk's PROJECTS: the home in a window, on Make -----------------
     b.open("projects"); b.drain(1.0)
     bench.start(); b.drain(12.0); bench.stop("projects window open+settle")
-    g = pyval(b, "ws.wm._wins['projects'].ctx.layout.lib_grid")
+    g = pyval(b, "ws.wm.windows['projects'].ctx.layout.lib_grid")
     o = win_geom(b, "projects")
     if g and o:
         gx, gy, gw, gh = g
@@ -957,16 +957,16 @@ def bench_all(b, out_path):
             b.drain(2.0)
             bench.stop("editor tab: %s" % tab)
         bench.start(); b.drain(3.0); bench.stop("editor idle (blocks)")
-        pyexec(b, "ws.open_projects()"); b.drain(2.0)
+        pyexec(b, "ws.home.open_projects()"); b.drain(2.0)
 
     # -- settings -----------------------------------------------------------
     b.open("settings"); b.drain(2.0)
     bench.start(); b.drain(3.0); bench.stop("settings idle")
     o = win_geom(b, "settings")
-    lay = pyval(b, "ws.wm._wins['settings'].ctx.layout.set_row_h")
-    sx = pyval(b, "ws.wm._wins['settings'].ctx.layout.set_x")
-    sw = pyval(b, "ws.wm._wins['settings'].ctx.layout.set_w")
-    sy = pyval(b, "ws.wm._wins['settings'].ctx.layout.set_row_y0")
+    lay = pyval(b, "ws.wm.windows['settings'].ctx.layout.set_row_h")
+    sx = pyval(b, "ws.wm.windows['settings'].ctx.layout.set_x")
+    sw = pyval(b, "ws.wm.windows['settings'].ctx.layout.set_w")
+    sy = pyval(b, "ws.wm.windows['settings'].ctx.layout.set_row_y0")
     if o and lay:
         cx = o[0] + sx + sw // 2
         y0 = o[1] + sy + 4 * lay
@@ -984,7 +984,7 @@ def bench_all(b, out_path):
     # -- desk apps ----------------------------------------------------------
     for app in ("files", "artwork", "calc", "storybook",
                 "appearance"):
-        ok = pyval(b, "ws.open_app(ws._apps_by_id['%s'])" % app)
+        ok = pyval(b, "ws.spine.open_app(ws.app('%s'))" % app)
         if not ok:
             print("  %-34s (app not available)" % ("app: " + app))
             continue
@@ -1009,7 +1009,7 @@ def bench_all(b, out_path):
         home(b)
 
     # -- fullscreen Library (the smooth reference) --------------------------
-    pyexec(b, "ws.open_library()"); b.drain(12.0)
+    pyexec(b, "ws.home.open_library()"); b.drain(12.0)
     bench.start(); b.drain(3.0); bench.stop("library idle")
     band = pyval(b, "ws.launcher.band_rect()")
     if band:
@@ -1023,16 +1023,16 @@ def bench_all(b, out_path):
     # read as the rows' max (the single-frame maximum) --------------------
     home(b)
     pyexec(b, "ws.open_settings()\n"
-              "ws.open_app(ws._apps_by_id['calc'])\n"
-              "ws.open_app(ws._apps_by_id['files'])")
+              "ws.spine.open_app(ws.app('calc'))\n"
+              "ws.spine.open_app(ws.app('files'))")
     b.drain(4.0)
-    bench.start(); pyexec(b, "ws.defer(ws.open_library)"); b.drain(4.0)
+    bench.start(); pyexec(b, "ws.defer(ws.home.open_library)"); b.drain(4.0)
     bench.stop("PLAY, three windows parked")
-    bench.start(); pyexec(b, "ws.defer(ws.open_desk)"); b.drain(4.0)
+    bench.start(); pyexec(b, "ws.defer(ws.home.open_desk)"); b.drain(4.0)
     bench.stop("X, three windows back")
-    pyexec(b, "ws.open_library()"); b.drain(3.0)
+    pyexec(b, "ws.home.open_library()"); b.drain(3.0)
     pyexec(b, "ws.wm.release_cache()")
-    bench.start(); pyexec(b, "ws.defer(ws.open_desk)"); b.drain(4.0)
+    bench.start(); pyexec(b, "ws.defer(ws.home.open_desk)"); b.drain(4.0)
     bench.stop("X, one stamp released")
     # A live wallpaper behind the parked desk: the home's own backdrop is the
     # only one that may animate.
@@ -1041,10 +1041,10 @@ def bench_all(b, out_path):
     for wp in live:
         pyexec(b, "ws.look.select_wallpaper(%r, persist=False)" % wp)
         if pyval(b, "ws.wallpaper.is_animating(0.03)"):
-            pyexec(b, "ws.open_library()"); b.drain(3.0)
+            pyexec(b, "ws.home.open_library()"); b.drain(3.0)
             bench.start(); b.drain(3.0)
             bench.stop("library idle, live wallpaper %s (desk parked)" % wp)
-            pyexec(b, "ws.open_desk()"); b.drain(1.0)
+            pyexec(b, "ws.home.open_desk()"); b.drain(1.0)
             break
     pyexec(b, "ws.look.select_wallpaper(%r, persist=False)" % was)
     home(b)
@@ -1069,7 +1069,7 @@ class _PK:
     def pressed(self, n):
         return n == self.n
 def _pk(n):
-    ws._sysmenu_layer.handle_input(_PK(n))
+    ws.sysmenu_layer.handle_input(_PK(n))
     if not getattr(ws.wm, 'popover_takes_keys', lambda: False)():
         ws.mark_dirty()
 ws._pk = _pk
@@ -1125,8 +1125,8 @@ def bench_popovers(b, out_path):
     print("\n=== popover benchmark (end-to-end frame ms) ===")
     home(b)
     pyexec(b, "ws.open_settings()\n"
-              "ws.open_app(ws._apps_by_id['calc'])\n"
-              "ws.open_app(ws._apps_by_id['files'])")
+              "ws.spine.open_app(ws.app('calc'))\n"
+              "ws.spine.open_app(ws.app('files'))")
     b.drain(4.0)
     bench.start(); b.drain(3.0); bench.stop("desk idle, three windows")
     popover_rows(b, bench, "over windows")
@@ -1177,8 +1177,8 @@ def bench_repaint(b, surfaces, seconds, out_path):
             # an Editor tab on Star Catcher, as the shell goldens open it
             pyexec(b, "ws.open_in_editor([c for c in ws.carts.all "
                       "if c.get('title') == 'Star Catcher'][0])\n"
-                      "ws.set_menu_view('%s')" % name[7:])
-        elif not pyval(b, "ws.open_app(ws._apps_by_id['%s'])" % name):
+                      "ws.text.set_menu_view('%s')" % name[7:])
+        elif not pyval(b, "ws.spine.open_app(ws.app('%s'))" % name):
             print("  %-34s (app not available)" % name)
             continue
         b.drain(2.5)
@@ -1353,7 +1353,7 @@ def bench_kernel(b, out_path):
                              else "DIFFER board %r host %r" % (dev, host)))
     bench = Bench(b)
     home(b)
-    pyexec(b, "ws.open_library()"); b.drain(8.0)
+    pyexec(b, "ws.home.open_library()"); b.drain(8.0)
     band = pyval(b, "ws.launcher.band_rect()")
     if band:
         bx, by, bw, bh = band
@@ -1421,8 +1421,8 @@ def bench_home(b, out_path):
     is the painted-frame cadence, and a settled row paints nothing."""
     bench = Bench(b)
     pyexec(b, HOME_KEY)
-    pyexec(b, "ws.open_library()"); b.drain(8.0)
-    tabs = bool(pyval(b, "hasattr(ws, 'set_home_tab')"))
+    pyexec(b, "ws.home.open_library()"); b.drain(8.0)
+    tabs = bool(pyval(b, "hasattr(ws.home, 'set_home_tab')"))
     bench.start(); b.drain(3.0); bench.stop("home idle")
     band = pyval(b, "ws.launcher.band_rect()")
     bx, by, bw, bh = band
@@ -1455,7 +1455,7 @@ def bench_home(b, out_path):
     if tabs:
         bench.start()
         for t in ("mine", "apps", "make", "games"):
-            pyexec(b, "ws.set_home_tab(%r)" % t); b.drain(1.2)
+            pyexec(b, "ws.home.set_home_tab(%r)" % t); b.drain(1.2)
         bench.stop("tab switch (x4)")
     live = pyval(b, "[ws.look.wp_id_for(c) for c in ws.look.wallpaper_carts()]") or []
     was = pyval(b, "ws.look.wallpaper_id")
@@ -1484,9 +1484,9 @@ def bench_icons(b, out_path):
     """The icon home and the grid, the same scenarios each (the docstring's
     `--icons`)."""
     bench = Bench(b)
-    pyexec(b, "ws.open_library()"); b.drain(8.0)
+    pyexec(b, "ws.home.open_library()"); b.drain(8.0)
     for arr, name in (("grid", "grid home"), ("icons", "icon home")):
-        pyexec(b, "ws.set_home_arrangement(%r)\nws.set_home_tab('make')\n"
+        pyexec(b, "ws.home.set_home_arrangement(%r)\nws.home.set_home_tab('make')\n"
                   "ws.launcher.sel = 0\nws.launcher.scroll = 0\n"
                   "ws.mark_dirty()" % arr)
         b.drain(4.0)
@@ -1504,9 +1504,9 @@ def bench_icons(b, out_path):
         bench.start(); b.drain(2.0); bench.stop("%s idle after the fling" % name)
         bench.start()
         for t in ("games", "mine", "apps", "make"):
-            pyexec(b, "ws.set_home_tab(%r)" % t); b.drain(1.2)
+            pyexec(b, "ws.home.set_home_tab(%r)" % t); b.drain(1.2)
         bench.stop("%s tab (x4)" % name)
-    pyexec(b, "ws.set_home_arrangement(ws.look.home)\nws.mark_dirty()")
+    pyexec(b, "ws.home.set_home_arrangement(ws.look.home)\nws.mark_dirty()")
     b.drain(1.0)
     home(b)
     table = bench.table()

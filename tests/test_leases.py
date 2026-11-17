@@ -13,6 +13,7 @@ import random
 import subprocess
 import sys
 import time
+import types
 
 import pytest
 
@@ -22,6 +23,7 @@ from runtime import moy_input as mi
 from runtime import moy_lease as N
 from runtime import moy_log as L
 from runtime import scheduler as S
+from runtime import sched_python as Y
 from runtime.host import lease_sim
 from unix_mp import ROOT, require_unix_mp, runtime_tree
 
@@ -39,7 +41,7 @@ class Guard:
         self.abort = False
 
     def call(self, fn, budget):
-        return S.ABORTED if self.abort else fn()
+        return Y.ABORTED if self.abort else fn()
 
     def cost(self):
         return 0
@@ -213,7 +215,7 @@ def test_an_irq_wakes_its_process_on_each_edge_the_trigger_names():
         for v in (1, 0, 1, 0):
             N.sim_level(5, v)
         out = [0] * 8
-        n = moybyte.WAKES.due(0, out)
+        n = moybyte.WAKES.pending(out)
         for wid in out[:n]:
             _as(pid, lambda: moybyte.WAKES.call(wid))
         assert len(seen) == 2
@@ -541,17 +543,17 @@ def test_a_full_table_refuses_the_radio_and_the_console_reads_it_offline():
     taken = [N.take(2, N.GPIO, 0, (p,)) for p in pins[:N.ROWS_MAX]]
     assert len(taken) == N.ROWS_MAX
     assert _errno(lambda: N.Wifi().hold("web")) == errno.ENOSPC
-    from runtime.console_spine import SpineVerbs
+    from runtime.console_spine import Spine
 
     class Radio:
         def radio_on(self):
             return True
 
-    ws = SpineVerbs.__new__(SpineVerbs)
-    ws.wifi, ws.leases = Radio(), N.Wifi()
-    assert ws.wifi_hold("web") is False
+    ws = types.SimpleNamespace(wifi=Radio(), leases=N.Wifi())
+    ws.spine = Spine(ws)
+    assert ws.spine.wifi_hold("web") is False
     N.drop(taken[0])
-    assert ws.wifi_hold("web") is True and ws.leases.holders() == ["web"]
+    assert ws.spine.wifi_hold("web") is True and ws.leases.holders() == ["web"]
 
 
 def test_a_random_walk_of_the_radio_agrees_with_its_mask():

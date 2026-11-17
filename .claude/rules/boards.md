@@ -15,16 +15,18 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
 (`tools/board.py`). What follows is what bites whoever touches `firmware/`,
 `device/` or `native/`.
 
-## One build system, five boards
+## One build system, six boards
 
 - **The shared half of every `build.sh` is `tools/esp32_build_lib.sh`**: the
-  toolchain and its self-heal, IDF components, native staging, the web blob
-  (generated into the STAGED copy — a build never writes into `native/`), the
+  toolchain and its self-heal, IDF components, native staging, the browser
+  console's pack and the digest the image names (generated into the STAGED
+  copy and `dist/` — a build never writes into `native/`), the
   OTA identity stamp from `device/moy_ota.py`, the frozen manifest and its
   fingerprint, the stale-sdkconfig guard, the #168 size guard and, outside
   CI, the one ccache every checkout and worktree shares (`moybyte_ccache`). What stays per
   board is its patch ladder and its sdkconfig facts. Builds clone mainline
-  MicroPython v1.28 and ESP-IDF v5.5.1 into the board's `.build/`, and an
+  MicroPython and ESP-IDF at the releases `tools/upstream_pins.env` names
+  into the board's `.build/`, and an
   oversized image, or one under its board's headroom floor (`[image]
   headroom_floor_kib` in board.toml), is a build FAILURE on every board. Every
   floor is 0 since 2026-11-07 (owner): with no users the slots are still ours
@@ -85,13 +87,19 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   commit than the tag's is reset to stock at the tag (patches gone, the
   patchers re-apply them) and a tag it cannot get fails the build. Same tag: a
   silent no-op, patches and objects kept.
+- **The tag and the ESP-IDF release are named once, in
+  `tools/upstream_pins.env`.** The build lib, the web runner's `build.sh`, the
+  Makefile and CI read it, and `tests/test_upstream_pins.py` fails a build
+  script or workflow that spells a release. CI's board builds then run
+  `tools/patch_check.py`, which tries every `patches/*.patch` with `git apply
+  --check --cached` against the pinned trees' indexes; a bump runs it first.
 - **A build runs in a worktree, never the main checkout.** The main
   checkout's `dist/` and board `.build/` trees are the images every other
   session flashes, and a build there overwrites them (it happened twice before
   2026-10-03). `tools/worktree.py new NAME` makes a worktree that builds as it
   is: its own MicroPython trees, local clones of the main checkout's, over the
-  one shared ESP-IDF, and its own browser console, which every image bakes
-  (an image built with none fails the suites' baked-console check).
+  one shared ESP-IDF, and its own browser console, whose digest every image
+  names (an image built with none fails the suites' add-on check).
   `tools/board.py pass` refuses a build in the main checkout without `--main`.
 - **Every ESP32 build checks out micropython's tinyusb fork from the component
   manager's one git cache** (`~/.cache/Espressif/ComponentManager`) while it
@@ -129,8 +137,10 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   the write-allocate read (cls, a big rect, an rrect's middle rows); sprite
   BATCHING on it is a dead end (~10× worse than `spr_batch`: per-op submit
   dwarfs a tiny blit); its scaler is fixed BILINEAR in silicon, so pixel art
-  goes through Settings → CRISP PIXELS (`moy_ppa.blit_crisp`, a banded SRAM
-  bounce byte-exact against the CPU kernel, #204). The triple framebuffer
+  goes through Settings → CRISP PIXELS (`moy_ppa_k_crisp`, a banded SRAM
+  bounce byte-exact against the CPU kernel, #204), one choice in one C body
+  for the canvas, the rotated paint route and the kernel's front
+  (`native/moy_glass/moy_present_game.c`). The triple framebuffer
   shipped; the double game canvas was built, measured and REVERTED (`26e1f9f` —
   the game fence was already ~free and the retention memcpy cost more); #159's
   L2 cache 128→256 KB closed the game chapter (512 KB does not boot — the
@@ -143,8 +153,8 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   (A/B'd on both and declined, 2026-11-06, #246). ESP-IDF's own fragments then
   move the .bss of lwIP, wpa_supplicant, the WiFi driver's net80211 and pp and
   the BT host to PSRAM, which frees internal RAM at an idle desk, but the WiFi
-  driver's start then takes more internal RAM than the move freed, and the
-  driver keeps it until a reboot. A component's static scratch moves to PSRAM
+  driver's start then takes more internal RAM than the move freed, for as
+  long as the driver is up. A component's static scratch moves to PSRAM
   by a patch that allocates it while the component runs instead
   (`moybyte_patch_mdns_psram`, `tools/patch_mdns_psram.py`).
 
@@ -176,7 +186,7 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   (`native/moy_net/moy_net.h`, THE BOOK): the first holder powers the STA up
   and the last out powers it down (`esp_wifi_stop`), from whichever task
   changed the rows, which keeps the S3's WLAN-vs-LCD-DMA internal-RAM fight to
-  when the network is needed. Python's `Workstation.wifi_hold(tag, pid=None)`
+  when the network is needed. Python's `Spine.wifi_hold(tag, pid=None)`
   and `wifi_release(tag, pid=None)` take and drop rows of that table; a
   compiled program's http handle and the media service take theirs in C. The
   holders are `web` (released when the webhost's socket closes), `update` (taken before
@@ -280,7 +290,9 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   ignores `0x03` (or raw turned off), where the `0x04` revert drains — the
   README has the mechanism. **Mic is the console's key** (`start`,
   2026-10-18), seen only in the matrix (ASCII sends the idle byte for a bare
-  Mic), and a text field's Cancel while one is typed into. Backspace is a
+  Mic), and a text field's Cancel while one has an edit in progress
+  (`InputPolicy.cancel`); which mode the keyboard is in is the input
+  policy's, derived from the focused surface (`runtime/shell/input_policy.py`). Backspace is a
   plain key.
 - **Serial reads are unreliable ACROSS a reset** on the SoC-USB boards: a reset
   removes the device node from under an open handle, and a reader that opens
@@ -307,7 +319,19 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   patches are `patches/p4_esp_lcd_dsi_underrun_hook.patch` behind
   `moybyte_patch_p4_dsi_underrun` and `patches/p4_ppa_srm_mb_order_bypass.patch`
   (the SRM deadlock a rotate with a sub-FIFO last unit hits) behind
-  `moybyte_patch_p4_ppa_srm_mb_order`. Status and numbers: #58, #202.
+  `moybyte_patch_p4_ppa_srm_mb_order`. Three more patch ESP-IDF v5.5.6 for
+  a rev < v3 chip: `p4_coredump_dram_mapped_once.patch`
+  (`moybyte_patch_p4_coredump_dram`), `p4_heap_low_sram_priority.patch`
+  (`moybyte_patch_p4_heap_low_sram`: the low SRAM serves plain internal
+  allocations first, or the high SRAM loses its large blocks) and
+  `p4_ppa_trans_context_internal_only.patch`
+  (`moybyte_patch_p4_ppa_trans_context`). `p4_clk_switch_out_of_line.patch`
+  (`moybyte_patch_p4_clk_switch`) keeps the startup CPU clock switch, which
+  runs with the external memory cache suspended, an IRAM function of its own:
+  inlined into flash-resident `esp_clk_init` it cache-faulted at the first
+  boot step of a Guition P4 image, silently, every boot (2026-11-17), and the
+  build refuses an image where it is inlined again. Each is in `patches/`, and each
+  patcher is in `tools/esp32_build_lib.sh`. Status and numbers: #58, #202.
 - **A native module runs in U-mode on a P4, and the boot PMP layout and the
   vectors are the kernel's** (`native/moy_elf/moy_umode.h`): both P4 boards
   build with `CONFIG_BOOTLOADER_REGION_PROTECTION_ENABLE=n` and
@@ -385,20 +409,46 @@ stages 1–6 all absent. Its README is the authority; what bites:
 
 - 8 MB of flash: the console table does not fit, and the bootloader rejects an
   oversized table into a silent boot loop. Its partition CSV is authored.
-- It carries the seed roster COMPRESSED (`tools/gen_device_carts.py --packed`,
-  `CARTS_Z`, cut by board.toml's `[roster]`), inflated one cart at a time into
-  an EMPTY store on first boot, stopping while `zero_host.SEED_RESERVE` is
-  still free — gated on emptiness, not #47's version compare, because its
-  store is the record (the only copy of a browser-made cart), where a
-  console's is a cache: a seed cart the kid deletes stays deleted.
+- Its seed carts are board.toml's `[roster] image`, packed into the image
+  (`tools/gen_device_carts.py --packed --only`, `CARTS_Z`), and
+  `zero_host.seed_carts` keeps the consoles' rule over them (owner,
+  2026-11-17): a removal recorded in `system/removed` holds, a newer version
+  replaces, `SEED_RESERVE` stays free. Everything else is an official cart
+  of the release, which the page asks the board for over `/official` (the
+  board is its store's one writer). Its README says which carts each Zero
+  carries and how a cable flash, provisioning and an update bring the rest.
+- With no browser console add-on in its store a Zero fetches the one that
+  fits from its release (`zero_host.make_addon`, `tend_addon`), unless its
+  owner removed it (`system/removed`'s console line): its root then says so
+  and links `/?console=install`, which drops the record and fetches it
+  (`way_back`, `moy_page_say`), the page being a Zero's only face. The cable
+  install (`tools/board_flash.py`) gives each `mpremote` call a deadline,
+  because a wedged USB-Serial/JTAG never answers an open.
 - Its patch ladder is two patches, the kernel entry's `moybyte_patch_native_code_free`
   and the VM's `moybyte_patch_slice_store` that every board takes, and every
   other one says why not (`# DECLINED <fn>`). Do not give it the
   #169 retune without the 120 MHz profile; the spike suite refuses the pairing.
 - USB-Serial/JTAG since 2026-08-30: opens like the console S3s, reaches the ROM
-  loader through esptool's default reset and leaves it with `--after
-  watchdog_reset` (never `hard_reset`; `machine.bootloader()` loops forever on
-  this chip). Holding BOOT while plugging in is the recovery. It has no dev
+  loader through esptool's default reset and leaves it with `hard_reset`
+  (never `watchdog_reset`: it re-enumerates the USB while the board boots,
+  and a port opened then wedged it until a replug; `machine.bootloader()`
+  loops forever on this chip). Holding BOOT while plugging in is the recovery. It has no dev
   channel, so `tools/board.py` knows it by the USB serial in its board.toml.
 - A pushed `.py` SHADOWS the frozen one (`/` is searched before `.frozen`), so
   its module push is opt-in and undoable, and the board announces it at boot.
+- **The C3 Zero (`firmware/esp32c3_zero/`, `c3_zero`) is the Zero on an
+  ESP32-C3**: the same store host (`device/zero_*.py`, which both Zeros take)
+  and module sets, on a chip with no PSRAM, one core, one I2C controller and
+  4 MB of flash. A build without PSRAM (`MOY_HAS_PSRAM` unset,
+  `native/moy_kernel/moy_platform.h`) serves every PSRAM placement from the
+  internal heap and keeps no kernel pool, so a native block a PSRAM board
+  hides costs this one internal SRAM, and a new resident task or buffer on a
+  Zero is measured there before it ships: SSH fits only with its stacks and
+  arena sized for it, SFTP refused, the webhost's upload buffer made per
+  request and the Python heap's ceiling kept clear of both (the README's SSH
+  paragraph). A block that lives for good is made at start, beside the
+  others: one made mid-session splits the free heap for good. One factory
+  slot and no OTA (owner, 2026-11-17): a new image goes on by cable, and the
+  flash installs the browser console add-on that fits it into the store
+  (`[flash] addon`, `tools/board_flash.py`); the website's card offers the
+  install and the app image as its update. Its README is the authority.

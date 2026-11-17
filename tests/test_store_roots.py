@@ -20,11 +20,11 @@ from runtime.moy_index import ROOTS, StaleHandle
 BINDINGS = {"python": moy_index.Index}
 
 try:
-    from tools import moy_index_spike
-except ImportError:         # the VM's run of this file has no tools/
-    moy_index_spike = None
-if moy_index_spike is not None:
-    BINDINGS.update(moy_index_spike.host_bindings())
+    from runtime import native_parts
+except ImportError:         # the VM's run of this file has no ctypes face
+    native_parts = None
+if native_parts is not None:
+    BINDINGS.update(native_parts.host_bindings())
 
 
 @pytest.fixture(params=sorted(BINDINGS))

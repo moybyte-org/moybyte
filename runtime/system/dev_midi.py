@@ -32,22 +32,10 @@ port.
 A transport the console lacks refuses with OSError(ENODEV); `present()` is
 whether any is there."""
 
-try:
-    import moy_midi as _N
-except ImportError:  # host: the runtime package
-    from runtime import moy_midi as _N
-
-try:
-    import devices as _D
-except ImportError:  # host: the runtime package
-    from runtime import devices as _D
-
-try:
-    import moybyte as _moybyte
-    from ticks import _ticks_ms
-except ImportError:  # host: the runtime package
-    from runtime import moybyte as _moybyte
-    from runtime.ticks import _ticks_ms
+import moy_midi as _N
+import devices as _D
+import moybyte as _moybyte
+from ticks import _ticks_ms
 
 UART, USB, BLE = _N.UART, _N.USB, _N.BLE
 _BLE_STATES = ("connecting", "finding", "ready", "failed", "gone")   # the driver's BLE_*
@@ -64,35 +52,23 @@ _ports = {}         # pid -> {port: [transport, unit, the UART lease | the BLE s
 def _usb():
     try:
         import moy_usb
-    except ImportError:
-        try:
-            from runtime import moy_usb
-        except ImportError:  # a console with no USB host
-            return None
+    except ImportError:  # a console with no USB host
+        return None
     return moy_usb if moy_usb.present() else None
 
 
 def _gatt():
-    try:
-        import moy_gatt
-    except ImportError:  # host: the runtime package
-        from runtime import moy_gatt
+    import moy_gatt
     return moy_gatt if moy_gatt.present() else None
 
 
 def _ble():
-    try:
-        import dev_ble
-    except ImportError:  # host: the runtime package
-        from runtime import dev_ble
+    import dev_ble
     return dev_ble
 
 
 def _leases():
-    try:
-        import leases
-    except ImportError:  # host: the runtime package
-        from runtime import leases
+    import leases
     return leases
 
 

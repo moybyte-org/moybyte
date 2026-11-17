@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "moy_codec.h"
 #include "moy_json.h"
 #include "moy_link.h"
 #include "moy_net.h"

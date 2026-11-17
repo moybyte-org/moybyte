@@ -36,14 +36,9 @@ and the desk's (tools/make_font.py's `module`).
   plus(cv, rect, ink, spec, stepped)          the set's `new` at any size
 """
 
-try:
-    import fontset as _fontset
-    import ui_draw as _ui_draw
-    from editors_sheet import IconSheet, _SheetSprite
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import fontset as _fontset
-    from runtime import ui_draw as _ui_draw
-    from runtime.editors_sheet import IconSheet, _SheetSprite
+import fontset as _fontset
+import ui_draw as _ui_draw
+from editors_sheet import IconSheet, _SheetSprite
 
 SLOTS = (
     "moy", "home", "wifi", "wifi_off", "battery", "search", "play", "projects",
@@ -152,7 +147,7 @@ def pixel_sheet():
     return _PIXEL[0]
 
 
-# A `slots` look field's leaves hold this many slots each (tools/gen_ui_tables.py).
+# A `slots` look field's leaves hold this many slots each (tools/gen_os/style.py).
 SLOT_BITS = 30
 _SLOT_LEAVES = tuple("icons.pixel_slots.%d" % i for i in range(-(-len(SLOTS) // SLOT_BITS)))
 

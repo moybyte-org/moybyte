@@ -27,7 +27,7 @@ WHAT COUNTS AS AN INJECTION. Two sites, because the wiring lives in two:
   * `ws.<name> = ...` on the BOOT PATH of the target's wiring function.
     Assignments inside a loop are excluded: on the P4 the whole frame loop is
     inside `run_desktop`, and its serial dev commands mutate `ws.perf_capture`,
-    `ws.show_fps`, `ws._psave_ms` and `ws._dirty` per keystroke. Those are
+    `ws.show_fps`, `ws._psave_ms` and `ws.frame_state.dirty` per keystroke. Those are
     per-frame STATE, not services -- a board that offers `diag 0|1` over serial
     is not thereby a board that has an FPS preference the others lack.
 
@@ -113,7 +113,7 @@ SERVICES = {
     "pointer": "the cursor model, sized to the SYSTEM canvas",
     "keyboard": "the physical keyboard, for the code editor's text/raw flip",
     "ble_keyboard": "an OPTIONAL SECOND keyboard over BLE HID (#26), on a board that already has a physical one",
-    "_with_sd": "the storage gate every store op is wrapped in",
+    "with_sd": "the storage gate every store op is wrapped in",
     "updater": "the #53 OTA updater behind Settings -> UPDATE FW",
     "c6_updater": "the C6 radio co-processor's updater behind Settings -> "
                   "UPGRADE C6 RADIO (#7/#58): downloads the shimmed slave "
@@ -126,6 +126,12 @@ SERVICES = {
     "cart_pick": "the #124 question for the player's own copy of an external "
                  "file this console cannot fetch",
     "cart_home": "where carts are got instead, on a page a console serves",
+    "cart_board": "the console with no screen serving this page, asked to install "
+                  "and remove its own official carts (carts_link.BoardCarts)",
+    "cart_own": "the index this console's own release publishes beside its "
+                "firmware, the browser console add-on's, which Get Carts reads last",
+    "addon": "the step that installs the browser console add-on fitting this "
+             "image after an update (runtime/carts/web_addon.py)",
     "media_net": "the page's bytes Music plays in the browser: a song from the "
                  "page's store or a board's sealed /media, a station through "
                  "the page's fetch (firmware/web_runner/media_link.py)",
@@ -162,7 +168,7 @@ WIRING = {
         "pointer": INJECTED,
         "keyboard": INJECTED,
         "ble_keyboard": INJECTED,
-        "_with_sd": INJECTED,
+        "with_sd": INJECTED,
         "updater": INJECTED,
         "c6_updater": "its radio is the S3's own silicon -- there is no co-processor to update. The row becomes INJECTED the day a board grows a companion radio chip",
         "webhost": INJECTED,
@@ -172,6 +178,9 @@ WIRING = {
         "cart_pick": "a board reads every host over its own TLS client -- no "
                      "CORS between it and an archive -- so it never asks",
         "cart_home": "a board is where carts are got",
+        "cart_board": "a board installs its own carts",
+        "cart_own": INJECTED,
+        "addon": INJECTED,
         "media_net": "a board's media service reads its own files and dials its own streams (moy_media); media_net is a page's fetch",
         "reboot_hook": INJECTED,
         "battery": INJECTED,
@@ -201,8 +210,8 @@ WIRING = {
         "wifi": INJECTED,
         "pointer": INJECTED,
         "keyboard": INJECTED,
-        "ble_keyboard": "a paired BLE keyboard IS this board's only keyboard, so it\n                         is attached as `keyboard` above rather than beside it --\n                         one driver, one slot. Settings finds it either way: \n                         settings_layer._bt_service() checks ble_keyboard first,\n                         then keyboard, and gates on settings_capable.",
-        "_with_sd": "no SD card on this console -- the store is internal flash "
+        "ble_keyboard": "a paired BLE keyboard IS this board's only keyboard, so it\n                         is attached as `keyboard` above rather than beside it --\n                         one driver, one slot. Settings finds it either way: \n                         the bt role's server (BtServer) checks ble_keyboard first,\n                         then keyboard, and gates on settings_capable.",
+        "with_sd": "no SD card on this console -- the store is internal flash "
                     "and races nothing, so the Workstation's own call-through "
                     "default IS the correct gate. A wrapper here would be "
                     "ceremony around `fn()`",
@@ -215,6 +224,9 @@ WIRING = {
         "cart_pick": "a board reads every host over its own TLS client -- no "
                      "CORS between it and an archive -- so it never asks",
         "cart_home": "a board is where carts are got",
+        "cart_board": "a board installs its own carts",
+        "cart_own": INJECTED,
+        "addon": INJECTED,
         "media_net": "a board's media service reads its own files and dials its own streams (moy_media); media_net is a page's fetch",
         "reboot_hook": INJECTED,
         "battery": "mains-powered: VDD_BAT is the RTC backup cell's, not a "
@@ -243,8 +255,8 @@ WIRING = {
         "wifi": INJECTED,
         "pointer": INJECTED,
         "keyboard": INJECTED,
-        "ble_keyboard": "a paired BLE keyboard IS this board's only keyboard, so it\n                         is attached as `keyboard` above rather than beside it --\n                         one driver, one slot. Settings finds it either way: \n                         settings_layer._bt_service() checks ble_keyboard first,\n                         then keyboard, and gates on settings_capable.",
-        "_with_sd": "no SD card on this console -- the store is internal flash "
+        "ble_keyboard": "a paired BLE keyboard IS this board's only keyboard, so it\n                         is attached as `keyboard` above rather than beside it --\n                         one driver, one slot. Settings finds it either way: \n                         the bt role's server (BtServer) checks ble_keyboard first,\n                         then keyboard, and gates on settings_capable.",
+        "with_sd": "no SD card on this console -- the store is internal flash "
                     "and races nothing, so the Workstation's own call-through "
                     "default IS the correct gate. A wrapper here would be "
                     "ceremony around `fn()`",
@@ -257,6 +269,9 @@ WIRING = {
         "cart_pick": "a board reads every host over its own TLS client -- no "
                      "CORS between it and an archive -- so it never asks",
         "cart_home": "a board is where carts are got",
+        "cart_board": "a board installs its own carts",
+        "cart_own": INJECTED,
+        "addon": INJECTED,
         "media_net": "a board's media service reads its own files and dials its own streams (moy_media); media_net is a page's fetch",
         "reboot_hook": INJECTED,
         "battery": "the board's README names no cell and no gauge pin",
@@ -283,8 +298,8 @@ WIRING = {
         "wifi": INJECTED,
         "pointer": INJECTED,
         "keyboard": INJECTED,
-        "ble_keyboard": "a paired BLE keyboard IS this board's only keyboard, so it\n                         is attached as `keyboard` above rather than beside it --\n                         one driver, one slot. Settings finds it either way: \n                         settings_layer._bt_service() checks ble_keyboard first,\n                         then keyboard, and gates on settings_capable.",
-        "_with_sd": "no SD in play (stage 4 open) -- the store is internal "
+        "ble_keyboard": "a paired BLE keyboard IS this board's only keyboard, so it\n                         is attached as `keyboard` above rather than beside it --\n                         one driver, one slot. Settings finds it either way: \n                         the bt role's server (BtServer) checks ble_keyboard first,\n                         then keyboard, and gates on settings_capable.",
+        "with_sd": "no SD in play (stage 4 open) -- the store is internal "
                     "flash and races nothing, so the Workstation's own "
                     "call-through default IS the correct gate",
         "updater": INJECTED,
@@ -297,6 +312,9 @@ WIRING = {
         "cart_pick": "a board reads every host over its own TLS client -- no "
                      "CORS between it and an archive -- so it never asks",
         "cart_home": "a board is where carts are got",
+        "cart_board": "a board installs its own carts",
+        "cart_own": INJECTED,
+        "addon": INJECTED,
         "media_net": "a board's media service reads its own files and dials its own streams (moy_media); media_net is a page's fetch",
         "reboot_hook": INJECTED,
         "battery": "the README's GPIO5 gauge (a ~1.72x divider) comes from an "
@@ -326,7 +344,7 @@ WIRING = {
                     "exists only so the code editor can flip a T-Deck keyboard "
                     "between ASCII and raw-matrix mode, which has no host analogue",
         "ble_keyboard": "the sim has no BLE radio; the host reads a real\n                         keyboard through ConsoleDriver/pygame, and a\n                         pairing UI over nothing would be a dead row.",
-        "_with_sd": "no shared bus and no card: the Workstation's call-through "
+        "with_sd": "no shared bus and no card: the Workstation's call-through "
                     "default is already right on a filesystem",
         "updater": "OTA writes an ESP32 app partition (esp32.Partition). There "
                    "is nothing on a host to flash, and Settings hides the row "
@@ -345,6 +363,9 @@ WIRING = {
                      "board's is",
         "cart_pick": "urllib reads any host, so the simulator never asks",
         "cart_home": "the simulator is a console of its own",
+        "cart_board": "the simulator is a console of its own",
+        "cart_own": "the simulator has no release of its own to publish an add-on beside",
+        "addon": "the simulator serves no browser console",
         "media_net": "the host's media service reads its own files and URLs; media_net exists because a browser's VM cannot reach the network or its store itself",
         "battery": "a laptop's battery is its own OS's to show",
         "reboot_hook": "machine.reset() has no host meaning; the shared console "
@@ -383,7 +404,7 @@ WIRING = {
         "keyboard": "browser key events arrive through web_input as InputState, "
                     "not as a device keyboard object with a mode command",
         "ble_keyboard": "a browser cannot pair HID devices for the page --\n                         keys arrive as DOM events through web_input.",
-        "_with_sd": "the VFS is in-memory; nothing to gate",
+        "with_sd": "the VFS is in-memory; nothing to gate",
         "updater": "not at BOOT, and not never: web_boot.update_enable binds a\n"
                    "                 RemoteUpdater over the board's /update endpoint AFTER the\n"
                    "                 worker's probe answers (#41), so it is out of this scan's\n"
@@ -401,7 +422,10 @@ WIRING = {
         "cart_keep": INJECTED,
         "cart_pick": INJECTED,
         "cart_home": INJECTED,
+        "cart_board": INJECTED,
         "media_net": INJECTED,
+        "cart_own": "a page is the browser console; it installs no add-on",
+        "addon": "a page is the browser console; it installs no add-on",
         "battery": "a browser's battery is its own OS's to show",
         "reboot_hook": "a reload is the browser's reset, and the page owns it",
         "net": "no #65 transport in the browser yet -- the host's LoopbackNet is "
@@ -428,7 +452,7 @@ NOT_A_SERVICE = {
                 "Neither is a capability the other target lacks",
     "perf_hud": "the same knob's other half -- whether the chip DRAWS. Turned "
                 "off with show_fps for the same clean-frame reason",
-    "_achievement_unlocked": "a de-branding stub: the web build silences the "
+    "achievement_unlocked": "a de-branding stub: the web build silences the "
                              "console's achievement toasts (gamification for "
                              "the kid console, not for a cart player). An "
                              "override of shared behaviour, not a backend",
@@ -439,7 +463,7 @@ NOT_A_SERVICE = {
                  "no panel to blank",
     "soft_keyboard": "a fact about the page, not a backend: its ⌨ summons the "
                      "browser's own keyboard, so a text field can be typed "
-                     "under touch there (Workstation.can_type). The boards "
+                     "under touch there (Text.can_type). The boards "
                      "have no such keyboard and keep the class default",
 }
 
@@ -902,8 +926,8 @@ class _Handles:
 
     Follows the shapes the wiring actually uses -- `x = ws.svc`,
     `getattr(ws, "svc", None)`, `for x in (<handles>)` and `x = helper()` where
-    helper returns one -- to a fixed point, so the service settings_layer
-    reaches through `self._bt_service()` resolves like a direct attribute.
+    helper returns one -- to a fixed point, so a service reached through a
+    helper (`self._bt_service()`) resolves like a direct attribute.
     Scopes are deliberately ignored: a name is a name, which can only ever make
     this MORE willing to find a call, and a found call is the thing being
     demanded.
@@ -1217,7 +1241,14 @@ def test_the_ble_keyboard_rows_are_the_ones_this_half_was_written_for():
     assert 'getattr(ws, "ble_keyboard", None)' in spine, (
         "the T-Deck stopped binding ws.ble_keyboard into the kernel's input "
         "stage -- a paired keyboard cannot produce a keypress (#26)")
-    assert ("ble_keyboard", "start") in _module_handles(
-        "runtime/system/settings_layer.py").verbs("open_bluetooth"), (
+    # Settings reaches the service through its bt role, whose server
+    # (runtime/shell/shell_servers.py's BtServer) hands out the keyboard.
+    served = _module_handles("runtime/shell/shell_servers.py").rets.get("keyboard", set())
+    assert "ble_keyboard" in served, "the bt role no longer hands out ws.ble_keyboard"
+    settings = _module_handles("runtime/system/settings_layer.py")
+    settings.rets["keyboard"] = set(served)
+    while settings._pass():
+        pass
+    assert ("ble_keyboard", "start") in settings.verbs("_bt_open"), (
         "nothing calls ble_keyboard.start() on the T-Deck -- the Bluetooth "
         "panel opens onto a radio that has never scanned (#26)")

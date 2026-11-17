@@ -75,7 +75,7 @@ row), the VM up or stopped; the console's frame finds a run one started
 (`frame`) and follows it as it follows its own.
 
 THE RADIO. While a URL of the list may play, the run holds the radio's
-"media" tag under its own pid (`Workstation.wifi_hold`); its end lets it go
+"media" tag under its own pid (`Spine.wifi_hold`); its end lets it go
 in C (moy_media.c's reap), and this face settles the radio after it. The
 hold is taken after the C's play() begun the list, so a URL waits on the
 service's task for the link (moy_net.h's THE NETWORK'S GATE), MOY_NET_DIAL_MS
@@ -111,23 +111,13 @@ if _N is None:
     except ImportError:  # a console with no media service (the Guition S3)
         _N = None
 
-try:
-    import devices as _D
-except ImportError:  # host: the runtime package
-    from runtime import devices as _D
-
-try:
-    import moybyte as _moybyte
-except ImportError:  # host: the runtime package
-    from runtime import moybyte as _moybyte
+import devices as _D
+import moybyte as _moybyte
 
 try:
     import moy_log as _L
-except ImportError:  # pragma: no cover - an image without the kernel
-    try:
-        from runtime import moy_log as _L
-    except ImportError:
-        _L = None
+except ImportError:
+    _L = None
 
 EPERM, ENOENT, EIO, EBADF, EINVAL, ENOSPC = 1, 2, 5, 9, 22, 28
 EPROTONOSUPPORT = 93
@@ -155,11 +145,8 @@ def _shares_media():
     True where there is no line (nothing is counted)."""
     try:
         import moy_play as _P
-    except ImportError:  # host: the runtime package
-        try:
-            from runtime import moy_play as _P
-        except ImportError:
-            return True
+    except ImportError:
+        return True
     fn = getattr(_P, "shares", None)
     rows = fn() if fn is not None else None
     if rows is None:
@@ -201,10 +188,7 @@ def tls():
     page's fetch verifies its own)."""
     if _net() is not None:
         return True
-    try:
-        import moy_http
-    except ImportError:  # host: the runtime package
-        from runtime import moy_http
+    import moy_http
     return bool(moy_http.tls())
 
 
@@ -242,10 +226,7 @@ def _rate():
 
 
 def _sched():
-    try:
-        import scheduler
-    except ImportError:  # host: the runtime package
-        from runtime import scheduler
+    import scheduler
     return scheduler.SCHED
 
 
@@ -287,7 +268,7 @@ def _hold():
     ws, pid = _D.console, _s["pid"]
     if ws is None or not pid or _holds(ws, pid):
         return
-    ws.wifi_hold(TAG, pid)
+    ws.spine.wifi_hold(TAG, pid)
     _s["radio"] = pid
     dial = getattr(getattr(ws, "cart_net", None), "dial", None)
     if dial is not None:
@@ -375,7 +356,7 @@ def _end():
     _close_file()
     _D.MEDIA[0] = 0
     ws = _D.console
-    settle = getattr(ws, "wifi_settle", None)
+    settle = getattr(getattr(ws, "spine", None), "wifi_settle", None)
     if settle is not None:
         settle()
 
@@ -542,10 +523,7 @@ def _took(was):
     the person is told, as the system (moy_media_tell's notification, its
     text the C's for every client), the console's list taking it now."""
     if was and _N.tell(was):
-        try:
-            from notifications import NOTES
-        except ImportError:  # host: the runtime package
-            from runtime.notifications import NOTES
+        from notifications import NOTES
         NOTES.drain()
 
 

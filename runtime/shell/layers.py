@@ -5,7 +5,8 @@ from Workstation (runtime/shell/console.py) -- docs/history/shell_layers_refacto
 module holds the shell-side building blocks that are NOT the router itself:
 
   * `Layer`      -- the uniform surface interface (id / domain / draw / handle_input
-                    / handle_pointer / lifecycle).
+                    / handle_pointer) and the input protocol the console's input
+                    policy asks of whatever holds the keys (runtime/shell/input_policy.py).
   * `_LegacyLayer` -- a Layer whose facets call injected callables: the permanent
                     home of the four draw-only overlays (splash / toast / notice /
                     cursor), which have no state worth a class of their own.
@@ -18,10 +19,13 @@ module holds the shell-side building blocks that are NOT the router itself:
 
 Every class here references ONLY its `self.ws` back-ref (and, for `_LegacyLayer`,
 injected callables) -- no console module-level constants or
-NAMES -- so this file is a dependency-free leaf: console.py imports it, it imports
-nothing back (no circular import), and both the host and the device freeze the
-identical source (build.sh stages it into modules/ like the editor cores).
+NAMES -- so this file is a leaf over the toolkit's engine: console.py imports
+it, it imports nothing back (no circular import), and both the host and the
+device freeze the identical source (build.sh stages it into modules/ like the
+editor cores).
 """
+
+import ui_draw as _ui_draw
 
 
 class Layer:
@@ -37,10 +41,38 @@ class Layer:
                  canvas as one viewport, #39). The router owns the single composite.
 
     handle_input / handle_pointer return a *handled* bool so the router can stop at
-    the top-most layer that claims the event (overlay > content > chrome)."""
+    the top-most layer that claims the event (overlay > content > chrome).
+
+    The INPUT PROTOCOL is what the console's input policy asks of the surface
+    that holds the keys (runtime/shell/input_policy.py), each verb defaulted
+    here: `ui_host` (the AppHost its pages draw through, which answers the
+    toolkit's half: a focused field types, Mic and back cancel its edit, back
+    dismisses a popover), `typing`, `cancel`, `back` and `has_page` (its own
+    page step, after the toolkit's), `close` (leaving it, by any route),
+    `page_title` and `ball_steps`. `B_BACK`: its B is the host's back, as
+    every app's is; a surface whose B is a button of its own leaves it
+    False. `ESC_LEAVES`: Esc on its first page leaves it. `KEYS_IDLE`: a
+    frame of no input after another does nothing in its `handle_input`
+    (which answers True to it), so a window's route hands it none
+    (`WindowRoute._keys_idle`); a surface whose `handle_input` also asks
+    whether its page is still moving leaves it False.
+
+    The FRAME PROTOCOL is what the console's frame asks of a surface,
+    whichever it is, so no surface is named there: `moved` (it changed on
+    its own since it drew, and draws again), `ON_WALLPAPER` (it shows the
+    live wallpaper behind it, whose animation keeps frames coming), `BAR`
+    (the strip the bar's keys walk while a registered app is on top: the
+    host's "app" strip, its own, or None for none), `leave` (its own way
+    back past its first page, else the host's) and `blur` (the keys went
+    to another surface)."""
 
     id = "layer"
     domain = "system"
+    B_BACK = False
+    ESC_LEAVES = True
+    KEYS_IDLE = False
+    ON_WALLPAPER = False
+    BAR = "app"
 
     def __init__(self, ws):
         self.ws = ws
@@ -57,11 +89,73 @@ class Layer:
     def handle_pointer(self, px, py, click):
         return False
 
-    def on_enter(self):
-        pass
+    def ui_host(self):
+        """The AppHost the surface's page draws through, or None."""
+        return None
 
-    def on_leave(self):
-        pass
+    def typing(self):
+        """Whether the surface takes typed bytes: by default, a field focused
+        on its page (`ui_draw.app_typing`)."""
+        h = self.ui_host()
+        return h is not None and _ui_draw.app_typing(h.ctx)
+
+    def cancel(self):
+        """The host's cancel (the T-Deck's Mic) inside the surface: True where
+        it took it. By default a focused field's edit gives its draft back."""
+        h = self.ui_host()
+        if h is not None and _ui_draw.app_cancel(h.ctx, True):
+            h.owed = True
+            return True
+        return False
+
+    def back(self):
+        """One page of the surface back, after the toolkit's step (a field's
+        edit, a popover): True where it took it, False on its first page,
+        where the host leaves it."""
+        return False
+
+    def has_page(self):
+        """Whether a page of its own is open, which `back` steps out of."""
+        return False
+
+    def close(self):
+        """Leaving the surface, by any route: what it holds is written.
+        Change-gated and cheap (#154)."""
+
+    def page_title(self):
+        """The open page's name, after the back chevron; None: the surface's."""
+        return None
+
+    def ball_steps(self):
+        """Whether the trackball steps the surface as W A S D do."""
+        return True
+
+    def moved(self):
+        """Whether what it shows moved on its own since it drew (an async
+        state it follows): the frame draws it again with nothing dirty."""
+        return False
+
+    def leave(self):
+        """Leave it past its first page by its own way back: True where it
+        has one, False for the host's (the caller, the Editor's home)."""
+        return False
+
+    def blur(self):
+        """The keys went to another surface: what is typed is kept."""
+
+
+class AppLayer(Layer):
+    """A registered app's surface (docs/app_api_v1.md): its pages draw through
+    the AppHost its context lends (`ctx.ui`, held as `_ui`), and B is its
+    back. `BACK_MINIMISES`: a back on its first page minimises it on the
+    desk."""
+
+    B_BACK = True
+    BACK_MINIMISES = False
+    _ui = None
+
+    def ui_host(self):
+        return self._ui
 
 
 class _LegacyLayer(Layer):
@@ -112,11 +206,38 @@ class _PlayerLayer(Layer):
 
     id = "desktop"
     domain = "game"
+    ESC_LEAVES = False
+    KEYS_IDLE = True                  # `Player.handle_input` takes nothing: the cart reads its own keys
 
     def ball_steps(self):
-        """An app's page takes the trackball as its W A S D (`Player.ball_steps`);
+        """An app's page takes the trackball as its W A S D (`AppFace.ball_steps`);
         a game's trackball is its pointer."""
-        return self.ws.run.player.ball_steps()
+        return self.ws.run.player.face.ball_steps()
+
+    def typing(self):
+        return self.ws.run.player.face.typing()
+
+    def cancel(self):
+        """Mic in a script's prompt is its Stop; in an app's field, the
+        field's edit given back (`AppFace.cancel`)."""
+        ws = self.ws
+        if (ws.cart is not None and ws.cart.get("type") == "script"
+                and ws.script_console.reading()):
+            ws.spine.exit_to_caller()
+            return True
+        return ws.run.player.face.cancel()
+
+    def back(self):
+        return self.ws.run.player.face.back()
+
+    def has_page(self):
+        return self.ws.run.player.face.has_page()
+
+    def close(self):
+        """Leaving the run: what a cart app's editor handles hold is written."""
+        pl = self.ws.run.player
+        if pl is not None:
+            pl.flush_editors()
 
     def draw(self, dt):
         self.ws.run.player.tick(dt)
@@ -139,7 +260,7 @@ class _BlocksLayer(Layer):
 
     def at_top(self):
         """Up goes on to the bar from the outline's first row
-        (Workstation._bar_keys)."""
+        (InputRouter._bar_keys)."""
         bu = self.ws.block_ui
         be = bu.blocks_ed
         return (be is not None and be.cur == 0 and bu.blk_menu is None
@@ -148,6 +269,19 @@ class _BlocksLayer(Layer):
     def handle_input(self, i):
         self.ws.block_ui._blocks_input()   # cursor nav + insert menu (#29)
         return True
+
+    def typing(self):
+        """An entry prompt's keypad types."""
+        return self.ws.block_ui.blk_kbd is not None
+
+    def cancel(self):
+        """Mic, Esc or B in an entry prompt: it closes, as its Cancel does."""
+        if not self.ws.block_ui.cancel_prompt():
+            return False
+        self.ws.mark_dirty()
+        return True
+
+    back = cancel
 
     def handle_pointer(self, px, py, click):
         self.ws.block_ui._blocks_pointer(px, py, click)   # outline + insert menu
@@ -159,6 +293,7 @@ class _UpdateLayer(Layer):
 
     id = "update"
     domain = "system"
+    KEYS_IDLE = True                  # its phases move on a press alone; the pump is the draw's
 
     def draw(self, dt):
         self.ws.update_ui._pump_update(dt)   # advance the install / reboot countdown
@@ -189,7 +324,6 @@ class _WebConsoleLayer(Layer):
         ws = self.ws
         lay = ws.layout
         ws.web.ui.draw((lay.cx, lay.cy, lay.cw, lay.ch))
-        ws.bar_layer._draw_status_strip("webconsole")
 
     def handle_input(self, i):
         return self.ws.web.ui.handle_input(i)
@@ -203,23 +337,24 @@ class _MapLayer(Layer):
     handheld's Map page, or a desk pane's view (`map_editor_ui.py`). Tap = paint
     one cell, drag = pan (#37); the d-pad pans the window.
 
-    Stage 4 (#46 zoned bar): draw() calls ws.bar_layer._draw_status_strip("menu")
-    LAST (chrome over content) so the Editor's lent top-bar zone (the tab ladder +
-    PLAY) shows on this tab; handle_pointer routes a tap through
-    ws.bar_layer.handle_bar_tap("menu", ...) FIRST, before the map click/pan."""
+    The frame draws the "menu" strip over it (`bar_layer.STRIP_OF`), the
+    Editor's lent top-bar zone (the tab ladder + PLAY); handle_pointer routes a
+    tap through ws.bar_layer.handle_bar_tap("menu", ...) FIRST, before the map
+    click/pan."""
 
     id = "map"
     domain = "system"
-    ball_steps = False              # the trackball moves the map's cursor
+    def ball_steps(self):
+        """The trackball moves the map's cursor."""
+        return False
 
     def draw(self, dt):
         ws = self.ws
-        ws._reset_canvas_state()          # game-canvas hygiene (degradation shares it)
+        ws.reset_canvas_state()          # game-canvas hygiene (degradation shares it)
         ws.map_ui._draw_map()
-        ws.bar_layer._draw_status_strip("menu")
 
     def at_top(self):
-        """Up goes on to the bar from the map's top row (Workstation._bar_keys)."""
+        """Up goes on to the bar from the map's top row (InputRouter._bar_keys)."""
         return self.ws.map_ui.at_top()
 
     def handle_input(self, i):
@@ -234,7 +369,7 @@ class _MapLayer(Layer):
             return True         # the Editor's lent zone (Stage 4) claimed the tap
         if ws.map_ui.layout.verbs:
             if ws.map_ui.pointer(px, py, click, ws.pointer.down):
-                ws._dirty = True
+                ws.mark_dirty()
         elif click:
             ws.map_ui._map_click(px, py)
         elif ws.pointer.down:
@@ -250,21 +385,34 @@ class _SceneLayer(Layer):
     (scene_editor_ui.SceneEditorUI). Tap = place/select, drag = move an actor or
     pan the world (the map editor's gesture grammar).
 
-    Stage-4 bar rollout (#46 zoned bar): draw() calls ws.bar_layer.
-    _draw_status_strip("menu") LAST (chrome over content) so the Editor's lent
-    top-bar zone (the tab ladder + PLAY, no SAVE -- #111) shows on this tab;
+    The frame draws the "menu" strip over it (`bar_layer.STRIP_OF`), the
+    Editor's lent top-bar zone (the tab ladder + PLAY, no SAVE -- #111);
     handle_pointer routes a tap through ws.bar_layer.handle_bar_tap("menu", ...)
     FIRST, before the placement click/pan -- the exact _MapLayer shape."""
 
     id = "scene"
     domain = "system"
-    ball_steps = False              # the trackball points at the placements
+    def ball_steps(self):
+        """The trackball points at the placements."""
+        return False
+
+    def ui_host(self):
+        """The handheld page's context, where its tag popover's field types."""
+        page = self.ws.scene_ui._page
+        return page.host if page is not None else None
+
+    def back(self):
+        """The tag popover closes."""
+        page = self.ws.scene_ui._page
+        if page is None or page.pop is None:
+            return False
+        page.close()
+        return True
 
     def draw(self, dt):
         ws = self.ws
-        ws._reset_canvas_state()          # game-canvas hygiene (degradation shares it)
+        ws.reset_canvas_state()          # game-canvas hygiene (degradation shares it)
         ws.scene_ui._draw_scene()
-        ws.bar_layer._draw_status_strip("menu")
 
     def handle_input(self, i):
         self.ws.scene_ui._scene_input()
@@ -278,7 +426,7 @@ class _SceneLayer(Layer):
             return True         # the Editor's lent zone (Stage 4) claimed the tap
         if ws.scene_ui.layout.verbs:
             if ws.scene_ui.pointer(px, py, click, ws.pointer.down):
-                ws._dirty = True
+                ws.mark_dirty()
         elif click:
             ws.scene_ui._scene_click(px, py)
         elif ws.pointer.down:
@@ -293,27 +441,26 @@ class _MusicLayer(Layer):
     handheld's Music page (`editor_music.py`). The live mixer is ticked so a
     preview keeps sounding, then the preview flag auto-clears when it ends.
 
-    Stage-4 bar rollout (#46 zoned bar): draw() calls ws.bar_layer._draw_status_strip
-    ("menu") LAST (chrome over the page) so the Editor's lent top-bar zone (the tab
-    ladder + PLAY + X, no SAVE -- #111) shows on this tab; handle_pointer routes a tap through
-    ws.bar_layer.handle_bar_tap("menu", ...) FIRST, before the page's verbs."""
+    The frame draws the "menu" strip over it (`bar_layer.STRIP_OF`), the
+    Editor's lent top-bar zone (the tab ladder + PLAY + X, no SAVE -- #111);
+    handle_pointer routes a tap through ws.bar_layer.handle_bar_tap("menu", ...)
+    FIRST, before the page's verbs."""
 
     id = "music"
     domain = "system"
 
     def draw(self, dt):
         ws = self.ws
-        ws._reset_canvas_state()
+        ws.reset_canvas_state()
         if ws.audio_out is not None:
             ws.audio_out.tick(dt)
         mu = ws.music_ui
         if mu.music_preview is not None and not mu._music_preview_active():
             mu.music_preview = None
         mu._draw_music()
-        ws.bar_layer._draw_status_strip("menu")
 
     def at_top(self):
-        """Up goes on to the bar from the first step (Workstation._bar_keys)."""
+        """Up goes on to the bar from the first step (InputRouter._bar_keys)."""
         return self.ws.music_ui.at_top()
 
     def handle_input(self, i):
@@ -354,7 +501,7 @@ class _PauseLayer(Layer):
     domain = "system"
 
     def draw(self, dt):
-        full = getattr(self.ws.wm, "_pause_full", None)
+        full = getattr(self.ws.wm, "pause_full", None)
         if full is not None:
             full()                    # the windowed desk: a whole frame under it
         self.ws.pause.draw()
@@ -374,7 +521,7 @@ class _PauseLayer(Layer):
 
 
 class _ConfirmLayer(Layer):
-    """The delete confirm's layer (`console_notices.DeleteConfirm`): its
+    """The delete confirm's layer (`shell_cards.DeleteConfirm`): its
     dialog over the content, drawn on the system canvas; it takes every key
     and tap while it shows, and clears the game pointer's tap so a cart
     underneath never sees one."""
@@ -418,7 +565,7 @@ class _SysMenuLayer(Layer):
         p = self.ws.pause
         if p.open and p.shows_bar():
             return                    # over the paused game the pause draws it
-        paint = getattr(self.ws.wm, "_pop_paint", None)
+        paint = getattr(self.ws.wm, "pop_paint", None)
         if paint is not None:
             paint(False)              # the windowed WM: the scrim, its snapshots, the menu
         else:
@@ -429,12 +576,12 @@ class _SysMenuLayer(Layer):
         popover's (whatever dirty mark the handler left), one outside it
         marks the frame."""
         ws = self.ws
-        was = ws._dirty
+        was = ws.frame_state.dirty
         got = fn(*args)
         if got == "global":
-            ws._dirty = True
+            ws.mark_dirty()
         elif got == "local":
-            ws._dirty = was
+            ws.frame_state.dirty = was
             ws.popover_touch()
 
     def handle_input(self, i):
@@ -458,7 +605,7 @@ class _SysMenuLayer(Layer):
         elif i.pressed("a") or i.pressed("run"):
             m.activate()
             ws.popover_touch()
-            ws._dirty = True
+            ws.mark_dirty()
         return True
 
     def handle_pointer(self, px, py, click):
@@ -483,7 +630,7 @@ class _SysMenuLayer(Layer):
                 elif hit >= 0:
                     m.sel = hit           # a row: move+select
                     m.activate()
-                    ws._dirty = True
+                    ws.mark_dirty()
                 ws.popover_touch()
         gp = ws.input.game_pointer
         ws.input.game_pointer = (gp[0], gp[1], False, False)
@@ -491,7 +638,7 @@ class _SysMenuLayer(Layer):
 
 
 class _AboutLayer(Layer):
-    """About's card (console_notices.AboutCard) over the washed content: its rows
+    """About's card (shell_cards.AboutCard) over the washed content: its rows
     take the keys and taps; Esc, B or a tap outside closes it. Modal --
     always consumes + clears the game pointer's tap."""
 
@@ -507,13 +654,13 @@ class _AboutLayer(Layer):
         if i.pressed("b") or i.pressed("stop"):
             card.close()
         elif card.host.keys(i):
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         return True
 
     def handle_pointer(self, px, py, click):
         ws = self.ws
         if ws.menu_ui.about.host.point(px, py, click, bool(getattr(ws.pointer, "down", False))):
-            ws._dirty = True
+            ws.mark_dirty()
         gp = ws.input.game_pointer
         ws.input.game_pointer = (gp[0], gp[1], False, False)
         return True

@@ -37,15 +37,8 @@ if _N is None:
     except ImportError:  # a console with no USB host
         _N = None
 
-try:
-    import devices as _D
-except ImportError:  # host: the runtime package
-    from runtime import devices as _D
-
-try:
-    import moybyte as _moybyte
-except ImportError:  # host: the runtime package
-    from runtime import moybyte as _moybyte
+import devices as _D
+import moybyte as _moybyte
 
 if _N is not None:
     HID, CDC, MIDI, OTHER = _N.HID, _N.CDC, _N.MIDI, _N.OTHER

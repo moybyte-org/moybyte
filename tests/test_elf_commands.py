@@ -66,7 +66,7 @@ def term(tmp_path, built):
     (ncblind / "manifest.json").write_text(json.dumps(man))
     ws = build_workstation(str(carts))
     assert "elf" in ws.runtimes
-    app = ws.terminal_app
+    app = ws.app("terminal")
     app.open()
     app.draw(0)
     app.draw(0)

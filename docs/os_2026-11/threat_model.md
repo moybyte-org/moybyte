@@ -32,10 +32,10 @@ sealed and the more the prompt says.
 | tier | boards | what seals it | enforced in | what it does not stop |
 |---|---|---|---|---|
 | Lua app or game | every board | libmoy's sandbox: base without `load`, `loadstring`, `dofile`, `loadfile`, `require` and `collectgarbage`; `io`, `os`, `debug` and `package` not compiled in; a chunk is loaded as text only, a binary one refused; the role names its permissions bind, and `io`/`os` mapped onto the folders they grant | `native/moycore/libmoy/moy_lua.c` (`BANNED`, `SANDBOX_LIBS`), `native/moycore/modmoycore.c` (`run_chunk`), `native/moy_app/moy_app_lua.c` | a bug in the Lua VM, which runs in the kernel's own memory |
-| Lua service | every board | a state of its own: base without `load`, `dofile` and `loadfile`, with `coroutine`, `table`, `string` and `math`; an `os` of `time` and `clock` alone; no `io`, `debug` or `package`; its source loaded as text | `native/moycore/moycore_svc.c` (`open_names`) | a bug in the Lua VM, which runs in the kernel's own memory |
+| Lua service | every board | a state of its own over the tier's one sandbox, a cart's: base without `load`, `dofile`, `loadfile` and `collectgarbage`, with `coroutine`, `table`, `string` and `math`; an `os` of `time` and `clock` alone; no `io`, `debug` or `package`; its source loaded as text | `native/moycore/moycore_lua.c` (`moycore_lua_sandbox`), `native/moycore/moycore_svc.c` (`open_names`) | a bug in the Lua VM, which runs in the kernel's own memory |
 | wasm, interpreted | every board | WAMR's interpreter checks every access against the bounded linear memory; the imports are the only surface, an import of a role not granted refused at load; a WASI command's paths answer NOTCAPABLE outside the folders its `files` grants, and WAMR's libc-wasi is not built | `native/moy_wasm/README.md`, `native/moy_wasm/moy_wasi.c`, `native/moy_sh/moy_sh_prog.h` (THE ROOTS) | a loop that calls no import runs until it returns (README, "Stopping a run") |
 | wasm, AOT | every board | the bounds checks are in the compiled code, so a module loads only by provenance: its key matches this chip and format, and a signature present must verify (`moy_ota_admit_module`) | `native/moy_net/moy_ota.h`, `native/moy_wasm/moy_wasm_key.h` | an **unsigned** module, admitted under `full_access`, is native code at the kernel's trust on every board, the P4s included: AOT never runs in U-mode (§7) |
-| Python | every board | nothing: the shell's one VM, its real builtins, `open`, `os`, `socket` and every shell module importable; the manifest is legible, not binding | `runtime/shell/app_perms.py` (`TRUSTED`), `processes.md` §2 and §3 | anything: the prompt says "A trusted app" and that is the whole of it. A permission turned off binds its names to `None`, a courtesy the app can step around |
+| Python | every board | nothing: the shell's one VM, its real builtins, `open`, `os`, `socket` and every shell module reachable (the installer refuses a plain import of one, `processes.md` §2, and `__import__` walks past it); the manifest is legible, not binding | `runtime/shell/app_perms.py` (`TRUSTED`), `processes.md` §2 and §3 | anything: the prompt says "A trusted app" and that is the whole of it. A permission turned off binds its names to `None`, a courtesy the app can step around |
 | C (ELF) | the P4s | U-mode under PMP, the OS table the only way into the kernel (below) | `native/moy_elf/README.md` ("Isolation"), `native/moy_elf/moy_umode.h` | a bug in a row's own body; a canary mismatch ends the board, by design |
 | C (ELF) | the S3s | nothing (owner, 2026-11-07, `tiers.md` §1): the module is loaded into the kernel's memory and can write any of it, whatever its rows check | `runtime/shell/app_perms.py`: `check` refuses a native cart without `full_access`, and the S3s have no entry in `FULL_ACCESS_LINES`, so the prompt says "Full access to the console" | everything: files, secrets, radios, flash. The floor is the crash record and the strike ledger, keyed by content hash for an unsigned module (`processes.md` §10) |
 
@@ -56,7 +56,7 @@ authority; this is where each defence lives):
   not hold is `EBADF`; an object a row is using outlives another thread's
   close of it.
 - **The scrub.** A module's block, its stacks and its mappings are zeroed
-  when taken and when let go (`u_scrub_free` in `native/moy_elf/moy_os.c`),
+  when taken and when let go (`moy_os_u_scrub_free` in `native/moy_elf/moy_os.c`),
   so no process reads what the last holder left.
 - **The trap context.** A U call's saved kernel context carries a canary
   checked at its end (THE SEAL, `native/moy_elf/moy_umode.c`); a trap is
@@ -64,7 +64,7 @@ authority; this is where each defence lives):
 - **The kernel's own records** are taken under its lock, so no race between
   a row, a fault and a process's end reaches freed memory (90da6e6d9).
 - **Permissions bind rows**: a socket row asks the process's grant
-  (`net_need` in `moy_os.c`) before it opens one.
+  (`net_need` in `moy_os_net.c`) before it opens one.
 - **The net**: `tests/on_glass.py`'s `elf_umode_isolates` runs
   `tests/fixtures/elf/elf_wild.moy` against every row with a checked pointer
   or handle (the list generated from the table), hostile stacks, and ends
@@ -122,8 +122,9 @@ exchange but never finish it, and the password never crosses the network.
 Its limits in short: the page itself crosses plain HTTP, so an active attacker on the LAN can serve a page that captures what is
 typed into it; a paired browser can write and run any cart, one that arrives as files
 being asked on the glass at its first run (§3); the password pairs against the record's PBKDF2 cost
-(above) and the backoff. The Zero's setup network is open
-while it is unconfigured (`firmware/seeed_xiao_esp32s3_zero/modules/zero_setup.py`).
+(above) and the backoff. The Zero's setup network is open whenever
+no saved network answers, and on a board that already has a password its form
+changes nothing without that password, five tries a boot (`device/zero_setup.py`).
 
 **Fetches.** The kernel's client (`native/moy_net/moy_net_port.c`) verifies an
 https server against the image's CA bundle, with the host's name, and a build
@@ -247,4 +248,8 @@ What holds less than a reader would assume. Each is how the code stands.
 - **The browser's profile**: a device key is that profile's, and on the
   project site the console's store is the browser's own storage.
 - **The vendored code's own bugs** (Dropbear, WAMR, mbedTLS, Lua): they are
-  the console's, fixed in our forks and re-vendored.
+  the console's, fixed in our forks and re-vendored. Every `*_vendor.json`
+  pin is checked weekly against OSV.dev, NVD and its upstream's GitHub
+  advisories (`tools/vendor_advisories.py`); one it reports is bumped past or
+  acknowledged with a reason in `tools/vendor_advisories_ack.json`. Lua has
+  no pin, so nothing checks it.

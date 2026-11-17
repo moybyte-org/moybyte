@@ -1,14 +1,16 @@
 // moy_input's board half: the bus adapter, the pins and ISRs, and the input
-// task. moy_drivers.h has the drivers; this file is what a board's
-// mpconfigboard.h selects them with:
+// task. moy_drivers.h has the drivers; this file is what a board selects them
+// with, its pins from board.toml's rows (board_config.hw_defines) and the rest
+// from its mpconfigboard.h:
 //
 //   MOY_INPUT_KBD_TDECK            the T-Deck's C3 keyboard on the kernel's bus
-//   MOY_INPUT_BALL_UP/_DOWN/_LEFT/_RIGHT, MOY_INPUT_BALL_CLICK
+//   MOY_HW_TRACKBALL_UP/_DOWN/_LEFT/_RIGHT, MOY_HW_TRACKBALL_CLICK
 //                                  the trackball's pulse pins and its click
 //   MOY_INPUT_TOUCH_KIND           MOY_TOUCH_GT911, _GSL3680 or _AXS, and its
-//     _ADDR, _YX, _CLEAR_FIRST, _INT (the GT911's gate, or the GSL's address
-//     strap), _RST, _SWAP, _FLIP_X, _FLIP_Y, _RAW_W, _RAW_H, _RAW_X0, _RAW_Y0,
-//     _EXTRAPOLATE, _HOLD_MS, _FW and _FW_LEN (the GSL3680's firmware)
+//     _ADDR, _YX, _CLEAR_FIRST, _SWAP, _FLIP_X, _FLIP_Y, _RAW_W, _RAW_H,
+//     _RAW_X0, _RAW_Y0, _EXTRAPOLATE, _HOLD_MS, _FW and _FW_LEN (the GSL3680's
+//     firmware); its pins are the i2c0 row's MOY_HW_I2C0_TOUCH_INT (the
+//     GT911's gate, or the GSL's address strap) and _TOUCH_RST
 //   MOY_INPUT_TASK                 the drivers' passes run on a core-0 task of
 //                                  MOY_INPUT_TASK_STACK bytes, one per kick;
 //                                  without it a kick runs the pass inline
@@ -21,12 +23,16 @@
 // The VM's soft reset sweeps only the pins a Python handler holds
 // (moy_kernel.c), so these survive it, and so does the task.
 
+#include "moy_tasks.h"
+
+#include "moy_platform.h"
+
 #include "py/mpconfig.h"
 
 #include "moy_drivers.h"
 
-#if defined(MOY_INPUT_BOARD) && (defined(MOY_INPUT_KBD_TDECK) || defined(MOY_INPUT_TOUCH_KIND) \
-    || defined(MOY_INPUT_BALL_UP))
+#if defined(MOY_ON_BOARD) && (defined(MOY_INPUT_KBD_TDECK) || defined(MOY_INPUT_TOUCH_KIND) \
+    || defined(MOY_HW_TRACKBALL_UP))
 
 #include <string.h>
 
@@ -70,12 +76,12 @@ static int bus_write_read(void *ctx, uint8_t addr, const uint8_t *src, size_t ns
 
 static uint32_t bus_ms(void *ctx) {
     (void)ctx;
-    return (uint32_t)(esp_timer_get_time() / 1000) & (MOY_INPUT_TICKS_PERIOD - 1u);
+    return (uint32_t)(moy_now_us() / 1000) & (MOY_INPUT_TICKS_PERIOD - 1u);
 }
 
 static uint32_t bus_us(void *ctx) {
     (void)ctx;
-    return (uint32_t)esp_timer_get_time();
+    return (uint32_t)moy_now_us();
 }
 
 static void bus_sleep(void *ctx, uint32_t ms) {
@@ -103,11 +109,11 @@ extern const size_t MOY_INPUT_TOUCH_FW_LEN;
 #endif
 #endif
 
-#ifdef MOY_INPUT_BALL_UP
+#ifdef MOY_HW_TRACKBALL_UP
 static moy_ball_t s_ball;
 static bool s_ball_up;
 static const int8_t BALL_PINS[4] = {
-    MOY_INPUT_BALL_UP, MOY_INPUT_BALL_DOWN, MOY_INPUT_BALL_LEFT, MOY_INPUT_BALL_RIGHT,
+    MOY_HW_TRACKBALL_UP, MOY_HW_TRACKBALL_DOWN, MOY_HW_TRACKBALL_LEFT, MOY_HW_TRACKBALL_RIGHT,
 };
 
 static void IRAM_ATTR ball_isr(void *arg) {
@@ -115,7 +121,9 @@ static void IRAM_ATTR ball_isr(void *arg) {
 }
 #endif
 
-#if defined(MOY_INPUT_TOUCH_KIND) && defined(MOY_INPUT_TOUCH_INT) && !defined(MOY_INPUT_TOUCH_FW)
+// The GT911's INT gates its reads; the GSL3680 takes INT as its address strap,
+// and the AXS15231B's is not read.
+#if defined(MOY_INPUT_TOUCH_KIND) && MOY_INPUT_TOUCH_KIND == 1 && defined(MOY_HW_I2C0_TOUCH_INT)
 static void IRAM_ATTR touch_int_isr(void *arg) {
     (void)arg;
     s_touch.int_count++;
@@ -134,7 +142,7 @@ static bool isr_service(void) {
 }
 
 bool moy_input_board_owns_pin(int gpio) {
-    #ifdef MOY_INPUT_BALL_UP
+    #ifdef MOY_HW_TRACKBALL_UP
     if (s_ball_up) {
         for (int i = 0; i < 4; i++) {
             if (BALL_PINS[i] == gpio) {
@@ -144,7 +152,7 @@ bool moy_input_board_owns_pin(int gpio) {
     }
     #endif
     #ifdef TOUCH_INT_GATE
-    if (s_touch.gate && gpio == MOY_INPUT_TOUCH_INT) {
+    if (s_touch.gate && gpio == MOY_HW_I2C0_TOUCH_INT) {
         return true;
     }
     #endif
@@ -168,9 +176,6 @@ static void one_pass(void) {
 }
 
 #ifdef MOY_INPUT_TASK
-#ifndef MOY_INPUT_TASK_STACK
-#define MOY_INPUT_TASK_STACK 3072
-#endif
 static TaskHandle_t s_task;
 
 static void input_task(void *arg) {
@@ -183,8 +188,7 @@ static void input_task(void *arg) {
 
 static void task_up(void) {
     if (s_task == NULL) {
-        xTaskCreatePinnedToCore(input_task, "moy_input", MOY_INPUT_TASK_STACK, NULL,
-                                ESP_TASK_PRIO_MIN + 2, &s_task, 0);
+        moy_task_spawn(MOY_TASK_INPUT, input_task, NULL, &s_task);
     }
 }
 
@@ -238,16 +242,16 @@ bool moy_input_board_kbd(moy_kbd_t **k) {
 static void gsl_reset(void *ctx, bool before) {
     (void)ctx;
     if (before) {
-        gpio_reset_pin(MOY_INPUT_TOUCH_INT);
-        gpio_set_direction(MOY_INPUT_TOUCH_INT, GPIO_MODE_OUTPUT);
-        gpio_set_level(MOY_INPUT_TOUCH_INT, 0);
-        gpio_set_level(MOY_INPUT_TOUCH_RST, 0);
+        gpio_reset_pin(MOY_HW_I2C0_TOUCH_INT);
+        gpio_set_direction(MOY_HW_I2C0_TOUCH_INT, GPIO_MODE_OUTPUT);
+        gpio_set_level(MOY_HW_I2C0_TOUCH_INT, 0);
+        gpio_set_level(MOY_HW_I2C0_TOUCH_RST, 0);
         bus_sleep(NULL, 20);
-        gpio_set_level(MOY_INPUT_TOUCH_RST, 1);
+        gpio_set_level(MOY_HW_I2C0_TOUCH_RST, 1);
         bus_sleep(NULL, 20);
     } else {
-        gpio_set_direction(MOY_INPUT_TOUCH_INT, GPIO_MODE_INPUT);
-        gpio_set_pull_mode(MOY_INPUT_TOUCH_INT, GPIO_PULLUP_ONLY);
+        gpio_set_direction(MOY_HW_I2C0_TOUCH_INT, GPIO_MODE_INPUT);
+        gpio_set_pull_mode(MOY_HW_I2C0_TOUCH_INT, GPIO_PULLUP_ONLY);
     }
 }
 #endif
@@ -291,9 +295,9 @@ bool moy_input_board_touch(moy_touchdev_t **d, int32_t w, int32_t h) {
         #ifdef MOY_INPUT_TOUCH_FW
         s_touch.fw = MOY_INPUT_TOUCH_FW;
         s_touch.fw_len = MOY_INPUT_TOUCH_FW_LEN;
-        gpio_reset_pin(MOY_INPUT_TOUCH_RST);
-        gpio_set_direction(MOY_INPUT_TOUCH_RST, GPIO_MODE_OUTPUT);
-        gpio_set_level(MOY_INPUT_TOUCH_RST, 1);
+        gpio_reset_pin(MOY_HW_I2C0_TOUCH_RST);
+        gpio_set_direction(MOY_HW_I2C0_TOUCH_RST, GPIO_MODE_OUTPUT);
+        gpio_set_level(MOY_HW_I2C0_TOUCH_RST, 1);
         #endif
         moy_touchdev_probe(&s_touch, &s_bus);
         #ifdef MOY_INPUT_TOUCH_FW
@@ -302,12 +306,12 @@ bool moy_input_board_touch(moy_touchdev_t **d, int32_t w, int32_t h) {
         #ifdef TOUCH_INT_GATE
         if (s_touch.available && isr_service()) {
             gpio_config_t io = {
-                .pin_bit_mask = 1ULL << MOY_INPUT_TOUCH_INT,
+                .pin_bit_mask = 1ULL << MOY_HW_I2C0_TOUCH_INT,
                 .mode = GPIO_MODE_INPUT,
                 .intr_type = GPIO_INTR_ANYEDGE,
             };
             if (gpio_config(&io) == ESP_OK
-                && gpio_isr_handler_add(MOY_INPUT_TOUCH_INT, touch_int_isr, NULL) == ESP_OK) {
+                && gpio_isr_handler_add(MOY_HW_I2C0_TOUCH_INT, touch_int_isr, NULL) == ESP_OK) {
                 s_touch.gate = true;
             }
         }
@@ -326,7 +330,7 @@ bool moy_input_board_touch(moy_touchdev_t **d, int32_t w, int32_t h) {
 }
 
 bool moy_input_board_ball(moy_ball_t **b, bool *click) {
-    #ifdef MOY_INPUT_BALL_UP
+    #ifdef MOY_HW_TRACKBALL_UP
     if (!s_ball_up) {
         if (!isr_service()) {
             return false;
@@ -342,7 +346,7 @@ bool moy_input_board_ball(moy_ball_t **b, bool *click) {
             gpio_isr_handler_add(BALL_PINS[i], ball_isr, (void *)i);
         }
         gpio_config_t io = {
-            .pin_bit_mask = 1ULL << MOY_INPUT_BALL_CLICK,
+            .pin_bit_mask = 1ULL << MOY_HW_TRACKBALL_CLICK,
             .mode = GPIO_MODE_INPUT,
             .pull_up_en = GPIO_PULLUP_ENABLE,
         };
@@ -350,7 +354,7 @@ bool moy_input_board_ball(moy_ball_t **b, bool *click) {
         s_ball_up = true;
     }
     *b = &s_ball;
-    *click = gpio_get_level(MOY_INPUT_BALL_CLICK) == 0;
+    *click = gpio_get_level(MOY_HW_TRACKBALL_CLICK) == 0;
     return true;
     #else
     (void)b;

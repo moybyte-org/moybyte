@@ -46,6 +46,7 @@ import ctypes
 import os
 
 from . import host_native, native_build
+from moy_gfx_face import moy_shape_hole_t as _Hole, moy_shape_paint_t as _Paint
 
 # The native module's own directory, searched alongside the vendored libmoy one:
 # the compositor kernel is moy_gfx's, not libmoy's, and it lives with the
@@ -60,7 +61,8 @@ _MOY_GFX = os.path.dirname(native_build.LIBMOY)
 # and refuses a name that appears in each, so this cannot silently pick up a
 # stale copy.
 _LIBMOY = ("moy.h", "moy_pixel.h", "moy_canvas.c", "moy_sprite.c", "moy_data.c",
-           "moy_gfx_kernels.h", "moy_gfx_kernels.c", "moy_text.h", "moy_text.c",
+           "moy_gfx_kernels.h", "moy_gfx_kernels.c", "moy_gfx_base.h", "moy_gfx_base.c",
+           "moy_text.h", "moy_text.c",
            "moy_backdrop.h", "moy_backdrop.c", "moy_shape.h", "moy_shape.c",
            "moy_path.h", "moy_path.c", "moy_path_faces.h", "moy_scr.h", "moy_scr.c")
 
@@ -126,7 +128,7 @@ _SIGS = (
     ("mg_tint", [_P, _Z, _P, _Z, _I, _I, _I, _I, _I, ctypes.c_uint16, _I, _I, _I, _I], _I),
     ("moy_shape_stats", [_P], None),
     ("moy_shape_reset", [_I], None),
-    ("moy_shape_wire_swapped", [_I], None),
+    ("moy_gfx_wire", [_I], _I),
     ("moy_shape_shadow_io", [_P, _P], None),
     ("moy_shape_coverage", [_I, _I, _I], _I),
     # Paths and the outline faces (native/moy_gfx/moy_path.c).
@@ -134,7 +136,6 @@ _SIGS = (
     ("mg_path_text", [_P, _Z, _I, _I, _I, _I, _I, _P, _Z, _I, _I, _I, _I, _I, _I, _I], _I),
     ("moy_path_width", [_I, _I, _P, _Z], _I),
     ("moy_path_metrics", [_I, _P], _I),
-    ("moy_path_wire_swapped", [_I], None),
     # The boot splash (native/moy_gfx/moy_scr.c).
     ("moy_splash_buf", [_P, _Z, _I, _I, _I, _I, _I, _I, _P, _I, _P, _Z], _I),
     # The layer restore (moy_gfx_kernels.h's mg_lr_*), its engine one of the
@@ -281,16 +282,6 @@ def shape(buf, dw, dh, kind, a0, a1, a2, a3, a4, a5, color, pat, hole,
                     int(cx0), int(cy0), int(cx1), int(cy1))
 
 
-class _Paint(ctypes.Structure):
-    _fields_ = [("n", ctypes.c_uint8), ("mode", ctypes.c_uint8), ("steps", ctypes.c_uint8),
-                ("pad", ctypes.c_uint8), ("t", ctypes.c_int16 * 6), ("c", ctypes.c_uint16 * 6),
-                ("y0", ctypes.c_int), ("h", ctypes.c_int)]
-
-
-class _Hole(ctypes.Structure):
-    _fields_ = [(n, ctypes.c_int) for n in ("x", "y", "w", "h", "r")]
-
-
 def _paint(fill):
     """moy_shape_paint_t from what modmoy_gfx.c's rrect takes: None, a wire
     colour, or (mode, steps, y0, h, t0, c0, t1, c1, ...)."""
@@ -393,9 +384,10 @@ def shape_reset(caches):
     _lib().moy_shape_reset(int(bool(caches)))
 
 
-def shape_order(swapped):
-    _lib().moy_shape_wire_swapped(int(bool(swapped)))
-    _lib().moy_path_wire_swapped(int(bool(swapped)))
+def wire(*swapped):
+    """Whether text, shapes and paths write byte-swapped words; with
+    `swapped`, set it for all three (moy_gfx_base.h). Answers what it was."""
+    return bool(_lib().moy_gfx_wire(int(bool(swapped[0])) if swapped else -1))
 
 
 def _ints(a):

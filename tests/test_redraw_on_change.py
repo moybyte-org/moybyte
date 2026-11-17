@@ -27,7 +27,7 @@ def _static_launcher(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.look.select_wallpaper(None, persist=False)
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
     return ws, drv
 
 
@@ -39,10 +39,10 @@ def _static_code_editor(tmp_path):
     assert ws.launcher.items, "system carts should be seeded"
     ws.launcher.sel = 0
     ws.open()
-    ws._open_menu()
-    ws.set_menu_view("code")
+    ws.text.open_menu()
+    ws.text.set_menu_view("code")
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
     assert ws.menu_view == "code" and ws.editor is not None
     return ws, drv
 
@@ -53,7 +53,7 @@ def _settle(ws, drv, n=3):
     for _ in range(n):
         drv.frame(DT)
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
     drv.frame(DT)
     return ws.frame_state.frames_drawn
 
@@ -69,7 +69,7 @@ def test_static_code_editor_skips_idle_frames(tmp_path):
         drv.frame(DT)
     assert ws.frame_state.frames_drawn == base, (
         "static code editor redrew %d of 100 idle frames" % (ws.frame_state.frames_drawn - base))
-    assert ws._dirty is False
+    assert ws.frame_state.dirty is False
 
 
 def test_static_launcher_skips_idle_frames(tmp_path):
@@ -145,7 +145,7 @@ def test_running_cart_redraws_every_frame(tmp_path):
     ws.launcher.sel = 0
     ws.open()                       # -> screen == "desktop", cart running
     assert ws.screen == "desktop"
-    assert ws._update is not None or ws._draw is not None
+    assert ws.run.player.update is not None or ws.run.player.draw is not None
     base = _settle(ws, drv)
     for _ in range(60):
         drv.frame(DT)
@@ -170,7 +170,7 @@ def test_live_wallpaper_keeps_launcher_animating(tmp_path):
         import pytest
         pytest.skip("no live (animating) wallpaper cart seeded")
     settle_badges(ws)
-    ws._toast_until = 0
+    ws.toast_until = 0
     base = _settle(ws, drv)
     for _ in range(30):
         drv.frame(DT)

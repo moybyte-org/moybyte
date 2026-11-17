@@ -231,7 +231,7 @@ def test_an_uninstalled_pick_reads_as_absent_at_boot(tmp_path):
     ws.look.apply_layout()
     assert layout_base.bar_edge() == "bottom"
     _install({"format": 2, "name": "other"})      # the one slot now holds another
-    ws.load_system()
+    ws.spine.load_system()
     assert ws.look.layout_theme() is None
     assert ws.system.get("layout_theme") == "dock"  # the row stays; it reads absent
     assert layout_base.bar_edge() == "top"
@@ -284,7 +284,7 @@ def _golden_ws(cfg, carts):
                                     font_scale=cfg["font_scale"], windowed=cfg["windowed"],
                                     panel_diagonal_in=cfg["diagonal_in"])
     if cfg["windowed"]:
-        ws.open_desk()
+        ws.home.open_desk()
         if cfg.get("console"):
             ws.wm.enter_console()
     return ws

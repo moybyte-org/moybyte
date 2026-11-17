@@ -29,12 +29,8 @@ try:
 except ImportError:  # pragma: no cover
     _io = None
 
-try:
-    from ticks import _ticks_ms, _ticks_diff
-    from moy_fs import _exists
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.ticks import _ticks_ms, _ticks_diff
-    from runtime.moy_fs import _exists
+from ticks import _ticks_ms, _ticks_diff
+from moy_fs import _exists
 
 
 def _exact(src, n, job):
@@ -65,6 +61,18 @@ def _u16(b, i):
 
 def _u32(b, i):
     return b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (b[i + 3] << 24)
+
+
+def _parents(base, name):
+    """The folders under `base` the file `name` (an official cart's
+    `scenes/level.json`) sits in, made."""
+    import os
+    segs = name.split("/")
+    for k in range(1, len(segs)):
+        try:
+            os.mkdir(base + "/" + "/".join(segs[:k]))
+        except OSError:
+            pass
 
 
 class _Sink:
@@ -120,6 +128,8 @@ class _Sink:
 
         def _io():
             if self.f is None:
+                if self.cart_file and "/" in self.name:
+                    _parents(self.job.stage, self.name)
                 self.f = open(path, "wb")
             if len(data):
                 self.f.write(data)
@@ -711,11 +721,6 @@ class _Local:
 
 
 # cart_index's words and fetch helpers, imported last (see above).
-try:
-    from cart_index import (InstallError, MISMATCH, PACKING, READ_CHUNK, STOPPED,
-                            _Fetched, _MP, _hex, _log, _ranged_bytes,
-                            _tail_bytes, net_text, resolve, stage_root)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.cart_index import (InstallError, MISMATCH, PACKING, READ_CHUNK, STOPPED,
-                                    _Fetched, _MP, _hex, _log, _ranged_bytes,
-                                    _tail_bytes, net_text, resolve, stage_root)
+from cart_index import (InstallError, MISMATCH, PACKING, READ_CHUNK, STOPPED,
+                        _Fetched, _MP, _hex, _log, _ranged_bytes,
+                        _tail_bytes, net_text, resolve, stage_root)

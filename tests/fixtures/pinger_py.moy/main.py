@@ -7,10 +7,7 @@
 # receiver takes one only where its manifest lists the name under
 # `receives` (native/moy_kernel/moy_evq.h, THE RULE).
 
-try:
-    import moybyte
-except ImportError:  # the host: the runtime package
-    from runtime import moybyte
+import moybyte
 
 PERIOD_MS = 100
 SENT = [0, 0]                   # ticks, messages taken

@@ -15,18 +15,10 @@ moves, and the verbs are made again only when what they are made of moves
 frame, stays on the class. It owns no state of its own.
 """
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-    import layout_base as _lb
-    from home_grid import HOME_TABS, NEW_TILE_TYPE, PSEUDO_TILE_TYPES, text_scale
-    from moy_store_base import builtin_name as _builtin_name
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-    from runtime import layout_base as _lb
-    from runtime.home_grid import HOME_TABS, NEW_TILE_TYPE, PSEUDO_TILE_TYPES, text_scale
-    from runtime.moy_store_base import builtin_name as _builtin_name
+import ui as _ui
+import ui_draw as _ui_draw
+import layout_base as _lb
+from home_grid import HOME_TABS, NEW_TILE_TYPE, PSEUDO_TILE_TYPES, text_scale
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
@@ -37,8 +29,9 @@ class HomeZone:
         """The active tab's verbs on the selected card (§12's table): Games
         PLAY, CHANGE, SEARCH; Mine PLAY, CHANGE; Apps OPEN; Make NEW, CHANGE,
         COPY, DEL. CHANGE, COPY and DEL need a real cart and a store that
-        manages projects, and DEL one the kid's (a built-in is copied, never
-        deleted: `builtin_name`, the open-cart menu's own test); the "+ New"
+        manages projects, and DEL one a Delete takes (`CartManager.deletable`,
+        the open-cart menu's own test: a core built-in is copied, never
+        deleted); the "+ New"
         card's verb is NEW. SEARCH is the
         fullscreen home's alone."""
         ws = self.ws
@@ -55,7 +48,7 @@ class HomeZone:
                 return ()                        # a read-only store makes nothing
             if not change:
                 return ("new",)
-            if _builtin_name(sel["path"]) is not None:
+            if not ws.carts.deletable(sel):
                 return ("new", "change", "copy")
             return ("new", "change", "copy", "delete")
         if sel is not None and sel.get("type") == NEW_TILE_TYPE:
@@ -161,7 +154,7 @@ class HomeZone:
                 rect if rect is not None else ws.layout.zone_left):
             if _in(px, py, r):
                 self._tab_focus = False
-                ws.set_home_tab(tid, self.grid)
+                ws.home.set_home_tab(tid, self.grid)
                 return True
         chips = self._zone_action_rects(
             rect if rect is not None else ws.layout.zone_left)

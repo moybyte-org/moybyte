@@ -21,10 +21,7 @@ project commit drain the SAME batch into its journal line, #111)."""
 
 import json
 
-try:
-    from op_history import History, OpCodec, OpHistoryMixin
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.op_history import History, OpCodec, OpHistoryMixin
+from op_history import History, OpCodec, OpHistoryMixin
 
 
 # A fresh actor's tag: a real word (not "") so the props row never shows an

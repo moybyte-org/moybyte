@@ -69,14 +69,19 @@ bool moy_play_interrupt_pending(void) {
 #endif
 
 // The VM is going (native/moy_kernel's soft reset): the run it never ended
-// ends here -- its runtime closed first (moycore's binding, where the image
-// has it), as the Player ends a run -- why SERIAL, its books frozen and its
+// ends here, as the Player ends a run -- why SERIAL, its books frozen and its
 // rows returned.
-void moycore_vm_stop(void) __attribute__((weak));
-
 // A stop for the run (moy_kernel_stop): the run is the kernel's from here,
 // launched and not loaded, and it is not ended.
-int moy_kernel_stop_pending(void) __attribute__((weak));
+#include "moy_kernel.h"
+#pragma weak moy_kernel_stop_pending
+// Its runtime closes first, where the image has moycore.
+#if __has_include("moycore_run.h")
+#include "moycore_run.h"
+#else
+void moycore_vm_stop(void);
+#endif
+#pragma weak moycore_vm_stop
 
 void moy_play_vm_stop(void) {
     if (moycore_vm_stop != NULL) {

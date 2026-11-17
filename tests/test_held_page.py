@@ -98,11 +98,11 @@ def _console(tmp_path, monkeypatch, bufs, ref, windowed, force=True):
                                         font_scale=1, windowed=True, panel_diagonal_in=7.0)
     else:
         ws = host_app.build_workstation(carts)
-    ws.bar_layer._clock_text = lambda: "10:30"
+    ws.bar_layer.clock_text = lambda: "10:30"
     no_unlock_banner(ws)
     quiesce(ws)
     drv = host_app.ConsoleDriver(ws)
-    root = ws.wm._root_canvas if windowed else ws.sys_canvas
+    root = ws.wm.root_canvas if windowed else ws.sys_canvas
     root.RETAINED_FRAMES = bufs
     held = [bytes(root._buf)]
     shots = []
@@ -111,7 +111,7 @@ def _console(tmp_path, monkeypatch, bufs, ref, windowed, force=True):
         for _ in range(n):
             k = ws.frame_state.frames_drawn
             if force:
-                ws._dirty = True
+                ws.mark_dirty()
             drv.frame(1 / 30)
             if ws.frame_state.frames_drawn == k:
                 continue
@@ -130,7 +130,7 @@ def _dialogs(ws, frame):
     """The Blocks number and name prompts typed into, then Cart info typed
     into and its fields moved, every presented frame."""
     ws.open_in_editor(_cart(ws, "Star Catcher"))
-    ws.set_menu_view("blocks")
+    ws.text.set_menu_view("blocks")
     frame(4)
     bu = ws.block_ui
     for kind, opener, typed in (
@@ -144,7 +144,7 @@ def _dialogs(ws, frame):
             frame(2)
         bu._blk_kbd_cancel()
         frame(3)
-    ws.set_menu_view("cards")
+    ws.text.set_menu_view("cards")
     frame(4)
     cl = ws.cards_layer
     cl._open_meta()
@@ -165,7 +165,7 @@ def _keyed(ws, frame):
     Cart info, A on its door, typed into and cancelled."""
     drv = frame.drv
     ws.open_in_editor(_cart(ws, "Tap Game"))
-    ws.set_menu_view("blocks")
+    ws.text.set_menu_view("blocks")
     frame(4)
     bu = ws.block_ui
     prompts = menus = 0
@@ -219,7 +219,7 @@ def _keyed(ws, frame):
             drv.press("up")
         elif case == "unpainted":
             bu._blk_move_cursor(-1)
-            ws._dirty = True
+            ws.mark_dirty()
         else:
             drv.press("up")
             frame(3)
@@ -237,11 +237,11 @@ def _keyed(ws, frame):
         bu._blk_kbd_cancel()
         frame(3)
     ws.pointer.visible = False
-    ws._dirty = True
+    ws.mark_dirty()
     frame(2)
-    ws.exit()
+    ws.spine.exit()
     ws.open_in_editor(_cart(ws, "Star Catcher"))
-    ws.set_menu_view("cards")
+    ws.text.set_menu_view("cards")
     frame(4)
     page = ws.cards_layer.page()
     for _ in range(12):
@@ -344,7 +344,7 @@ def test_the_fit_check_releases_the_held_page_and_a_dialog_mints_it_again(tmp_pa
                                                                           monkeypatch):
     ws, frame, shots, puts = _console(tmp_path, monkeypatch, 1, False, False)
     ws.open_in_editor(_cart(ws, "Star Catcher"))
-    ws.set_menu_view("cards")
+    ws.text.set_menu_view("cards")
     frame(3)
     ws.cards_layer._open_meta()
     frame(3)
@@ -361,9 +361,9 @@ def test_the_fit_check_releases_the_held_page_and_a_dialog_mints_it_again(tmp_pa
     while ws.wm.release_cache():
         pass
     assert ws.held_pages[0] is None and ws.held_pages[2] is None
-    ws.exit()
+    ws.spine.exit()
     ws.open_in_editor(_cart(ws, "Star Catcher"))
-    ws.set_menu_view("cards")
+    ws.text.set_menu_view("cards")
     frame(2)
     ws.cards_layer._open_meta()
     n = puts[0]
@@ -397,7 +397,7 @@ def test_a_held_layer_with_no_room_is_asked_once_a_modal(tmp_path, monkeypatch):
     opened = len(asks)
     assert opened == 1, asks           # the card's first frame
     frame(4)
-    ws._dirty = True
+    ws.mark_dirty()
     frame(4)
     for _ in range(10):
         frame.drv.frame(1 / 30)        # idle frames: the card's mint asks on them
@@ -425,7 +425,7 @@ def test_the_desk_root_reads_no_last_buffer_as_the_desk_boards_do(tmp_path):
         assert getattr(comp, "last_buffer", None) is None
     desk = host_app.build_workstation(str(tmp_path / "desk"), sys_size=(1024, 600),
                                       font_scale=2, windowed=True)
-    root = desk.wm._root_canvas
+    root = desk.wm.root_canvas
     assert getattr(root, "last_buffer", None) is None
     assert getattr(root, "copy_last", None) is not None
     hand = host_app.build_workstation(str(tmp_path / "hand"))

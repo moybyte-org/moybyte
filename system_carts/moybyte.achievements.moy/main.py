@@ -25,12 +25,8 @@ while its shelf stands), `clock_day()` (today as YYYYMMDD off the bar's
 clock, 0 without one) and `row_stamp()`.
 """
 
-try:
-    import achievements as _A
-    import os_log as _log
-except ImportError:  # the host: the runtime package
-    from runtime import achievements as _A
-    from runtime import os_log as _log
+import achievements as _A
+import os_log as _log
 
 
 def _refuse(who, ach_id, why):

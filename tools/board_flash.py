@@ -12,6 +12,8 @@ lines.
 
     tools/board_flash.py flash   <board_dir> --port /dev/ttyACM0
     tools/board_flash.py monitor <board_dir> --port /dev/ttyACM0
+    tools/board_flash.py addon   <board_dir> --port /dev/ttyACM0   (a REPL board)
+    tools/board_flash.py carts   <board_dir> --port /dev/ttyACM0   (a REPL board)
 
 The flash ORDER is fixed here, once: erase otadata FIRST (with --after
 no_reset), then write the merged image, so the board leaves the flash running
@@ -36,12 +38,9 @@ until a panic writes one.
 leaves the ROM loader is a hardware fact and not a preference. The T-Deck
 declares `before = usb_reset` (measured: default_reset write-times-out against
 a wedged USB-Serial/JTAG node, usb_reset connects); the P4's CH343 is happy
-with the esptool default. `after` defaults to hard_reset, which is what the
-console boards want -- and the Zero declares `watchdog_reset`, the verb that
-is PROVEN on it: hard_reset left it sitting in the loader when it ran as CDC,
-which reads exactly like an image that did not take, and the verb stayed when
-the board moved to USB-Serial/JTAG rather than changing two things at once.
-That fact lives in the board's own toml, which this file reads.
+with the esptool default. `after` defaults to hard_reset, which every board
+takes: an RTS pulse that boots the app and keeps a USB-Serial/JTAG board's
+USB device, where a watchdog reset re-enumerates it while it boots.
 
 `stub` picks the flasher stub esptool uploads, and every esptool run of a
 flash takes it as `ESPTOOL_STUB_VERSION` (read from 4.12, the variable behind
@@ -49,6 +48,37 @@ esptool's hidden `--stub-version`; 5.x defaults to 2). An older esptool ignores
 it and runs its own stub, so the flash is slower, never wrong. A board without
 the key gets esptool's default. The Waveshare P4 declares 2, and its board.toml
 says why.
+
+THE BROWSER CONSOLE ADD-ON. A board that declares `[flash] addon` (the carts
+folder, on a board that speaks a bare REPL: the two Zeros) has the add-on cart
+that fits the image just written installed into its store after the flash,
+over that REPL (`install_addon`), with the add-on folders that fit other
+images taken off, and a removal of the console its store recorded dropped.
+Either Zero also fetches the one that fits from its release by itself when
+it has none and its owner did not remove it, and the XIAO after an update
+(zero_host.make_addon); the cable install is how a build of this tree, which
+no release publishes, gets its page. The console boards install it through
+their dev channel (`tools/board.py BOARD addon`, which a board pass runs).
+
+THE OFFICIAL CARTS. On the same boards the image seeds the carts board.toml's
+`[roster] image` names (the XIAO's the core carts, every app and five games;
+the C3's the core alone); the flash then installs the other official carts
+from this tree's system_carts/, the bytes its release publishes
+(`install_carts`): into a NEW store -- one holding nothing but the image's
+carts and add-ons -- the set board.toml's `[roster] install` names (empty on
+both Zeros today), and into any store every official cart it holds at an older version
+that the image does not carry, replaced with the kid's saves and config kept
+(the seed's own rule, #47). Each is copied beside the carts folder and moved
+in by one rename, and the store's reserve (zero_host.SEED_RESERVE) is kept.
+The XIAO brings them to a new release by itself after an update
+(runtime/carts/web_addon.py); the C3, with no OTA, by this.
+
+EVERY MPREMOTE CALL HAS A DEADLINE (`_mpremote`): a wedged USB-Serial/JTAG
+answers an open with nothing, and on 2026-11-17 one held a flash for 45
+minutes. The REPL probe gets PROBE_S, a command EXEC_S, a copy longer by
+its size; running out is `NoAnswer`, which names the port and the cure.
+And nothing opens the port while a flashed board boots (`_let_boot`), then
+the probes come PROBE_GAP_S apart: opened while it booted, a Zero wedged.
 
 esptool runs from THIS interpreter (`sys.executable -m esptool`) -- the venv's,
 via the Makefile. The fork-era esptool_no_modem wrapper is not needed on either
@@ -269,7 +299,287 @@ def flash(board_dir, port, verify=True):
         args += ["--before", str(fl["before"])]
     args += ["--after", str(fl.get("after", "hard_reset")), "write_flash",
              str(fl["offset"]), str(image)]
-    return _esptool(chip, port, baud, *args, stub=stub)
+    rc = _esptool(chip, port, baud, *args, stub=stub)
+    if rc == 0 and fl.get("addon"):
+        _let_boot(port)
+        rc = install_addon(board_dir, port, reset=False) or install_carts(board_dir, port)
+    return rc
+
+
+def _let_boot(port):
+    """Leave a board esptool just reset alone for FLASHED_BOOT_S: opened and
+    closed while it boots out of a watchdog reset, which enumerates its USB
+    again, a Zero's USB-Serial/JTAG wedged twice on 2026-11-17 (no web host,
+    every open of the port hanging, only a power cycle bringing it back),
+    where a board that had finished booting took a whole provisioning over
+    the same port."""
+    import time
+    print("   leaving %s to boot for %d s" % (port, FLASHED_BOOT_S))
+    time.sleep(FLASHED_BOOT_S)
+
+
+ADDON_BOOT_S = 30          # how long a flashed board has to answer its REPL
+FLASHED_BOOT_S = 25        # a flashed board's boot, untouched (_let_boot)
+PROBE_GAP_S = 5            # between REPL probes: each one opens the port
+# Every mpremote call has a deadline: a wedged USB-Serial/JTAG answers an open
+# with nothing, never an error, and an mpremote with no deadline waits on it
+# for good. The REPL probe is short; a command is given EXEC_S; a copy EXEC_S
+# and a second for every COPY_RATE bytes it carries.
+PROBE_S = 15
+EXEC_S = 120
+COPY_RATE = 8 * 1024
+
+
+class NoAnswer(Exception):
+    """An mpremote call that outlived its deadline."""
+
+    def __init__(self, port, seconds):
+        Exception.__init__(self, "no answer from %s after %d s: unplug and replug "
+                                 "the board" % (port, seconds))
+
+
+def addon_folder(board_dir, out):
+    """The browser console add-on cart that fits the image `board_dir`'s
+    build left in dist/ (tools/web_pack.py), unpacked under `out`."""
+    import zipfile
+    sys.path.insert(0, str(ROOT / "tools"))
+    import web_pack
+    cfg = board_config.load(board_dir)
+    page = web_pack.page_beside(str(ROOT / cfg["flash"]["image"]), cfg["board"]["ota"])
+    name, _ = web_pack.publish_cart(page, out)
+    with zipfile.ZipFile(os.path.join(out, name)) as z:
+        z.extractall(out)
+    return os.path.join(out, web_pack.cart_id(page[1]) + ".moy")
+
+
+def _mpremote(port, *args, timeout=EXEC_S):
+    """mpremote's `args` on `port`, given `timeout` seconds; NoAnswer past it."""
+    cmd = [sys.executable, "-m", "mpremote", "connect", port] + list(args)
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise NoAnswer(port, timeout)
+
+
+def _copy_s(path):
+    """The deadline of a copy of `path`, a file or a folder."""
+    n = 0
+    if os.path.isdir(path):
+        for base, _dirs, names in os.walk(path):
+            n += sum(os.path.getsize(os.path.join(base, f)) for f in names)
+    else:
+        n = os.path.getsize(path)
+    return EXEC_S + n // COPY_RATE
+
+
+def _await_repl(board_dir, port, what):
+    import time
+    end = time.monotonic() + ADDON_BOOT_S
+    while _mpremote(port, "exec", "pass", timeout=PROBE_S).returncode != 0:
+        if time.monotonic() > end:
+            print("!! %s: no REPL on %s to install %s" % (board_dir, port, what))
+            return False
+        time.sleep(PROBE_GAP_S)
+    return True
+
+
+def _answered(fn):
+    """`fn`, an install over a board's REPL, with an mpremote call that
+    outlived its deadline (NoAnswer) its named failure: 1."""
+    def run(board_dir, port, *a, **kw):
+        try:
+            return fn(board_dir, port, *a, **kw)
+        except NoAnswer as exc:
+            print("!! %s: %s" % (board_dir, exc))
+            return 1
+    run.__name__ = fn.__name__
+    run.__doc__ = fn.__doc__
+    return run
+
+
+@_answered
+def install_addon(board_dir, port, reset=True):
+    """The add-on that fits the built image into `[flash] addon`, the carts
+    folder, over the board's REPL (mpremote's Ctrl-C stops what the board
+    runs), the other add-on folders taken off, the pack's size checked and a
+    removal of the console the store recorded dropped, as an install drops
+    it (moy_seed.ADDON_LINE); then with `reset` a reset, which starts the
+    board again. 0, or 1 with what went wrong."""
+    root = board_config.load(board_dir)["flash"]["addon"]
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = addon_folder(board_dir, tmp)
+        name = os.path.basename(folder)
+        size = os.path.getsize(os.path.join(folder, "moybyte_web.pack"))
+        if not _await_repl(board_dir, port, "the browser console add-on"):
+            return 1
+        clear = ("import os\n"
+                 "p = ''\n"
+                 "for d in %r.strip('/').split('/'):\n"
+                 "    p += '/' + d\n"
+                 "    try:\n"
+                 "        os.mkdir(p)\n"
+                 "    except OSError:\n"
+                 "        pass\n"
+                 "def rm(p):\n"
+                 "    try:\n"
+                 "        for n in os.listdir(p): rm(p + '/' + n)\n"
+                 "        os.rmdir(p)\n"
+                 "    except OSError:\n"
+                 "        os.remove(p)\n"
+                 "for n in os.listdir(%r):\n"
+                 "    if n.startswith('web_console_') and n != %r:\n"
+                 "        rm(%r + '/' + n)\n" % (root, root, name, root))
+        print("+ the browser console add-on: %s -> %s" % (name, root))
+        steps = (("exec", clear),
+                 ("cp", "-r", folder, ":%s/" % root),
+                 ("exec", "import os\nassert os.stat(%r)[6] == %d\n"
+                  "import moy_store\nmoy_store.removed_drop(%r, 'web_console')\n"
+                  "print('MOY' + 'OK')"
+                  % ("%s/%s/moybyte_web.pack" % (root, name), size, root)))
+        for step in steps:
+            r = _mpremote(port, *step, timeout=_copy_s(folder) if step[0] == "cp" else EXEC_S)
+            if r.returncode != 0 or (step[0] == "exec" and "Traceback" in r.stdout + r.stderr):
+                print("!! the browser console add-on did not install (%s):\n%s%s"
+                      % (step[0], r.stdout, r.stderr))
+                return 1
+        if reset:
+            _mpremote(port, "reset")
+    return 0
+
+
+SEED_DIR = ROOT / "system_carts"
+CART_SKIP = ("thumbs", "__pycache__")
+KEPT = ("pmem.json", "config.json")      # moy_seed._RESEED_PRESERVE
+
+
+def offered_carts(seeds=SEED_DIR):
+    """{folder: manifest version} of every seed cart in `seeds`, in order."""
+    import json
+    out = {}
+    for d in sorted(Path(seeds).iterdir()):
+        man = d / "manifest.json"
+        if d.name.endswith(".moy") and man.is_file():
+            out[d.name] = int(json.loads(man.read_text()).get("version", 0))
+    return out
+
+
+def carts_plan(have, offered, install, image):
+    """The official carts to write into a store holding `have` ({folder:
+    manifest version}, every cart folder in it), of `offered` (offered_carts),
+    leaving out the ones the image carries (`image`, ids), which its own seed
+    keeps: each one the store holds at an older version, and into a NEW store
+    -- one holding nothing but the image's carts and add-ons -- each of
+    `install` (ids) it lacks. In `offered`'s order."""
+    image = set(c + ".moy" for c in image)
+    want = set(c + ".moy" for c in install)
+    new = all(f in image or f.startswith("web_console_") for f in have)
+    return [f for f, v in offered.items() if f not in image and (
+        (f in have and have[f] < v) or (f not in have and new and f in want))]
+
+
+def _cart_bytes(src, block):
+    """The store blocks the cart folder `src` takes, in bytes."""
+    n = 2 * block
+    for base, dirs, names in os.walk(src):
+        dirs[:] = [d for d in dirs if d not in CART_SKIP]
+        n += block * len(dirs)
+        for f in names:
+            n += (os.path.getsize(os.path.join(base, f)) + block - 1) // block * block
+    return n
+
+
+def _reserve():
+    sys.path.insert(0, str(ROOT / "device"))
+    import zero_host
+    return zero_host.SEED_RESERVE
+
+
+@_answered
+def install_carts(board_dir, port, reset=True, seeds=SEED_DIR):
+    """The official carts this tree publishes into `[flash] addon`, the carts
+    folder, over the board's REPL (carts_plan: a new store's `[roster]
+    install`, and every one the store holds at an older version), each copied
+    beside the carts folder and moved in by one rename with its saves and
+    config kept, the store's reserve kept free; then with `reset` a reset. 0,
+    or 1 with what went wrong."""
+    import json
+    import shutil
+    root = board_config.load(board_dir)["flash"]["addon"]
+    stage = root.rsplit("/", 1)[0] + "/install"
+    if not _await_repl(board_dir, port, "the official carts"):
+        return 1
+    look = ("import os, json\n"
+            "h = {}\n"
+            "for n in os.listdir(%r):\n"
+            "    if n.endswith('.moy'):\n"
+            "        try:\n"
+            "            h[n] = int(json.load(open(%r + '/' + n + '/manifest.json')).get('version', 0))\n"
+            "        except Exception:\n"
+            "            h[n] = 0\n"
+            "s = os.statvfs(%r)\n"
+            "print('MOYCARTS', json.dumps({'have': h, 'block': s[0], 'free': s[0] * s[3]}))\n"
+            % (root, root, root))
+    r = _mpremote(port, "exec", look)
+    line = [ln for ln in r.stdout.splitlines() if ln.startswith("MOYCARTS ")]
+    if r.returncode != 0 or not line:
+        print("!! the official carts: the store did not answer:\n%s%s" % (r.stdout, r.stderr))
+        return 1
+    got = json.loads(line[-1].split(" ", 1)[1])
+    offered = offered_carts(seeds)
+    image = board_config.roster_only(board_dir) or tuple(f[:-4] for f in offered)
+    plan = carts_plan(got["have"], offered, board_config.roster_install(board_dir), image)
+    free, reserve = got["free"], _reserve()
+    rm = ("import os\n"
+          "def rm(p):\n"
+          "    try:\n"
+          "        for n in os.listdir(p): rm(p + '/' + n)\n"
+          "        os.rmdir(p)\n"
+          "    except OSError:\n"
+          "        try:\n"
+          "            os.remove(p)\n"
+          "        except OSError:\n"
+          "            pass\n")
+    swap = (rm + "st, d = %r, %r\n"
+            "for k in %r:\n"
+            "    try:\n"
+            "        os.stat(d + '/' + k)\n"
+            "        rm(st + '/' + k)\n"
+            "        os.rename(d + '/' + k, st + '/' + k)\n"
+            "    except OSError:\n"
+            "        pass\n"
+            "rm(d)\n"
+            "os.rename(st, d)\n"
+            "assert os.stat(d + '/manifest.json')[6] == %d\n"
+            "print('MOY' + 'OK')\n")
+    left = []
+    with tempfile.TemporaryDirectory() as tmp:
+        for folder in plan:
+            src = Path(seeds) / folder
+            need = _cart_bytes(str(src), got["block"])
+            if free - need < reserve:
+                left.append(folder)
+                continue
+            clean = os.path.join(tmp, folder)
+            shutil.copytree(str(src), clean, ignore=shutil.ignore_patterns(*CART_SKIP))
+            print("+ official cart %s -> %s" % (folder, root))
+            steps = (("exec", rm + "try:\n    os.mkdir(%r)\nexcept OSError:\n    pass\nrm(%r)\n"
+                      % (stage, stage + "/" + folder)),
+                     ("cp", "-r", clean, ":%s/" % stage),
+                     ("exec", swap % (stage + "/" + folder, root + "/" + folder, KEPT,
+                                      os.path.getsize(os.path.join(clean, "manifest.json")))))
+            for step in steps:
+                r = _mpremote(port, *step,
+                              timeout=_copy_s(clean) if step[0] == "cp" else EXEC_S)
+                if r.returncode != 0 or (step[0] == "exec" and "Traceback" in r.stdout + r.stderr):
+                    print("!! %s did not install (%s):\n%s%s"
+                          % (folder, step[0], r.stdout, r.stderr))
+                    return 1
+            free -= need
+    if left:
+        print("!! left out, the store's reserve: %s" % ", ".join(left))
+    if reset:
+        _mpremote(port, "reset")
+    return 0
 
 
 def monitor(board_dir, port):
@@ -282,7 +592,7 @@ def monitor(board_dir, port):
 
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("verb", choices=("flash", "monitor"))
+    ap.add_argument("verb", choices=("flash", "monitor", "addon", "carts"))
     ap.add_argument("board_dir")
     ap.add_argument("--port", required=True)
     ap.add_argument("--no-verify", action="store_true",
@@ -290,6 +600,10 @@ def main(argv):
     a = ap.parse_args(argv[1:])
     if a.verb == "flash":
         return flash(a.board_dir, a.port, verify=not a.no_verify)
+    if a.verb == "addon":
+        return install_addon(a.board_dir, a.port)
+    if a.verb == "carts":
+        return install_carts(a.board_dir, a.port)
     return monitor(a.board_dir, a.port)
 
 

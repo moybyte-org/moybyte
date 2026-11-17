@@ -332,10 +332,7 @@ class LoopbackNet(NetService):
 # net.pump() runs every frame of a multiplayer cart (#66 has the cost).
 import json
 
-try:
-    import moy_play as _mp
-except ImportError:                     # CPython: the host's ctypes module
-    from runtime import moy_play as _mp
+import moy_play as _mp
 
 PROTO = 3
 T_BEACON, T_JOIN, T_START, T_INPUT, T_MSG, T_BYE, T_PORT = 1, 2, 3, 4, 5, 6, 7
@@ -982,14 +979,11 @@ class EspNowLink:
     def _say_desync(self, ws):
         """The match's desync on the screen: two worlds that disagree are
         said, never left to paint two plausible games."""
-        notice = getattr(ws, "notice", None)
+        notice = getattr(getattr(ws, "notices", None), "notice", None)
         if notice is None:
             return
         try:
-            try:
-                import ui_draw as _ud
-            except ImportError:
-                from runtime import ui_draw as _ud
+            import ui_draw as _ud
             notice(_ud.s("notice.out_of_sync"), _ud.s("notice.out_of_sync_why"), "warn")
         except Exception as exc:  # noqa: BLE001 -- a notice must never kill a frame
             print("Moybyte link: notice failed:", exc)
@@ -1033,7 +1027,8 @@ class EspNowLink:
         so does its tick: the lower of the two consoles' (`announce`)."""
         if not self.active:
             return False
-        cfg = getattr(ws, "config", None) if ws is not None else None
+        proj = getattr(getattr(ws, "run", None), "project", None)
+        cfg = getattr(proj, "config", None)
         try:
             self._m.set_config(json.dumps(cfg) if cfg else None)
         except Exception:  # noqa: BLE001
@@ -1101,10 +1096,7 @@ def match_rate(fps):
 
 
 def _cart_buttons():
-    try:
-        from cart_api import CART_BUTTONS
-    except ImportError:
-        from runtime.cart_api import CART_BUTTONS
+    from cart_api import CART_BUTTONS
     return CART_BUTTONS
 
 
@@ -1117,7 +1109,7 @@ def launch_cart(ws, title):
         return False
     open_now = getattr(ws, "cart", None)
     if open_now and str(open_now.get("title") or "").lower() == want:
-        return bool(ws._start())
+        return bool(ws.start())
     items = getattr(ws.launcher, "items", [])
     for i in range(len(items)):
         it = items[i]
@@ -1125,7 +1117,7 @@ def launch_cart(ws, title):
             continue
         if want == str(it.get("title") or "").lower():
             ws.launcher.sel = i
-            ws.launch_selected()
+            ws.home.launch_selected()
             return True
     return False
 

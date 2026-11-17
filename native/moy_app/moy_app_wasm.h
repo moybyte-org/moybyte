@@ -82,9 +82,8 @@ int moy_app_wasm_imports(const uint8_t *head, size_t n, moy_app_import_fn fn, vo
 // read under the state's seqlock for the public UI API's RUN face
 // (native/moy_ui/moy_ui_wasm.h): copied only when the generation differs
 // from `have`. Answers a generation that is never 0, or 0 while no state
-// was ever bound.
-uint32_t moy_app_wasm_theme(int32_t out[MOY_APP_TOKENS], uint32_t have, char *name,
-                            uint32_t cap);
+// was ever bound. `out` holds MOY_APP_TOKENS words.
+uint32_t moy_app_wasm_theme(int32_t *out, uint32_t have, char *name, uint32_t cap);
 
 // The hops made, the microseconds they took end to end, and the rows' own
 // share of those on the VM's task: the hop's price per call is the difference

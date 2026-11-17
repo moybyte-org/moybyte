@@ -19,7 +19,7 @@ _DT = 1 / 30
 class _In:
     def __init__(self, *names, key=0):
         self.names = set(names)
-        self.last_key = key
+        self.last_key = self.typed = key
 
     def steps(self, n):
         return int(bool(self.pressed(n)))
@@ -30,7 +30,7 @@ class _In:
 
 def _frames(ws, n=2):
     for _ in range(n):
-        ws._dirty = True
+        ws.mark_dirty()
         ws.frame(_DT)
 
 
@@ -74,8 +74,8 @@ def _handheld(tmp_path, seed=True):
     ws.pointer.visible = False
     if seed:
         _seed(ws.carts_root)
-    app = ws._apps_by_id["storybook"]
-    ws.open_app(app)
+    app = ws.app("storybook")
+    ws.spine.open_app(app)
     _frames(ws, 3)
     return ws, app
 
@@ -87,9 +87,9 @@ def _desk(tmp_path, seed=True):
     ws.pointer.visible = False
     if seed:
         _seed(ws.carts_root)
-    ws.open_desk()
-    app = ws._apps_by_id["storybook"]
-    ws.open_app(app)
+    ws.home.open_desk()
+    app = ws.app("storybook")
+    ws.spine.open_app(app)
     _frames(ws, 3)
     return ws, app
 
@@ -185,7 +185,7 @@ def test_present_draws_no_bar_and_the_bars_band_is_the_slides(tmp_path):
     assert top == bytes(len(top)), "black above the slide, where the bar was"
     ws.pointer.place(14, 9)                     # where the bar's way back was
     ws.pointer.click = True
-    ws.handle_pointer()
+    ws.router.handle_pointer()
     ws.pointer.click = False
     assert ws.wm.top_kind() == "storybook" and app.show is not None
 
@@ -194,7 +194,7 @@ def test_present_draws_no_bar_and_the_bars_band_is_the_slides(tmp_path):
 
 def test_the_desk_opens_at_its_designed_size(tmp_path):
     ws, app = _desk(tmp_path)
-    win = ws.wm._wins["storybook"]
+    win = ws.wm.windows["storybook"]
     assert (win.w, win.h) == (900, 536)
     assert app.layout.desk and app.ed is not None
 
@@ -282,7 +282,7 @@ def test_a_drag_moves_and_snaps_to_the_slides_middle(tmp_path):
     ed.handle_pointer(to, py, False, True)
     assert o["x"] == 512 and ed.guides and ed.guides[0] == ("v", 512)
     ed.handle_pointer(to, py, False, False)
-    assert ed.guides == () and len(st.undos) == 1
+    assert ed.guides == () and len(st.hist._undo) == 1
     st.undo()
     assert st.slides[1]["objects"][1]["x"] == 608
 
@@ -385,14 +385,14 @@ def test_paints_door_lists_the_stories_and_adds_a_slide_with_its_undo(tmp_path):
 
 
 def _tap_part(ws, app, part):
-    cx, cy, _cw, _ch = ws.wm._wins["storybook"].content_rect()
+    cx, cy, _cw, _ch = ws.wm.windows["storybook"].content_rect()
     x, y, w, h = app._ui.box(part)
     ws.pointer.place(cx + x + w // 2, cy + y + h // 2)
     ws.pointer.click = True
-    ws.handle_pointer()
+    ws.router.handle_pointer()
     _frames(ws, 1)
     ws.pointer.click = False
-    ws.handle_pointer()
+    ws.router.handle_pointer()
     _frames(ws, 2)
 
 

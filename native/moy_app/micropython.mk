@@ -15,3 +15,7 @@ SRC_USERMOD_LIB_C += $(MOY_APP_DIR)/moy_app.c $(MOY_APP_DIR)/moy_app_wasm.c $(MO
 CFLAGS_USERMOD += -I$(MOY_APP_DIR) -I$(MOY_APP_DIR)/../moy_spine -I$(MOY_APP_DIR)/../moy_input \
     -I$(MOY_APP_DIR)/../moy_store -I$(MOY_APP_DIR)/../moy_png -I$(MOY_APP_DIR)/../moy_net \
     -I$(MOY_APP_DIR)/../moy_lua/lua
+
+# The user-files layer's generated face (gen_os, modmoy_ufiles_face.h) holds
+# names only modmoy_ufiles.c uses: a change to it alone re-scans every source.
+QSTR_GLOBAL_DEPENDENCIES += $(wildcard $(MOY_APP_DIR)/../moy_store/*_face.h)

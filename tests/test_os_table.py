@@ -45,6 +45,14 @@ def test_the_generated_files_are_the_source_s():
             assert f.read() == text, "%s is stale: run tools/gen_os_table.py" % path
 
 
+def test_every_whole_generated_file_is_marked_generated_for_github():
+    paths = [os.path.relpath(p, ROOT) for p in gen_os_table.whole(gen_os_table.outputs())]
+    got = subprocess.run(["git", "check-attr", "linguist-generated", "--"] + paths, cwd=ROOT,
+                         capture_output=True, text=True, check=True).stdout.splitlines()
+    unmarked = [line.split(":")[0] for line in got if not line.endswith(": true")]
+    assert unmarked == [], "give each a .gitattributes pattern: %s" % unmarked
+
+
 def test_the_http_prompt_says_it_reaches_the_local_network():
     """`http` reaches any host, the LAN's included, with no address filter
     (owner, 2026-11-09): its install prompt line, generated from the
@@ -137,7 +145,7 @@ def test_the_sdk_s_log_levels_and_event_record_are_the_kernel_s():
     order = ["MOY_LOG_EMERG"] + [n.strip() for n in names.split(",") if n.strip()]
     for name, value in re.findall(r"#define (MOY_LOG_\w+) (\d+)", sdk):
         assert order.index(name) == int(value), name
-    assert gen_os_table._evq_block() in sdk
+    assert gen_os_table.evq_block() in sdk
 
 
 @pytest.fixture(scope="module")
@@ -204,3 +212,107 @@ def test_a_service_s_device_permissions_are_the_handle_rows():
     from runtime.shell import system_api
     row = next(r for r in gen_os_table.load()["rows"] if r["name"] == "moybyte.dev_open")
     assert set(system_api.DEVICE_PERMS) == {p.split(":")[0] for p in row["perm"]}
+
+
+def test_one_error_table():
+    """native/os_calls.json's errors are the app ABI's codes and every face's
+    answer to one: the C enum and the texts are generated (moy_app_err.h,
+    runtime/system/face_errors.py), so no face restates a message by hand, and
+    the console's NO_STORE says the table's text."""
+    from runtime import face_errors
+    from runtime.shell import app_context
+    errs = gen_os_table.load()["errors"]
+    texts = {e[k] for e in errs for k in ("msg", "lua", "err") if e.get(k)}
+    faces = [os.path.join(ROOT, *p.split("/")) for p in (
+        "native/moy_app/modmoy_app.c", "native/moy_app/moy_app_lua.c",
+        "runtime/host/moy_app_binding.py")]
+    for path in faces:
+        src = open(path).read()
+        for t in texts:
+            assert '"%s"' % t not in src, "%s restates %r: take it from the errors" % (path, t)
+    for e in errs:
+        assert getattr(face_errors, e["code"]) == e["n"]
+        if e["code"] == "OK":
+            continue
+        exc = face_errors.exception(e["n"])
+        assert type(exc).__name__ == e["py"], e["code"]
+        if e["py"] == "OSError":
+            assert exc.errno == getattr(__import__("errno"), e["errno"])
+    nostore = next(e for e in errs if e["code"] == "NOSTORE")
+    assert str(app_context.NO_STORE) == nostore["err"]
+    assert type(face_errors.exception(99)) is type(face_errors.exception(face_errors.BAD))
+
+
+# What the call table's codes and rows guard (docs/refactor_2026-11.md, phase
+# 10): the sources the tree writes, the vendored copies and the generated
+# files apart.
+VENDORED = re.compile(r"/(lua|dash|dropbear|mbedtls|wamr|libmoy|monocypher|elf_loader)/")
+
+
+def _our_c():
+    """{path: text} of every C file of native/ the tree writes by hand."""
+    made = {os.path.relpath(p, ROOT) for p, _t in gen_os_table.outputs()}
+    files = subprocess.run(["git", "ls-files", "native"], cwd=ROOT, capture_output=True,
+                           text=True, check=True).stdout.split()
+    out = {}
+    for f in files:
+        if f.endswith((".c", ".h")) and not VENDORED.search("/" + f) and f not in made:
+            with open(os.path.join(ROOT, f), errors="replace") as fh:
+                out[f] = fh.read()
+    return out
+
+
+def test_no_hand_code_dispatches_a_row_or_maps_an_app_code():
+    """The door's rows are MOY_APP_DOOR_ROWS, a code's errno and texts the
+    errors' columns: no hand switch names a C row or an app code."""
+    bad = ["%s:%d" % (f, t[:m.start()].count("\n") + 1)
+           for f, t in _our_c().items() for m in re.finditer(r"case MOY_(ROW|APP)_[A-Z]", t)]
+    assert bad == []
+
+
+def test_every_module_s_ok_is_zero():
+    """moy_kernel.h's RESULT CODES: every MOY_<M>_OK is 0 (or another's OK)."""
+    bad = []
+    for f, t in _our_c().items():
+        for m in re.finditer(r"\b(MOY\w*_OK)\s*=\s*([^,}\s]+)", t):
+            if m.group(2) != "0" and not m.group(2).endswith("_OK"):
+                bad.append("%s: %s = %s" % (f, m.group(1), m.group(2)))
+    assert bad == []
+
+
+def test_lua_s_role_binding_has_no_per_row_function_but_the_hand_ones():
+    """A Lua name is l_row over its row (moy_app_lua.c), but the rows the table
+    marks hand; the rest of moy_app_lua.c's functions are io's and os's."""
+    hand = {cfn for _r, _t, _n, cfn, row, _rd in gen_os_table.lua_names(gen_os_table.load())
+            if any(r["name"] == row and r.get("lua_ret") == "hand"
+                   for r in gen_os_table.load()["rows"])}
+    with open(os.path.join(ROOT, "native", "moy_app", "moy_app_lua.c")) as f:
+        fns = set(re.findall(r"^static int (l_\w+)\(lua_State \*L\)", f.read(), re.M))
+    assert hand and hand <= fns
+    assert {f for f in fns - hand if not f.startswith(("l_io_", "l_os_"))} == {"l_row"}
+
+
+def test_the_evq_errors_are_moy_evq_h_s_codes():
+    """Every code moy_evq.h numbers has its row in evq_errors, and no other."""
+    with open(os.path.join(ROOT, "native", "moy_kernel", "moy_evq.h")) as f:
+        codes = set(re.findall(r"^\s+MOY_EVQ_([A-Z]+) = \d+,", f.read(), re.M)) - {"OK"}
+    assert {e["code"] for e in gen_os_table.load()["evq_errors"]} == codes
+
+
+def test_every_python_served_row_is_a_method_of_its_role_s_c_type():
+    """A role modmoy_app.c builds as a SERVED_ROLE (the board's and the
+    browser's face) has one SERVED method and one ROW for each of its rows
+    the Python console serves: the host's binding derives its methods from
+    the table, so a row missing here fails only on a board or a page."""
+    with open(os.path.join(ROOT, "native", "moy_app", "modmoy_app.c")) as f:
+        src = f.read()
+    rows = gen_os_table.load()["rows"]
+    roles = re.findall(r"^SERVED_ROLE\((\w+), \w+\)", src, re.M)
+    assert "install" in roles
+    for role in roles:
+        want = {r["name"].split(".", 1)[1] for r in rows
+                if r["name"].startswith(role + ".") and r.get("server") != "c"}
+        served = set(re.findall(r"^SERVED\(%s, \w+, (\w+)\)" % role, src, re.M))
+        listed = set(re.findall(r"ROW\(%s, (\w+)\)" % role, src))
+        assert served == want, (role, sorted(want ^ served))
+        assert served <= listed, (role, sorted(served - listed))

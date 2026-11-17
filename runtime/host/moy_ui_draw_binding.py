@@ -427,6 +427,12 @@ def install(m, lib, tokens):
         _check(lib.moy_ui_frame_under(c.byref(sink(cv, look)), box_of(rect), int(title_h),
                                       1 if active else 0, int(mode)))
 
+    def frame_under_fill(cv, look, rect, title_h, active, mode, src, outer, inner):
+        ps, n, _ks = _pixels(src, False)
+        _check(lib.moy_ui_frame_under_fill(c.byref(sink(cv, look)), box_of(rect), int(title_h),
+                                           1 if active else 0, int(mode), ps, n, box_of(outer),
+                                           box_of(inner)))
+
     def frame_under_onto(cv, look, rect, title_h, active, mode, onto, onto_th, onto_active):
         _check(lib.moy_ui_frame_under_onto(c.byref(sink(cv, look)), box_of(rect), int(title_h),
                                            1 if active else 0, int(mode), box_of(onto),
@@ -518,7 +524,8 @@ def install(m, lib, tokens):
               button, button_x, chip, tab_rects, tab, status, hints, game_btn, game_icon_btn,
               mini_btn, toolbar, paint, frame, frame_buttons, frame_band, frame_geom, frame_icon, bar_part,
               scrim, scrim_alpha, tile, unlock, rec, modal, modal_band, month_h, perf,
-              frame_under, frame_under_onto, cast, dialog, text_field, panel, focus, current,
+              frame_under, frame_under_fill, frame_under_onto, cast, dialog, text_field, panel,
+              focus, current,
               marks, mark_reach, inset, cut,
               split, row_content, cell_art):
         setattr(m, f.__name__, f)

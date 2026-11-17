@@ -1,21 +1,10 @@
 // moy_sh_screen: the shell's screen face. moy_sh_screen.h has the contract.
 
+#include "moy_platform.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
-
-#if __has_include("esp_timer.h")
-#include "esp_timer.h"
-#define NOW_MS() ((uint32_t)(esp_timer_get_time() / 1000))
-#else
-#include <time.h>
-static uint32_t now_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
-}
-#define NOW_MS() now_ms()
-#endif
 
 #include "moy_sh_app.h"
 #include "moy_sh_board.h"
@@ -24,10 +13,20 @@ static uint32_t now_ms(void) {
 // The kernel's input table (native/moy_input/moy_input.h): weak, so an image
 // or a harness without it links, and its poll then reads no keys.
 typedef struct moy_input moy_input_t;
-moy_input_t *moy_input_kernel(void) __attribute__((weak));
-bool moy_input_holds(const moy_input_t *t, int32_t byte, uint32_t buttons)
-    __attribute__((weak));
-void moy_input_board_kick(void) __attribute__((weak));
+#if __has_include("moy_input.h")
+#include "moy_input.h"
+#else
+moy_input_t *moy_input_kernel(void);
+bool moy_input_holds(const moy_input_t *t, int32_t byte, uint32_t buttons);
+#endif
+#pragma weak moy_input_kernel
+#pragma weak moy_input_holds
+#if __has_include("moy_drivers.h")
+#include "moy_drivers.h"
+#else
+void moy_input_board_kick(void);
+#endif
+#pragma weak moy_input_board_kick
 
 #define CTRL_C 3
 #define CANCEL_BUTTONS ((1u << 5) | (1u << 14))   // `b` and `start` (MOY_INPUT_NAMES)
@@ -91,7 +90,7 @@ static int screen_poll(void *ctx) {
         f->stop = 0;
         return 1;
     }
-    uint32_t now = NOW_MS();
+    uint32_t now = (uint32_t)moy_now_ms();
     if (BUDGET_MS && (f->over || now - f->started >= BUDGET_MS)) {
         f->over = 1;
         return 1;
@@ -234,7 +233,7 @@ static int run_here(moy_sh_screen_t *f, const char *text, size_t n, int parks) {
     moy_sh_board_home_late(f->s, &f->homed);
     f->held = keys_held();
     f->by_keys = 0;
-    f->polled = NOW_MS();
+    f->polled = (uint32_t)moy_now_ms();
     f->yielded = f->polled;
     f->started = f->polled;
     f->over = 0;
@@ -249,8 +248,8 @@ static int run_here(moy_sh_screen_t *f, const char *text, size_t n, int parks) {
     }
     // a key that interrupted is let go before the frame merges again, so its
     // press is no edge there (Mic is the console's key, B its back)
-    uint32_t t0 = NOW_MS();
-    while (f->by_keys && keys_held() && NOW_MS() - t0 < RELEASE_MS) {
+    uint32_t t0 = (uint32_t)moy_now_ms();
+    while (f->by_keys && keys_held() && (uint32_t)moy_now_ms() - t0 < RELEASE_MS) {
         moy_sh_board_yield();
     }
     return r;

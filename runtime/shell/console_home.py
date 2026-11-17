@@ -1,9 +1,9 @@
 # Map (grep -n a name to jump there):
-#   HomeVerbs                     the home's verbs: launch, the desk, Projects, the tabs, search
-#   HomeVerbs.launch_named        run a cart by name and answer its title
-#   HomeVerbs.go_home             land on this mode's root
-#   HomeVerbs._launcher_items     the home's tab over the roster
-#   HomeVerbs._home_grid          the card model for an arrangement
+#   Home                     the home's verbs: launch, the desk, Projects, the tabs, search
+#   Home.launch_named        run a cart by name and answer its title
+#   Home.go_home             land on this mode's root
+#   Home.launcher_items      the home's tab over the roster
+#   Home._home_grid          the card model for an arrangement
 #   -- the resume record          where a reboot puts the home back
 #   -- the desk                   desktop mode's root, and PLAY into console mode
 #   -- the home in a window       the desk's PROJECTS
@@ -13,33 +13,20 @@
 in a window (`open_desk`/`open_library`/`open_projects`, `new_cart_and_edit`),
 the HOME key and the landing on this mode's root (`home_key`/`go_home`), and
 the home's cards -- each tab's items over the roster, the arrangement's card
-model, the tab and search state and the title the bar shows. A mixin of
-`Workstation`; the home's instance (`ws.launcher`) and its layers are built in
+model, the tab and search state and the title the bar shows. The console's
+`ws.home`; the home's instance (`ws.launcher`) and its layers are built in
 console.py.
 """
 
-try:
-    from home_icons import IconHome
-    from home_carousel import Carousel
-    from home_grid import (Launcher, new_tile, NEW_TILE_TYPE, PSEUDO_TILE_TYPES,
-                           HOME_TABS, tab_count_title, PROJECTS_VERB_SETS)
-    from project import Project
-    from cart_manager import today_ymd as _today_ymd
-    from chrome import NAMES
-    import scheduler as _scheduler
-    import cron as _cron
-    from achievements import is_proc as _is_ach_proc
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.home_icons import IconHome
-    from runtime.home_carousel import Carousel
-    from runtime.home_grid import (Launcher, new_tile, NEW_TILE_TYPE, PSEUDO_TILE_TYPES,
-                                   HOME_TABS, tab_count_title, PROJECTS_VERB_SETS)
-    from runtime.project import Project
-    from runtime.cart_manager import today_ymd as _today_ymd
-    from runtime.chrome import NAMES
-    from runtime import scheduler as _scheduler
-    from runtime import cron as _cron
-    from runtime.achievements import is_proc as _is_ach_proc
+from home_icons import IconHome
+from home_carousel import Carousel
+from home_grid import (Launcher, new_tile, NEW_TILE_TYPE, PSEUDO_TILE_TYPES,
+                       HOME_TABS, tab_count_title, PROJECTS_VERB_SETS)
+from project import Project
+from chrome import NAMES
+import scheduler as _scheduler
+import cron as _cron
+from achievements import is_proc as _is_ach_proc
 
 RESUME_MAX = 512        # the kernel's resume record's bytes (MOY_KERNEL_RESUME_MAX)
 
@@ -70,7 +57,10 @@ def _with_cron(rec, json):
 _HOME_CLASSES = {"carousel": Carousel, "grid": Launcher, "icons": IconHome}
 
 
-class HomeVerbs:
+class Home:
+
+    def __init__(self, ws):
+        self.ws = ws
 
     def launch_selected(self, grid=None):
         """The home's tap on `grid`'s selected card (the home's, ws.launcher,
@@ -80,16 +70,17 @@ class HomeVerbs:
         own on a board with a desk, from console mode too). The "+ New"
         card -- Make's first, an empty Mine's only -- makes a game and opens
         it in the Editor."""
-        grid = grid or self.launcher
+        ws = self.ws
+        grid = grid or ws.launcher
         sel = grid.selected()
         if sel is not None and sel.get("type") == NEW_TILE_TYPE:
             self.new_cart_and_edit(grid)
             return
         if grid.tab == "make":
             if sel is not None:
-                self.open_in_editor(sel)
+                ws.open_in_editor(sel)
             return
-        self.open(sel)
+        ws.open(sel)
 
     def launch_named(self, name):
         """Run the cart `name` names, and return its TITLE (None if none match).
@@ -111,8 +102,9 @@ class HomeVerbs:
         # str(): `name` comes off a JSON body a browser wrote, so it is only a
         # string by convention -- a number there must miss, not raise inside the
         # frame loop's tail.
+        ws = self.ws
         want = str(name or "").strip().lower()
-        items = self._runnable_items()
+        items = self.runnable_items()
         exact_title = None
         exact_folder = None
         partial = None
@@ -141,7 +133,7 @@ class HomeVerbs:
         if pick is None:
             return None
         self.select_cart(items[pick])
-        self.open()
+        ws.open()
         # Return something TRUTHY whenever a launch actually happened, so a
         # caller (moy_webhost's /run) can tell "nothing matched" (None, above)
         # from "launched a cart whose title is empty" -- a titleless cart used to
@@ -159,11 +151,12 @@ class HomeVerbs:
         starts again (scheduler.pause), and the services on tasks of their
         own, which run on through it and that console takes back
         (`kept_rows`, scheduler.take_back)."""
+        ws = self.ws
         import json
-        lw = self.launcher
+        lw = ws.launcher
         sel = lw.selected() or {}
         rec = {"tab": lw.tab, "sel": int(lw.sel),
-               "search": self.search_query, "path": sel.get("path"),
+               "search": ws.search_query, "path": sel.get("path"),
                "svc": _scheduler.SCHED.running_paths(),
                "keep": _scheduler.SCHED.kept_rows()}
         return _with_cron(rec, json)
@@ -171,6 +164,7 @@ class HomeVerbs:
     def resume_launcher(self, text):
         """Land the launcher where the resume record left it. A record that
         will not read changes nothing."""
+        ws = self.ws
         import json
         try:
             rec = json.loads(text)
@@ -180,7 +174,7 @@ class HomeVerbs:
             q = rec.get("search") or ""
             if q:
                 self.set_search_query(q)
-            items = self.launcher.items or []
+            items = ws.launcher.items or []
             sel = int(rec.get("sel", 0))
             path = rec.get("path")
             if path:
@@ -188,8 +182,8 @@ class HomeVerbs:
                     if items[i].get("path") == path:
                         sel = i
                         break
-            self.launcher.sel = max(0, min(sel, len(items) - 1))
-            self._dirty = True
+            ws.launcher.sel = max(0, min(sel, len(items) - 1))
+            ws.frame_state.dirty = True
             svc = rec.get("svc")
             if isinstance(svc, list):
                 _scheduler.SCHED.resumed = tuple(p for p in svc if isinstance(p, str))
@@ -206,25 +200,26 @@ class HomeVerbs:
         console mode it is the home's X (`wm.leave_console`), which brings the
         parked windows back; on the desk it closes every window. The boot's
         landing on the windowed tier; fullscreen tiers never call this."""
-        self._dirty = True
-        self.search_typing = False     # leaving the home ends any query typing
-        self._set_text_mode(False)
+        ws = self.ws
+        ws.frame_state.dirty = True
+        ws.search_typing = False     # leaving the home ends any query typing
         # Re-derive the shelf under the desk-tier filter (system apps are
         # desk icons here): the first call runs before the WM swap finished
         # populating anything, so the boot-time entry settles the filter.
-        self.launcher.set_items(self._launcher_view_items())
-        if self.wm.mode == "console":
-            self.wm.leave_console()
+        ws.launcher.set_items(self.launcher_view_items())
+        if ws.wm.mode == "console":
+            ws.wm.leave_console()
         else:
-            self.wm.goto("desk")
+            ws.wm.goto("desk")
 
     def open_library(self):
         """The desk's PLAY icon: console mode over the home
         (docs/theme_and_shell_2026-11.md §8.1). The WM ends a running playtest
         and parks the desk's windows, and go_home lands on the home without
         touching them. On a console-only WM it is go_home."""
-        self._editor_from = None
-        self.wm.enter_console()
+        ws = self.ws
+        ws._editor_from = None
+        ws.wm.enter_console()
         self.go_home()
 
     def change_selected(self, grid=None):
@@ -235,10 +230,11 @@ class HomeVerbs:
         playing to making: same Project, same persistence path, never a surprise
         duplicate (COPY stays an explicit Make verb). No-op for the "+ New" card
         (one verb: its tap)."""
-        sel = (grid or self.launcher).selected()
+        ws = self.ws
+        sel = (grid or ws.launcher).selected()
         if sel is None or sel.get("type") in PSEUDO_TILE_TYPES:
             return
-        self.open_in_editor(sel)
+        ws.open_in_editor(sel)
 
     # -- the home in a window (the desk's PROJECTS) --------------------------
 
@@ -250,40 +246,41 @@ class HomeVerbs:
         open brings the window back to Make on the card that tab last had.
         Where no desk is open (console mode, a console-only board) it is the
         home's own Make tab."""
-        if not self.wm.desk_open():
+        ws = self.ws
+        if not ws.wm.desk_open():
             self.go_home()
             self.set_home_tab("make")
             return
-        self._dirty = True             # screen change repaints (#44)
-        self.search_typing = False     # the query is the fullscreen home's
-        self._set_text_mode(False)     # a grid, not the code editor
-        g = self.projects_grid
+        ws.frame_state.dirty = True             # screen change repaints (#44)
+        ws.search_typing = False     # the query is the fullscreen home's
+        g = ws.projects_grid
         if g is None:
-            g = self.projects_grid = self._home_grid(
-                "carousel", self._launcher_items(self.carts.all, "make"))
+            g = ws.projects_grid = self._home_grid(
+                "carousel", self.launcher_items(ws.carts.all, "make"))
             g.tab = "make"
             g.verb_sets = PROJECTS_VERB_SETS   # Make's Play, its pane's rows
         else:
             self.set_home_tab("make", g)
-        self.projects_layer._tab_focus = False
-        self.wm.activate("projects")
+        ws.projects_layer._tab_focus = False
+        ws.wm.activate("projects")
 
     def new_cart_and_edit(self, grid=None):
         """The "+ New" card: create a fresh GAME cart (`carts.new()` does the
         create, the re-scan and the grids), then open it in the Editor. A no-op
         on a read-only store (a device without SD writes) or a failed write --
         `carts.new()` returns None and the home simply stays up."""
-        new = self.carts.new()
+        ws = self.ws
+        new = ws.carts.new()
         if new is None:
             return
         # Select the new cart on the home that made it, so backing out of the
         # Editor lands on the freshly-created project.
-        grid = grid or self.launcher
+        grid = grid or ws.launcher
         for i, it in enumerate(grid.items):
             if it.get("path") == new.get("path"):
                 grid.sel = i
                 break
-        self.open_in_editor(new)
+        ws.open_in_editor(new)
 
     def home_key(self):
         """The HOME key (owner, 2026-10-13: back out one level, everywhere).
@@ -291,13 +288,14 @@ class HomeVerbs:
         chip, kept, and HOME again brings them back (`wm.show_desk`); it never
         closes a window. In console mode it goes home, and from the home on a
         board whose desk waits beneath it, to the desktop."""
-        wm = self.wm
+        ws = self.ws
+        wm = ws.wm
         if wm.mode == "desktop":
             wm.show_desk()
-            self._dirty = True
+            ws.frame_state.dirty = True
         elif not wm.top_is("launcher"):
             self.go_home()
-        elif self.bar_layer._show_x("home"):
+        elif ws.bar_layer.show_x("home"):
             self.open_desk()
 
     def go_home(self):
@@ -306,62 +304,42 @@ class HomeVerbs:
         surface is persisted first. In console mode a parked Editor that still
         holds the workspace is not torn down -- go_home touches no parked
         window (docs/theme_and_shell_2026-11.md §8.1)."""
-        self._dirty = True             # screen change repaints (#44)
-        self._set_text_mode(False)    # restore the game-button keyboard mode
-        self.close_popover()
+        ws = self.ws
+        ws.frame_state.dirty = True             # screen change repaints (#44)
+        ws.close_popover()
         # The launcher root ends every return path: an app-to-app return that
         # outlived its journey here would drag an unrelated later exit into
         # Files. `_go_home_or_back` pops the slot BEFORE calling this.
-        self.returns.take_back()
-        self._script_return = None
-        self._project_return = None    # the project-file edit it guarded is over too
+        ws.returns.take_back()
+        ws._script_return = None
+        ws._project_return = None    # the project-file edit it guarded is over too
         # (#111) autosave-only: going home is an exit path for every persistent
         # system app + the Editor, so each is persisted BEFORE the state below is
         # torn down (self.editor/self.run.project etc.) -- a HOME-key tap reaches
         # here directly, bypassing any per-app CLOSE affordance, and must never
         # drop an edit still sitting in its idle-debounce window.
-        #
-        # This used to be a hand-written ladder naming four apps and four
-        # DIFFERENT verbs (writer.flush / the story's deck commit / sheets.flush /
-        # artwork._save) -- the bar-contract bug class one level down: an app that
-        # persists on a debounce and is not on the list loses the kid's work,
-        # silently. `close()` is the uniform LEAVING hook now
-        # (ui_refactor_2026-08 Phase 6, docs/app_api_v1.md); it is change-gated,
-        # so this costs nothing for an app with nothing pending, and a future app
-        # gets it by implementing one method instead of editing this file.
-        for _app, _text in getattr(self, "_apps", ()):
-            _close = getattr(_app, "close", None)
-            if _close is not None:
-                _close()
-        _editor_app = getattr(self, "editor_app", None)
-        if _editor_app is not None and _editor_app.project is self.run.project:
-            _editor_app.save_current()
-        if self._editing_icons:
-            self.look.save_icons()     # the theme mode's tabs
-        self.look.commit()             # a change to the theme still settling
-        self.settings_layer.commit_name()  # and a Name still being typed
-        if self.settings_layer.wifi_view:
-            self.settings_layer.close_wifi()   # its radio lease ends with the visit
+        ws.leave_every_surface()
+        _editor_app = getattr(ws, "editor_app", None)
         # The parked Editor's workspace (console mode): its window comes back
         # to it, so neither it nor the run state it holds is torn down.
-        keep = self.wm.is_parked("menu") and (
-            self._editing_icons or (_editor_app is not None
-                                    and _editor_app.project is self.run.project))
+        keep = ws.wm.is_parked("menu") and (
+            ws.text.editing_icons or (_editor_app is not None
+                                    and _editor_app.project is ws.run.project))
         if not keep:
-            self.editor = None
-            self.paint = None
+            ws.editor = None
+            ws.paint = None
             if _editor_app is not None:
                 _editor_app._drop_theme()  # never carry the theme mode home
             for _ui in ("map_ui", "scene_ui", "block_ui"):
-                _ui = self.built(_ui)        # one never built is fresh already
+                _ui = ws.built(_ui)        # one never built is fresh already
                 if _ui is not None:
                     _ui.reset()
-        self.wm.goto(self.wm.root_kind())   # this mode's root, everything above it gone
+        ws.wm.goto(ws.wm.root_kind())   # this mode's root, everything above it gone
         if not keep:
-            self.cart = None
+            ws.run.project.cart = None
             # #66 fragmentation fix: ns = None alone kept the world alive through
-            # player._update's closure; release clears the dict in place + collects.
-            self.run.player.release_world()
+            # player.update's closure; release clears the dict in place + collects.
+            ws.run.player.release_world()
             # #66 pin-field fix (the repeat-run CLIFF's other half): going HOME drops
             # the whole workspace. The fat cart re-slims NOW (not at the next open --
             # reopening the SAME cart otherwise stays fat forever, and its rehydrated
@@ -369,28 +347,28 @@ class HomeVerbs:
             # churn arena; reopen costs one SD read) and a FRESH empty Project
             # replaces the old one's sheet/tilemap/images/pmem (ws.run.project is
             # never-None by design, so surfaces keep their invariant). The EDITOR
-            # return path (\_exit_to_caller -> menu) keeps both -- that's live
+            # return path (\exit_to_caller -> menu) keeps both -- that's live
             # editing state, not a corpse.
-            _fat = self.run.fat_cart
+            _fat = ws.run.fat_cart
             if _fat is not None:
-                self.carts.reslim(_fat)
-                self.run.fat_cart = None
-            self.run.project = Project(self)
-        self.cart_error = None
-        self.ach_ui._konami_pos = 0          # fresh Konami run on the home desktop (#21)
-        self.ach_ui._clock_taps = 0
+                ws.carts.reslim(_fat)
+                ws.run.fat_cart = None
+            ws.run.project = Project(ws)
+        ws.run.player.cart_error = None
+        ws.ach_ui._konami_pos = 0          # fresh Konami run on the home desktop (#21)
+        ws.ach_ui._clock_taps = 0
         # #197: while WASM MODE is on, HOME is the connection screen. Here and
         # not at each exit site, because "return to the launcher" has many doors
         # -- the bar's context X, the pause menu's Quit, an app's own
         # close, a crash -- and every one of them funnels through this method. A
         # per-door re-park is the bug class that left the T-Deck without a web
         # console at all; this is the last line of the one door they share.
-        if self.web.parked:
-            self.wm.goto("webconsole")
+        if ws.web.parked:
+            ws.wm.goto("webconsole")
 
     # -- the home's cards: the tabs, the search, the arrangement --------------
 
-    def _launcher_items(self, carts, tab=None):
+    def launcher_items(self, carts, tab=None):
         """The home's `tab` (the active one by default) over `carts`
         (docs/theme_and_shell_2026-11.md §8.10), the four without overlap:
 
@@ -411,18 +389,19 @@ class HomeVerbs:
         step 2). An empty Mine holds
         one "+ New" card. No "+ New" on a read-only store (#151: the web
         runner's can_manage=False, where project management is out of scope)."""
+        ws = self.ws
         if tab is None:
-            tab = getattr(getattr(self, "launcher", None), "tab", "games")
-        manage = getattr(self, "can_manage", True)
+            tab = getattr(getattr(ws, "launcher", None), "tab", "games")
+        manage = getattr(ws, "can_manage", True)
         if tab == "make":
             items = self._make_items(carts)
             return items if manage else items[1:]
         carts = self.runs_here(carts)
-        own = self.carts.is_own
+        own = ws.carts.is_own
         if tab == "apps":
-            hidden = getattr(self.wm, "HIDDEN_APPS", ())
+            hidden = getattr(ws.wm, "HIDDEN_APPS", ())
             out = []
-            for app, _t in getattr(self, "_apps", ()):
+            for app in getattr(ws, "app_layers", ()):
                 if app.id in hidden:
                     continue
                 for c in carts:
@@ -433,7 +412,7 @@ class HomeVerbs:
             return out
         out = []
         for c in carts:
-            if c.get("type") in ("wallpaper", "theme", "service") or self.is_system_app(c):
+            if c.get("type") in ("wallpaper", "theme", "service") or ws.spine.is_system_app(c):
                 continue
             if tab == "mine":
                 if own(c):
@@ -449,72 +428,78 @@ class HomeVerbs:
         lacks, the launch's refusal (`app_perms.lacking`): the run tiles
         (Games, Mine, Apps, the desk column) leave them out, and Files and
         Make still list them."""
-        consent = getattr(self, "consent", None)
+        ws = self.ws
+        consent = getattr(ws, "consent", None)
         return consent.runnable(carts) if consent is not None else list(carts)
 
     def unclaimed_apps(self, carts):
         """The installed app- and tool-typed carts of `carts` that no
         registered app claims and the kid did not make: the Apps tab's tail
         and the desk column's (`wm_desk`)."""
-        own = self.carts.is_own
+        ws = self.ws
+        own = ws.carts.is_own
         return [c for c in carts if c.get("type") in ("app", "tool")
-                and not own(c) and not self.is_system_app(c)]
+                and not own(c) and not ws.spine.is_system_app(c)]
 
-    def _runnable_items(self):
+    def runnable_items(self):
         """Every cart a tap on the home RUNS or opens -- Games, Mine and Apps,
         in that order: what a remote run (`launch_named`) chooses from."""
-        carts = self.carts.all
+        ws = self.ws
+        carts = ws.carts.all
         out = []
         for tab in ("games", "mine", "apps"):
-            for c in self._launcher_items(carts, tab):
+            for c in self.launcher_items(carts, tab):
                 if c.get("path"):
                     out.append(c)
         return out
 
-    def _launcher_view_items(self, grid=None):
+    def launcher_view_items(self, grid=None):
         """`grid`'s (the home's by default) current contents: its active tab,
         the home's narrowed by the search query (#105), if any -- a plain
         case-insensitive substring match on the title; a "+ New" card survives
         it. The single place a rescan (carts.apply), a query edit
         (set_search_query) and a tab switch all call, so they can never desync
         on which list is "current"."""
-        if grid is not None and grid is not self.launcher:
-            return self._launcher_items(self.carts.all, grid.tab)
-        base = self._launcher_items(self.carts.all)
-        q = self.search_query.strip().lower()
+        ws = self.ws
+        if grid is not None and grid is not ws.launcher:
+            return self.launcher_items(ws.carts.all, grid.tab)
+        base = self.launcher_items(ws.carts.all)
+        q = ws.search_query.strip().lower()
         if not q:
             return base
         return [it for it in base
                 if it.get("type") in PSEUDO_TILE_TYPES
                 or q in it.get("title", "").lower()]
 
-    def _today_ymd(self):
-        return _today_ymd(self)
-
     def _home_grid(self, arrangement, items):
         """The home's card model for `arrangement` (docs/theme_and_shell_2026-11.md
         §8.10): the Carousel (the home window's, always), the shelf grid or
         the icon grid."""
+        ws = self.ws
         cls = _HOME_CLASSES.get(arrangement, Carousel)
-        g = cls(items, self.layout, NAMES)
+        g = cls(items, ws.layout, NAMES)
         # The "+ New" card draws the live icon set's plus (iconsets.plus).
-        g.icon_spec = self.icon_spec
-        g.cover_for = self.covers.cover_for
-        g.cover_ready = self.covers.ready_for
-        g.tinted_for = self.covers.tinted
+        g.icon_spec = ws.icon_spec
+        g.cover_for = ws.covers.cover_for
+        g.cover_ready = ws.covers.ready_for
+        g.tinted_for = ws.covers.tinted
         # The favorite-star badge on the selected card (#105).
-        g.favorite_for = self.carts.is_favorite
-        g.own_for = self.carts.is_own
-        g.plays_for = self.carts.plays
-        g.today_for = self._today_ymd
-        g.theme = getattr(self, "theme_colors", None)
+        g.favorite_for = ws.carts.is_favorite
+        # The crash guard's mark on a Make card it turned off (#160).
+        g.broken_for = ws.spine.cart_broken
+        g.broken_ids = ws.spine.broken_cart_ids
+        g.own_for = ws.carts.is_own
+        g.plays_for = ws.carts.plays
+        g.today_for = ws.notices.today_ymd
+        g.theme = getattr(ws, "theme_colors", None)
         return g
 
     def set_home_arrangement(self, arrangement):
         """Show the home as `arrangement` -- "carousel", "grid" or "icons",
         the layout's `home` key (look.apply_layout) -- on the same tab and
         card."""
-        old = self.launcher
+        ws = self.ws
+        old = ws.launcher
         if type(old) is _HOME_CLASSES.get(arrangement, Carousel):
             return
         g = self._home_grid(arrangement, old.items)
@@ -523,19 +508,20 @@ class HomeVerbs:
         g.sel = old.sel
         g._scroll_to_sel()
         old.release_faces()
-        self.launcher = g
-        self._dirty = True
+        ws.launcher = g
+        ws.frame_state.dirty = True
 
     def set_home_tab(self, tab, grid=None):
         """Switch the home (`grid`, ws.launcher by default) to `tab`, back on
         the card it last had."""
-        lw = grid or self.launcher
+        ws = self.ws
+        lw = grid or ws.launcher
         if tab == lw.tab:
             return
         sel = lw.selected()
         lw.tab_sel[lw.tab] = sel.get("path") if sel else None
         lw.tab = tab
-        lw.set_items(self._launcher_view_items(lw))
+        lw.set_items(self.launcher_view_items(lw))
         want = lw.tab_sel.get(tab)
         i = 0
         for k in range(len(lw.items)):
@@ -544,11 +530,12 @@ class HomeVerbs:
                 break
         lw.sel = i
         lw._scroll_to_sel()
-        self._dirty = True
+        ws.frame_state.dirty = True
 
     def step_home_tab(self, d, grid=None):
         """The tab `d` steps from the active one, clamped (the keys' tab row)."""
-        grid = grid or self.launcher
+        ws = self.ws
+        grid = grid or ws.launcher
         ids = [t for t, _l in HOME_TABS]
         i = ids.index(grid.tab) + d
         self.set_home_tab(ids[max(0, min(len(ids) - 1, i))], grid)
@@ -556,18 +543,19 @@ class HomeVerbs:
     def select_cart(self, cart):
         """Bring `cart` up on the home: the tab whose list holds it, then its
         card. False when no tab holds it."""
+        ws = self.ws
         path = cart.get("path") if cart else None
-        tabs = [self.launcher.tab] + [t for t, _l in HOME_TABS
-                                      if t != self.launcher.tab and t != "make"]
+        tabs = [ws.launcher.tab] + [t for t, _l in HOME_TABS
+                                      if t != ws.launcher.tab and t != "make"]
         for tab in tabs:
-            items = self._launcher_items(self.carts.all, tab)
+            items = self.launcher_items(ws.carts.all, tab)
             for k in range(len(items)):
                 if items[k] is cart or (path and items[k].get("path") == path):
-                    if tab != self.launcher.tab or self.search_query:
-                        self.search_query = ""
+                    if tab != ws.launcher.tab or ws.search_query:
+                        ws.search_query = ""
                         self.set_home_tab(tab)
-                        self.launcher.set_items(self._launcher_view_items())
-                    lw = self.launcher
+                        ws.launcher.set_items(self.launcher_view_items())
+                    lw = ws.launcher
                     for j in range(len(lw.items)):
                         if lw.items[j] is cart or (path and lw.items[j].get("path") == path):
                             lw.sel = j
@@ -577,7 +565,8 @@ class HomeVerbs:
     def home_title(self, grid=None):
         """The bar's title on the home (`grid`, ws.launcher by default): the
         active tab's count."""
-        grid = grid or self.launcher
+        ws = self.ws
+        grid = grid or ws.launcher
         n = 0
         for it in grid.items:
             if it.get("path"):
@@ -586,30 +575,31 @@ class HomeVerbs:
 
     def open_search(self):
         """Enter the launcher search box (≡ -> SEARCH, #105): capture ASCII
-        keystrokes into search_query, filtering the run-grid live. Mirrors the
-        wifi-password typing idiom (_set_text_mode swaps the keyboard to clean
-        ASCII while a query is being typed -- plain printable range only, so it
-        works on the T-Deck's keyboard with no `=[]{}<>%` keys)."""
-        self.search_typing = True
-        self._set_text_mode(True)
-        self._dirty = True
+        keystrokes into search_query, filtering the run-grid live. The keyboard
+        is in clean ASCII while a query is typed (the home's `typing`) -- plain
+        printable range only, so it works on the T-Deck's keyboard with no
+        `=[]{}<>%` keys."""
+        ws = self.ws
+        ws.search_typing = True
+        ws.frame_state.dirty = True
 
     def close_search(self, clear=True):
         """Leave the search box (ENTER/ESC while typing, or the sysmenu CLEAR
         SEARCH toggle). `clear=True` also drops the query and restores the full
         grid; `clear=False` (ENTER) just stops capturing keystrokes, leaving the
         filtered results up for d-pad/trackball browsing."""
-        self.search_typing = False
-        self._set_text_mode(False)
+        ws = self.ws
+        ws.search_typing = False
         if clear:
-            self.search_query = ""
-            self.launcher.set_items(self._launcher_view_items())
-        self._dirty = True
+            ws.search_query = ""
+            ws.launcher.set_items(self.launcher_view_items())
+        ws.frame_state.dirty = True
 
     def toggle_search(self):
         """The sysmenu SEARCH row's action: open the box if idle, else close (and
         clear) it -- one control both opens and dismisses search."""
-        if self.search_typing or self.search_query:
+        ws = self.ws
+        if ws.search_typing or ws.search_query:
             self.close_search(clear=True)
         else:
             self.open_search()
@@ -619,9 +609,10 @@ class HomeVerbs:
         idle-frame perf floor stays intact: this only runs on a keystroke, never
         per-frame, and an unchanged (empty) query is the byte-identical original
         grid."""
-        self.search_query = q
-        self.launcher.set_items(self._launcher_view_items())
-        self._dirty = True
+        ws = self.ws
+        ws.search_query = q
+        ws.launcher.set_items(self.launcher_view_items())
+        ws.frame_state.dirty = True
 
     def _make_items(self, carts):
         """The Make tab's entries: the "+ New" card first (create a game + open
@@ -643,13 +634,14 @@ class HomeVerbs:
         Note this departs from shell_ux_v1's "everything is editable"; the spec
         line is right again once #181 lands. The achievements process's cart
         is the console's own as well (docs/os_2026-11/processes.md §8)."""
+        ws = self.ws
         carts = [c for c in carts if c.get("type") != "theme" and not _is_ach_proc(c)]
-        apps = getattr(self, "_apps", ())
+        apps = getattr(ws, "app_layers", ())
         if apps:
             keep = []
             for c in carts:
                 claimed = False
-                for _app, _t in apps:
+                for _app in apps:
                     try:
                         if _app.is_app(c):
                             claimed = True
@@ -661,14 +653,15 @@ class HomeVerbs:
             carts = keep
         return [new_tile()] + list(carts)
 
-    def _leave_or_home(self, leave):
+    def leave_or_home(self, leave):
         """The B-leaves-the-sub-view / HOME-backs-out (`home_key`) shape shared by
         several menu_view input branches (theme/map/music/the default card editor)
         and the block-editor outline: B calls the view's own `leave` callback (it
         differs per view), HOME always goes
         to the HOME key's verb (`home_key`). Verified identical at every call site
         before extracting."""
-        i = self.input
+        ws = self.ws
+        i = ws.input
         if i.pressed("b"):
             leave()
         elif i.pressed("home"):

@@ -19,10 +19,8 @@ already draw that -- but four things a whole-screen hash cannot see:
     `not carts_root or not can_manage` each; they take the shared `StoreHandle`
     now, the same object `SystemStore` and `app_context`'s storage roles hold.
 
-  * **`rescan_carts` is the one surviving forward**, because `moy_webhost`
-    captures `lambda folders: ws.rescan_carts(folders)` at CONSTRUCTION -- a name that resolves
-    then and never again is exactly the 3d blind spot the façade ratchet exists
-    for, so the shape is pinned here as well as counted there.
+  * **`moy_webhost` captures `lambda folders: ws.carts.synced(folders)` at
+    CONSTRUCTION**, so `synced` keeps its one fixed parameter.
 """
 
 import ast
@@ -90,7 +88,7 @@ def test_apply_invalidates_covers_before_slimming_and_re_derives_both_grids(tmp_
     end); the two grid rebuilds -- the home's and the home window's -- must
     both read the SAME scan."""
     ws = build_ws(tmp_path)
-    ws.projects_grid = ws._home_grid("grid", [])
+    ws.projects_grid = ws.home._home_grid("grid", [])
     ws.projects_grid.tab = "make"
     order = []
     real_slim = ws.carts.slim
@@ -110,9 +108,9 @@ def test_the_grids_follow_a_create_through_apply(tmp_path):
     root = str(ws.carts_root)
     _mk(root, "Freshly")
     ws.carts.apply(shelf(root))
-    ws.set_home_tab("mine")                   # made here: the kid's own
+    ws.home.set_home_tab("mine")                   # made here: the kid's own
     assert "Freshly" in _titles(ws.launcher)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     assert "Freshly" in _titles(ws.launcher)
 
 
@@ -124,10 +122,10 @@ def test_rescan_adopts_what_landed_on_the_store_and_marks_dirty(tmp_path):
     paint -- without it the new cart sits on a store nothing repaints."""
     ws = build_ws(tmp_path)
     _mk(str(ws.carts_root), "Synced")
-    ws._dirty = False
+    ws.frame_state.dirty = False
     ws.carts.rescan()
-    assert ws._dirty is True
-    ws.set_home_tab("mine")                   # made here: the kid's own
+    assert ws.frame_state.dirty is True
+    ws.home.set_home_tab("mine")                   # made here: the kid's own
     assert "Synced" in _titles(ws.launcher)
 
 
@@ -154,16 +152,16 @@ def test_rescan_keeps_the_old_shelf_when_the_scan_raises(tmp_path, monkeypatch):
 
 
 def test_the_webhosts_on_sync_lambda_still_finds_the_shelf(tmp_path):
-    """`moy_webhost` builds `on_sync=lambda folders: ws.rescan_carts(folders)`
+    """`moy_webhost` builds `on_sync=lambda folders: ws.carts.synced(folders)`
     when the webhost is CONSTRUCTED and calls it per batch with the folders the
     batch changed (None: every one) -- the name has to keep resolving on the
     console, which is why this one forward stayed. Driven in the webhost's own
     shape rather than by calling the method directly."""
     ws = build_ws(tmp_path)
-    on_sync = lambda folders: ws.rescan_carts(folders)   # noqa: E731 -- the webhost's shape
+    on_sync = lambda folders: ws.carts.synced(folders)   # noqa: E731 -- the webhost's shape
     made = _mk(str(ws.carts_root), "Pushed")
     on_sync((made["path"].rsplit("/", 1)[-1],))
-    ws.set_home_tab("mine")                   # made here: the kid's own
+    ws.home.set_home_tab("mine")                   # made here: the kid's own
     assert "Pushed" in _titles(ws.launcher)
     again = _mk(str(ws.carts_root), "Pushed Too")
     on_sync(None)
@@ -205,10 +203,10 @@ def test_a_folder_rescan_reads_one_entry_and_matches_a_whole_scan(tmp_path, monk
     before = list(ws.carts.all)
     made = _mk(root, "Middling")
     reads = _Reads(monkeypatch)
-    ws._dirty = False
+    ws.frame_state.dirty = False
     ws.carts.rescan([made["path"]])
     assert reads.scans == 0 and reads.entries == [made["path"]]
-    assert ws._dirty is True
+    assert ws.frame_state.dirty is True
     whole = shelf(root)
     assert _paths(ws.carts.all) == _paths(whole)
     assert all(moy_catalogue.valid(c["h"]) for c in ws.carts.all if c.get("path"))
@@ -216,7 +214,7 @@ def test_a_folder_rescan_reads_one_entry_and_matches_a_whole_scan(tmp_path, monk
     assert all(a is b for a, b in zip(kept, before)), "the other entries are kept"
     new = next(c for c in ws.carts.all if c["path"] == made["path"])
     assert new["lazy"] is True and "icon_rows" not in new
-    ws.set_home_tab("mine")
+    ws.home.set_home_tab("mine")
     assert "Middling" in _titles(ws.launcher)
 
 
@@ -277,11 +275,11 @@ def test_every_store_writing_verb_rescans_only_its_folder(tmp_path, monkeypatch)
     assert _paths(ws.carts.all) == _paths(shelf(root))
 
 
-def test_the_rescan_forward_has_a_fixed_signature():
-    """A `*a, **kw` shim allocates a tuple per call (the #63/#66 churn class).
-    The façade ratchet counts forwards; this pins the one that has a live
-    caller outside the tree's own tests."""
-    sig = inspect.signature(console.Workstation.rescan_carts)
+def test_the_sync_verb_has_a_fixed_signature():
+    """A `*a, **kw` shim allocates a tuple per call (the #63/#66 churn class);
+    `moy_webhost`'s `on_sync` lambda calls this one with the folders."""
+    from runtime.cart_manager import CartManager
+    sig = inspect.signature(CartManager.synced)
     assert list(sig.parameters) == ["self", "folders"]
 
 
@@ -333,7 +331,7 @@ def test_new_creates_a_cart_adopts_it_and_hands_it_back(tmp_path):
     assert made is not None and made.get("path")
     assert len(ws.carts.all) == n0 + 1
     assert any(c["path"] == made["path"] for c in ws.carts.all)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     assert made["path"] in [it.get("path") for it in ws.launcher.items]
 
 
@@ -343,8 +341,8 @@ def test_new_cart_and_edit_opens_the_cart_new_returned(tmp_path):
     from the roster, which is what keeps the two halves from disagreeing about
     WHICH cart was just made."""
     ws = build_ws(tmp_path)
-    ws.set_home_tab("make")
-    ws.new_cart_and_edit()
+    ws.home.set_home_tab("make")
+    ws.home.new_cart_and_edit()
     assert ws.cart is not None
     assert ws.launcher.selected().get("path") == ws.cart["path"]
 
@@ -352,7 +350,7 @@ def test_new_cart_and_edit_opens_the_cart_new_returned(tmp_path):
 def test_new_cart_and_edit_stays_put_on_a_read_only_store(tmp_path):
     ws = build_ws(tmp_path)
     ws.can_manage = False
-    ws.new_cart_and_edit()
+    ws.home.new_cart_and_edit()
     assert ws.cart is None
 
 
@@ -417,8 +415,8 @@ def test_a_copy_the_store_has_no_room_for_says_so_and_leaves_nothing(
     assert sorted(os.listdir(root)) == before
     assert len(ws.carts.all) == n0
     assert not any(c["title"] == target["title"] + " copy" for c in ws.carts.all)
-    assert ws._notice == ("CAN'T COPY", "The store is full", "warn")
-    assert ws.notice_active()
+    assert ws.notice_up == ("CAN'T COPY", "The store is full", "warn")
+    assert ws.notices.notice_active()
 
 
 def test_a_new_cart_the_store_has_no_room_for_says_so(tmp_path, monkeypatch):
@@ -429,7 +427,7 @@ def test_a_new_cart_the_store_has_no_room_for_says_so(tmp_path, monkeypatch):
     _full_after(monkeypatch, 0)
     assert ws.carts.new() is None
     assert sorted(os.listdir(root)) == before
-    assert ws._notice == ("CAN'T MAKE", "The store is full", "warn")
+    assert ws.notice_up == ("CAN'T MAKE", "The store is full", "warn")
 
 
 def test_a_copy_that_fails_for_another_reason_stays_quiet(tmp_path, monkeypatch):
@@ -442,7 +440,7 @@ def test_a_copy_that_fails_for_another_reason_stays_quiet(tmp_path, monkeypatch)
         raise OSError(5, "I/O error")
     monkeypatch.setattr(moy_carts, "duplicate", _broken)
     ws.carts.dup(target)
-    assert ws._notice is None
+    assert ws.notice_up is None
 
 
 def test_the_store_knows_a_full_store_from_every_other_failure():
@@ -462,7 +460,7 @@ def test_delete_with_no_cart_given_deletes_the_open_one(tmp_path):
     _mk(root, "Selected")
     ws.carts.apply(shelf(root))
     opened = next(c for c in ws.carts.all if c["title"] == "Opened")
-    ws._open_workspace(opened)
+    ws.open_workspace(opened)
     ws.carts.delete()
     titles = [c["title"] for c in ws.carts.all]
     assert "Opened" not in titles and "Selected" in titles
@@ -528,6 +526,24 @@ def test_slim_strips_the_heavy_keys_and_rehydrate_refills_the_same_dict(tmp_path
     same = ws.carts.rehydrate(cart)
     assert same is cart
     assert cart["lazy"] is False and cart.get("src")
+
+
+def test_a_run_only_field_leaves_the_shelf_and_comes_back_with_the_run(tmp_path):
+    """A cart's palette is read by a run alone (Player.start), so the shelf's
+    entry holds none: a PICO-8 import's is 64 strings, ~2.3KB of live heap a
+    shelved cart. Rehydrate brings it back; reslim drops it again."""
+    ws = build_ws(tmp_path)
+    pal = ["%06X" % (i * 0x40404) for i in range(64)]
+    path = _mk(str(ws.carts_root), "Paletted", palette=pal)["path"]
+    ws.carts.apply(shelf(str(ws.carts_root)))
+    cart = next(c for c in ws.carts.all if c.get("path") == path)
+    assert cart["lazy"] is True
+    assert not [k for k in cart_manager.RUN_ONLY if k in cart]
+
+    ws.carts.rehydrate(cart)
+    assert cart["palette"] == pal
+    ws.carts.reslim(cart)
+    assert "palette" not in cart and cart["lazy"] is True
 
 
 def test_slim_bakes_the_grid_icon_while_the_art_is_still_in_ram(tmp_path):
@@ -600,7 +616,7 @@ def test_a_pseudo_tile_is_never_starred_or_recorded(tmp_path):
     """The "+ New" card carries no path, and a path is the identity
     everything here keys on."""
     ws = build_ws(tmp_path)
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     make = ws.launcher.items[0]
     assert make.get("path") is None
     assert ws.carts.is_favorite(make) is False
@@ -647,7 +663,7 @@ def test_a_launcher_run_records_the_cart_as_recent(tmp_path):
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("path"))
     cart = ws.launcher.selected()
-    ws.launch_selected()
+    ws.home.launch_selected()
     assert ws.system.get("desk_mru")[0] == cart["path"]
 
 
@@ -735,10 +751,10 @@ def _real(ws, n=1):
 def test_a_run_counts_a_play_and_stamps_the_day(tmp_path):
     ws = build_ws(tmp_path)
     a, b = _real(ws, 2)
-    ws.bar_layer._today = lambda: (2026, 10, 14)
+    ws.bar_layer.today = lambda: (2026, 10, 14)
     assert ws.carts.plays(a) is None
     ws.carts.note_recent(a)
-    ws.bar_layer._today = lambda: (2026, 10, 15)
+    ws.bar_layer.today = lambda: (2026, 10, 15)
     ws.carts.note_recent(a)
     assert ws.carts.plays(a) == (2, 20261015)
     assert ws.carts.plays(b) is None
@@ -750,19 +766,19 @@ def test_a_launcher_run_writes_the_play_record(tmp_path):
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("path"))
     cart = ws.launcher.selected()
-    ws.launch_selected()
+    ws.home.launch_selected()
     assert ws.carts.plays(cart)[0] == 1
 
 
 def test_a_board_without_a_wall_clock_keeps_the_day_it_had(tmp_path):
     ws = build_ws(tmp_path)
     a, = _real(ws)
-    ws.bar_layer._today = lambda: (2000, 1, 1)     # an unset RTC
+    ws.bar_layer.today = lambda: (2000, 1, 1)     # an unset RTC
     ws.carts.note_recent(a)
     assert ws.carts.plays(a) == (1, 0)
-    ws.bar_layer._today = lambda: (2026, 10, 14)
+    ws.bar_layer.today = lambda: (2026, 10, 14)
     ws.carts.note_recent(a)
-    ws.bar_layer._today = lambda: (0, 0, 0)
+    ws.bar_layer.today = lambda: (0, 0, 0)
     ws.carts.note_recent(a)
     assert ws.carts.plays(a) == (3, 20261014)
 

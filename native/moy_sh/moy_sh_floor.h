@@ -24,8 +24,8 @@
 // THE SCREEN is LOGICAL (w x h), drawn whole each frame the floor owes into a
 // buffer of its own; the caller turns it onto its panel. Its words are RGB565
 // high byte first where `swap` (the S3 panels, the host), canonical where not
-// (the P4's DPI scan-out): the palette and the glyph lane (moy_text_wire)
-// take that order.
+// (the P4's DPI scan-out): the palette and the raster (moy_gfx_wire) take
+// that order.
 //
 // Its memory is the shell's board table's `alloc` (PSRAM on a board): the
 // floor, the context, the shape, the pixels, and the face's own.

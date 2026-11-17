@@ -174,6 +174,7 @@ def test_info_button_tap_opens_the_modal(tmp_path):
         ws.input.begin_frame()
         ws.frame(1 / 30)
     assert ws.cards_layer.prompt is not None
+    ws.input_policy.sync()                              # the frame's look at the mode
     assert ws.input.text_mode is True                   # typing mode armed
 
 
@@ -268,4 +269,5 @@ def test_meta_modal_draws_without_crashing_and_reset_closes_it(tmp_path):
 
     ws.cards_layer.reset()                                  # switching cart must not leak it
     assert ws.cards_layer.prompt is None
+    ws.input_policy.sync()                                  # the next frame's look
     assert ws.input.text_mode is False

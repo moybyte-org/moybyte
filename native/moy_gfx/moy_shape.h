@@ -55,9 +55,9 @@
  * coverage. A TINT copies a sub-rect out with a colour over it, the dimmed
  * neighbour a cache keeps rather than a blend every frame.
  *
- * COLOURS are RGB565 in the buffer's wire order; moy_shape_wire_swapped says
- * which order that is (the S3 boards, the host and the browser hold it high
- * byte first, the P4's DPI does not: device/device_canvas.py's WIRE_SWAPPED).
+ * COLOURS are RGB565 in the buffer's wire order, which moy_gfx_wire sets
+ * (moy_gfx_base.h: the S3 boards, the host and the browser hold it high byte
+ * first, the P4's DPI does not).
  */
 
 #ifndef MOY_SHAPE_H
@@ -103,9 +103,7 @@ typedef struct {
     uint8_t stepped;                // a hard shadow's corners
 } moy_shape_shadow_t;
 
-// The buffer's word order (1: high byte first). Process-wide; 1 until set.
-void moy_shape_wire_swapped(int swapped);
-// A canonical RGB565 word in that order.
+// A canonical RGB565 word in the wire order (moy_gfx_wire).
 uint16_t moy_shape_wire(uint16_t canonical);
 
 // A rect with corners `r` (each clamped to half the shorter side and to
@@ -122,6 +120,15 @@ int moy_shape_shadow(const moy_text_target_t *t, int x, int y, int w, int h,
 // target's: a wash over another frame, kept as it lands. A pixel a shadow
 // does not touch is left as it was in both. NULL, NULL: in place again.
 void moy_shape_shadow_io(const uint16_t *src, uint16_t *also);
+
+// The next shadow also lays `src`, laid out as the target, into every pixel
+// of buffer rect `outer` but those of `inner` (each x, y, w, h; the clip
+// does not apply): blended under the shadow where it falls, copied where it
+// does not -- a restore and the shadow over it in one pass, each pixel read
+// and stored once. NULL: none. moy_shape_shadow_fill_end lays a fill no
+// shadow took (one that drew nothing) as the copy alone.
+void moy_shape_shadow_fill(const uint16_t *src, const int outer[4], const int inner[4]);
+int moy_shape_shadow_fill_end(const moy_text_target_t *t);
 
 // Canonical `f` over canonical `b` at `alpha` (0..255): the colour a shadow
 // of `f` at `alpha` leaves over `b` inside its corners, so a solid fill that

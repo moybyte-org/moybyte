@@ -48,9 +48,9 @@ def test_code_edit_survives_immediate_context_x_close(tmp_path):
         title = ws.launcher.items[ws.launcher.sel]["title"]
     path = _cart_path_by_title(ws, title)
     ws.open_in_editor()
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.editor.set_text("def _draw():\n    cls(9)  # edited, never saved\n")
-    ws.exit()                       # context-X: the ONLY thing that ran is exit()
+    ws.spine.exit()                       # context-X: the ONLY thing that ran is exit()
     assert ws.screen == "launcher"
     reloaded = moy_carts.load(path)
     assert "cls(9)" in reloaded["src"], \
@@ -68,13 +68,13 @@ def test_paint_edit_survives_immediate_context_x_close(tmp_path):
     title = ws.launcher.items[ws.launcher.sel]["title"]
     path = _cart_path_by_title(ws, title)
     ws.open_in_editor()
-    ws._open_paint()
+    ws.text.open_paint()
     pe = ws.paint
     pe.n = 0
     pe.color = 11
     pe.paint(0, 0)
     assert ws.sheet.dirty is True
-    ws.exit()                       # context-X, no SAVE tap, no PLAY
+    ws.spine.exit()                       # context-X, no SAVE tap, no PLAY
     assert ws.screen == "launcher"
     reloaded = moy_carts.load(path)
     sheet = SpriteSheet.from_hex(reloaded["sprites"])
@@ -96,7 +96,7 @@ def test_code_edit_survives_a_workspace_swap_via_projects(tmp_path):
     path_a = _cart_path_by_title(ws, title_a)
 
     _open_in_editor_by_title(ws, title_a)
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.editor.set_text("def _draw():\n    cls(4)  # cart A, never saved\n")
 
     _open_in_editor_by_title(ws, title_b)   # PROJECTS -> a DIFFERENT project
@@ -121,7 +121,7 @@ def test_windowed_make_window_close_commits_code_edit(tmp_path):
     title = ws.launcher.items[ws.launcher.sel]["title"]
     path = _cart_path_by_title(ws, title)
     ws.open_in_editor()
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     ws.editor.set_text("def _draw():\n    cls(6)  # windowed close, never saved\n")
     ws.wm.close_window_kind("menu")     # the make window's own strip X
     reloaded = moy_carts.load(path)
@@ -133,8 +133,8 @@ def test_windowed_artwork_window_close_commits_the_drawing(tmp_path):
     """Same #111 gap, the Paint app (#108 user drawings): closing its window via
     the strip X must flush the open drawing (artwork_app._save)."""
     ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2, windowed=True)
-    ws.open_app(ws.artwork_app)
-    app = ws.artwork_app
+    ws.spine.open_app(ws.app("artwork"))
+    app = ws.app("artwork")
     app.doc.put(0, 0, 5)
     app._mark_changed()
     assert app._unsaved is True
@@ -224,7 +224,7 @@ def test_a_real_edit_still_commits_on_tab_switch(tmp_path):
     assert "save_sprites" in hits, hits
 
     # map: one tile
-    ws.tilemap.mset(0, 0, 1)
+    ws.run.project.tilemap.mset(0, 0, 1)
     hits = _writes_during(ws, lambda: _switch(ws, "scene"))
     assert "save_map" in hits, hits
 
@@ -278,7 +278,7 @@ def test_a_hard_exit_pays_a_commit_the_switch_still_owes(tmp_path):
     ws.frame(1 / 30)
     ws.sheet.pset(0, 0, 7)
     ws.editor_app.set_tab("code")      # owes a sprite commit, no frame runs
-    ws.exit()                          # context-X -> go_home
+    ws.spine.exit()                          # context-X -> go_home
     assert ws.screen == "launcher"
     from runtime.editors_sheet import SpriteSheet
     sheet = SpriteSheet.from_hex(moy_carts.load(path)["sprites"])
@@ -294,13 +294,13 @@ def test_a_workspace_swap_pays_the_outgoing_project_s_debt(tmp_path):
     ws = _ws(tmp_path)
     carts = [c for c in ws.launcher.items if c.get("path")]
     first, second = carts[0], carts[1]
-    ws._open_workspace(first)
+    ws.open_workspace(first)
     ws.editor_app.open(ws.run.project)
     ws.editor_app.set_tab("paint")
     ws.frame(1 / 30)
     ws.sheet.pset(0, 0, 7)
     ws.editor_app.set_tab("code")      # owes a sprite commit
-    ws._open_workspace(second)         # PROJECTS -> a different project
+    ws.open_workspace(second)         # PROJECTS -> a different project
     assert ws.editor_app._pending == [], ws.editor_app._pending
     from runtime.editors_sheet import SpriteSheet
     sheet = SpriteSheet.from_hex(moy_carts.load(first["path"])["sprites"])
@@ -338,7 +338,7 @@ def _open_code(ws):
     title = next(c["title"] for c in ws.launcher.items if c.get("path"))
     path = _cart_path_by_title(ws, title)
     _open_in_editor_by_title(ws, title)
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     return path
 
 
@@ -350,7 +350,7 @@ def test_a_half_typed_line_survives_going_home(tmp_path):
     path = _open_code(ws)
     ws.editor.set_text(_HALF)
 
-    ws.exit()                       # context-X -> go_home, no wait, no save call
+    ws.spine.exit()                       # context-X -> go_home, no wait, no save call
 
     assert ws.screen == "launcher"
     assert "x = (" in moy_carts.load(path)["src"], \
@@ -384,7 +384,7 @@ def test_a_forced_commit_does_not_forgive_a_struck_out_app(tmp_path):
     ws = _ws(tmp_path)
     _open_code(ws)
     forgiven = []
-    ws.forgive_app = lambda cart: forgiven.append(cart)
+    ws.spine.forgive_app = lambda cart: forgiven.append(cart)
 
     ws.editor.set_text(_HALF)
     ws.editor_app.save_current()                 # the hard path: writes anyway
@@ -402,7 +402,7 @@ def test_play_still_refuses_to_run_source_that_will_not_parse(tmp_path):
     _open_code(ws)
     ws.editor.set_text(_HALF)
 
-    ws.run_code()
+    ws.saves.run_code()
 
     assert ws.screen == "menu", "a cart that cannot compile must not be run"
     assert (ws.cart_error or "").startswith("Syntax error")

@@ -1372,6 +1372,7 @@ async function init(search, coarse, channel, scheme, signin, rate) {
     // every write it later makes.
     const gpioPins = await probeGpio();
     const updateDoc = await probeUpdate();
+    const official = mode === "board" && await probeOfficial();
     mp.runPython("import web_boot\n"
         // BEFORE boot(): the mode is what decides whether the carts watcher
         // sweeps the journal, and boot() is where that watcher is built.
@@ -1384,6 +1385,9 @@ async function init(search, coarse, channel, scheme, signin, rate) {
         + (shelves ? "web_boot.site_sources(" + JSON.stringify(VFS.carts) + ", "
             + JSON.stringify(JSON.stringify(shelves)) + ")\n" : "")
         + (gpioPins ? "web_boot.gpio_enable(" + JSON.stringify(JSON.stringify(gpioPins)) + ")\n" : "")
+        // A console with no screen that installs its own official carts when
+        // this page asks: BEFORE boot(), which hands Get Carts the asking.
+        + (official ? "web_boot.official_enable()\n" : "")
         // The console this page's address asks for: its tier, size and cart
         // (web_boot.page_boot), on the page's pointer and colour scheme
         // (page_tail.js: ?scheme= or prefers-color-scheme).
@@ -1531,6 +1535,18 @@ async function probeUpdate() {
         return (d && d.running) ? d : null;
     } catch (e) {
         return null;                 // no such host, no such endpoint: fine
+    }
+}
+
+// Does the console that served this page install its official carts when
+// the page asks (a console with no screen)? One GET, before the console
+// exists, so Get Carts either asks it or says the console gets its own.
+async function probeOfficial() {
+    try {
+        const r = await sealed("GET", "/official");
+        return r.status === 200 && !!sealedJson(r);
+    } catch (e) {
+        return false;
     }
 }
 
@@ -1807,6 +1823,8 @@ function cartsPump() {
         else if (j.op === "record") cartsRecord(j);
         else if (j.op === "wput") writtenKeep(j);
         else if (j.op === "wdel") writtenDrop(j);
+        else if (j.op === "official") cartsOfficial(j);
+        else if (j.op === "refold") cartsRefold(j);
         else if (j.op === "pick") {
             cartsLive.set(j.id, { pick: true, path: j.path });
             self.postMessage({ t: "pick", id: j.id, name: j.name, size: j.size, host: j.host });
@@ -1859,6 +1877,63 @@ async function cartsGet(j) {
     } catch (e) {
         if (mine()) cartsSay({ id: j.id, error: String((e && e.message) || e) });
     }
+}
+
+// Get Carts on a page a console with no screen serves (carts_link.BoardCarts):
+// its sealed /official asked, a POST of `body` or a GET, the answer's text in
+// the job's spool.
+async function cartsOfficial(j) {
+    const live = { path: j.path };
+    cartsLive.set(j.id, live);
+    const mine = () => cartsLive.get(j.id) === live;
+    let r;
+    try {
+        r = j.body == null ? await sealed("GET", "/official")
+                           : await sealed("POST", "/official", j.body);
+    } catch (e) {
+        if (mine()) cartsSay({ id: j.id, status: 0, error: String((e && e.message) || e) });
+        return;
+    }
+    if (!mine()) return;
+    mkdirs(dirOf(j.path));
+    mp.FS.writeFile(j.path, r.clear ? "" : (r.text || ""));
+    cartsSay({ id: j.id, status: r.status });
+    cartsSay({ id: j.id, end: 1 });
+}
+
+// ...and the cart that console installed, brought over this page's copy: its
+// carts pulled again and the one folder replaced, in one turn of this
+// thread, so the console's sweep never sees it half written; the VM adopts
+// it on the answer.
+async function cartsRefold(j) {
+    let r;
+    try {
+        r = await sealed("GET", "/" + store.rootById("carts").endpoint);
+    } catch (e) {
+        r = { status: 0 };
+    }
+    const doc = r.status === 200 ? sealedJson(r) : null;
+    if (!doc) {
+        cartsSay({ id: j.id, error: "the console did not send its carts (" + r.status + ")" });
+        return;
+    }
+    rmTree(j.root + "/" + j.folder);
+    const files = {}, pre = j.folder + "/";
+    for (const rel in doc) if (rel.startsWith(pre)) files[rel] = doc[rel];
+    writeStore(j.root, files);
+    cartsSay({ id: j.id, kept: 1 });
+}
+
+function rmTree(p) {
+    let names;
+    try { names = mp.FS.readdir(p); } catch (e) { return; }
+    for (const n of names) {
+        if (n === "." || n === "..") continue;
+        const c = p + "/" + n;
+        if (mp.FS.isDir(mp.FS.stat(c).mode)) rmTree(c);
+        else mp.FS.unlink(c);
+    }
+    mp.FS.rmdir(p);
 }
 
 // The console let an answer (or a question to the player) go: stop it, and

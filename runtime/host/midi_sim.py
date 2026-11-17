@@ -5,10 +5,7 @@ and BLE-MIDI through gatt_sim's notifications.
 
   wire(port, data)      MIDI bytes on a UART port's line"""
 
-try:
-    from . import moy_midi as _N
-except ImportError:  # loaded flat
-    import moy_midi as _N
+import moy_midi as _N
 
 
 def wire(port, data):

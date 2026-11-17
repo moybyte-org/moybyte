@@ -4,17 +4,16 @@
 # (~1.94MB); the frozen console overflows that. This table is OTA-SHAPED from
 # day one -- two app slots, mirroring the T-Deck's #53 layout -- so the P4 OTAs
 # without the partition-layout migration reflash the T-Deck had to eat. The
-# slots are 8 MiB (owner, 2026-10-15; 4 MiB at first, 6 MiB from 2026-10-05):
-# the built-in theme fonts stay in the image, and with them the image left
-# ~1.1 MB above the 1024 KiB headroom floor while the 2026-10 look's next
-# steps add several hundred KB; 8 MiB keeps ~1.6 MB above the floor after
-# +500 KB. The coredump partition (owner, 2026-11-03,
+# slots are 6.5 MiB (2026-11-17; 4 MiB at first, 6 MiB from 2026-10-05, 8 MiB
+# from 2026-10-15 (owner) for the built-in theme fonts): the browser console
+# left the image for its add-on cart (native/moy_net/moy_page.h) and its
+# 1.9 MB with it. The coredump partition (owner, 2026-11-03,
 # docs/os_2026-11/processes.md section 10) follows ota_1: a panic writes an
 # ESP-IDF ELF core dump there (sdkconfig.board), tools/coredump.py reads it
 # over the cable, and Settings -> LAST CRASH clears it; 128 KiB holds every
 # task's TCB and the used part of its stack with room for a deep VM stack.
 # The store is the TF card when one mounts; the internal fallback, the tail
-# from 0x1030000 (the rest of the chip, 15.81 MiB), holds the whole seed set
+# from 0xD30000 (the rest of the chip, 18.81 MiB), holds the whole seed set
 # with room to spare. The tail is deliberately UNLISTED: mainline
 # MicroPython auto-builds the vfs over the unallocated remainder (the "plus"
 # table behavior). build.sh copies this file into ports/esp32/ at stage time
@@ -30,6 +29,6 @@
 nvs,      data, nvs,     0x9000,   0x4000,
 otadata,  data, ota,     0xd000,   0x2000,
 phy_init, data, phy,     0xf000,   0x1000,
-ota_0,    app,  ota_0,   0x10000,  0x800000,
-ota_1,    app,  ota_1,   0x810000, 0x800000,
-coredump, data, coredump, 0x1010000, 0x20000,
+ota_0,    app,  ota_0,   0x10000,  0x680000,
+ota_1,    app,  ota_1,   0x690000, 0x680000,
+coredump, data, coredump, 0xD10000, 0x20000,

@@ -39,7 +39,7 @@ def _own(ws, title="Extra"):
     moy_carts.create(title, str(ws.carts_root), src="def _draw():\n    cls(1)\n",
                      type="game")
     ws.carts.apply(shelf(str(ws.carts_root)))
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("title") == title)
     return ws.launcher.selected()
@@ -98,7 +98,7 @@ def test_make_x_asks_and_cancel_keeps_the_cart(tmp_path):
     drv.type_char(ord("x"))
     c = _asked(ws, drv)
     assert ws.menu_ui.scrims(), "the dialog dims what is behind it (D-01)"
-    assert ws._modal_layer() == ("confirm",)
+    assert ws.modal_layer() == ("confirm",)
     _press(drv, "a")                              # A on Cancel
     assert not c.open and _there(ws)
 
@@ -245,23 +245,23 @@ def test_the_desk_projects_windows_delete_asks(tmp_path):
     ws = g._build(dict(g.CONFIGS["p4_1024x600_cs2_fs1_windowed"], variant="dark",
                        theme="moy"), tmp_path / "carts")
     drv = _drv(ws)
-    ws.open_desk()
-    ws.open_projects()
+    ws.home.open_desk()
+    ws.home.open_projects()
     _frames(drv)
     grid = ws.projects_grid
     _own(ws)
-    ws.set_home_tab("make", grid)
+    ws.home.set_home_tab("make", grid)
     grid.sel = next(i for i, it in enumerate(grid.items) if it.get("title") == "Extra")
     _frames(drv)
     home = ws.projects_layer
-    win = ws.wm._wins["projects"]
-    ws.wm._install(win.ctx)
+    win = ws.wm.windows["projects"]
+    ws.wm.install_window(win.ctx)
     try:
         buttons = home._desk_buttons()
         r = next(r for v, r, _k in buttons if v == "delete")
         home.handle_pointer(r[0] + r[2] // 2, r[1] + r[3] // 2, True)
     finally:
-        ws.wm._install(ws.wm._root_ctx)
+        ws.wm.install_window(ws.wm.root_ctx)
     c = _asked(ws, drv)
     _press(drv, "a")
     assert not c.open and _there(ws)
@@ -302,7 +302,7 @@ def test_the_hint_strip_names_the_dialogs_keys(tmp_path, monkeypatch, kind):
         return [bytes(cv._buf[2 * (yy * cv.w + x):2 * (yy * cv.w + x + w)])
                 for yy in range(y, y + h)]
 
-    ws._dirty = True
+    ws.mark_dirty()
     _frames(drv)
     home = strip()
     monkeypatch.setattr(launcher_layer._ui_draw, "hints", spy)

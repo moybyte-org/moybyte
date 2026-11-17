@@ -14,16 +14,10 @@ painted frames, never on a band frame.
 It owns no state of its own: the button focus it draws is the layer's.
 """
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-    from home_grid import (day_words, desk_button_layout, DESK_ROW_GAP, _dot_top,
-                           NEW_TILE_TYPE, PSEUDO_TILE_TYPES, _VERB_HINT)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-    from runtime.home_grid import (day_words, desk_button_layout, DESK_ROW_GAP, _dot_top,
-                                   NEW_TILE_TYPE, PSEUDO_TILE_TYPES, _VERB_HINT)
+import ui as _ui
+import ui_draw as _ui_draw
+from home_grid import (day_words, desk_button_layout, DESK_ROW_GAP, _dot_top,
+                       NEW_TILE_TYPE, PSEUDO_TILE_TYPES, _VERB_HINT)
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 DESC_LINES = 3       # the desk home's description: at most this many lines,

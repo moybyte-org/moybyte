@@ -42,7 +42,7 @@ def ws(tmp_path, built):
         pytest.skip("no host native tier")
     ws.input = InputTable()
     yield ws
-    lua = ws.run.player._lua
+    lua = ws.run.player.lua
     if lua is not None:
         lua.close()
 
@@ -77,7 +77,7 @@ def _start(ws):
 def test_a_native_game_plays_its_frames_in_the_player(ws):
     p = _start(ws)
     from runtime.elf_run import ElfGame
-    assert isinstance(p._lua, ElfGame), "the Player did not open the native run"
+    assert isinstance(p.lua, ElfGame), "the Player did not open the native run"
     cv = ws.run.canvas
     assert _square(ws) == (16, 16), "libmoy's rectfill is not on the canvas"
     assert cv.pix(0, 0) == 1, "the screen libmoy cleared is not on the canvas"
@@ -99,10 +99,10 @@ def test_it_takes_its_buttons(ws):
 
 def test_a_pause_holds_it_and_resume_goes_on(ws):
     p = _start(ws)
-    pid = p._lua.pid
+    pid = p.lua.pid
     from runtime import elf_binding
     ws.pause.show()
-    assert ws.pause.open and p.paused
+    assert ws.pause.open and p.pace.paused
     _frames(ws, 1)
     before = elf_binding.info(pid)["events"]
     _frames(ws, 4)
@@ -120,7 +120,7 @@ def test_a_pause_holds_it_and_resume_goes_on(ws):
 
 def test_its_quit_ends_the_run(ws):
     p = _start(ws)
-    pid = p._lua.pid
+    pid = p.lua.pid
     _frames(ws, 3, press="b")
     _frames(ws, 2)
     assert p.cart_error is None, p.cart_error
@@ -131,7 +131,7 @@ def test_its_quit_ends_the_run(ws):
 
 def test_home_stops_the_game(ws):
     p = _start(ws)
-    pid = p._lua.pid
+    pid = p.lua.pid
     from runtime import elf_binding
     assert elf_binding.info(pid) is not None
     ws.pause.show()
@@ -142,7 +142,7 @@ def test_home_stops_the_game(ws):
 
 def test_a_trap_shows_the_stop_card(ws):
     p = _start(ws)
-    pid = p._lua.pid
+    pid = p.lua.pid
     _frames(ws, 3, press="a")
     _frames(ws, 2)
     assert p.cart_error is not None and "SIGSEGV" in p.cart_error, p.cart_error
@@ -169,7 +169,36 @@ def test_a_game_too_big_for_the_console_gets_the_fit_notice(ws, monkeypatch):
     monkeypatch.setattr(rt, "memory", lambda: (1024, 1024))
     open_cart(ws, "Game Native")
     p = ws.run.player
-    assert p.notice is not None and p._lua is None, p.cart_error
+    assert p.notice is not None and p.lua is None, p.cart_error
+
+
+def test_a_game_built_for_another_chip_gets_the_chip_notice(tmp_path, built):
+    """A native cart with no module for this console (a backup of an S3's
+    store restored onto a P4) is refused before it loads, with the notice
+    that says so: no run, and no error text of the loader's."""
+    from runtime.host_app import build_workstation
+    from runtime.moy_input import InputTable
+    carts = tmp_path / "carts"
+    carts.mkdir()
+    dst = carts / "elf_game.moy"
+    shutil.copytree(built, str(dst))
+    man = json.loads((dst / "manifest.json").read_text())
+    man["moybyte"]["native"] = ["esp32s3"]
+    (dst / "manifest.json").write_text(json.dumps(man))
+    (dst / "main.host.elf").rename(dst / "main.esp32s3.elf")
+    ws = build_workstation(str(carts))
+    if "elf" not in ws.runtimes:
+        pytest.skip("no host native tier")
+    ws.input = InputTable()
+    open_cart(ws, "Game Native")
+    p = ws.run.player
+    en = json.load(open(os.path.join(ROOT, "native", "moy_spine", "strings", "en.json")))
+    assert p.lua is None
+    assert p.notice == en["strings"]["say.chip_text"]
+    assert p.notice_title == en["strings"]["say.chip"]
+    _frames(ws, 2)
+    card = ws.pause
+    assert card.rows == (card.HOME,), "a notice, not a stop: nothing to restart"
 
 
 def test_a_command_has_no_screen_to_present_to(tmp_path):

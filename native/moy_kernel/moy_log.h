@@ -15,7 +15,8 @@
 // and a writer that names no pid writes under it. A process table takes over
 // spawn and current; the record does not change.
 //
-// THE RING is PSRAM (moy_kernel.h: kernel data is PSRAM), MOY_LOG_BYTES of it,
+// THE RING is PSRAM (moy_kernel.h: kernel data is PSRAM; the internal heap on a
+// board without it), MOY_LOG_BYTES of it,
 // made by moy_log_reserve before the VM's first heap area (moy_kernel.c's
 // app_main) so a VM stop never finds it inside the run it frees; a tier with no
 // reserve makes it at its first write. A write that does not fit drops the
@@ -25,14 +26,22 @@
 #ifndef MOY_LOG_H
 #define MOY_LOG_H
 
+#include "moy_platform.h"
+
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-// The ring's bytes: configuration, a board's define over this default.
+// The ring's bytes: configuration, a board's define over this default. On a
+// board built without PSRAM the ring is internal heap, so it is half the size:
+// still four records of MOY_LOG_TEXT_MAX.
 #ifndef MOY_LOG_BYTES
+#if defined(MOY_ON_BOARD) && !defined(MOY_HAS_PSRAM)
+#define MOY_LOG_BYTES (8u * 1024u)
+#else
 #define MOY_LOG_BYTES (16u * 1024u)
+#endif
 #endif
 #define MOY_LOG_TEXT_MAX 2048u
 #define MOY_LOG_NAMES 64u           // the newest runs whose names are kept
@@ -110,10 +119,5 @@ void moy_log_dump(uint32_t since, int level, const char *name, void (*say)(const
 
 // The clock a host's test pins (microseconds; 0: the real one).
 void moy_log_pin_clock(uint64_t us);
-
-// The exit statuses a process's `exit` line records (moy_proc_exit.h), in
-// its order -- not run, interrupted, trapped, killed -- for a binding that
-// reads them at run time (the host's ctypes, runtime/host/moy_log.py).
-extern const uint8_t moy_log_exits[4];
 
 #endif // MOY_LOG_H

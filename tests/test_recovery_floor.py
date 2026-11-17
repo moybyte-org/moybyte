@@ -47,12 +47,12 @@ LINES = ["The console kept crashing.", "Last: fault in mp_task", "app: paint",
          "StoreProhibited", "PC 42012345 at 00000000", "Up 81 s, boot 7",
          "Firmware 1.2.3-test"]
 # The crc32 of each console's settled first screen for LINES and its hint, the
-# words in the framebuffer's order.
+# shell at its home (the prompt `files $`), the words in the framebuffer's order.
 GOLDEN = {
-    "tdeck": 0xDBE43829,
-    "guition_s3": 0xF2AF152B,
-    "p4": 0x4D20CC15,
-    "guition_p4": 0x7C6E4F93,
+    "tdeck": 0x8ECDF440,
+    "guition_s3": 0xDB487BBB,
+    "p4": 0xDB8A3023,
+    "guition_p4": 0x2ACE65DD,
 }
 NONE, RETRY, SAFE, REBOOT, REPL = -1, 0, 1, 2, 3
 
@@ -156,7 +156,7 @@ def test_a_tap_on_a_button_is_its_choice(built, board):
 
 def test_the_floors_words_are_the_kernels():
     """The prompt's words and the serial line's are one list in two files."""
-    src = open(os.path.join(ROOT, "native", "moy_kernel", "moy_kernel.c")).read()
+    src = open(os.path.join(ROOT, "native", "moy_kernel", "moy_recovery_floor.c")).read()
     floor = open(os.path.join(ROOT, "native", "moy_sh", "moy_sh_floor.c")).read()
     words = '{"retry", "safe", "reboot", "repl"}'
     assert "K_WORDS[] = %s;" % words in src and "WORDS[] = %s;" % words in floor
@@ -213,9 +213,11 @@ def _main(job):
     lib.moy_sh_face_line.argtypes = [vp, ctypes.POINTER(i32)]
     w, h, desk, fs, swap, inp = CONSOLES[job["board"]]
     root = job.get("root")
-    if not root:                        # an empty files tree, as a board's floor sees no store
+    if not root:                        # a store with its home, the files tree a board's floor sees
         import tempfile
         root = tempfile.mkdtemp(prefix="moyfloor")
+        for d in ("carts", "files"):
+            os.makedirs(os.path.join(root, "sd", "moybyte", d))
     fl = lib.moy_sh_floor_new(ctypes.byref(Geom(w, h, desk, fs, swap, inp)), root.encode())
     lines = [s.encode() for s in job["lines"]]
     lib.moy_sh_floor_say(fl, (ctypes.c_char_p * len(lines))(*lines), len(lines),

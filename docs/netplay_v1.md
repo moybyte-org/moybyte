@@ -355,7 +355,7 @@ PLAYERS** hands a paired Bluetooth keyboard the second slot, so two kids share
 one screen on two real keyboards. The mechanism is #26's source model — a source
 carries a player, two of them disagreeing IS multiplayer — so `players()`
 answers 2 with no transport, session or netcode. Capability-gated on
-`ws.second_keyboard()`, non-None only where the board owns a keyboard already
+`ws.toggles.second_keyboard()`, non-None only where the board owns a keyboard already
 (the T-Deck); on a touch-only board the Bluetooth keyboard IS `ws.keyboard`, so
 handing it to player two leaves player one with nothing. Two honesty rules, both
 pinned: the setting **refuses** where it cannot work rather than reporting ON,
@@ -367,7 +367,7 @@ keyboard is five centimetres wide.
 
 ## 7. Where the numbers live
 
-Per-cart fps and frame budgets in **#66**, P4 figures in **#58**; both win over
-any number here. The full ledgers — latency tables, phase-by-phase P4 verdicts,
+Per-cart fps and frame ms in `docs/perf/ledger.md` (generated; the stories in
+**#66**), P4 figures in **#58**; both win over any number here. The full ledgers — latency tables, phase-by-phase P4 verdicts,
 refuted avenues, the unbuilt levers (beaming a cart, more players, range, power)
 — stay in the campaigns above.

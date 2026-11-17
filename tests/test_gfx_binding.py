@@ -653,7 +653,7 @@ def test_the_optional_libmoy_verbs_are_implemented_here_anyway():
 
 # Every verb the canvas calls is in the op script.
 # Called by the canvas and drawing nothing: the word order the shapes blend in.
-_NO_PIXELS = frozenset({"shape_order", "path_width", "path_metrics"})
+_NO_PIXELS = frozenset({"wire", "path_width", "path_metrics"})
 
 
 def test_the_op_script_exercises_every_verb_the_canvas_depends_on():

@@ -14,13 +14,16 @@ import ctypes
 import os
 
 from . import native_build
+from .moy_elf_face import moy_os_fault_t as Fault, moy_os_info_t as Info, moy_os_stats_t as Stats
+from .moy_app_face import moy_app_run_t as _Run
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _NATIVE = os.path.join(native_build.ROOT, "native")
 _ELF = os.path.join(_NATIVE, "moy_elf")
 
 PART = native_build.Part("elf", (
-    "moy_os.h", "moy_os.c", "moy_os_table.h", "moy_os_rows.h", "moy_os_table.c",
+    "moy_os.h", "moy_os_int.h", "moy_os.c", "moy_os_files.c", "moy_os_net.c", "moy_os_proc.c",
+    "moy_os_table.h", "moy_os_rows.h", "moy_os_table.c",
     "moy_elf.h", "moy_elf_check.c", "moyhost_elf.c", "moy_ota.h",
     "moy_sh.h", "moy_sh_board.h", "moy_sh_prog.h", "moy_log.h", "moy_proc.h", "moy_proc_exit.h", "moy_evq.h",
     "moy_super.h", "moy_vmq.h", "moy_app.h", "moy_app_rows.h", "moy_app_run.h"),
@@ -37,25 +40,6 @@ NET = 1                 # moy_os.h's MOY_OS_NET
 UNSIGNED = 2            # moy_os.h's MOY_OS_UNSIGNED: the consent admits an unsigned module
 _NET_FN = ctypes.CFUNCTYPE(None, _P, _U32, _I)
 _NET = [None]           # the hook, kept alive while the library holds it
-
-
-class Info(ctypes.Structure):
-    """moy_os_info_t."""
-    _fields_ = [("pid", _U32), ("threads", _U32), ("handles", _U32), ("wakes", _U32),
-                ("events", _U32), ("service", ctypes.c_uint8),
-                ("ending", ctypes.c_uint8), ("net", ctypes.c_uint8), ("sockets", _U32),
-                ("mapped", _U32), ("cpu_us", _U32)]
-
-
-class Fault(ctypes.Structure):
-    """moy_os_fault_t."""
-    _fields_ = [("pid", _U32), ("cause", _U32), ("pc", _U32), ("addr", _U32),
-                ("name", ctypes.c_char * 24)]
-
-
-class Stats(ctypes.Structure):
-    """moy_os_stats_t."""
-    _fields_ = [("started", _U32), ("swept", _U32), ("killed", _U32), ("leaked", _U32)]
 
 
 def _lib():
@@ -151,11 +135,6 @@ def start(path, argv, roots=None, pid=0, cid="", budget_ms=0, flags=0, run=None)
     if code < 0:
         return REFUSED, err.value.decode("utf-8", "replace")
     return 0, None
-
-
-class _Run(ctypes.Structure):
-    """moy_app_run.h's moy_app_run_t, as moy_app's `run` answers its bytes."""
-    _fields_ = [("a", _P), ("sn", _U32), ("g", _U32), ("roles", _U32)]
 
 
 def _run(run):

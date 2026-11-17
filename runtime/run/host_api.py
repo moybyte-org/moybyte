@@ -13,29 +13,12 @@ portable Python: no pygame, no sockets, no threading (#151: the web runner
 freezes this module under MicroPython-WASM).
 """
 
-try:                                    # a VM: the kernel's frame loop
-    import moy_loop as _loop
-except ImportError:                     # CPython: its ctypes binding
-    from runtime import moy_loop as _loop
-try:                                    # staged/frozen flat namespace (web runner)
-    from cart_api import (CART_BUTTONS, _Layer,  # noqa: F401 -- re-exports
-                          _decode_moyimg, make_api)
-except ImportError:                     # host: the runtime package
-    from runtime.cart_api import (CART_BUTTONS, _Layer,  # noqa: F401
-                                  _decode_moyimg, make_api)
-
-try:                                    # a VM: the native module
-    import moy_input as _mi
-except ImportError:
-    from runtime import moy_input as _mi
-try:                                    # staged/frozen flat namespace
-    import moybyte as _moybyte
-except ImportError:                     # host: the runtime package
-    from runtime import moybyte as _moybyte
-try:                                    # staged/frozen flat namespace (web runner)
-    from scheduler import SCHED as _sched
-except ImportError:                     # host: the runtime package
-    from runtime.scheduler import SCHED as _sched
+import moy_loop as _loop  # a VM: the kernel's frame loop
+from cart_api import (CART_BUTTONS, _Layer,  # noqa: F401 -- re-exports
+                      _decode_moyimg, make_api)
+import moy_input as _mi  # a VM: the native module
+import moybyte as _moybyte
+from scheduler import SCHED as _sched
 
 # A desk keyboard's keys on a host (the simulator's and the browser page's),
 # in one place: the button each presses beside what it types. The arrows and
@@ -58,6 +41,11 @@ def _fold(code):
 
 
 PAN_SPEED = 6            # px/frame the arrow-keys-as-trackball nudge the cursor
+
+
+def _pan_px(d):
+    """The cursor's nudge for `d` pulses of the arrows-as-trackball."""
+    return d * PAN_SPEED
 
 
 # --- WiFi (#38): host fake backend ------------------------------------------
@@ -137,7 +125,7 @@ class FakeWifi:
     def connect(self, ssid, password=""):
         """'Associate' with `ssid` (fake: always succeeds), remember the creds, and
         report connected. Returns True. The link lasts as long as the radio's
-        lease does (Workstation.wifi_hold / wifi_release, host == device); the
+        lease does (Spine.wifi_hold / wifi_release, host == device); the
         creds persist to disk for autoconnect. An EMPTY
         password resolves to the stored one first (the DeviceWifi contract): the
         panel's known-network reconnect passes "", and remembering that "" used
@@ -428,9 +416,6 @@ class ConsoleDriver:
     def menu_view(self):
         return self.ws.menu_view
 
-    def in_code_editor(self):
-        return self.ws.screen == "menu" and self.ws.menu_view == "code"
-
     def in_text_mode(self):
         # A RUNNING cart that opted into text input via textmode(True) (#38/#42).
         # The pygame loop routes typed unicode to the cart's key() when this is true
@@ -449,89 +434,34 @@ class ConsoleDriver:
         (`Workstation.full_key`)."""
         self.ws.full_key()
 
-    def menu_open(self):
-        """The pause menu, the delete confirm or the system menu shows: Esc
-        is theirs."""
-        return self.ws.pause.open or self.ws.confirm.open or self.ws.sysmenu.open
-
-    def takes_escape(self):
-        """Esc is the console's: a menu shows, a game plays fullscreen (its
-        Esc is the console's key), Settings or a registered app is the
-        fullscreen surface (its Esc is the bar's back), or the focused desk
-        window shows its back chevron, or a running app has a view of its
-        own open (`Player.has_page`)."""
-        ws = self.ws
-        return (self.menu_open() or ws.plays_fullscreen()
-                or ws.screen in ("settings", "tasks")
-                or (not ws.windowed_chrome and ws.screen in ws._apps_by_id)
-                or (not ws.windowed_chrome and ws.screen == "desktop"
-                    and ws.run.player.has_page())
-                or (ws.windowed_chrome and ws.wm.focus_has_back()))
-
     def escape(self):
-        """Esc: the pause menu steps back (Options to its menu, the menu to
-        the game), the system menu closes; over a fullscreen game it is the
-        console's key (docs/shell_ux_v1.md §9a), the pause menu, whatever the
-        cart declared and whoever ran it; Settings and a registered app go
-        back one level, as the bar's chevron and B do, and so does a desk
-        window's app with a page open (its title strip's chevron); the
-        Editor steps back (its one bar has no chevron), and on a desk a
-        grown pane goes back instead."""
-        ws = self.ws
-        if ws.pause.open:
-            ws.pause.back()
-        elif ws.confirm.open:
-            ws.confirm.cancel()
-        elif ws.sysmenu.open:
-            ws.sysmenu.close()
-            ws.popover_touch()
-        elif ws.plays_fullscreen():
-            ws.system_key()
-        elif ws.screen == "settings":
-            ws.settings_layer.back()
-        elif ws.screen == "tasks" and not ws.windowed_chrome:
-            ws.tasks_layer.back()
-        elif not ws.windowed_chrome and ws.screen in ws._apps_by_id:
-            ws.app_back()
-        elif (not ws.windowed_chrome and ws.screen == "desktop"
-              and ws.run.player.has_page()):
-            ws.app_back(ws.run.player)  # the running app's own view steps back
-        elif ws.windowed_chrome and ws.wm.focus_back():
-            pass
-        elif ws.screen == "menu" and ws.editor_layer() is not ws.layer_of(ws.menu_view):
-            ws.editor_layer().escape()  # the desk Editor: a grown pane back
-        elif ws.screen == "menu":
-            ws.exit()                   # the Editor's one bar: Esc steps back
+        """Esc, as a board's keyboard sends it (native/moy_input/moy_hid.c):
+        on a text surface the typed byte 27, which its field takes; anywhere
+        else the `stop` button, which is the console's back
+        (`InputPolicy.back`): a menu steps back or closes, a fullscreen game
+        pauses, a surface steps back a page or is left. The host's buttons
+        are the first eight and carry no `stop`, so it calls the back the
+        router gives a board's."""
+        policy = self.ws.input_policy
+        if self.input.text_mode:
+            self.type_char(0x1B)
+        elif (policy.takes_stop(policy.holder()) or self.ws.modal_layer() is not None
+              or self.ws.about):
+            policy.back()
 
     # -- per-frame tick ------------------------------------------------------
     def frame(self, dt):
         for name in self._pending:
             self.input.set_held(name, True)
-        # The table's clock is the frames' injected one, so a held key
-        # repeats on the same frames on every run.
-        self._clock += max(0.0, dt) * 1000.0
-        self.input.begin_frame(int(self._clock))
-        # The trackball (`pan`, `ball_click`), spent after the merge as the
-        # T-Deck's is (`Workstation.ball`): a surface's steps and Enter, a
-        # caret's arrows, else the cursor's nudge and the pointer's click.
-        dx, dy = self._pan
-        bc = self._ball_click
-        self._ball_click = False
-        if dx or dy or bc or self.ws.ball_owed:
-            took = self.ws.ball(dx, dy, bc)
-            if (dx or dy) and not took & 1:
-                self.pointer.move(dx * PAN_SPEED, dy * PAN_SPEED)
-            if bc and not took & 2:
-                self._click = True
-        # One queued byte per frame -- and in TEXT MODE, never the same byte in
-        # two ADJACENT frames: the editors' KeyEdge dedups identical consecutive
-        # bytes (it models the T-Deck's discrete press edges + the P4 BLE
-        # keyboard's held level state), so a queued repeat ("ll" in "hello",
-        # backspace-backspace, a soft keyboard's delete autorepeat) must ship a
-        # 0 GAP frame between the two -- or every second keystroke is silently
-        # dropped (found via the phone's Backspace in the code editor). GAME
-        # mode keeps the raw contiguous stream: there a repeated byte IS the
-        # held-key latch the key()/keyp() cart API reads (v0.4 semantics).
+        # One queued byte per frame, written before the merge publishes its
+        # press (`typed`) -- and in TEXT MODE, never the same byte in two
+        # ADJACENT frames: the press is a byte that differs from the last
+        # merge's (it models the T-Deck's discrete press edges and a BLE
+        # keyboard's held level), so a queued repeat ("ll" in "hello",
+        # backspace-backspace, a soft keyboard's delete autorepeat) ships a
+        # 0 GAP frame between the two, or every second keystroke is dropped.
+        # GAME mode keeps the raw contiguous stream: there a repeated byte IS
+        # the held-key latch the key()/keyp() cart API reads.
         nxt = 0
         if self._typed:
             if (self._typed[0] != self._key_prev
@@ -542,6 +472,20 @@ class ConsoleDriver:
             nxt = self._key_held     # game mode: a held key streams every frame
         self._src.last_key = nxt
         self._key_prev = nxt
+        # The table's clock is the frames' injected one, so a held key
+        # repeats on the same frames on every run.
+        self._clock += max(0.0, dt) * 1000.0
+        self.input.begin_frame(int(self._clock))
+        # The trackball (`pan`, `ball_click`), spent after the merge as the
+        # T-Deck's is (`InputRouter.ball`): a surface's steps and Enter, a
+        # caret's arrows, else the cursor's nudge and the pointer's click.
+        dx, dy = self._pan
+        bc = self._ball_click
+        self._ball_click = False
+        if dx or dy or bc or self.ws.ball_owed:
+            took = self.ws.router.ball_frame(dx, dy, bc, self.pointer, _pan_px)
+            if bc and not took & 2:
+                self._click = True
         self.pointer.down = self._down
         self.pointer.click = self._click
         # The frame is the kernel's (native/moy_kernel/moy_loop.c) on this
@@ -549,7 +493,7 @@ class ConsoleDriver:
         # into the console's three entries in its order. This harness owns the
         # input (above) and the clock, so the frame keeps the dt it was given.
         ws = self.ws
-        _loop.drive(ws.handle_input, ws.handle_pointer,
+        _loop.drive(ws.router.handle_input, ws.router.handle_pointer,
                     lambda _dt: (ws.frame(dt), ws.frame_state.frames_drawn)[1], dt)
         # The background scheduler after the frame, as a board's tail runs it:
         # this harness does not sleep, so its budget is the guaranteed slice.
@@ -575,16 +519,16 @@ class ConsoleDriver:
             self._buttons(_mi.PB_PRIMARY, False)
             self.pointer.down = False
             self.pointer.click = False
-            self.ws.handle_pointer()
+            self.ws.router.handle_pointer()
             self.ws.mark_dirty()
-            if self.ws._deferred:
+            if self.ws.deferred:
                 # #184: taps SCHEDULE their heavy transition now (run at the
                 # next frame's tail, behind the LOADING paint). This release
                 # pass ran after ws.frame(), so honor click()'s "the tap
                 # completes within this frame() call" contract by draining
                 # here -- click() is the tests/scripts verb; real mouse input
                 # rides touch()/touch_up() and the normal frame cadence.
-                self.ws._run_deferred()
+                self.ws.run_deferred()
 
     def rgb888(self):
         # The SYSTEM canvas is what the panel/window shows (the composited viewport +

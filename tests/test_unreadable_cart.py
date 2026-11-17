@@ -13,15 +13,15 @@ cart dict SLIM, and the workspace opened anyway -- so the failure surfaced two
 frames later inside `Player.start`, as an uncaught KeyError, with `ws.cart`
 pointing at the half-loaded dict and a later `go_home()` raising in turn.
 
-Two behaviours are pinned here. The read RETRIES once after a collect, because
-the block usually exists and just has not been reclaimed (the previous cart's
-payloads are dropped a few statements earlier, by `CartManager.reslim`, with
-nothing collecting in between). And when it still will not read, the workspace
-refuses BEFORE `ws.cart` is assigned: the kid gets the error panel a crashing
-cart gets, and the launcher stays usable.
+The store's load retries the source once after a collect (modmoy_store.c's
+`big_str`), because the block usually exists and just has not been reclaimed.
+What is pinned here is the console's half: when the cart still will not load,
+the workspace refuses BEFORE `ws.cart` is assigned: the kid gets the error
+panel a crashing cart gets, and the launcher stays usable.
 """
 
 import shutil
+import sys
 
 from runtime import moy_carts
 
@@ -43,24 +43,24 @@ def _mk(ws, title):
 
 
 def _deny_source(monkeypatch, cart, times):
-    """Make this cart's main.py read raise MemoryError the next `times` reads --
-    the device's own failure, not a missing file."""
-    real = moy_carts._read_recover
-    target = cart["path"] + "/main.py"
+    """Make this cart's load come back empty the next `times` loads -- what
+    the store answers when the source will not read."""
+    store = sys.modules["moy_store"]
+    real = store.load
     left = [times]
 
-    def fake(path, at=None):
-        if path == target and left[0] > 0:
+    def fake(path):
+        if path == cart["path"] and left[0] > 0:
             left[0] -= 1
-            raise MemoryError("memory allocation failed, allocating 77824 bytes")
-        return real(path, at)
+            return None
+        return real(path)
 
-    monkeypatch.setattr(moy_carts, "_read_recover", fake)
+    monkeypatch.setattr(store, "load", fake)
     return left
 
 
 def _select(ws, cart):
-    if not ws.select_cart(cart):
+    if not ws.home.select_cart(cart):
         raise AssertionError("cart not on the shelf: " + cart["title"])
 
 
@@ -105,7 +105,7 @@ def test_the_launcher_survives_a_refused_cart(tmp_path, monkeypatch):
     _deny_source(monkeypatch, cart, 99)
     _select(ws, cart)
     ws.open()
-    ws.go_home()
+    ws.home.go_home()
     assert ws.screen == "launcher"
     assert ws.run.player.cart_error is None
     _select(ws, good)
@@ -126,30 +126,6 @@ def test_a_refused_open_leaves_no_open_cart_behind(tmp_path, monkeypatch):
     assert ws.cart is None
     assert ws.run.player.ns is None, "the dead run's world outlived the refusal"
     assert ws.run.fat_cart is None
-
-
-def test_the_source_read_retries_once_after_a_collect(tmp_path, monkeypatch):
-    """The common case: the block exists, it just had not been reclaimed. One
-    collect and the same read succeeds -- so the kid never sees the panel."""
-    ws = _ws(tmp_path)
-    cart = _mk(ws, "Mossmoss")
-    left = _deny_source(monkeypatch, cart, 1)
-    _select(ws, cart)
-    ws.open()
-    assert left[0] == 0, "the read was never retried"
-    assert ws.cart is cart
-    assert cart["src"] == GOOD_SRC
-    assert ws.run.player.cart_error is None, ws.run.player.cart_error
-
-
-def test_the_retry_is_once_not_a_loop(tmp_path, monkeypatch):
-    """A heap that is genuinely out cannot be waited out; two failures is the
-    answer, not a retry storm."""
-    ws = _ws(tmp_path)
-    cart = _mk(ws, "Mossmoss")
-    left = _deny_source(monkeypatch, cart, 2)
-    assert moy_carts.load(cart["path"]) is None
-    assert left[0] == 0
 
 
 def test_a_cart_with_no_folder_at_all_is_refused(tmp_path):

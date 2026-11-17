@@ -104,9 +104,6 @@ void moy_seal_hkdf(const uint8_t *salt, size_t sn, const uint8_t *ikm, size_t in
                    const void *info, size_t infon, uint8_t *out, size_t on);
 int moy_seal_eq(const void *a, const void *b, size_t n);   // constant time
 void moy_seal_wipe(void *p, size_t n);
-// `want` bytes from exactly 2*want hex digits: 1, else 0.
-int moy_seal_unhex(const char *s, size_t n, uint8_t *out, size_t want);
-void moy_seal_hex(const uint8_t *p, size_t n, char *out);  // 2n digits and a NUL
 
 // THE PASSWORD's record, as system/password keeps it (runtime/system/
 // ssh_service.py) and the SSH server and the sign-in read it:

@@ -19,13 +19,7 @@ import pytest
 from net_ports import free_port
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "device"))            # moy_webserver
-# APPENDED, not inserted, since the Zero became a build target (2026-08-29):
-# that directory now holds the board's own modules AND the copies its build
-# stages there, and a staged `moy_webserver.py` is exactly the untracked stale
-# copy tests/test_staging_closure.py exists to stop anything reading. `device/`
-# stays first, so only the board-AUTHORED names resolve out of here.
-sys.path.append(str(ROOT / "firmware" / "seeed_xiao_esp32s3_zero" / "modules"))
+sys.path.insert(0, str(ROOT / "device"))            # zero_setup, zero_host, moy_webserver
 
 import zero_setup                                              # noqa: E402
 import zero_host                                               # noqa: E402
@@ -260,6 +254,60 @@ def test_a_bad_post_re_serves_the_form_with_the_reason_and_saves_nothing():
     assert got == [] and srv.saved is None and srv.reboot_at is None
 
 
+def test_a_board_with_a_password_is_not_set_up_again_without_it():
+    """The setup AP comes up whenever no saved network answers, so a configured
+    board away from its network hosts it too. Its form asks for the password
+    the board has, and a neighbour who does not know it changes nothing."""
+    record = zero_setup.console_hash("old-board-pass")
+    got = []
+    srv = zero_setup.SetupServer("ap", got.append, lambda: [], record=lambda: record)
+    assert b'name="current"' in srv.handle_http("GET", "/", b"")
+    form = b"name=attic&console=new-board-pass&ssid=evil&password="
+    for cur in (b"", b"&current=wrong-pass"):
+        body = srv.handle_http("POST", "/setup", form + cur)
+        assert b"403 " in body and b"Nothing was changed" in body
+    assert got == [] and srv.reboot_at is None
+    body = srv.handle_http("POST", "/setup", form + b"&current=old-board-pass")
+    assert b"200 OK" in body and len(got) == 1 and srv.reboot_at is not None
+
+
+def test_a_configured_boards_form_takes_few_guesses_a_boot():
+    record = zero_setup.console_hash("old-board-pass")
+    got = []
+    srv = zero_setup.SetupServer("ap", got.append, lambda: [], record=lambda: record)
+    form = b"name=attic&console=new-board-pass&ssid=evil&password=&current="
+    for i in range(zero_setup.CURRENT_TRIES):
+        assert b"403 " in srv.handle_http("POST", "/setup", form + b"guess-%d" % i)
+    body = srv.handle_http("POST", "/setup", form + b"old-board-pass")
+    assert b"403 " in body and b"restart the board" in body and got == []
+
+
+def test_an_unconfigured_boards_form_asks_for_no_current_password():
+    assert b'name="current"' not in _server().handle_http("GET", "/", b"")
+    assert not zero_setup.is_password("anything", None)
+    assert not zero_setup.is_password("anything", "$moy2$junk")
+
+
+def test_a_body_the_vms_heap_cannot_hold_is_busy_not_the_end_of_setup(monkeypatch):
+    """The poll copies a parked body into the VM's heap, which on a board with
+    no PSRAM may not hold a long one: a 503, and the form goes on serving."""
+    answers = []
+
+    class Net:
+        web_poll = staticmethod(lambda: 1)
+        web_answer = staticmethod(answers.append)
+
+        @staticmethod
+        def web_take():
+            raise MemoryError
+
+    monkeypatch.setattr(zero_setup, "moy_net", Net)
+    srv = _server()
+    srv.serving = True
+    assert srv.poll()
+    assert len(answers) == 1 and b"503 " in answers[0]
+
+
 def test_a_failed_write_is_a_500_that_says_nothing_changed_not_a_reboot():
     def boom(clean):
         raise OSError(28, "ENOSPC")
@@ -291,6 +339,17 @@ def test_a_failed_scan_is_an_empty_list_not_a_broken_page():
 
     srv = zero_setup.SetupServer("ap", lambda c: None, boom)
     assert json.loads(srv.scan_cached()) == {"nets": []}
+
+
+def test_the_kernels_scan_reaches_the_form(monkeypatch):
+    """moy_net.wifi_scan hands each ssid over as BYTES (modmoy_net.c), and the
+    form lists it: an ssid taken for a str and encoded again raised on every
+    row, and every scan came back an empty list."""
+    monkeypatch.setattr(zero_setup.moy_net, "wifi_scan",
+                        lambda: [(b"home", -41, 3), (b"cafe", -70, 0)], raising=False)
+    srv = zero_setup.SetupServer("ap", lambda c: None, zero_setup._scan)
+    assert json.loads(srv.scan_cached()) == {"nets": [
+        {"ssid": "home", "rssi": -41, "lock": 1}, {"ssid": "cafe", "rssi": -70, "lock": 0}]}
 
 
 def test_the_ap_name_carries_the_mac_tail():
@@ -635,7 +694,7 @@ def test_a_whole_first_run_lands_on_flash_and_reboots_in_that_order(
 
     monkeypatch.setattr(net, "wifi_ap_mac", lambda: ap.MAC, raising=False)
     monkeypatch.setattr(net, "wifi_ap", _ap_up, raising=False)
-    monkeypatch.setattr(net, "wifi_scan", lambda: [("home", -41, 3)], raising=False)
+    monkeypatch.setattr(net, "wifi_scan", lambda: [(b"home", -41, 3)], raising=False)
     monkeypatch.setattr(net, "wifi_off", lambda: ap.active(False), raising=False)
     monkeypatch.setattr(zero_setup, "SetupServer", _SpyServer)
     monkeypatch.setattr(zero_setup, "DnsRedirect", _SpyDns)

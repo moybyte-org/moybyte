@@ -57,11 +57,18 @@ What it does differently, because a console is not a PC:
     takes them with the cart.
   * it installs only what a sandbox runs or the loader validates (RUNTIMES):
     a compiled cart, whose native module a board loads only by its
-    signature, a Lua cart, or a theme package ("runtime": "theme"), data
+    signature, a Lua cart, a theme package ("runtime": "theme"), data
     the theme loader parses, validates and clamps (docs/theme_and_shell_2026-11.md
-    §6) and nothing runs. A board's TLS checks the server's certificate,
+    §6) and nothing runs, or the browser console add-on ("runtime": "web"),
+    whose pack only the webhost reads and only when its head names the page
+    this image names (native/moy_net/moy_page.h); an index lists one of those
+    a page and a console lists only the one that fits it (`fitting`). A
+    board's TLS checks the server's certificate,
     but a server is not proof of what it serves; what lands is sandboxed,
-    signed or validated data.
+    signed or validated data. The one exception is the console's own
+    release: its index, signature verified, lists every seed cart of that
+    build as an OFFICIAL cart (`parse_index`'s `own`), which installs as the
+    image's seed would, Python included.
 
 The store layout sits BESIDE the carts folder (moy_store_base._sibling_path):
 `installed.json`, the record of what this store installed (index, id, version,
@@ -89,7 +96,7 @@ and puts back an old copy whose replacement never moved in.
 
 Host == device == browser: MicroPython-safe (`deflate` inflates there, `zlib`
 on CPython), and the network is injected -- urllib on the host
-(runtime/host/host_app.py), the kernel's client on a board (device/wire_links.CartNet),
+(runtime/host/host_app.py), the kernel's client on a board (device/cart_net.CartNet),
 the page's fetch in the browser (firmware/web_runner/carts_link.py). A
 transport's `open(url)` answers an object with `status`, `length` (None when
 unknown), `readinto(buf)` and `close()`.
@@ -147,31 +154,18 @@ try:
 except ImportError:  # pragma: no cover
     _io = None
 
-try:
-    from ticks import _ticks_ms, _ticks_diff
-    from moy_store_base import (_sibling_path, _is_dir, COVER_MAX_BYTES,
-                                builtin_ns, cart_path)
-    from moy_fs import _exists, _mkdir, _read_recover, _write_atomic, _write_atomic_steps
-    import moy_carts as _store
-    import cart_files as _cart_files
-    import cart_listing as _cl
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.ticks import _ticks_ms, _ticks_diff
-    from runtime.moy_store_base import (_sibling_path, _is_dir,
-                                        COVER_MAX_BYTES, builtin_ns, cart_path)
-    from runtime.moy_fs import (_exists, _mkdir, _read_recover, _write_atomic,
-                                _write_atomic_steps)
-    from runtime import moy_carts as _store
-    from runtime import cart_files as _cart_files
-    from runtime import cart_listing as _cl
+from ticks import _ticks_ms, _ticks_diff
+from moy_store_base import (_sibling_path, _is_dir, COVER_MAX_BYTES,
+                            builtin_ns, cart_path)
+from moy_fs import _exists, _mkdir, _read, _read_recover, _write_atomic, _write_atomic_steps
+import moy_carts as _store
+import cart_files as _cart_files
+import cart_listing as _cl
+import app_imports as _app_imports
 
-# The record and the removal are native/moy_store/moy_shelf.h's on every tier:
-# the image's moy_store, or the same C over ctypes on CPython.
-try:
-    import moy_store as _shelf
-    _shelf.shelf_record
-except (ImportError, AttributeError):  # CPython
-    from runtime import moy_shelf_binding as _shelf
+# The record and the removal are native/moy_store/moy_shelf.h's on every tier
+# (the module `moy_store`).
+import moy_store as _shelf
 
 
 INDEX_VERSION = 1
@@ -184,7 +178,11 @@ SIG_SCHEME = b"moybyte-index-v1\n"
 SIG_TAIL = b', "sig": "'
 INDEX_KEYS = None             # the keys an index verifies against; None: the image's
 STAGE_DIR = "install"
-RUNTIMES = ("wasm", "lua", "theme")
+RUNTIMES = ("wasm", "lua", "theme", "web")
+# The runtimes whose carts need no engine of this console's: a theme is data
+# the theme loader takes, and "web" is the browser console add-on, a pack the
+# webhost serves (native/moy_net/moy_page.h).
+DATA_RUNTIMES = ("theme", "web")
 
 INDEX_LIMIT = 262144          # an index read whole into RAM
 TEXT_LIMIT = 65536            # a licence text, likewise
@@ -233,6 +231,7 @@ NO_LICENCE = "Its licence wasn't accepted."
 NO_MEMORY = "Not enough memory free to unpack it."
 NET_MEMORY = "Not enough memory free to download. Restart the console, then try again."
 BAD_SIGNATURE = "The cart shelf's signature is wrong."
+NOT_FOR_APPS = "It uses a part of the console apps can't: %s."
 
 _MP = getattr(sys, "implementation", None) is not None \
     and sys.implementation.name == "micropython"
@@ -365,8 +364,27 @@ def module_parts(fn):
 
 # -- the index ------------------------------------------------------------------
 
-def check_cart(c):
-    """None when `c` is an index entry this console can install, else why not."""
+def plain_path(name):
+    """A file an OFFICIAL entry may make this console write: up to three
+    plain names joined by "/" (a seed cart's `scenes/` and `images/`)."""
+    if not isinstance(name, str):
+        return False
+    segs = name.split("/")
+    return len(segs) <= 3 and all(plain_name(n) for n in segs)
+
+
+def is_official(c):
+    """Whether index entry `c` is one of this console's release's own carts
+    (parse_index stamps it)."""
+    return c.get("official") is True
+
+
+def check_cart(c, official=False):
+    """None when `c` is an index entry this console can install, else why not.
+    An `official` entry (the console's own release index, its signature
+    verified: parse_index) is a built-in: its id and folder are in the
+    built-ins' namespace, its runtime may be "python" and its files may sit
+    in a cart's subfolders; any other entry naming that namespace is refused."""
     if not isinstance(c, dict):
         return "not an object"
     for key in ("id", "name", "folder", "runtime"):
@@ -381,10 +399,12 @@ def check_cart(c):
         if not isinstance(d, str) or not d:
             return "depends"
     folder = c["folder"]
-    if not plain_name(folder) or not folder.endswith(".moy") or builtin_ns(folder):
+    if not plain_name(folder) or not folder.endswith(".moy") \
+            or builtin_ns(folder) != official:
         return "folder %r" % folder
-    if builtin_ns(c["id"]) or folder != c["id"] + ".moy":
+    if builtin_ns(c["id"]) != official or folder != c["id"] + ".moy":
         return "id %r" % c["id"]
+    named = plain_path if official else plain_name
     lic = c.get("licence")
     if not _sized(lic) or not isinstance(lic.get("url"), str):
         return "licence"
@@ -397,7 +417,7 @@ def check_cart(c):
                 or not isinstance(a.get("files"), dict):
             return "asset"
         for fn, meta in a["files"].items():
-            if not plain_name(fn) or not _sized(meta) or fn in names:
+            if not named(fn) or not _sized(meta) or fn in names:
                 return "file %r" % fn
             names[fn] = True
     for e in c.get("external") or ():
@@ -439,15 +459,21 @@ def _read_listing(c):
             del c[key]
 
 
-def parse_index(data, url):
+def parse_index(data, url, own=None):
     """The carts in an index document, each stamped with the index it came
     from (`index`) and that index's name (`shelf`). An entry this console
     cannot read is left out and logged, and so is a `cover` it cannot (the
     cart stays); a document that is not an index, or whose signature does not
-    verify (`check_signature`), is an InstallError."""
+    verify (`check_signature`), is an InstallError.
+
+    `own` is the index this console's release publishes (load_indexes). Read
+    from there with its signature verified, an entry in the built-ins'
+    namespace is OFFICIAL (stamped `official`): a seed cart of this release
+    (tools/web_pack.py), which installs as the image's seed would."""
     if isinstance(data, str):
         data = data.encode()
     signed = check_signature(data, url)
+    trusted = own is not None and url == own and signed is True
     try:
         index = json.loads(data.decode())
     except (ValueError, UnicodeError) as exc:
@@ -460,7 +486,8 @@ def parse_index(data, url):
                            % url)
     out = []
     for c in index.get("carts") or ():
-        why = check_cart(c)
+        official = trusted and isinstance(c, dict) and builtin_ns(c.get("id"))
+        why = check_cart(c, official)
         if why is not None:
             _log("%s: left out %r (%s)" % (url, c.get("id") if isinstance(c, dict)
                                            else c, why))
@@ -491,6 +518,8 @@ def parse_index(data, url):
         c["index"] = url
         c["shelf"] = str(index.get("name") or "")
         c["signed"] = bool(signed)
+        if official:
+            c["official"] = True
         out.append(c)
     return out
 
@@ -512,14 +541,59 @@ def sources_text(urls):
     return "".join(u + "\n" for u in urls)
 
 
-def load_indexes(root):
+def load_indexes(root, own=None):
     """The indexes this console browses: `system/sources` beside the carts
-    folder when it names any, else DEFAULT_INDEXES."""
+    folder when it names any, else DEFAULT_INDEXES; and `own` last, the index
+    the console's own release publishes beside its firmware (the browser
+    console add-on, one entry a page, each naming the page it fits;
+    tools/web_pack.py writes it, moy_ota.OtaUpdater.own_index names it)."""
     try:
         got = parse_sources(_read_recover(_sibling_path(root, SOURCES_NAME)))
     except Exception:  # noqa: BLE001 -- an unreadable override is no override
         got = None
-    return got or list(DEFAULT_INDEXES)
+    got = got or list(DEFAULT_INDEXES)
+    if own and own not in got:
+        got.append(own)
+    return got
+
+
+def page_want():
+    """The 64 hex of the browser console's page this image names, or None
+    (the host, a build with no bundle)."""
+    try:
+        import moy_web
+        return moy_web.page_want()
+    except (ImportError, AttributeError):
+        return None
+
+
+def fits_here(c, want=None):
+    """Whether this console can use index entry `c`: one that names no page
+    (`moybyte.fits`) and is no "web" cart, else only where it fits the page
+    this image names -- the browser console add-on, and an official entry,
+    which is its release's and so its image's (the page digest names the
+    build that published it)."""
+    fits = (c.get("moybyte") or {}).get("fits")
+    if c.get("runtime") != "web" and not fits:
+        return True
+    want = page_want() if want is None else want
+    return bool(want) and fits == want
+
+
+def fitting(carts, want=None):
+    """parse_index's `carts` this console can use (fits_here)."""
+    want = page_want() if want is None else want
+    return [c for c in carts if fits_here(c, want)]
+
+
+def runs_on(c, have):
+    """Whether a cart of index entry `c` runs on a console whose engines are
+    `have` (`ws.runtimes`' names). An official Python cart runs on the
+    console's own interpreter, as its seed does."""
+    rt = c["runtime"]
+    if rt == "python":
+        return is_official(c)
+    return rt in RUNTIMES and (rt in have or rt in DATA_RUNTIMES)
 
 
 def save_sources(root, urls):
@@ -770,9 +844,19 @@ def cart_state(cart, p, entry, present, manifest=None):
 
     `entry` is the record's entry for the cart's folder (or None), `present`
     whether that folder exists, `manifest` its parsed manifest.json when there
-    is no record to go by."""
+    is no record to go by, and always for an official cart: that one stands
+    by its manifest's version, as the seed that keeps it current does (#47),
+    whether the seed or an install wrote it."""
     if not present:
         return "get"
+    if is_official(cart):
+        if not isinstance(manifest, dict):
+            return "update"
+        try:
+            have = int(manifest.get("version", 0))
+        except (TypeError, ValueError):
+            have = 0
+        return "update" if have < cart["version"] else "installed"
     if entry is not None and entry.get("id") == cart["id"]:
         if int(entry.get("version") or 0) < cart["version"]:
             return "update"
@@ -791,10 +875,7 @@ def cart_state(cart, p, entry, present, manifest=None):
 
 
 def _moy_carts():
-    try:
-        import moy_carts
-    except ImportError:  # pragma: no cover - host fallback when not yet aliased
-        from runtime import moy_carts
+    import moy_carts
     return moy_carts
 
 
@@ -1385,7 +1466,9 @@ class Install:
     anything else is the install prompt's question (runtime/shell/
     app_perms.py), held in `asking` until `agree()` goes on or `cancel()`
     removes the build; an InstallError it raises refuses the install. A
-    denied install leaves the shelf exactly as it was.
+    denied install leaves the shelf exactly as it was. Before the ask, a
+    Python cart whose main imports a module an app may not is refused
+    (`app_imports`), the module named.
 
     With a `keep` (the module docstring's keeper) the checked build goes to the
     store of record before it moves into place, and moves only once that store
@@ -1489,6 +1572,9 @@ class Install:
             while True:
                 if self._reader is None:
                     if self._opening is None and not self._next():
+                        if self.cart.get("runtime") == "python" \
+                                and not is_official(self.cart):
+                            self.in_store(self._imports_check)
                         ask, self.ask = self.ask, None
                         if ask is not None:
                             self.asking = self.in_store(lambda: ask(self.stage))
@@ -1510,6 +1596,25 @@ class Install:
             self.t_all += _ticks_diff(_ticks_ms(), t)
             self._report_once()
         return not self.finished
+
+    def _imports_check(self):
+        """A Python cart whose main imports a module an app may not is
+        refused, the module named (runtime/carts/app_imports.py)."""
+        try:
+            man = json.loads(_read(self.stage + "/manifest.json"))
+            main = man.get("main") or "main.py"
+            src = _read(self.stage + "/" + main)
+        except (OSError, ValueError, AttributeError, TypeError):
+            return
+        bad = _app_imports.refused(src)
+        if bad:
+            names = []
+            for _line, mod in bad:
+                if mod not in names:
+                    names.append(mod)
+            raise InstallError(NOT_FOR_APPS % ", ".join(names),
+                               "%s: %s line %d imports %s, which an app may not"
+                               % (self.folder, main, bad[0][0], bad[0][1]))
 
     def _report_once(self):
         if self.finished and self.done and not self._reported:
@@ -1839,7 +1944,4 @@ def _copy_bytes(src, dst):
 # -- the stream readers ---------------------------------------------------------
 # The stream readers (cart_unpack), this module's names too. Imported at the
 # foot because cart_unpack takes this module's words and fetch helpers.
-try:
-    from cart_unpack import _Sink, _ZipReader, _Ranged, _TarGzReader, _Bare, _Local
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.cart_unpack import _Sink, _ZipReader, _Ranged, _TarGzReader, _Bare, _Local
+from cart_unpack import _Sink, _ZipReader, _Ranged, _TarGzReader, _Bare, _Local

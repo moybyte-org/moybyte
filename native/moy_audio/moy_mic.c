@@ -1,5 +1,9 @@
 // moy_mic: the `mic` device API's driver (moy_mic.h).
 
+#include "moy_tasks.h"
+
+#include "moy_kmem.h"
+
 #include "moy_mic.h"
 
 #include <stdlib.h>
@@ -8,11 +12,11 @@
 #include "moy_aud.h"
 #include "moy_lease.h"
 
-#if MOY_AUD_BOARD
+#if MOY_ON_BOARD
 #include "py/mpconfig.h"        // the board's MOY_AUDIO_* (mpconfigboard.h)
 #endif
 
-#if MOY_AUD_BOARD && defined(MOY_API_MIC) && defined(MOY_HW_MIC_DIN)
+#if MOY_ON_BOARD && defined(MOY_API_MIC) && defined(MOY_HW_MIC_DIN)
 #define MIC_BOARD 1
 #include "driver/i2s_std.h"
 #include "esp_heap_caps.h"
@@ -214,7 +218,7 @@ static int start(void) {
     }
     #endif
     M->run = 1;
-    if (xTaskCreatePinnedToCore(reader, "moy_mic", 3072, NULL, 6, &M->task, 0) != pdPASS) {
+    if (!moy_task_spawn(MOY_TASK_MIC, reader, NULL, &M->task)) {
         M->run = 0;
         M->task = NULL;
         return -MOY_MIC_ENOMEM;
@@ -263,11 +267,7 @@ static int open_(uint32_t owner) {
         return -MOY_MIC_ENODEV;
     }
     if (M == NULL) {
-        #ifdef MIC_BOARD
-        M = heap_caps_calloc(1, sizeof(*M), MALLOC_CAP_SPIRAM);
-        #else
-        M = calloc(1, sizeof(*M));
-        #endif
+        M = moy_kalloc(sizeof(*M), MOY_KMEM_PSRAM | MOY_KMEM_ZERO);
         if (M == NULL) {
             return -MOY_MIC_ENOMEM;
         }

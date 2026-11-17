@@ -7,20 +7,13 @@ and hands it the cache state; the layer decides per frame whether to render
 live, blit the cache, or skip the restore outright.
 """
 
-try:
-    from layers import Layer
-    from widgets import _in, _ticks_ms
-    import ui_draw as _ui_draw        # the desk's tiles and labels
-    import layout_base as _layout_base
-    import iconsets as _iconsets
-    from status_items import ITEMS as _ITEMS
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layers import Layer
-    from runtime.widgets import _in, _ticks_ms
-    from runtime import ui_draw as _ui_draw
-    from runtime import layout_base as _layout_base
-    from runtime import iconsets as _iconsets
-    from runtime.status_items import ITEMS as _ITEMS
+from layers import Layer
+from widgets import _in, _ticks_ms
+import ui_draw as _ui_draw        # the desk's tiles and labels
+from bar_layer import glyph as _bar_glyph
+import layout_base as _layout_base
+import iconsets as _iconsets
+from status_items import ITEMS as _ITEMS
 
 # A desk label over a wallpaper (a picture or a cart, pixels the theme does
 # not know): white over a black shadow (chrome.FIXED's), 80% and one pixel
@@ -128,7 +121,7 @@ class _BackdropLayer(Layer):
         # is deliberately NOT in this sig: focus moves no desk pixels.
         s = wm._shape_sig()
         # order + geometry; focus too under the depth, whose shadows and
-        # outline fringes (drawn here, _draw_unders) follow it
+        # outline fringes (drawn here, draw_unders) follow it
         wsig = (s[0], s[2], s[1]) if _ui_draw.depth()[12] else (s[0], s[2])
         if wsig != wm._desk_win_sig:
             wm._desk_win_sig = wsig
@@ -142,7 +135,7 @@ class _BackdropLayer(Layer):
             wm._desk_painted = False
             wm._damage_rects = []
             return
-        if (stale or wm._backdrop_disabled or wm._backdrop_unsupported
+        if (stale or wm.backdrop_disabled or wm._backdrop_unsupported
                 or wm.desk_moves(dt)):        # its pixels move on their own
             wm._desk_sig = sig
             wm._backdrop_valid = False        # live: re-render, then re-snapshot
@@ -153,7 +146,7 @@ class _BackdropLayer(Layer):
             wm._rest = None                   # a live desk lays every buffer whole
             self._draw_desktop(dt)
             wm._capture_backdrop()
-            wm._draw_unders()
+            wm.draw_unders()
             # This buffer holds the cache it just took, and the clock: one of the N.
             wm._desk_streak = 1 if wm._backdrop_valid else 0
             wm._clock_drawn()
@@ -181,12 +174,12 @@ class _BackdropLayer(Layer):
                     # every buffer takes the item as it now stands
                     wm._tile_shown = tile
                     wm._desk_streak = 0
-                ptr = self.ws._ptr_state()
-                last = self.ws._last_ptr
+                ptr = self.ws.ptr_state()
+                last = self.ws.last_ptr
                 cursor_live = ((ptr is not None and ptr[2])
                                or (last is not None and last[2]))
                 if not (cursor_live and ptr != last) \
-                        and wm._desk_streak >= wm._retained_n() and not wm._scrim_up():
+                        and wm._desk_streak >= wm.retained_n() and not wm._scrim_up():
                     wm._desk_painted = False   # untouched: windows may skip too
                     wm._damage_rects = []      # the desk changed nowhere
                     wm._desk_clock()
@@ -197,9 +190,12 @@ class _BackdropLayer(Layer):
             _t0 = _ticks_ms() if _perf else 0
             union = wm._blit_backdrop_cache()
             if wm._restored is not False:
-                wm._draw_unders(wm._restored)
+                wm.draw_unders(wm._restored)
+            land = getattr(wm.root_canvas, "show_landed", None)
+            if land is not None:
+                land()                         # the last frame's stamp landed under it
             if _perf:
-                self.ws._pf_wm_restore = _ticks_ms() - _t0
+                self.ws.pf_wm_restore = _ticks_ms() - _t0
             if union is not None:
                 wm._damage_rects = [union]     # the desk changed inside the gesture
             bar = self.ws.bar_layer
@@ -213,7 +209,7 @@ class _BackdropLayer(Layer):
         wm._rest = None
         self._draw_desktop(dt)                # cache lost: render + re-snapshot
         wm._capture_backdrop()
-        wm._draw_unders()
+        wm.draw_unders()
         wm._desk_streak = 1 if wm._backdrop_valid else 0
         wm._clock_drawn()
 
@@ -242,7 +238,7 @@ class _BackdropLayer(Layer):
         column leaves the desk's cache whole: a live desk is a full repaint."""
         ws = self.ws
         carts = ws.carts
-        at = (carts.gen, carts.titled, len(getattr(ws, "_apps", ())))
+        at = (carts.gen, carts.titled, len(getattr(ws, "app_layers", ())))
         if at != self._cat_at:
             self._cat_at = at
             self._cat_sig = tuple((key, label, c.get("path") if c else None)
@@ -252,7 +248,7 @@ class _BackdropLayer(Layer):
     def _draw_desktop(self, dt):
         self.ws.wallpaper.draw(dt, quiet=self.quiet())
         self._draw_desk_icons()
-        self.ws.bar_layer._draw_status_strip("desk")
+        self.ws.bar_layer.draw_status_strip("desk")
 
     def quiet(self):
         """The desk's quiet rectangles (docs/theme_and_shell_2026-11.md §3.9): the
@@ -300,9 +296,9 @@ class _BackdropLayer(Layer):
         `notes`) and no registered app has that id, else its whole id."""
         ws = self.ws
         out = [("play", "Play", None), ("projects", "Projects", None)]
-        carts = ws.runs_here(ws.carts.all)
-        apps = getattr(ws, "_apps", ())
-        for app, _text in apps:
+        carts = ws.home.runs_here(ws.carts.all)
+        apps = getattr(ws, "app_layers", ())
+        for app in apps:
             if app.id in self.HIDDEN_APPS or not getattr(app, "DESK_TILE", True):
                 continue
             cart = None
@@ -310,12 +306,15 @@ class _BackdropLayer(Layer):
                 if app.is_app(c):
                     cart = c
                     break
-            out.append((app.id, str(ws.app_title(app.id) or app.id.upper()), cart))
-        ids = ws._apps_by_id
-        for c in ws.unclaimed_apps(carts):
+            if cart is None:
+                # No cart in the store carries it (a C3 Zero's store holds a
+                # handful): open_app could not open it, so it has no tile.
+                continue
+            out.append((app.id, str(ws.spine.app_title(app.id) or app.id.upper()), cart))
+        for c in ws.home.unclaimed_apps(carts):
             cid = str(c.get("id") or c.get("title") or "")
             tail = cid.rsplit(".", 1)[-1]
-            key = tail if tail in _iconsets.SLOT and tail not in ids else cid
+            key = tail if tail in _iconsets.SLOT and ws.app(tail) is None else cid
             out.append((key, str(c.get("title") or tail), c))
         return out
 
@@ -324,7 +323,7 @@ class _BackdropLayer(Layer):
         wrapping into further columns; recomputed per call from live geometry."""
         ws = self.ws
         fs = ws.look.effective_font_scale()
-        dx, dy, dw, dh = self.wm._desk_rect()
+        dx, dy, dw, dh = self.wm.desk_rect()
         box = _layout_base.metric("tile", fs)
         return self._look_rects(self._icon_catalog(), box, fs, dx, dy, dw, dh)
 
@@ -415,7 +414,7 @@ class _BackdropLayer(Layer):
                     cv.spr(img, box[0] + (box[2] - 16 * sc) // 2,
                            box[1] + (box[3] - 16 * sc) // 2, sc)
                 else:
-                    ws._glyph(self.ICON_GLYPHS.get(key, "app"), _icon_box(box), tink, cv)
+                    _bar_glyph(self.ICON_GLYPHS.get(key, "app"), _icon_box(box), tink, cv)
             _ui_draw.label(cv, band, label, lab, _ui_draw.ALIGN_CENTER, shadow=shadow)
 
     def _draw_desk_icons(self):
@@ -427,13 +426,13 @@ class _BackdropLayer(Layer):
         set, no registered app's) runs its cart as the home's Apps tab does."""
         ws = self.ws
         if key == "play":
-            ws.open_library()
+            ws.home.open_library()
         elif key == "projects":
-            ws.open_projects()
+            ws.home.open_projects()
         else:
-            app = ws._apps_by_id.get(key)
+            app = ws.app(key)
             if app is not None and (cart is None or app.is_app(cart)):
-                ws.open_app(app)
+                ws.spine.open_app(app)
             elif cart is not None:
                 ws.open(cart)
 

@@ -1,4 +1,4 @@
-"""The Zero's terminal (firmware/seeed_xiao_esp32s3_zero/modules/zero_shell.py)
+"""The Zero's terminal (device/zero_shell.py)
 on the host: its door answers the shell's crossings it can (`passwd`, `df`,
 `mem`, `ps`) and hands every other back as a console with its VM stopped
 does, and ssh_service serves on it without a WiFi lease."""
@@ -11,7 +11,7 @@ import pytest
 from runtime import net_binding, ssh_service
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.append(str(ROOT / "firmware" / "seeed_xiao_esp32s3_zero" / "modules"))
+sys.path.insert(0, str(ROOT / "device"))
 
 import zero_shell                                               # noqa: E402
 

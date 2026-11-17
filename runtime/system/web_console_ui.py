@@ -20,6 +20,10 @@ nothing else:
   * "Open in a browser", the address in the code face, always shown, and
     how a browser that cannot scan signs in: the console's password where
     one is set (`passwd`), else the code is the only way in.
+  * Whether the page fits this firmware: the browser console is an add-on
+    cart (runtime/carts/web_addon.py), and after a firmware update the one
+    installed fits the old image until the one that fits arrives. The line
+    says so, or how far its update is, and Update it starts one.
   * Turning it off, because the toggle that got here lives in Settings and
     Settings is behind this screen. A mode with no visible way out is a
     trap: back (K on the T-Deck, Esc on a keyboard) turns it off, and a
@@ -33,23 +37,12 @@ it the content rect and draws the bar's status strip over it. NAMES is
 injected at construction rather than imported back from console.py.
 """
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
+import ui as _ui
+import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
-try:
-    import moy_qr as _qr
-except ImportError:  # host: the runtime package
-    from runtime import moy_qr as _qr
-
-try:
-    import layout_base as _lb
-except ImportError:  # host: the runtime package
-    from runtime import layout_base as _lb
+import moy_qr as _qr
+import layout_base as _lb
 
 _HEAD = {"face": "title"}
 _SAY = {"tone": "dim", "wrap": True, "lines": 3}
@@ -148,6 +141,16 @@ class WebConsoleUI:
         if host:
             y += 6 * fs
             y = self._line(self._web.sign_in_hint(), _CAP, x, y, w, "caption", 2)
+        note = self._web.page_note()
+        if note is not None:
+            y += 6 * fs
+            y = self._line(note, _CAP, x, y, w, "caption", 2)
+            self._damage.again()           # the update's progress moves on its own
+        if self._web.page_stale():
+            _ui.at(x, y + 8 * fs, min(w, 150 * fs), 28 * fs)
+            if _ui.button("Update it"):
+                self._web.update_page()
+            y += 36 * fs
         if _ui.input_kind() == "touch" or desk:
             _ui.at(x, y + 8 * fs, min(w, 120 * fs), 28 * fs)
             if _ui.button("Turn off", "danger"):

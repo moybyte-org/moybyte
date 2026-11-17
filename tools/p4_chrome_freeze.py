@@ -31,7 +31,7 @@ import moy_gfx
 ws._strips = {}
 ws._verdict = []
 def _snap(key):
-    win = ws.wm._wins[key]
+    win = ws.wm.windows[key]
     cv = ws.sys_canvas
     w = win.w
     h = win.title_h + 2                    # strip + the border line under it
@@ -109,8 +109,8 @@ def main():
             hold(b, cx, cy0, cx, cy1, 200)
             b.drain(1.2)                     # let the freeze engage
             got = sample(b, "settings", n=10)
-            froze = b.pyval("ws.wm._wins['settings']._chrome_streak")
-            quiet = b.pyval("ws.wm._chrome_quiet")
+            froze = b.pyval("ws.wm.windows['settings']._chrome_streak")
+            quiet = b.pyval("ws.wm.chrome_quiet")
             cross = b.pyval("ws._cross()")
             b.wait_line("swipe done", 30)
 

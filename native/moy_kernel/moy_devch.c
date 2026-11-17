@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "moy_codec.h"
 #include "moy_devch.h"
 #include "moy_log.h"
 #include "moy_loop.h"
@@ -203,10 +204,18 @@ static bool parse_u32(const char *s, uint32_t *out) {
 // -- the run's words (native/moy_play: weak, so an image without the Player
 // hands them to the console) ---------------------------------------------------
 
-bool moy_play_front_live(void) __attribute__((weak));
-bool moy_play_panel_up(void) __attribute__((weak));
-bool moy_play_front_end(int why) __attribute__((weak));
-size_t moy_play_state_json(char *out, size_t n) __attribute__((weak));
+#if __has_include("moy_play.h")
+#include "moy_play.h"
+#else
+bool moy_play_front_live(void);
+bool moy_play_panel_up(void);
+bool moy_play_front_end(int why);
+size_t moy_play_state_json(char *out, size_t n);
+#endif
+#pragma weak moy_play_front_live
+#pragma weak moy_play_panel_up
+#pragma weak moy_play_front_end
+#pragma weak moy_play_state_json
 
 // A run in front, or the panel a stopped run left: either holds the frame,
 // and the run's words are the kernel's.
@@ -357,8 +366,14 @@ static bool w_log(int argc, char **argv, const char *line) {
 // moy_sh_board.h: weak, so an image without the shell hands it to the
 // console), answered `SH <line>` a line and `SH end <status>`, `SH more` or
 // `SH exit <status>`. The kernel's, so it answers with no VM running.
-bool moy_sh_board_line(const char *text) __attribute__((weak));
-bool moy_sh_board_break(void) __attribute__((weak));
+#if __has_include("moy_sh_board.h")
+#include "moy_sh_board.h"
+#else
+bool moy_sh_board_line(const char *text);
+bool moy_sh_board_break(void);
+#endif
+#pragma weak moy_sh_board_line
+#pragma weak moy_sh_board_break
 
 static bool w_sh(int argc, char **argv, const char *line) {
     (void)argc;
@@ -466,25 +481,6 @@ bool moy_devch_line(const char *line, bool *quit) {
     return dispatch(tmp, quit);
 }
 
-// Well-formed UTF-8 (a line the console's words can decode).
-static bool utf8(const char *s) {
-    const unsigned char *p = (const unsigned char *)s;
-    while (*p) {
-        unsigned char c = *p++;
-        int more = c < 0x80 ? 0 : (c & 0xE0) == 0xC0 ? 1 : (c & 0xF0) == 0xE0 ? 2
-                   : (c & 0xF8) == 0xF0 ? 3 : -1;
-        if (more < 0 || (more == 1 && c < 0xC2)) {
-            return false;
-        }
-        while (more--) {
-            if ((*p++ & 0xC0) != 0x80) {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
 bool moy_devch_poll(bool *quit) {
     bool ran = false;
     const moy_loop_ops_t *ops = moy_loop_ops();
@@ -516,7 +512,7 @@ bool moy_devch_poll(bool *quit) {
                     continue;
                 }
                 // Bytes that are not text cost the line they land in.
-                if (!utf8(D.buf)) {
+                if (!moy_utf8_valid(D.buf, strlen(D.buf))) {
                     D.dropped++;
                     continue;
                 }

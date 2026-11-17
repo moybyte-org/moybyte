@@ -32,6 +32,8 @@
 // compiled-module tier, so a cart never "needs an update" here), footprint
 // and interp_footprint (one rule), and mem().
 
+#include "moy_kmem.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -58,7 +60,12 @@ EM_JS_DEPS(moy_wasm_web, "$stringToUTF8,$getWasmTableEntry,malloc,free,"
 // module "moybyte.app", which the page's adapters wrap as they wrap the "moy"
 // table's (worker.js). Weak there: an image without native/moy_app answers no
 // rows.
-const void *moy_app_wasm_natives(uint32_t *count) __attribute__((weak));
+#if __has_include("moy_app_wasm.h")
+#include "moy_app_wasm.h"
+#else
+const moy_app_native_t *moy_app_wasm_natives(uint32_t *count);
+#endif
+#pragma weak moy_app_wasm_natives
 EMSCRIPTEN_KEEPALIVE const void *moy_web_app_natives(uint32_t *count)
 {
     *count = 0;
@@ -124,7 +131,7 @@ static void read_module(const char *path, uint8_t **out, uint32_t *out_len)
         mp_stream_close(f);
         mp_raise_ValueError(MP_ERROR_TEXT("module file is empty, unreadable or too big"));
     }
-    uint8_t *buf = malloc((size_t)size);
+    uint8_t *buf = moy_kalloc((size_t)size, MOY_KMEM_LIBC);
     if (!buf) {
         mp_stream_close(f);
         mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("no memory for the module file"));
@@ -417,8 +424,8 @@ static mp_obj_t mod_command_start(size_t n_args, const mp_obj_t *args)
     } else {
         return cmd_answer(-3, "the module file will not read");
     }
-    cmd_t *c = calloc(1, sizeof *c);
-    const char **argv = calloc(argc ? argc : 1, sizeof *argv);
+    cmd_t *c = moy_kalloc(sizeof *c, MOY_KMEM_LIBC | MOY_KMEM_ZERO);
+    const char **argv = moy_kalloc((argc ? argc : 1) * sizeof *argv, MOY_KMEM_LIBC | MOY_KMEM_ZERO);
     if (c == NULL || argv == NULL) {
         free(c);
         free(argv);

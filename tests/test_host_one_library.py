@@ -26,7 +26,7 @@ def _addr(lib, name):
 def test_every_host_binding_loads_the_one_library():
     from runtime import (gfx_binding, glass_binding, host_native, lua_binding,
                          moy_input, moy_loop, moy_play, net_binding)
-    import tools.moy_index_spike as spike
+    from runtime import native_parts as spike
     path = host_native.build()
     assert path is not None
     libs = {"gfx": gfx_binding._lib(), "glass": glass_binding._lib(),
@@ -81,7 +81,7 @@ def _pixels(ws):
 
 def _frame(drv):
     quiesce(drv.ws)
-    drv.ws._dirty = True
+    drv.ws.mark_dirty()
     drv.frame(_DT)
 
 
@@ -117,7 +117,7 @@ def test_a_page_draws_the_same_pixels_in_every_runtime_under_moy(tmp_path, varia
             _frame(drv)
             got.append(_pixels(ws))
         assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
-        ws.exit()
+        ws.spine.exit()
         shots[name] = got
     assert set(shots) == set(titles) and all(len(v) == 3 for v in shots.values())
     ref = shots["python"]

@@ -553,10 +553,14 @@ def test_a_request_with_no_session_and_an_old_pin_url_are_refused(tmp_path):
 
 
 def test_the_bundle_and_the_marker_stay_open(tmp_path):
-    nb._bake({"index.html.gz": b"\x1f\x8bpage"})
     try:
         h = _host(tmp_path)
-        assert status(h.handle_http("GET", "/", b"")) == 200
+        nb._bake({"index.html.gz": b"\x1f\x8bpage"}, carts=tmp_path / "carts")
+        r = h.handle_http("GET", "/", b"")      # the page's own address, then the page
+        if status(r) == 302:
+            loc = [l for l in split(r)[1].split("\r\n") if l.lower().startswith("location:")]
+            r = h.handle_http("GET", loc[0].split(":", 1)[1].strip(), b"")
+        assert status(r) == 200
         r = h.handle_http("GET", "/sync", b"")
         assert (status(r), doc(r)) == (200, {"sync": 1})
     finally:
@@ -826,7 +830,7 @@ def test_settings_lists_the_paired_browsers_and_forgets_one(tmp_path, monkeypatc
     ws.open_settings()
     sl = ws.settings_layer
     assert sl._paired_words == "2"
-    sl.open_paired()
+    sl.open_page("paired")
     said, links = [], []
     real_label, real_link = ui.label, ui.link
     monkeypatch.setattr(ui, "label", lambda t, o=None: (said.append(t), real_label(t, o))[1])
@@ -1090,7 +1094,7 @@ def test_every_stamp_is_unix_seconds(tmp_path):
     from runtime import moy_journal, wallclock
     assert moy_journal._EPOCH == wallclock._EPOCH
     hdr = (ROOT / "native" / "moy_net" / "moy_net.h").read_text()
-    assert "#if __has_include(\"esp_heap_caps.h\")\n#define MOY_NET_CLOCK_EPOCH 946684800" in hdr
+    assert "#ifdef MOY_ON_BOARD\n#define MOY_NET_CLOCK_EPOCH 946684800" in hdr
     assert "return (int64_t)time(NULL) + MOY_NET_CLOCK_EPOCH;" in hdr
     for name in ("moy_webauth.c", "moy_webhost.c", "modmoy_net.c"):
         src = (ROOT / "native" / "moy_net" / name).read_text()

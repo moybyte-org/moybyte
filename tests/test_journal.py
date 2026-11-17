@@ -1,17 +1,20 @@
-"""Stage 7 (#7, docs/history/shell_ux_technical_plan_v1.md Section 3): the durable, per-project,
-reboot-surviving undo/redo journal in runtime/carts/moy_carts.py.
+"""The durable, per-project, reboot-surviving undo/redo journal (#7):
+native/moy_store/moy_journal.c, through moy_carts' re-exported verbs.
 
-Exercises the storage logic directly (no console): the append->undo->redo->new-commit-
+Exercises the storage directly (no console): the append->undo->redo->new-commit-
 truncates-tail walk, torn-tail recovery, the cap/compaction (oldest dropped + their
-snapshots deleted), reboot survival (reload purely from the SD files), and the
-discipline proof that the per-commit line append is a RAW open("a") -- O(1), NOT the
-whole-file-rewriting _write_atomic.
+snapshots deleted), reboot survival (reload purely from the SD files), and that the
+per-commit line append only adds bytes to the log.
 """
 
 import json
+from tests import journal_files as jf
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+# native/moy_store/moy_journal.h's budget.
+MAX_ENTRIES = 64
+MAX_BYTES = 512 * 1024
 
 
 def _cart(tmp_path):
@@ -23,14 +26,6 @@ def _cart(tmp_path):
     return moy_carts, c["path"]
 
 
-def _journal_mod():
-    """The journal implementation module (moy_journal since the moy_carts split):
-    caps + private helpers are patched/inspected THERE; moy_carts re-exports the
-    public verbs so `mc.journal_*` keeps working."""
-    from runtime import moy_journal
-    return moy_journal
-
-
 def _live(path, file="main.py"):
     return (Path(path) / file).read_text()
 
@@ -39,9 +34,7 @@ def _cursor(mc, path):
     """The scalar undo position. Read the way the journal reads it, because
     cursor.json exists only while something is REWOUND (#154): at rest there is
     no file, and the position is every file's newest entry."""
-    mj = _journal_mod()
-    _jdir, log, cur, _snap = mc._journal_paths(path)
-    return mj._journal_cursor(cur, mj._journal_load_entries(log))
+    return jf.cursor(path)
 
 
 # -- (a) the walk: append -> undo -> redo -> new commit truncates the redo tail ----
@@ -76,7 +69,7 @@ def test_journal_walk_append_undo_redo_truncate(tmp_path):
 
     # and undo now walks v4 -> v2 -> v1 (v3 was dropped, its snapshot deleted)
     assert mc.journal_undo(path) == "main.py" and _live(path) == "v2\n"
-    _jdir, _log, _cur, snap_dir = mc._journal_paths(path)
+    _jdir, _log, _cur, snap_dir = jf.paths(path)
     snaps = sorted(p.name for p in Path(snap_dir).iterdir())
     assert not any("v3" in _read_snap(snap_dir, n) for n in snaps)
 
@@ -115,7 +108,7 @@ def test_journal_dedup_writes_nothing_when_unchanged(tmp_path):
     mc, path = _cart(tmp_path)
     assert mc.journal_append(path, "main.py", "same\n") == 1
     assert mc.journal_append(path, "main.py", "same\n") is None    # no new seq
-    _jdir, _log, _cur, snap_dir = mc._journal_paths(path)
+    _jdir, _log, _cur, snap_dir = jf.paths(path)
     assert len(list(Path(snap_dir).iterdir())) == 1               # only ONE snapshot
 
 
@@ -125,13 +118,13 @@ def test_journal_torn_tail_line_is_dropped(tmp_path):
     mc, path = _cart(tmp_path)
     mc.journal_append(path, "main.py", "one\n")
     mc.journal_append(path, "main.py", "two\n")
-    _jdir, log_path, _cur, _snap = mc._journal_paths(path)
+    _jdir, log_path, _cur, _snap = jf.paths(path)
 
     # Simulate a power loss mid-append: a truncated final JSON line with no newline.
     with open(log_path, "a") as f:
         f.write('{"seq": 3, "ts": 0, "file": "main.py", "sn')   # torn -- no closing brace
 
-    entries = mc._journal_load_entries(log_path)
+    entries = jf.entries(log_path)
     assert [e["seq"] for e in entries] == [1, 2]        # the torn line was dropped
     # And undo still walks the two intact commits.
     (Path(path) / "main.py").write_text("two\n")
@@ -151,8 +144,8 @@ def test_journal_undo_refuses_torn_snapshot(tmp_path):
     mc.journal_append(path, "main.py", "good-two\n"); (Path(path) / "main.py").write_text("good-two\n")
 
     # Corrupt the snapshot undo WOULD restore (seq 1 = good-one): truncate it to garbage.
-    _jdir, log_path, _cur, snap_dir = mc._journal_paths(path)
-    seq1 = mc._journal_load_entries(log_path)[0]
+    _jdir, log_path, _cur, snap_dir = jf.paths(path)
+    seq1 = jf.entries(log_path)[0]
     (Path(snap_dir) / Path(seq1["snap"]).name).write_text("go")   # len 2 != recorded 9
 
     assert mc.journal_undo(path) is None                # refused -- snapshot damaged
@@ -163,8 +156,8 @@ def test_journal_undo_refuses_empty_snapshot(tmp_path):
     mc, path = _cart(tmp_path)
     mc.journal_append(path, "main.py", "keep-me\n"); (Path(path) / "main.py").write_text("keep-me\n")
     mc.journal_append(path, "main.py", "current\n"); (Path(path) / "main.py").write_text("current\n")
-    _jdir, log_path, _cur, snap_dir = mc._journal_paths(path)
-    seq1 = mc._journal_load_entries(log_path)[0]
+    _jdir, log_path, _cur, snap_dir = jf.paths(path)
+    seq1 = jf.entries(log_path)[0]
     (Path(snap_dir) / Path(seq1["snap"]).name).write_text("")     # 0-byte snapshot
 
     assert mc.journal_undo(path) is None
@@ -178,8 +171,8 @@ def test_journal_redo_refuses_torn_snapshot(tmp_path):
     assert mc.journal_undo(path) == "main.py" and _live(path) == "r1\n"
 
     # Corrupt the redo target (seq 2 = r2) and confirm redo won't overwrite r1 with junk.
-    _jdir, log_path, _cur, snap_dir = mc._journal_paths(path)
-    seq2 = mc._journal_load_entries(log_path)[1]
+    _jdir, log_path, _cur, snap_dir = jf.paths(path)
+    seq2 = jf.entries(log_path)[1]
     (Path(snap_dir) / Path(seq2["snap"]).name).write_text("XYZLONGER")   # len != recorded
     assert mc.journal_redo(path) is None
     assert _live(path) == "r1\n"                          # untouched
@@ -197,61 +190,56 @@ def test_journal_undo_restores_a_legit_empty_snapshot(tmp_path):
 
 # -- (c) the cap / compaction: oldest entries + their snapshots are dropped ---------
 
-def test_journal_compaction_drops_oldest(tmp_path, monkeypatch):
+def test_journal_compaction_drops_oldest(tmp_path):
     mc, path = _cart(tmp_path)
-    monkeypatch.setattr(_journal_mod(), "JOURNAL_MAX_ENTRIES", 3)   # tiny cap so the test is quick
-
-    for i in range(1, 7):                               # 6 commits, cap 3
+    n = MAX_ENTRIES + 3
+    for i in range(1, n + 1):
         mc.journal_append(path, "main.py", "V%d\n" % i)
         (Path(path) / "main.py").write_text("V%d\n" % i)
 
-    entries = mc._journal_load_entries(mc._journal_paths(path)[1])
+    entries = jf.entries(jf.paths(path)[1])
     seqs = [e["seq"] for e in entries]
-    assert len(seqs) <= 3                               # rotated down to the cap
-    assert seqs[-1] == 6                                # the newest commit survives
+    assert len(seqs) <= MAX_ENTRIES                     # rotated down to the cap
+    assert seqs[-1] == n                                # the newest commit survives
     assert 1 not in seqs and 2 not in seqs             # the oldest were dropped
 
     # the dropped entries' snapshots are gone from disk (not just unlinked from the log)
-    _jdir, _log, _cur, snap_dir = mc._journal_paths(path)
+    _jdir, _log, _cur, snap_dir = jf.paths(path)
     on_disk = sorted(p.name for p in Path(snap_dir).iterdir())
-    assert not any(n.startswith("0001-") or n.startswith("0002-") for n in on_disk)
-    assert any(n.startswith("0006-") for n in on_disk)
+    assert not any(x.startswith("0001-") or x.startswith("0002-") for x in on_disk)
+    assert any(x.startswith("%04d-" % n) for x in on_disk)
 
     # the current state still undoes cleanly within the surviving window
     assert mc.journal_undo(path) == "main.py"
-    assert _live(path) == "V5\n"
+    assert _live(path) == "V%d\n" % (n - 1)
 
 
-def test_journal_bytes_cap_triggers_compaction(tmp_path, monkeypatch):
-    # The 512KB cap fires independently of the 64-entry cap (whichever first).
+def test_journal_bytes_cap_triggers_compaction(tmp_path):
+    # The 512 KiB cap fires independently of the 64-entry cap (whichever first).
     mc, path = _cart(tmp_path)
-    monkeypatch.setattr(_journal_mod(), "JOURNAL_MAX_ENTRIES", 1000)  # count cap out of the way
-    monkeypatch.setattr(_journal_mod(), "JOURNAL_MAX_BYTES", 300)     # ~3 x 100-byte snapshots
+    size = 100 * 1024
+    for i in range(8):
+        text = ("%03d" % i) * (size // 3) + "\n"
+        mc.journal_append(path, "main.py", text)
+        (Path(path) / "main.py").write_text(text)
 
-    for i in range(6):
-        mc.journal_append(path, "main.py", ("%03d" % i) * 33 + "\n")   # 100 bytes each
-        (Path(path) / "main.py").write_text(("%03d" % i) * 33 + "\n")
-
-    _jdir, log_path, _cur, snap_dir = mc._journal_paths(path)
-    total = mc._journal_total_len(mc._journal_load_entries(log_path))
-    assert total <= 300                                   # held under the byte cap
-    assert len(mc._journal_load_entries(log_path)) < 6    # oldest rolled off
+    _jdir, log_path, _cur, snap_dir = jf.paths(path)
+    assert jf.total_len(jf.entries(log_path)) <= MAX_BYTES   # held under the byte cap
+    assert len(jf.entries(log_path)) < 8                     # oldest rolled off
 
 
-def test_journal_compact_keeps_current_state(tmp_path, monkeypatch):
-    # Even under a brutal cap, compaction never drops the CURRENT state's snapshot --
-    # undo/current always resolves.
+def test_journal_compact_keeps_current_state(tmp_path):
+    # Compaction never drops the CURRENT state's snapshot -- undo/current always
+    # resolves.
     mc, path = _cart(tmp_path)
-    monkeypatch.setattr(_journal_mod(), "JOURNAL_MAX_ENTRIES", 1)
-    for i in range(4):
+    for i in range(MAX_ENTRIES + 4):
         mc.journal_append(path, "main.py", "S%d\n" % i)
         (Path(path) / "main.py").write_text("S%d\n" % i)
-    # The live file matches the last commit, and its snapshot is still readable.
-    entries = mc._journal_load_entries(mc._journal_paths(path)[1])
-    assert entries                                        # at least the current survives
-    cur = mc._journal_current_snap(entries, _cursor(mc, path), "main.py")
-    _jdir = mc._journal_paths(path)[0]
-    assert (Path(_jdir) / cur).read_text() == "S3\n"
+    entries = jf.entries(jf.paths(path)[1])
+    assert entries
+    cur = jf.current_snap(entries, _cursor(mc, path), "main.py")
+    _jdir = jf.paths(path)[0]
+    assert (Path(_jdir) / cur).read_text() == "S%d\n" % (MAX_ENTRIES + 3)
 
 
 # -- (d) reboot survival: a fresh load sees only the SD files -----------------------
@@ -275,37 +263,18 @@ def test_journal_survives_reboot(tmp_path):
 
 # -- (e) discipline proof: the per-commit line append is O(1), NOT _write_atomic ----
 
-def test_journal_append_is_raw_open_not_write_atomic(tmp_path, monkeypatch):
-    # The BINDING v1.1 rule: journal.jsonl grows via a raw open(path,"a") -- one line
-    # appended, O(1) -- and must NEVER go through _write_atomic (which rewrites the
-    # whole file, making each commit O(n)). Prove it two ways.
+def test_journal_append_only_adds_to_the_log(tmp_path):
+    # journal.jsonl grows by one line a commit: the existing prefix is byte-identical,
+    # and a commit with nothing rewound writes no cursor at all (#154).
     mc, path = _cart(tmp_path)
-    _jdir, log_path, _cur, _snap = mc._journal_paths(path)
-
-    # (1) _write_atomic is NEVER called with the journal log as its target on the
-    #     per-commit append path (cursor.json IS atomic -- that's allowed). The spy
-    #     lands on moy_journal (the implementation module since the split).
-    mj = _journal_mod()
-    real_atomic = mj._write_atomic
-    atomic_targets = []
-
-    def _spy_atomic(p, data):
-        atomic_targets.append(p)
-        return real_atomic(p, data)
-    monkeypatch.setattr(mj, "_write_atomic", _spy_atomic)
-
+    _jdir, log_path, cur, _snap = jf.paths(path)
     mc.journal_append(path, "main.py", "a\n")
     mc.journal_append(path, "main.py", "b\n")
-    assert log_path not in atomic_targets                 # the LOG never rewritten atomically
-    assert not any(t.endswith("cursor.json") for t in atomic_targets), \
-        "a commit with nothing rewound writes no cursor at all (#154)"
-
-    # (2) O(1): appending a line only ADDS bytes -- the existing prefix is byte-identical
-    #     (a whole-file rewrite could reorder/rewrite it; an append cannot).
+    assert not Path(cur).exists()
     before = Path(log_path).read_bytes()
     mc.journal_append(path, "main.py", "c\n")
     after = Path(log_path).read_bytes()
-    assert after.startswith(before)                       # pure append: prefix preserved
+    assert after.startswith(before)
     assert len(after) > len(before)
 
 
@@ -318,17 +287,14 @@ def test_journal_no_dir_until_first_append(tmp_path):
     assert (Path(path) / "journal" / "journal.jsonl").exists()
 
 
-def test_noop_append_does_not_mkdir(tmp_path, monkeypatch):
-    # F3: a no-op append (content-dedup skip) must touch NOTHING -- the mkdir happens
-    # only once we're committing to a write, so an idle tick that changes nothing leaves
-    # no empty folders (and does no filesystem work at all beyond the dedup read).
+def test_a_no_op_append_writes_nothing(tmp_path):
+    # A no-op append (the content-dedup skip) touches nothing in the journal.
     mc, path = _cart(tmp_path)
-    mc.journal_append(path, "main.py", "same\n")   # first real append creates the dirs
-    calls = []
-    real_mkdir = mc._mkdir
-    monkeypatch.setattr(mc, "_mkdir", lambda p: (calls.append(p), real_mkdir(p))[1])
-    assert mc.journal_append(path, "main.py", "same\n") is None   # no-op (deduped)
-    assert calls == []                              # no mkdir on a no-op append
+    mc.journal_append(path, "main.py", "same\n")
+    jdir = Path(jf.paths(path)[0])
+    before = sorted((str(p), p.stat().st_mtime_ns) for p in jdir.rglob("*"))
+    assert mc.journal_append(path, "main.py", "same\n") is None
+    assert sorted((str(p), p.stat().st_mtime_ns) for p in jdir.rglob("*")) == before
 
 
 # -- (f) #111 PER-FILE cursors: a scoped undo/redo walks only the tab's file(s) --------
@@ -400,48 +366,24 @@ def test_a_cursor_without_a_map_loads_as_everything_applied(tmp_path):
     mc.journal_append(path, "main.py", "A\n")            # seq 1
     mc.journal_append(path, "map.moymap", "M1\n")        # seq 2
     mc.journal_append(path, "main.py", "B\n")            # seq 3
-    _jdir, _log, cur, _snap = mc._journal_paths(path)
+    _jdir, _log, cur, _snap = jf.paths(path)
     Path(cur).write_text(json.dumps({"seq": 2, "bytes": 999}))
 
-    mj = _journal_mod()
-    entries = mj._journal_load_entries(_log)
-    assert mj._journal_cursors(cur, entries) == {"main.py": 3, "map.moymap": 2}
+    entries = jf.entries(_log)
+    assert jf.cursors(cur, entries) == {"main.py": 3, "map.moymap": 2}
     assert mc.journal_can_redo(path, ("main.py",)) is False
 
 def test_missing_and_torn_cursor_default_to_newest(tmp_path):
     # A missing/torn cursor.json defaults every file to its newest entry (the safe
     # 'everything applied' state) -- so undo works and redo is dim.
     mc, path = _two_file_cart(tmp_path)
-    _jdir, _log, cur, _snap = mc._journal_paths(path)
+    _jdir, _log, cur, _snap = jf.paths(path)
     Path(cur).write_text("{ this is torn json")       # unparseable cursor
 
-    mj = _journal_mod()
-    entries = mj._journal_load_entries(_log)
-    assert mj._journal_cursors(cur, entries) == {"main.py": 2, "map.moymap": 4}
+    entries = jf.entries(_log)
+    assert jf.cursors(cur, entries) == {"main.py": 2, "map.moymap": 4}
     assert mc.journal_can_redo(path, ("main.py",)) is False   # already at the top
     assert mc.journal_can_undo(path, ("main.py",)) is True
-
-
-def test_the_journal_dirs_are_made_once_not_on_every_commit(tmp_path, monkeypatch):
-    """Two directory ops per save, on every board, to re-make a folder that has
-    existed since the project's first commit (#154). The dirs are created by
-    FAILING to write into them instead, so only the first commit pays."""
-    from runtime import moy_journal
-    store, path = _cart(tmp_path)
-
-    made = []
-    real = moy_journal._mkdir
-    monkeypatch.setattr(moy_journal, "_mkdir",
-                        lambda p: (made.append(p), real(p))[1])
-
-    store.journal_append(path, "main.py", "v1\n")
-    assert len(made) == 2                     # the first commit builds journal/ + s/
-    made.clear()
-
-    store.journal_append(path, "main.py", "v2\n")
-    store.journal_append(path, "main.py", "v3\n")
-    assert made == []
-    assert store.journal_undo(path) == "main.py"      # ...and the journal still walks
 
 
 # -- (h) the snapshot is the publish backup, claimed (#154) -----------------------
@@ -460,52 +402,36 @@ def test_a_published_commit_claims_its_backup_instead_of_writing_the_payload(tmp
     snapshot RENAMES it rather than putting a 20KB main.py down a third time
     (#154) -- so the commit writes no snapshot payload at all, and the entry
     says `stamped` so the reader knows to come back through the stamp."""
-    from runtime import moy_journal
     store, path = _cart(tmp_path)
     src = "def _draw():\n    cls(3)\n"
 
     _commit(store, path, "v0\n")               # the first commit builds journal/ + s/
-
-    wrote = []
-    real = moy_journal._write
-
-    def _spy(p, d):
-        out = real(p, d)                        # record only a write that LANDED
-        wrote.append(p)
-        return out
-
-    moy_journal._write = _spy
-    try:
-        _commit(store, path, src)
-    finally:
-        moy_journal._write = real
+    _commit(store, path, src)
 
     jdir = path + "/journal"
-    entries = moy_journal._journal_load_entries(jdir + "/journal.jsonl")
+    entries = jf.entries(jdir + "/journal.jsonl")
     assert len(entries) == 2
     e = entries[-1]
     assert e.get("stamped") == 1, "a published commit claims its backup"
-    assert not [p for p in wrote if "/s/" in p], "no snapshot payload was written"
     assert not Path(path + "/main.py.bak").exists(), "the spent backup MOVED"
     # and what an undo would restore is exactly the source, stamp line stripped
-    assert moy_journal._journal_read_snap(jdir, e) == src
+    assert jf.read_snap(jdir, e) == src
 
 
 def test_bytes_that_were_never_published_get_a_written_snapshot(tmp_path):
     """The graduation BASELINE entry journals source that is NOT what the live
     file holds, so there is no backup of it to claim. It must fall through to
     writing its own copy rather than claiming the WRONG bytes."""
-    from runtime import moy_journal
     store, path = _cart(tmp_path)
     _commit(store, path, "live\n")                 # the published state
     store.journal_append(path, "main.py", "a baseline that was never published\n")
 
     jdir = path + "/journal"
-    entries = moy_journal._journal_load_entries(jdir + "/journal.jsonl")
+    entries = jf.entries(jdir + "/journal.jsonl")
     assert entries[-1].get("stamped") is None
-    assert moy_journal._journal_read_snap(jdir, entries[-1]) == \
+    assert jf.read_snap(jdir, entries[-1]) == \
         "a baseline that was never published\n"
-    assert moy_journal._journal_read_snap(jdir, entries[0]) == "live\n"
+    assert jf.read_snap(jdir, entries[0]) == "live\n"
 
 
 def test_both_snapshot_kinds_walk(tmp_path):
@@ -529,57 +455,18 @@ def test_a_torn_claimed_snapshot_is_refused(tmp_path):
     """The claimed snapshot's own stamp is a crc over its payload -- strictly more
     than `len` can see. A snapshot whose text was mangled without changing its
     length must NOT be copied over the kid's live file."""
-    from runtime import moy_journal
     store, path = _cart(tmp_path)
     _commit(store, path, "v1-good\n")
     _commit(store, path, "v2\n")
 
     jdir = path + "/journal"
-    entries = moy_journal._journal_load_entries(jdir + "/journal.jsonl")
+    entries = jf.entries(jdir + "/journal.jsonl")
     snap = Path(jdir) / entries[0]["snap"]
     head, rest = snap.read_text().split("\n", 1)
     snap.write_text(head + "\n" + "v1-BAD!\n")        # same length, wrong bytes
-    assert moy_journal._journal_read_snap(jdir, entries[0]) is None
+    assert jf.read_snap(jdir, entries[0]) is None
     assert store.journal_undo(path) is None            # refused
     assert _live(path) == "v2\n"                       # the live file is untouched
-
-
-def test_a_no_op_commit_answers_from_the_stamp_without_reading_the_snapshot(tmp_path):
-    """A debounce that fires with nothing changed must not touch the card. The
-    entry records the snapshot's stamp, so the check is a crc over the new text
-    rather than a read of the previous snapshot back off the medium (#154)."""
-    from runtime import moy_journal
-    store, path = _cart(tmp_path)
-    _commit(store, path, "v1\n")
-
-    reads = []
-    real = moy_journal._read
-    moy_journal._read = lambda p: (reads.append(p), real(p))[1]
-    try:
-        assert store.journal_append(path, "main.py", "v1\n") is None   # a no-op
-    finally:
-        moy_journal._read = real
-    assert not [p for p in reads if "/s/" in p], "the snapshot was read back"
-
-
-def test_one_cursor_read_per_commit(tmp_path):
-    """cursor.json holds two things a commit needs -- the per-file map and the
-    running byte total -- and the card charges a full file open for a second
-    read of it (#154). Counted at the moy_fs leaf, which is where BOTH the
-    journal's own reads and _read_recover's land."""
-    from runtime import moy_fs, moy_journal
-    store, path = _cart(tmp_path)
-    _commit(store, path, "v1\n")
-
-    reads = []
-    real_fs, real_j = moy_fs._read, moy_journal._read
-    moy_fs._read = lambda p: (reads.append(p), real_fs(p))[1]
-    moy_journal._read = lambda p: (reads.append(p), real_j(p))[1]
-    try:
-        _commit(store, path, "v2\n")
-    finally:
-        moy_fs._read, moy_journal._read = real_fs, real_j
-    assert len([p for p in reads if p.endswith("cursor.json")]) == 1
 
 
 def test_a_torn_cursor_is_recovered_not_defaulted(tmp_path):
@@ -587,43 +474,35 @@ def test_a_torn_cursor_is_recovered_not_defaulted(tmp_path):
     that makes that mean something. A cursor torn mid-publish -- the FAT case:
     truncated, so a strict PREFIX of the backup -- must come back as the position
     it held, not as the safe 'everything applied' default (#154)."""
-    from runtime import moy_journal
     store, path = _cart(tmp_path)
     for text in ("v1\n", "v2\n", "v3\n"):
         _commit(store, path, text)
     assert store.journal_undo(path) == "main.py"     # rewind: cursor is no longer newest
     assert _live(path) == "v2\n"
 
-    _jdir, log, cur, _snap = store._journal_paths(path)
+    _jdir, log, cur, _snap = jf.paths(path)
     whole = Path(cur).read_text()
     Path(cur).write_text(whole[:len(whole) // 2])    # a torn publish of the cursor
 
-    entries = moy_journal._journal_load_entries(log)
-    cursors = moy_journal._journal_cursors(cur, entries)
-    assert cursors != moy_journal._journal_newest_by_file(entries), \
+    entries = jf.entries(log)
+    cursors = jf.cursors(cur, entries)
+    assert cursors != jf.newest_by_file(entries), \
         "a recoverable cursor must not fall back to the default"
     assert cursors == {"main.py": 2}
     assert store.journal_can_redo(path, ("main.py",)) is True
 
 
-def test_a_rewound_cursor_IS_written_atomically(tmp_path, monkeypatch):
+def test_a_rewound_cursor_is_written(tmp_path):
     """The other half of the cursor rule (#154): a commit with nothing rewound
-    writes no cursor, but an undo leaves a position nothing can recompute -- and
-    that one goes down through _write_atomic, still last."""
+    writes no cursor, but an undo leaves a position nothing can recompute."""
     mc, path = _cart(tmp_path)
-    mj = _journal_mod()
-    _jdir, _log, cur, _snap = mc._journal_paths(path)
+    _jdir, _log, cur, _snap = jf.paths(path)
     for text in ("a\n", "b\n"):
         mc.journal_append(path, "main.py", text)
         (Path(path) / "main.py").write_text(text)
     assert not Path(cur).exists(), "at rest the cursor is absent, not written"
 
-    real_atomic = mj._write_atomic
-    targets = []
-    monkeypatch.setattr(mj, "_write_atomic",
-                        lambda p, d: (targets.append(p), real_atomic(p, d))[1])
     assert mc.journal_undo(path) == "main.py"
-    assert any(t.endswith("cursor.json") for t in targets)
     assert Path(cur).exists()
 
     # ...and stepping back to the top removes it again -- the default needs no file

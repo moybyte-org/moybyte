@@ -7,10 +7,11 @@
 //                        -> {"ok": n, "reads": {"2": 1}, "err": [[i, why], ...]}
 //
 // THE ALLOWLIST IS THE SECURITY MODEL: the pins a kid may drive are the board's
-// table (MOY_NET_GPIO_PINS in its mpconfigboard.h, whose comment says what each
-// excluded pin would break), and a pin outside it is refused and never
-// touched. A bad op is skipped and reported; it never aborts the batch, whose
-// neighbours may be the write that turns a motor off. An empty batch is the
+// `gpio` lease row in its board.toml, which the build emits as
+// MOY_LEASE_GPIO_PINS (the Zero's mpconfigboard.h says what each excluded pin
+// would break), and a pin outside it is refused and never touched. A bad op
+// is skipped and reported; it never aborts the batch, whose neighbours may be
+// the write that turns a motor off. An empty batch is the
 // page's probe and answers with the allowlist. Both methods are sealed routes
 // of the webhost (moy_webhost.c's header): what reaches here is a signed-in
 // page's.
@@ -32,19 +33,25 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "moy_sb.h"
 #include "moy_json.h"
 #include "moy_net.h"
+#pragma weak moy_gpio_pins
+#pragma weak moy_gpio_drive
+#pragma weak moy_gpio_sense
+#pragma weak moy_gpio_reset
 
 #define GPIO_V 1
 #define ERR_MAX 8
 
 // The lease table's calls (moy_lease.h), weak: an image without the kernel
 // leases nothing.
-int moy_lease_take(uint32_t owner, uint8_t cls, uint8_t unit, uint64_t pins,
-                   uint8_t flags, uint32_t *h) __attribute__((weak));
-uint32_t moy_lease_of_pin(int pin) __attribute__((weak));
-uint32_t moy_lease_sweep(uint32_t owner) __attribute__((weak));
-uint32_t moy_log_spawn(const char *name) __attribute__((weak));
+#include "moy_lease.h"
+#pragma weak moy_lease_take
+#pragma weak moy_lease_of_pin
+#pragma weak moy_lease_sweep
+#include "moy_log.h"
+#pragma weak moy_log_spawn
 #define LEASE_OK 0
 #define LEASE_BAD 4
 #define LEASE_GPIO 1
@@ -107,27 +114,22 @@ void moy_gpio_release(void) {
     }
 }
 
-typedef struct {
-    char *p;
-    size_t n, cap;
-} buf_t;
+static void put(moy_sb_t *b, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 
-static void put(buf_t *b, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
-
-static void put(buf_t *b, const char *fmt, ...) {
-    if (b->n >= b->cap) {
-        return;
-    }
+// One printf piece onto the answer, which stays NUL-terminated.
+static void put(moy_sb_t *b, const char *fmt, ...) {
+    char t[160];
     va_list ap;
     va_start(ap, fmt);
-    int k = vsnprintf(b->p + b->n, b->cap - b->n, fmt, ap);
+    int k = vsnprintf(t, sizeof(t), fmt, ap);
     va_end(ap);
     if (k > 0) {
-        b->n += (size_t)k < b->cap - b->n ? (size_t)k : b->cap - b->n - 1u;
+        moy_sb_put(b, t, (size_t)k < sizeof(t) ? (size_t)k : sizeof(t) - 1u);
     }
+    moy_sb_end(b);
 }
 
-static void pin_list(buf_t *b, const uint8_t *pins, int count) {
+static void pin_list(moy_sb_t *b, const uint8_t *pins, int count) {
     put(b, "[");
     for (int i = 0; i < count; i++) {
         put(b, "%s%u", i ? ", " : "", (unsigned)pins[i]);
@@ -186,8 +188,8 @@ int moy_gpio_request(int post, const char *target, size_t tn, const char *body,
                      size_t bn, char *out, size_t cap) {
     const uint8_t *pins = NULL;
     int count = moy_gpio_pins != NULL ? moy_gpio_pins(&pins) : 0;
-    buf_t b = {out, 0, cap};
-    out[0] = '\0';
+    moy_sb_t b = moy_sb_fixed(out, cap);
+    moy_sb_end(&b);
     (void)target;
     (void)tn;
     if (!post) {

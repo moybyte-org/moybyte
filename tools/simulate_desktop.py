@@ -14,7 +14,9 @@ gallery. No device needed. Drive it live (pygame) or headlessly via a script.
   #            Enter = run, which is also "open this cart" in the launcher.
   #            BACKSPACE is a plain key. SUPER (Cmd, the Windows key) is the
   #            console's key: the system menu, or the pause menu over a game
-  #            (Quit leaves it). Esc closes a menu, or quits the sim.
+  #            (Quit leaves it). Esc is a board keyboard's: back (a menu
+  #            closes, a game pauses), and in a field the byte 27. The
+  #            window's close quits the sim.
   #   The T-Deck's own keys differ ON PURPOSE (it has no arrows, and its Z/X sit
   #   under the WASD thumb): there it is WASD + L/K. Same buttons, two keyboards.
   #   The code editor is FULL-SCREEN: letters type, the bottom symbol palette
@@ -245,12 +247,7 @@ def run_live(driver, dt, scale):
             elif ev.type == pygame.KEYDOWN and ev.key in media_keys:
                 driver.media_key(media_keys[ev.key])
             elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
-                if driver.takes_escape() or driver.in_code_editor():
-                    driver.escape()       # a menu closes, Settings or an app steps back
-                elif driver.in_text_mode():
-                    driver.type_char(0x1B)   # a cart taking text owns its Esc
-                else:
-                    running = False       # with no menu open, Esc quits the simulator
+                driver.escape()           # as a board's keyboard sends it
             elif ev.type == pygame.MOUSEWHEEL:
                 # notches, positive right and down (SDL's y is positive up)
                 driver.wheel(ev.x, -ev.y, mods_now())
@@ -298,9 +295,9 @@ def _force_autoplay_on_open(ws):
 
     def _open(cart=None):
         _orig_open(cart)
-        if ws.cart and isinstance(ws.config, dict) and "autoplay" in ws.config:
-            ws.config["autoplay"] = 1
-            ws._start()
+        if ws.cart and isinstance(ws.run.project.config, dict) and "autoplay" in ws.run.project.config:
+            ws.run.project.config["autoplay"] = 1
+            ws.start()
 
     ws.open = _open
 

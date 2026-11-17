@@ -13,30 +13,19 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "moy_sb.h"
 #include "moy_sh_fmt.h"
 
-typedef struct {
-    char *buf;
-    size_t cap, n;
-} sink_t;
-
-static void put(sink_t *k, char c) {
-    if (k->n + 1 < k->cap) {
-        k->buf[k->n] = c;
-    }
-    k->n++;
-}
-
-static void pad(sink_t *k, char c, int n) {
+static void pad(moy_sb_t *k, char c, int n) {
     while (n-- > 0) {
-        put(k, c);
+        moy_sb_byte(k, c);
     }
 }
 
 enum { F_MINUS = 1, F_PLUS = 2, F_SPACE = 4, F_HASH = 8, F_ZERO = 16 };
 
 // One integer conversion: `v` its magnitude, `neg` its sign.
-static void integer(sink_t *k, uintmax_t v, int neg, char conv, int flags, int width,
+static void integer(moy_sb_t *k, uintmax_t v, int neg, char conv, int flags, int width,
                     int prec) {
     char digits[72];
     int nd = 0;
@@ -73,11 +62,11 @@ static void integer(sink_t *k, uintmax_t v, int neg, char conv, int flags, int w
         pad(k, ' ', fill);
     }
     for (const char *p = prefix; *p; p++) {
-        put(k, *p);
+        moy_sb_byte(k, *p);
     }
     pad(k, '0', zeros);
     while (nd > 0) {
-        put(k, digits[--nd]);
+        moy_sb_byte(k, digits[--nd]);
     }
     if (flags & F_MINUS) {
         pad(k, ' ', fill);
@@ -85,10 +74,10 @@ static void integer(sink_t *k, uintmax_t v, int neg, char conv, int flags, int w
 }
 
 int moy_sh_vsnprintf(char *buf, size_t cap, const char *fmt, va_list ap) {
-    sink_t k = { buf, cap, 0 };
+    moy_sb_t k = moy_sb_fixed(buf, cap);
     for (const char *f = fmt; *f; f++) {
         if (*f != '%') {
-            put(&k, *f);
+            moy_sb_byte(&k, *f);
             continue;
         }
         const char *spec = f++;
@@ -179,7 +168,7 @@ int moy_sh_vsnprintf(char *buf, size_t cap, const char *fmt, va_list ap) {
                 pad(&k, ' ', fill);
             }
             for (size_t i = 0; i < n; i++) {
-                put(&k, s[i]);
+                moy_sb_byte(&k, s[i]);
             }
             if (flags & F_MINUS) {
                 pad(&k, ' ', fill);
@@ -195,20 +184,18 @@ int moy_sh_vsnprintf(char *buf, size_t cap, const char *fmt, va_list ap) {
             double d = va_arg(ap, double);
             int w = snprintf(out, sizeof out, one, d);
             for (int i = 0; i < w && i < (int)sizeof out - 1; i++) {
-                put(&k, out[i]);
+                moy_sb_byte(&k, out[i]);
             }
         } else {
             for (const char *p = spec; p <= f && *p; p++) {
-                put(&k, *p);
+                moy_sb_byte(&k, *p);
             }
             if (!*f) {
                 break;
             }
         }
     }
-    if (cap > 0) {
-        buf[k.n < cap ? k.n : cap - 1] = 0;
-    }
+    moy_sb_end(&k);
     return (int)k.n;
 }
 

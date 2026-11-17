@@ -1,4 +1,4 @@
-"""The packages (docs/os_2026-11/system.md §6, runtime/carts/pkg.py): the
+"""The packages (docs/os_2026-11/system.md §6, runtime/shell/pkg.py): the
 index's signature and `depends`, `system/sources`, the checks Get Carts
 shares with the shell's `pkg` (the chip, the engine's fit and THE SHARES',
 the command-name refusal), the verbs over an in-memory repository, and the
@@ -38,7 +38,7 @@ def _sign(data, d=TEST_D):
 @pytest.fixture
 def keys(monkeypatch):
     from runtime import net_binding
-    net_binding.install()
+    monkeypatch.setitem(sys.modules, "moy_net", net_binding)
     monkeypatch.setattr(ci, "INDEX_KEYS", TEST_KEYS)
 
 
@@ -196,6 +196,9 @@ class Inst:
         return None
 
     def keep(self):
+        return None
+
+    def own(self):
         return None
 
     def consent(self):
@@ -645,7 +648,7 @@ class IO:
 
 
 def done(verb):
-    """A verb (a generator: runtime/carts/pkg.py) stepped to its end."""
+    """A verb (a generator: runtime/shell/pkg.py) stepped to its end."""
     try:
         while True:
             next(verb)

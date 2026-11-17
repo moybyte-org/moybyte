@@ -107,10 +107,10 @@ def test_a_service_posts_and_the_banner_goes_up_over_the_game(tmp_path):
     assert n.summary == "Ana" and n.body == "are you coming?" and n.icon == N.ICON
     assert n.actions == (("reply", "Reply"),)
     drv.frame(_DT)
-    assert ws._note_layer in ws.wm._cache_overlay
+    assert ws.note_layer in ws.wm._cache_overlay
     r = ws._note_rect
     assert r is not None and r[1] < ws.sys_canvas.h // 3, "drawn at the top"
-    assert not ws.run.player.paused and ws.screen == "desktop"
+    assert not ws.run.player.pace.paused and ws.screen == "desktop"
 
 
 def test_without_the_permission_nothing_is_posted(tmp_path):
@@ -165,9 +165,9 @@ def test_dismissing_keeps_the_game_playing(tmp_path):
     for _ in range(3):
         drv.frame(_DT)
     assert N.NOTES.up() is None and [n.id for n in N.NOTES.list] == [nid]
-    assert ws.run.player is pl and ws.screen == "desktop" and not pl.paused
+    assert ws.run.player is pl and ws.screen == "desktop" and not pl.pace.paused
     assert ws.procs.list == []
-    assert ws._note_layer not in ws.wm._cache_overlay
+    assert ws.note_layer not in ws.wm._cache_overlay
 
 
 def test_a_drag_up_on_the_banner_dismisses_it(tmp_path):
@@ -178,12 +178,12 @@ def test_a_drag_up_on_the_banner_dismisses_it(tmp_path):
     drv.frame(_DT)
     x, y, w, h = ws._note_rect
     ws.pointer.down = True
-    assert ws._note_pointer(x + w // 2, y + h - 2, False)
-    assert ws._note_pointer(x + w // 2, y + 2, False)
+    assert ws.notices._note_pointer(x + w // 2, y + h - 2, False)
+    assert ws.notices._note_pointer(x + w // 2, y + 2, False)
     ws.pointer.down = False
-    assert ws._note_pointer(x + w // 2, y - 20, True)
+    assert ws.notices._note_pointer(x + w // 2, y - 20, True)
     assert N.NOTES.up() is None and len(N.NOTES.list) == 1
-    assert ws.screen == "desktop" and not ws.run.player.paused
+    assert ws.screen == "desktop" and not ws.run.player.pace.paused
 
 
 # -- acting -----------------------------------------------------------------------
@@ -195,7 +195,7 @@ def _mesh_minimised(ws, drv):
     drv.frame(_DT)
     mesh = ws.run.player
     assert ws.procs.detach()
-    ws.go_home()
+    ws.home.go_home()
     open_cart(ws, "Star Catcher")
     for _ in range(3):
         drv.frame(_DT)
@@ -212,13 +212,13 @@ def test_acting_on_the_handheld_minimises_the_game_and_focuses_the_app(tmp_path)
     assert nid is not None and N.NOTES.up().app == "Mesh"
     drv.frame(_DT)
     x, y, w, h = ws._note_rect
-    assert ws._note_pointer(x + w // 2, y + h // 2, True)        # a tap on it
+    assert ws.notices._note_pointer(x + w // 2, y + h // 2, True)        # a tap on it
     drv.frame(_DT)
     assert ws.run.player is mesh and ws.cart["title"] == "Mesh"
     assert mesh.ns["acted"] == [(nid, "default")]
     assert [p.title() for p in ws.procs.list] == ["Star Catcher"]
     p = ws.procs.list[0]
-    assert p.player is game and p.state == "minimised" and game.paused
+    assert p.player is game and p.state == "minimised" and game.pace.paused
     assert N.NOTES.list == [] and N.NOTES.up() is None
 
 
@@ -227,14 +227,14 @@ def test_acting_on_the_desk_throttles_the_game(tmp_path):
     _poster_cart(carts, type="game")
     ws = no_unlock_banner(build_desktop_ws(tmp_path))
     drv = make_drv(ws)
-    ws.open_desk()
+    ws.home.open_desk()
     drv.frame(_DT)
     for t in ("Mesh", "Star Catcher"):
         open_cart(ws, t)
         drv.frame(_DT)
-        win = ws.wm._wins["desktop"]
+        win = ws.wm.windows["desktop"]
         if win.saved is not None:
-            ws.wm._toggle_max(win)
+            ws.wm.toggle_max(win)
         drv.frame(_DT)
     assert ws.cart["title"] == "Star Catcher"
     mesh = ws.procs.list[0].player
@@ -245,7 +245,7 @@ def test_acting_on_the_desk_throttles_the_game(tmp_path):
     drv.frame(_DT)
     assert ws.run.player is mesh and mesh.ns["acted"] == [(nid, "default")]
     p = ws.procs.list[0]
-    assert p.player is game and p.state == "throttled" and not game.paused
+    assert p.player is game and p.state == "throttled" and not game.pace.paused
 
 
 def test_a_services_notification_is_acted_on_in_the_service(tmp_path):
@@ -256,7 +256,7 @@ def test_a_services_notification_is_acted_on_in_the_service(tmp_path):
     nid = _post_as(pid, "Ana", actions=("default", "Open", "reply", "Reply"))
     assert N.NOTES.act(nid, "reply")
     assert S.SCHED.procs[pid].ns["heard"] == [(nid, "reply")]
-    assert ws.screen == "desktop" and not ws.run.player.paused
+    assert ws.screen == "desktop" and not ws.run.player.pace.paused
 
 
 # -- the task manager ---------------------------------------------------------------

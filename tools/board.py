@@ -9,7 +9,7 @@
 #   -- the ports                      cmd_ports
 #   -- reset, flash, wait             wait_for_desk, esptool_reset, cmd_reboot, cmd_flash
 #   -- the C6 radio's firmware        c6_image, c6_stream, cmd_c6
-#   -- the command line               parser, main (`pass` goes to tools/board_pass.py)
+#   -- the command line               parser, main (`pass`: tools/board_pass.py; `perf-baseline`: tools/perf_pass.py)
 """Drive an attached board by name: the on-glass loop, one command per step.
 
     tools/board.py ports                        which port is which board, who holds it
@@ -22,6 +22,8 @@
     tools/board.py tdeck perf "Brick Siege"     median drawn fps; --diag adds phase ms
     tools/board.py tdeck push ports/x.moy       copy a cart folder to the store, rescan;
                                                 a compiled cart gets its chip's module
+    tools/board.py tdeck addon                  install the browser console add-on
+                                                that fits the board's built image
     tools/board.py tdeck remove x.moy           take it off the store as the console
                                                 removes a cart (push's counterpart)
     tools/board.py tdeck shot /tmp/tdeck.png    the glass as a PNG (--source game: the cart)
@@ -36,9 +38,16 @@
     tools/board.py tdeck wait                   until the desk answers
     tools/board.py guition_p4 c6 URL            flash the C6 radio's slave image
                                                 over ESP-Hosted, reboot onto it
-    tools/board.py pass tdeck p4 [-k EXPR]      build, flash, suite, one table
+    tools/board.py pass tdeck p4 [-k EXPR]      build, flash, suite, perf, one table
                                                 (tools/board_pass.py; --all,
-                                                --skip-build, --no-flash, --shot)
+                                                --skip-build, --no-flash, --shot,
+                                                --no-perf)
+    tools/board.py perf-baseline tdeck --image COMMIT  the pass's perf stage
+                                                alone, on the image a just-booted
+                                                board has (built from COMMIT):
+                                                recorded `fresh` and set beside
+                                                the last fresh run
+                                                (tools/perf_pass.py)
 
 The board is its `[board] ota` id (p4, tdeck, guition_s3, guition_p4,
 xiao_zero), the same name `--board` takes everywhere else. Everything goes
@@ -448,11 +457,11 @@ def cmd_desk(b, a):
         st = b.state()
     stack = st.get("stack") or []
     if stack and stack[-1] not in ("launcher", "desk"):
-        b.pyval("ws.go_home() or 1", timeout=20)
+        b.pyval("ws.home.go_home() or 1", timeout=20)
         b.drain(0.5)
         st = b.state()
     if st.get("desk") is False:
-        b.pyexec("ws.open_desk()")
+        b.pyexec("ws.home.open_desk()")
         b.drain(0.5)
         st = b.state()
     print("stack=%s desk=%s order=%s"
@@ -465,8 +474,8 @@ def cmd_perf(b, a):
     st = need_desk(b, a.board)
     diag_was = bool(st.get("diag"))
     # `state`'s uncap is the RUNNING cart's; the switch the next run takes is
-    # `ws._uncap`, which is what `uncap` sets.
-    uncap_was = bool(b.pyval("getattr(ws, '_uncap', False)", timeout=10))
+    # `ws.uncap`, which is what `uncap` sets.
+    uncap_was = bool(b.pyval("getattr(ws, 'uncap', False)", timeout=10))
     held = st.get("wifi_held") or []
     status = 0
     try:
@@ -505,8 +514,8 @@ def cmd_perf(b, a):
     return status
 
 
-PMEM = ("(lambda p: (getattr(getattr(p, '_lua', None), 'flush_pmem', "
-        "lambda: 0)(), list(ws.pmem.cells) if getattr(ws, 'pmem', None) "
+PMEM = ("(lambda p: (getattr(getattr(p, 'lua', None), 'flush_pmem', "
+        "lambda: 0)(), list(ws.run.project.pmem.cells) if getattr(ws.run.project, 'pmem', None) "
         "is not None else None)[1])(getattr(ws.run, 'player', None))")
 
 
@@ -974,7 +983,7 @@ def c6_stream(b, url, size, sha):
     if not b.pyval("getattr(ws, 'c6_updater', None) is not None", timeout=10):
         raise BoardError("this board has no C6 updater")
     cu = "ws.c6_updater"
-    b.pyexec("ws.wifi_hold('update')\n"
+    b.pyexec("ws.spine.wifi_hold('update')\n"
              "__import__('device_wifi').autoconnect_wifi(ws.wifi)", timeout=30)
     try:
         end = time.time() + C6_LINK_S
@@ -1012,7 +1021,7 @@ def c6_stream(b, url, size, sha):
             return "swapped"
         raise BoardError("the radio did not take it: %s" % err)
     finally:
-        b.pyexec("ws.wifi_release('update')", timeout=30)
+        b.pyexec("ws.spine.wifi_release('update')", timeout=30)
 
 
 def cmd_c6(name, dirs, a):
@@ -1062,9 +1071,11 @@ def parser(dirs):
     ap = argparse.ArgumentParser(
         description=__doc__.split("\n")[0],
         epilog="`tools/board.py BOARD VERB -h` for a verb's options.")
-    ap.add_argument("board", choices=sorted(dirs) + ["ports", "pass"],
-                    help="the board's [board] ota id, `ports`, or `pass "
-                         "BOARD...` (`tools/board.py pass -h`)")
+    ap.add_argument("board", choices=sorted(dirs) + ["ports", "pass",
+                                                     "perf-baseline"],
+                    help="the board's [board] ota id, `ports`, `pass "
+                         "BOARD...` (`tools/board.py pass -h`) or "
+                         "`perf-baseline BOARD`")
     _common(ap, lambda v: v)
     ap.add_argument("--probe", action="store_true",
                     help="(ports) ask each unclaimed port who it is, once")
@@ -1124,6 +1135,9 @@ def parser(dirs):
                             "consent and keys); push's counterpart")
     p.add_argument("folders", nargs="+", metavar="FOLDER",
                    help="a name in the carts folder (elf_hello.moy)")
+    p = verb("addon", help="push the browser console add-on cart that fits "
+                           "this board's built image (its dist/ pack), as "
+                           "Get Carts would install it")
     p = verb("refresh-wasm", help="rebuild the stale compiled-cart modules "
                                   "this BOARD'S STORE actually has "
                                   "(tools/refresh_wasm.py) -- what a "
@@ -1178,6 +1192,9 @@ def main(argv=None):
     if argv[:1] == ["pass"]:
         import board_pass
         return board_pass.main(argv[1:])
+    if argv[:1] == ["perf-baseline"]:
+        import perf_pass
+        return perf_pass.main(argv[1:])
     dirs = boards()
     a = parser(dirs).parse_args(argv)
     try:
@@ -1199,6 +1216,17 @@ def main(argv=None):
             if a.no_rescan:
                 argv2.append("--no-rescan")
             return push_cart.main(argv2)
+        if a.verb == "addon":
+            port = a.port or resolve(a.board, dirs)[0]
+            if not a.force:
+                refuse_if_held(port)
+            import push_cart
+            import tempfile
+            with tempfile.TemporaryDirectory() as tmp:
+                import board_flash
+                folder = board_flash.addon_folder(dirs[a.board], tmp)
+                print("pushing %s" % os.path.basename(folder))
+                return push_cart.main([folder, "--board", a.board, "--port", port])
         if a.verb == "refresh-wasm":
             port = a.port or resolve(a.board, dirs)[0]
             if not a.force:

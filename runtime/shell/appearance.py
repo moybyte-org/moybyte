@@ -71,7 +71,7 @@ re-derivation -- eight layout heads, every registered app, the WM hook. It is
 kernel policy that a dozen things besides a font change would call, so
 `set_font_scale` reaches back for it rather than owning it.
 
-`_bar_img_cache` stays kernel too: it backs `ws._bar_image` / `ws._icon`, which
+`_bar_img_cache` stays kernel too: it backs `ws.bar_image` / `ws.icon`, which
 are the shared DRAW TOOLKIT (doc 4 keeps that on the kernel by decision), and
 bar_layer's own header already says so. `set_icon_sheet` clears it, the one
 kernel field this object writes besides the tokens.
@@ -89,56 +89,24 @@ read, before the layer stack exists -- so `carts_store`, `carts_root`,
 at the moment of use and never captured here.
 """
 
-try:
-    from moy_store_base import BUILTIN_NS
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import BUILTIN_NS
-
-try:
-    from chrome import (_default_icon_sheet, _err_text,
-                        DEFAULT_THEME, DEFAULT_VARIANT, forget_themes,
-                        theme_known, THEME_NAMES,
-                        THEME_VARIANTS, text_scale_floor, adopt_packages,
-                        package, theme_names, forget_package, live_colors,
-                        backdrop as _backdrop)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.chrome import (_default_icon_sheet, _err_text,
-                                DEFAULT_THEME, DEFAULT_VARIANT, forget_themes,
-                                theme_known,
-                                THEME_NAMES, THEME_VARIANTS, text_scale_floor,
-                                adopt_packages, package, theme_names,
-                                forget_package, live_colors,
-                                backdrop as _backdrop)
-try:
-    from theme_custom import (Custom, CUSTOM, DROP, MANIFEST, PETME128,
-                              PICTURE_FILE, derived_of, font_files, keys_of,
-                              manifest, minified, name_ok, named, overlay,
-                              read_look, sheet_files, wall_keys)
-    from moy_store_base import cart_path
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.theme_custom import (Custom, CUSTOM, DROP, MANIFEST,
-                                      PETME128, PICTURE_FILE, derived_of, font_files,
-                                      keys_of, manifest, minified, name_ok,
-                                      named, overlay, read_look, sheet_files,
-                                      wall_keys)
-    from runtime.moy_store_base import cart_path
+from moy_store_base import BUILTIN_NS
+from chrome import (_default_icon_sheet, _err_text,
+                    DEFAULT_THEME, DEFAULT_VARIANT, forget_themes,
+                    theme_known, THEME_NAMES,
+                    THEME_VARIANTS, text_scale_floor, adopt_packages,
+                    package, theme_names, forget_package, live_colors,
+                    backdrop as _backdrop)
+from theme_custom import (Custom, CUSTOM, DROP, MANIFEST, PETME128,
+                          PICTURE_FILE, derived_of, font_files, keys_of,
+                          manifest, minified, name_ok, named, overlay,
+                          read_look, sheet_files, wall_keys)
+from moy_store_base import cart_path
 from binascii import crc32 as _crc32
-try:
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui_draw as _ui_draw
-try:
-    import fontset as _fontset
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import fontset as _fontset
-try:
-    import shell_layout as _shell_layout
-    import layout_base as _layout_base
-    import iconsets as _iconsets
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import shell_layout as _shell_layout
-    from runtime import layout_base as _layout_base
-    from runtime import iconsets as _iconsets
+import ui_draw as _ui_draw
+import fontset as _fontset
+import shell_layout as _shell_layout
+import layout_base as _layout_base
+import iconsets as _iconsets
 _ui_is_light = _ui_draw.is_light
 
 def _ui_text_w(t):
@@ -232,10 +200,7 @@ _FULL = [False]         # a load found the slots full and reset them
 
 def _keep_splash(th):
     """The next boot's first light on theme roles `th` (console.keep_splash)."""
-    try:
-        from console import keep_splash
-    except ImportError:  # pragma: no cover - host package lane
-        from runtime.console import keep_splash
+    from console import keep_splash
     return keep_splash(th)
 
 
@@ -566,7 +531,7 @@ class Appearance:
                 ws.wallpaper.compile(cart)   # compile into the backdrop component (#28)
                 if cart is not ws.run.fat_cart:
                     ws.carts.reslim(cart)
-        ws._dirty = True
+        ws.mark_dirty()
 
     # -- custom: a change to the theme (docs/history/theming_2026-09.md §9 phase 6
     #    step 5, §4.10) -----------------------------------------------------
@@ -900,7 +865,7 @@ class Appearance:
 
     def edit_file(self):
         """Appearance's Edit theme…: the active theme opened in the Editor's
-        theme mode (`Workstation.edit_theme`). On a seed or an installed
+        theme mode (`Text.edit_theme`). On a seed or an installed
         package `custom` is made from it first and switched to (a seed is
         firmware); on `custom` its unwritten change is written first, so the
         file opened is the look shown. The mode's saves come back through
@@ -922,7 +887,7 @@ class Appearance:
         store = getattr(ws, "store", None)
         if store is None or not store.writable() or not self.commit():
             return False
-        return bool(ws.edit_theme(made))
+        return bool(ws.text.edit_theme(made))
 
     def file_text(self):
         """custom's theme.json as the look holds it, unwritten change and
@@ -1239,7 +1204,7 @@ class Appearance:
         ws.launcher.theme = ws.theme_colors
         if getattr(ws, "projects_grid", None) is not None:
             ws.projects_grid.theme = ws.theme_colors
-        ws._dirty = True
+        ws.mark_dirty()
         self._apply_wallpaper()
 
     # -- the icon sheets ---------------------------------------------------------
@@ -1250,11 +1215,11 @@ class Appearance:
         its sprites (and, on the device, their RGB565 copies). None reverts the
         bar to the _glyph fallback."""
         self.icon_sheet = sheet
-        # The kernel's cache, cleared from here: it backs ws._bar_image/_icon, the
+        # The kernel's cache, cleared from here: it backs ws.bar_image/_icon, the
         # shared draw toolkit, and a stale entry would keep blitting old pixels.
-        self.ws._bar_img_cache = {}
+        self.ws.bar_img_cache = {}
         self.publish()
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def load_icon_sheet(self):
         """Bake the shell's IconSheet from `chrome._ICON_ART` (Stage 1): what the
@@ -1307,11 +1272,11 @@ class Appearance:
         self._pixel_imgs = {}
         self._pixel_gen = -1
         ws = self.ws
-        ws._bar_img_cache = {}
+        ws.bar_img_cache = {}
         bl = getattr(ws, "bar_layer", None)
         if bl is not None:
             bl.invalidate()
-        ws._dirty = True
+        ws.mark_dirty()
 
     def save_icons(self):
         """The Editor's theme mode's hard commit (an exit, a window's X, going
@@ -1330,7 +1295,7 @@ class Appearance:
         render scaled text); in the degradation case (the T-Deck / a shared 320x240
         canvas, whose framebuf text can't scale) it is 1, so the chrome geometry
         always matches the 8px text actually drawn -- no mis-laid-out desktop."""
-        if self.ws._sys_canvas is None:
+        if self.ws.bound_sys_canvas is None:
             return 1
         return self.font_scale if self.font_scale > self.text_floor else self.text_floor
 
@@ -1378,7 +1343,7 @@ class Appearance:
         default) persist it. Text is untouched: the system canvas keeps its font
         scale."""
         self.chrome_scale = self.valid_chrome_scale(scale)
-        self.ws._relayout()
+        self.ws.relayout()
         if persist:
             self.ws.system.set("chrome_scale", self.chrome_scale)
 
@@ -1400,14 +1365,14 @@ class Appearance:
             target.set_font_scale(self.effective_font_scale())
         # The responsive re-derivation stays KERNEL: eight layout heads, every
         # registered app and the WM's re-anchor hook, none of it about the look.
-        self.ws._relayout()
+        self.ws.relayout()
         if persist:
             self._persist_font_scale()
 
     def _font_scale_canvas(self):
         """The system canvas that OWNS the shell's font scale.
 
-        NOT simply `ws._sys_canvas`: on the windowed tier that attribute is
+        NOT simply `ws.bound_sys_canvas`: on the windowed tier that attribute is
         whatever WINDOW BUFFER is installed while a window's content draws or
         handles input -- and changing the font size from Settings is exactly
         that. The new scale then landed on a buffer that on_relayout immediately
@@ -1424,11 +1389,11 @@ class Appearance:
         sets the root's when the content's draw is done."""
         ws = self.ws
         wm = getattr(ws, "wm", None)
-        root = getattr(wm, "_root_canvas", None) if wm is not None else None
-        if root is not None and getattr(wm, "_direct_root", False):
-            wm._scale_owed = True
+        root = getattr(wm, "root_canvas", None) if wm is not None else None
+        if root is not None and getattr(wm, "direct_root", False):
+            wm.scale_owed = True
             return None
-        return root if root is not None else ws._sys_canvas
+        return root if root is not None else ws.bound_sys_canvas
 
     def cycle_font_scale(self, d):
         """Step the font scale by d through FONT_SCALES (Settings < / > stepper);
@@ -1477,8 +1442,8 @@ class Appearance:
             target = self._font_scale_canvas()
             if target is not None:
                 target.set_font_scale(self.effective_font_scale())
-            ws._relayout()
-        ws._dirty = True
+            ws.relayout()
+        ws.mark_dirty()
         if persist:
             ws.system.set("theme", self.theme_name, persist=False)
             ws.system.set("theme_variant", self.theme_variant)
@@ -1488,7 +1453,7 @@ class Appearance:
         ws.set_render_scale(self.live.look[0].get("render.scale", 1))
         if not self.apply_layout() and self._bars_moved \
                 and getattr(ws, "layout", None) is not None:
-            ws._relayout()
+            ws.relayout()
         self._bars_moved = False
         self._apply_wallpaper()
 
@@ -1679,7 +1644,7 @@ class Appearance:
         if name in self._refused:
             return
         self._refused.add(name)
-        notice = getattr(self.ws, "notice", None)
+        notice = getattr(getattr(self.ws, "notices", None), "notice", None)
         if notice is not None:
             notice(_ui_draw.s("notice.theme_refused") % name,
                    _ui_draw.s("theme.why_" + _THEME_WHY[min(max(rc, 1), 7) - 1]), "warn")
@@ -1730,7 +1695,7 @@ class Appearance:
         wm = ws.wm
         refused, bars, _home = self._theme_layout(self.layout_theme() or self.theme_name)
         notes = ("the theme's layout was refused",) if refused else ()
-        root = getattr(wm, "_root_canvas", None) or ws.sys_canvas
+        root = getattr(wm, "root_canvas", None) or ws.sys_canvas
         return _shell_layout.resolve(
             bars, self._theme_layout(DEFAULT_THEME)[1], root.w, root.h,
             self.effective_chrome_scale(), wm.layout_catalogue(), wm.LAYOUT_EDGES,
@@ -1749,10 +1714,10 @@ class Appearance:
         home = self._theme_layout(self.layout_theme() or self.theme_name)[2]
         if home != self.home:
             self.home = home
-            ws.set_home_arrangement(home)
+            ws.home.set_home_arrangement(home)
         if bars != self.bars:
             self.bars = bars
-            ws._dirty = True
+            ws.mark_dirty()
         if bars != _layout_base.bars_in_force():
             ws.place_bars(bars)
             return True

@@ -21,20 +21,8 @@ try:
 except ImportError:  # pragma: no cover - a port with only uio
     import uio as _io
 
-try:
-    import moybuf as _moybuf
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import moybuf as _moybuf
-
-try:
-    from moyimg import cover_stream as _cover_stream
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moyimg import cover_stream as _cover_stream
-
-try:
-    import story_doc as _doc
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import story_doc as _doc
+import moybuf as _moybuf
+import story_doc as _doc
 
 SW, SH = _doc.SW, _doc.SH
 FACE = {"sans": 0, "sans_bold": 1, "mono": 2}
@@ -153,16 +141,13 @@ def _blob_size(blob):
 
 def read_indices(blob, dw, dh, out):
     """The picture `blob` (moyimg-v1 text) at dw x dh into `out` (dw * dh
-    MOY64 indices), read a row at a time (moy_ufiles.cover_image, else its
-    reference moyimg.cover_stream). Whether it read."""
+    MOY64 indices), read a row at a time (moy_ufiles.cover_image). Whether it
+    read."""
     data = blob.encode() if isinstance(blob, str) else blob
     try:
-        try:
-            import moy_ufiles
-            got = moy_ufiles.cover_image(_io.BytesIO(data), out, dw, dh, _doc.IMAGE_W,
-                                         _doc.IMAGE_H)
-        except ImportError:
-            got = _cover_stream(_io.BytesIO(data), out, dw, dh, _doc.IMAGE_W, _doc.IMAGE_H)
+        import moy_ufiles
+        got = moy_ufiles.cover_image(_io.BytesIO(data), out, dw, dh, _doc.IMAGE_W,
+                                     _doc.IMAGE_H)
     except ValueError:
         got = None
     return got is not None

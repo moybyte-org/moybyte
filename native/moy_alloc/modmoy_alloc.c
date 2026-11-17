@@ -9,6 +9,8 @@
 // must not be walked by every gc mark phase; runtime/toolkit/moybuf.py is the Python
 // discipline over it. See the moy_buf block below for what the registry buys.
 
+#include "moy_alloc.h"
+
 #include "py/obj.h"
 #include "py/runtime.h"
 #include "py/objarray.h"

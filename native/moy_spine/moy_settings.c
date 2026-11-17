@@ -4,14 +4,11 @@
 // that grows by doubling. Lookup is a linear scan: system/settings has dozens of
 // keys, and the scan touches the lengths first.
 
-// The lock's clock and recursive mutex are POSIX's, which a strict C99
-// build on Linux leaves out unless asked.
-#if defined(__linux__) && !defined(_GNU_SOURCE) && !defined(_XOPEN_SOURCE)
-#define _XOPEN_SOURCE 700
-#endif
+#include "moy_platform.h"
 
 #include <string.h>
 
+#include "moy_sb.h"
 #include "moy_json.h"
 #include "moy_settings.h"
 
@@ -36,57 +33,15 @@ struct moy_settings {
 
 // -- the lock (moy_settings.h, THE SETTINGS LOCK) -----------------------------
 
-#if defined(__has_include) && __has_include("esp_heap_caps.h")
-#include "freertos/FreeRTOS.h"
-#include "freertos/semphr.h"
-
-static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
-static StaticSemaphore_t s_mu_buf;
-static SemaphoreHandle_t s_mu;
+static moy_mutex_t s_mu = MOY_RMUTEX_INIT;
 
 void moy_settings_lock(void) {
-    if (s_mu == NULL) {
-        portENTER_CRITICAL(&s_mux);
-        if (s_mu == NULL) {
-            s_mu = xSemaphoreCreateRecursiveMutexStatic(&s_mu_buf);
-        }
-        portEXIT_CRITICAL(&s_mux);
-    }
-    xSemaphoreTakeRecursive(s_mu, portMAX_DELAY);
+    moy_mutex_lock(&s_mu);
 }
 
 void moy_settings_unlock(void) {
-    xSemaphoreGiveRecursive(s_mu);
+    moy_mutex_unlock(&s_mu);
 }
-#elif !defined(__EMSCRIPTEN__) || defined(__EMSCRIPTEN_PTHREADS__)
-#include <pthread.h>
-
-static pthread_mutex_t s_mu;
-static pthread_once_t s_once = PTHREAD_ONCE_INIT;
-
-static void mu_init(void) {
-    pthread_mutexattr_t at;
-    pthread_mutexattr_init(&at);
-    pthread_mutexattr_settype(&at, PTHREAD_MUTEX_RECURSIVE);
-    pthread_mutex_init(&s_mu, &at);
-    pthread_mutexattr_destroy(&at);
-}
-
-void moy_settings_lock(void) {
-    pthread_once(&s_once, mu_init);
-    pthread_mutex_lock(&s_mu);
-}
-
-void moy_settings_unlock(void) {
-    pthread_mutex_unlock(&s_mu);
-}
-#else
-void moy_settings_lock(void) {
-}
-
-void moy_settings_unlock(void) {
-}
-#endif
 
 // The scanner is moy_json's: a row holds one value, a file one object.
 
@@ -344,22 +299,9 @@ int moy_settings_at(const moy_settings_t *s, uint32_t i, const char **key,
 
 // -- the file ----------------------------------------------------------------
 
-typedef struct {
-    char *out;
-    size_t cap, n;
-} sink_t;
-
-static void put(sink_t *k, const char *p, size_t n) {
-    if (k->n < k->cap) {
-        size_t room = k->cap - k->n;
-        memcpy(k->out + k->n, p, n < room ? n : room);
-    }
-    k->n += n;
-}
-
-static void put_key(sink_t *k, const char *p, size_t n) {
+static void put_key(moy_sb_t *k, const char *p, size_t n) {
     static const char hex[] = "0123456789abcdef";
-    put(k, "\"", 1);
+    moy_sb_put(k, "\"", 1);
     for (size_t i = 0; i < n; i++) {
         unsigned char c = (unsigned char)p[i];
         const char *esc = NULL;
@@ -374,29 +316,29 @@ static void put_key(sink_t *k, const char *p, size_t n) {
             default: break;
         }
         if (esc != NULL) {
-            put(k, esc, 2);
+            moy_sb_put(k, esc, 2);
         } else if (c < 0x20u) {
             char u[6] = { '\\', 'u', '0', '0', hex[c >> 4], hex[c & 15u] };
-            put(k, u, 6);
+            moy_sb_put(k, u, 6);
         } else {
-            put(k, p + i, 1);
+            moy_sb_put(k, p + i, 1);
         }
     }
-    put(k, "\"", 1);
+    moy_sb_put(k, "\"", 1);
 }
 
 size_t moy_settings_dump(const moy_settings_t *s, char *out, size_t cap) {
-    sink_t k = { out, cap, 0u };
-    put(&k, "{", 1);
+    moy_sb_t k = moy_sb_fixed(out, cap);
+    moy_sb_put(&k, "{", 1);
     for (uint32_t i = 0; i < s->count; i++) {
         if (i) {
-            put(&k, ", ", 2);
+            moy_sb_put(&k, ", ", 2);
         }
         put_key(&k, s->rows[i].buf, s->rows[i].key_len);
-        put(&k, ": ", 2);
-        put(&k, s->rows[i].buf + s->rows[i].key_len, s->rows[i].json_len);
+        moy_sb_put(&k, ": ", 2);
+        moy_sb_put(&k, s->rows[i].buf + s->rows[i].key_len, s->rows[i].json_len);
     }
-    put(&k, "}", 1);
+    moy_sb_put(&k, "}", 1);
     return k.n;
 }
 
@@ -485,7 +427,7 @@ static int key_before(const row_t *a, const row_t *b) {
 }
 
 size_t moy_settings_file(const moy_settings_t *s, char *out, size_t cap) {
-    sink_t k = { out, cap, 0u };
+    moy_sb_t k = moy_sb_fixed(out, cap);
     // The rows in key order with no index to allocate: each pass writes the
     // least key after the last one written (a settings file holds dozens).
     const row_t *last = NULL;
@@ -502,13 +444,13 @@ size_t moy_settings_file(const moy_settings_t *s, char *out, size_t cap) {
         }
         last = next;
         if (moy_settings_key_ok(next->buf, next->key_len)) {
-            put(&k, next->buf, next->key_len);
-            put(&k, " = ", 3);
+            moy_sb_put(&k, next->buf, next->key_len);
+            moy_sb_put(&k, " = ", 3);
             const char *v = next->buf + next->key_len;
             for (uint32_t i = 0; i < next->json_len; i++) {
-                put(&k, (v[i] == '\n' || v[i] == '\r') ? " " : v + i, 1);
+                moy_sb_put(&k, (v[i] == '\n' || v[i] == '\r') ? " " : v + i, 1);
             }
-            put(&k, "\n", 1);
+            moy_sb_put(&k, "\n", 1);
         }
     }
 }

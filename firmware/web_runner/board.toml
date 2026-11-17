@@ -172,5 +172,5 @@ moycore_glue -- moycore's glue: the run's buffers and asset texts handed to
 the C, its frame the kernel's Player's, pmem at the #66 boundaries. Board-agnostic by construction (it talks to ws and
 to the module, never to a panel), which is why the browser needs no twin.
 device_canvas -- THE RASTER (moycore stage 4): the browser runs the boards'
-own canvas class over web_canvas.WebCompositor. device_util -- the ticks
+own canvas class over the one-buffer compositor. device_util -- the ticks
 helpers device_canvas imports."""

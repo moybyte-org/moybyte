@@ -39,6 +39,7 @@ from runtime.cart_api import make_api
 from runtime.input import InputState
 from runtime.lua_ext import LAYER_VERBS, PRELUDE_HANDLES
 
+import pixel_goldens
 import test_spec_conformance as spec
 
 pytestmark = pytest.mark.skipif(
@@ -109,10 +110,14 @@ def _lua_frame(scene):
                          [pytest.param(n, g, id=n)
                           for n, _, g in spec._scene_names()])
 def test_the_lua_cart_draws_the_golden_frame_on_the_host(scene, golden):
-    got = hashlib.sha256(_lua_frame(scene)).hexdigest()
+    frame = _lua_frame(scene)
+    got = hashlib.sha256(frame).hexdigest()
+    png = pixel_goldens.check(scene, got, golden,
+                              lambda: pixel_goldens.index_rows(frame, spec.W, spec.H),
+                              spec.W, spec.H)
     assert got == golden, (
-        "%s as a Lua cart on the host:\n  golden %s\n  got    %s"
-        % (scene, golden, got))
+        "%s as a Lua cart on the host:\n  golden %s\n  got    %s%s"
+        % (scene, golden, got, pixel_goldens.message([png])))
 
 
 def test_the_five_layer_scenes_are_in_the_suite():

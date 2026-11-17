@@ -1,7 +1,10 @@
 # Crash-safe file primitives shared by the .moy store (moy_carts) and the
 # undo/redo journal (moy_journal) -- extracted from moy_carts.py so the journal
-# can be its own module without a circular import. MicroPython-safe (os +
-# binascii only; no shutil).
+# can be its own module without a circular import. The bodies are
+# native/moy_store's (moy_fs.h) on every tier: the module `moy_store`, which
+# every image links and the CPython host registers over ctypes
+# (runtime/host/moy_store_binding.py). What is here is the story they keep and
+# the few verbs made of them. MicroPython-safe.
 #
 # THE CRASH-SAFETY STORY (the ONE every durable store write in the console rides
 # on; #154). A save is THREE writes and nothing else -- no stat, no remove, no
@@ -104,10 +107,7 @@
 # writing it is 7.1 ms per KB on a card. The claimant keeps the stamp line and reads
 # back through `_read_stamped`, and `path` then has no backup until its next save.
 
-try:
-    import os
-except ImportError:  # pragma: no cover
-    os = None
+import moy_store as _native
 
 try:
     from binascii import crc32 as _crc32
@@ -120,87 +120,29 @@ except ImportError:  # pragma: no cover -- every target ships binascii
 
 
 _STAMP = "#moyfs1 "
-# The stamp is folded over slices rather than one `data.encode()` so a save never
-# needs a second full-size buffer beside the text it is already holding.
-_CRC_CHUNK = 2048
 _PUBLISH = ".publish"
-# Registered store roots, longest first (longest prefix wins, so a root nested
-# inside another resolves to the inner one). Bounded because a host test session
-# registers one per tmp store and `_root_for` walks the list on every recovered
-# read; a board has one or two. Falling off the end costs the per-file check, not
-# correctness.
-_ROOT_MAX = 8
-_roots = []
-# root -> the marker's (path, chars, crc), or None for "nothing in flight here".
-# A root absent from this dict has not been read yet; present means read (or
-# written) by us, so the marker file is opened at most once per root per process.
-_marks = {}
 
-
-def _mkdir(path):
-    try:
-        os.mkdir(path)
-    except OSError:
-        pass
-
-
-def _exists(path):
-    try:
-        os.stat(path)
-        return True
-    except OSError:
-        return False
-
-
-def _read(path):
-    with open(path, "r") as f:
-        return f.read()
-
-
-def _write(path, data):
-    with open(path, "w") as f:
-        f.write(data)
-
-
-def _remove(path):
-    try:
-        os.remove(path)
-    except OSError:
-        pass
-
-
-def _read_bytes(path, cap):
-    """A binary file's bytes, or None when it is larger than `cap` -- read a
-    piece at a time, so an oversized file never costs a buffer its own size.
-    OSError (no such file) goes on through."""
-    parts = []
-    n = 0
-    with open(path, "rb") as f:
-        while True:
-            b = f.read(4096)
-            if not b:
-                break
-            n += len(b)
-            if n > cap:
-                return None
-            parts.append(b)
-    return b"".join(parts)
-
-
-def _write_bytes(path, data):
-    """Publish a BINARY file whole: written beside it as `<path>.tmp`, then
-    renamed over it, so a crash leaves the previous file or the new one --
-    never a torn one. The text machinery below (the stamp, the `.bak` redo
-    log) is for text; a binary file in this store is a picture, which a torn
-    write would only have made unreadable."""
-    tmp = path + ".tmp"
-    with open(tmp, "wb") as f:
-        f.write(data)
-    try:
-        os.rename(tmp, path)
-    except OSError:                   # FAT: a rename does not replace
-        _remove(path)
-        os.rename(tmp, path)
+# The store's verbs (native/moy_store/moy_fs.h, modmoy_store.c), by the names
+# the store modules call them. `_remove` and `_mkdir` ignore an error; `_read`
+# raises OSError for a missing file; `_read_bytes` is None over its cap.
+set_publish_root = _native.set_publish_root
+_read = _native.read
+_write = _native.write
+_read_bytes = _native.read_bytes
+_write_bytes = _native.write_bytes
+_remove = _native.remove
+_mkdir = _native.mkdir
+_exists = _native.exists
+_stamp_of = _native.stamp
+_bak_stamp = _native.bak_stamp
+_read_stamped = _native.read_stamped
+_unmark = _native.unmark
+_write_atomic = _native.publish
+_publish_bak = _native.publish_bak
+_publish_mark = _native.publish_mark
+_forget_bak = _native.forget_bak
+_claim_bak = _native.claim
+_read_recover = _native.read_recover
 
 
 def _copy(src, dst):
@@ -210,206 +152,15 @@ def _copy(src, dst):
     _write(dst, _read(src))
 
 
-def _text_crc(text):
-    crc = 0
-    for i in range(0, len(text), _CRC_CHUNK):
-        crc = _crc32(text[i:i + _CRC_CHUNK].encode("utf-8"), crc)
-    return crc & 0xFFFFFFFF
-
-
-def _stamp_of(text):
-    return len(text), _text_crc(text)
-
-
 def _stamp_line(text):
+    """The stamp line a backup of `text` leads with."""
     n, crc = _stamp_of(text)
     return "%s%d %d\n" % (_STAMP, n, crc)
-
-
-# -- the store-wide publish marker (#154) -----------------------------------
-
-def set_publish_root(root):
-    """Register a store root, so `_read_recover` under it costs no extra lookup.
-    Idempotent; the store's dir setup calls it. Everything below a registered
-    root -- cart folders, their journals, the sibling stores -- shares its one
-    marker, because only one publish is ever in flight."""
-    if not root:
-        return
-    root = root.rstrip("/")
-    if root in _roots:
-        _roots.remove(root)
-    _roots.insert(0, root)
-    _roots.sort(key=len, reverse=True)
-    while len(_roots) > _ROOT_MAX:
-        _marks.pop(_roots.pop(), None)
-
-
-def _root_for(path):
-    for r in _roots:
-        if path.startswith(r + "/"):
-            return r
-    return None
-
-
-def _parse_mark(line):
-    """(path, chars, crc) from a marker line, or None when it isn't one. A torn
-    marker has no trailing newline and so can never parse as naming a file."""
-    if not line.startswith(_STAMP) or not line.endswith("\n"):
-        return None
-    bits = line[len(_STAMP):-1].split(" ", 2)
-    if len(bits) != 3 or not bits[2]:
-        return None
-    try:
-        return bits[2], int(bits[0]), int(bits[1])
-    except ValueError:
-        return None
-
-
-def _mark(root):
-    """The marker under `root`, read at most once per process."""
-    try:
-        return _marks[root]
-    except KeyError:
-        pass
-    m = None
-    try:
-        with open(root + "/" + _PUBLISH, "r") as f:
-            m = _parse_mark(f.readline())
-    except OSError:                   # no marker: nothing was ever in flight here
-        pass
-    _marks[root] = m
-    return m
-
-
-def _unmark(path):
-    """Forget the in-RAM marker for `path`'s root once its one question has been
-    answered, so the rest of this process reads that root for free."""
-    root = _root_for(path)
-    if root is not None:
-        _marks[root] = None
-
-
-def _stamp_for(path):
-    """What the published `path` should look like, or None for "nothing says".
-    Under a registered root this is a dict lookup; outside one it falls back to
-    opening the backup, which is what costs a path lookup per read."""
-    root = _root_for(path)
-    if root is None:
-        return _bak_stamp(path)
-    m = _mark(root)
-    if m is None or m[0] != path:
-        return None
-    return m[1], m[2]
-
-
-def _parse_stamp(line):
-    """(chars, crc) from a backup's first line, or None when it isn't one."""
-    if not line.startswith(_STAMP) or not line.endswith("\n"):
-        return None
-    bits = line[len(_STAMP):-1].split(" ")
-    if len(bits) != 2:
-        return None
-    try:
-        return int(bits[0]), int(bits[1])
-    except ValueError:
-        return None
-
-
-def _fits(text, stamp):
-    return len(text) == stamp[0] and _text_crc(text) == stamp[1]
-
-
-def _bak_stamp(path):
-    """The stamp beside `path`, or None when there is no stamped backup. Reads the
-    one line, never the payload -- this runs on every recovered read."""
-    try:
-        with open(path + ".bak", "r") as f:
-            return _parse_stamp(f.readline())
-    except OSError:
-        return None
-
-
-def _read_stamped(path):
-    """A stamped file's payload, or None when it cannot be trusted.
-
-    Returned only if the text matches the stamp on its first line, so a torn file
-    is refused rather than published. An UNSTAMPED file is legacy -- the pre-#154
-    rename rotation, or `moy_sync._publish`'s -- and is returned whole, which is
-    all those writers ever promised.
-
-    Two readers share this: the crash backup beside a published file, and a
-    journal snapshot that CLAIMED one (`_claim_bak`)."""
-    try:
-        with open(path, "r") as f:
-            head = f.readline()
-            rest = f.read()
-    except OSError:
-        return None
-    stamp = _parse_stamp(head)
-    if stamp is None:
-        # An empty file is a backup the power cut before its stamp landed (FAT
-        # writes the entry first), never a legacy one worth publishing.
-        return (head + rest) or None
-    if _fits(rest, stamp):
-        return rest
-    return None                       # torn: refuse it, never publish garbage
 
 
 def _read_bak(path):
     """The text of the backup beside `path` -- see `_read_stamped`."""
     return _read_stamped(path + ".bak")
-
-
-def _write_atomic(path, data):
-    """Write `data` to `path` so that any crash mid-write is recoverable by
-    `_read_recover`. Three writes, no stat/remove/rename -- see the module
-    docstring for the crash-safety argument and the invariant it asks of other
-    writers."""
-    n, crc = _stamp_of(data)
-    _mark_publish(path, n, crc)
-    _publish_bak(path, data)
-    _write(path, data)                # publish in place
-
-
-def _mark_publish(path, n, crc):
-    root = _root_for(path)
-    if root is not None:
-        try:
-            _write(root + "/" + _PUBLISH,
-                   "%s%d %d %s\n" % (_STAMP, n, crc, path))
-        except Exception:             # noqa: BLE001 -- best effort, see the docstring
-            _marks[root] = None       # this save publishes without detection
-        else:
-            _marks[root] = (path, n, crc)
-
-
-def _publish_bak(path, data):
-    """The stamped backup of `data` beside `path`: `_write_atomic`'s second
-    write, and the first of `_write_atomic_steps`."""
-    bak = path + ".bak"
-    n, crc = _stamp_of(data)
-    try:
-        with open(bak, "w") as f:     # the redo log, stamped
-            f.write("%s%d %d\n" % (_STAMP, n, crc))
-            f.write(data)
-    except Exception:                 # noqa: BLE001 -- ENOSPC etc.
-        _remove(bak)                  # free the half-written backup; `path` is untouched
-        raise
-
-
-def _publish_mark(path, data):
-    """The marker and the publish together: `_write_atomic_steps`' second
-    store op. The whole save instead when the backup beside `path` is not
-    this save's -- another save of the same file came between the two, or a
-    reader outside every root dropped it as a foreign write's stale one --
-    so a cut in the publish always finds its own backup."""
-    n, crc = _stamp_of(data)
-    st = _bak_stamp(path)
-    if st is None or tuple(st) != (n, crc):
-        _write_atomic(path, data)
-        return
-    _mark_publish(path, n, crc)
-    _write(path, data)
 
 
 def _write_atomic_steps(path, data):
@@ -424,114 +175,3 @@ def _write_atomic_steps(path, data):
     _publish_bak(path, data)
     yield
     _publish_mark(path, data)
-
-
-def _forget_bak(path):
-    """Drop the backup beside `path`. For a writer that publishes different bytes
-    without going through `_write_atomic`: a stamp left describing content that is
-    no longer there would make the next read 'recover' over the new file."""
-    _remove(path + ".bak")
-
-
-def _claim_bak(path, dest, stamp):
-    """Move `path`'s finished crash backup to `dest`. True when it was taken.
-
-    Once `_write_atomic(path, data)` has returned, `<path>.bak` holds a stamped
-    copy of exactly what is now published AND is spent: the marker's stamp fits
-    the published file, so no read reaches the backup before the next save
-    overwrites it. A second writer that wants those same bytes on the medium can
-    therefore TAKE that file instead of putting the payload down again -- a
-    rename against 7.1 ms per KB on the T-Deck's card (#154).
-
-    Claimed only when the backup's own stamp equals `stamp` -- the caller's
-    `_stamp_of(data)`, which it already holds -- so the check is one line read,
-    never the payload. A caller whose bytes were never published (the journal's
-    graduation BASELINE entry) fails that test and writes its own copy.
-
-    `dest` keeps the stamp line, so whoever reads it reads through
-    `_read_stamped`. And `path` is left with no backup until its next save: the
-    spare copy has MOVED rather than gone, but `_read_recover` no longer knows
-    where, so a `path` that disappears outright is a re-raise where it used to
-    heal. Only claim for bytes something else is keeping."""
-    if _bak_stamp(path) != stamp:
-        return False
-    try:
-        os.rename(path + ".bak", dest)
-    except OSError:                   # no backup, or `dest`'s folder is not there yet
-        return False
-    return True
-
-
-def _heal(path, data):
-    """Republish recovered bytes so the recovery is paid once rather than on every
-    read. Best-effort: a read-only or full medium must not turn a read that DID
-    recover into a failure."""
-    try:
-        _write(path, data)
-    except Exception:                 # noqa: BLE001
-        pass
-    return data
-
-
-def _read_recover(path, at=None):
-    """Read `path`, healing it from `<path>.bak` when the published file is
-    missing or is a half-written publish. Re-raises the original error if there is
-    no usable backup. See the module docstring for why a mismatch that is NOT a
-    truncation is read as a foreign write rather than as damage.
-
-    `at` is a name the same file opens by more cheaply -- a name relative to a
-    working directory the caller moved into the file's folder. Only the first
-    open takes it; the marker and the backup are always reached by `path`."""
-    try:
-        data = _read(at or path)
-    except OSError:
-        rec = _read_bak(path)         # never published, or lost after the backup landed
-        if rec is None:
-            raise
-        return _heal(path, rec)
-    stamp = _stamp_for(path)
-    if stamp is None or _fits(data, stamp):
-        return data                   # nothing in flight here, or it checks out
-    rec = _read_bak(path)
-    if rec is None:
-        _unmark(path)                 # a torn backup -- keep the file we can read
-        return data
-    if rec.startswith(data):
-        return _heal(path, rec)       # a truncated publish: finish it
-    _forget_bak(path)                 # someone else published here; the stamp is stale
-    _unmark(path)
-    return data
-
-
-# -- the native store (native/moy_store) ----------------------------------------
-#
-# Every image -- the boards, the browser, the desktop MicroPython -- links
-# `moy_store`, the same story in C over the VM's own FAT, littlefs or POSIX
-# instance, and every store read and write here goes through it. CPython (the
-# simulator, the tools, the tests) has no such module and keeps the twin above;
-# tests/test_moy_store.py holds the two to one answer.
-
-try:
-    import moy_store as _native
-except ImportError:
-    _native = None
-
-if _native is not None:
-    set_publish_root = _native.set_publish_root
-    _read = _native.read
-    _write = _native.write
-    _read_bytes = _native.read_bytes
-    _write_bytes = _native.write_bytes
-    _remove = _native.remove
-    _mkdir = _native.mkdir
-    _exists = _native.exists
-    _stamp_of = _native.stamp
-    _bak_stamp = _native.bak_stamp
-    _read_stamped = _native.read_stamped
-    _unmark = _native.unmark
-    _write_atomic = _native.publish
-    _publish_bak = _native.publish_bak
-    _publish_mark = _native.publish_mark
-    _forget_bak = _native.forget_bak
-    _claim_bak = _native.claim
-    _read_recover = _native.read_recover

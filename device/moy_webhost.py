@@ -5,7 +5,7 @@
 #   ConsoleSystem      the console's Settings and badges for the page it serves
 #   WebHost            the Settings contract over the kernel's webhost
 #   WebHost.poll       the C poll, its events, the parked request, the update
-#   WebHost.answer_vm  the routes the VM answers: /run, /update, the system root
+#   WebHost.answer_vm  the routes the VM answers: /run, /update, /official, the system root
 #   WebHost.browsers   the paired browsers (and WebHost.forget, one or all)
 #   make_webhost       the WebHost every board injects
 """Serve the moybyte web console FROM the console, over the device's own WiFi.
@@ -20,6 +20,9 @@ console behind it:
     POST /run       play a cart on the BOARD's own glass (#197)         [sealed]
     GET  /update    this board's FIRMWARE state (#41/#53)               [sealed]
     POST /update    ask it to update                                    [sealed]
+    GET  /official  where a list, install or removal of its official    [sealed]
+    POST /official  carts stands, and asking for one (a board with no
+                    screen, `web_addon.OfficialCarts`)                   [sealed]
     GET  /console.json  the console's portable Settings and its badges  [sealed]
     POST /sync      a batch for the system root, merged into them       [sealed]
 
@@ -60,16 +63,17 @@ except ImportError:                      # host: the C over ctypes
 http_response = moy_net.http_response
 query_param = moy_net.query_param
 
-try:
-    import moy_sync
-except ImportError:                      # host / CPython: the runtime package
-    from runtime import moy_sync
+import moy_sync
 
 DEFAULT_PORT = 80
 
 # The answer a board with no updatable firmware answers /update with: 503
 # means "a board, but nothing to update", where a 404 means "not a board".
 NO_UPDATER = '{"error":"no updater"}'
+
+# An official cart's install per poll on a board with no screen: the loop's
+# other duty is serving, so a request waits at most this behind it.
+OFFICIAL_SLICE_MS = 40
 
 # The kernel's events (moy_net.h's MOY_WEB_EV_*).
 EV_SHELF = 1
@@ -91,12 +95,21 @@ def pack_store(carts_root, tops=None, binary=False):
     return _json.loads(moy_net.web_pack(carts_root, tops, binary))
 
 
+def _unprefixed(target):
+    """`target` without the page's prefix, `/p/<12 hex>/`, as the kernel's
+    router takes it off (moy_webhost.c, THE PAGE'S PREFIX)."""
+    if target.startswith("/p/") and len(target) >= 16 and target[15] == "/":
+        return target[15:]
+    return target
+
+
 def baked_stamp():
-    """The image's own bundle as "<count> <bytes> <digest>", or None.
+    """The bundle this board serves as "<count> <bytes> <digest>": the one
+    its image names, while the add-on cart that fits it is installed; else
+    None.
 
     WHICH console is this board serving? Reachable from a REPL
-    (`py moy_webhost.baked_stamp()`), so the check costs one line and no
-    reflash."""
+    (`py moy_webhost.baked_stamp()`), so the check costs one line."""
     stamp = getattr(moy_net, "web_stamp", None)
     return stamp() if stamp is not None else None
 
@@ -206,7 +219,7 @@ class ConsoleUpdate:
         try:
             # The update screen's lease first: the stop below releases "web",
             # and the radio would power down between the two.
-            ws.wifi_hold("update")
+            ws.spine.wifi_hold("update")
             web = getattr(ws, "web", None)
             if web is not None:
                 # A BARE stop: this path can fail after it (the screen raises
@@ -222,7 +235,7 @@ class ConsoleUpdate:
             self.error = "%s" % exc
             print("UPDATE hand-off failed:", exc)
             try:
-                ws.wifi_release("update")
+                ws.spine.wifi_release("update")
             except Exception:                # noqa: BLE001
                 pass
         return True
@@ -243,7 +256,7 @@ class ConsoleUpdate:
         if ota is None:
             return None
         try:
-            return ota if self.ws._update_available() else None
+            return ota if self.ws.update_available() else None
         except Exception:                # noqa: BLE001 -- a ws without the query
             return None
 
@@ -269,7 +282,7 @@ class ConsoleSystem:
         ws = self.ws
         applied, errors, changed = self._rx.apply(ops, ws.system, ws.carts_root)
         if changed:
-            ws.apply_system_keys(changed)
+            ws.spine.apply_system_keys(changed)
         return applied, errors
 
 
@@ -298,7 +311,7 @@ class WebHost:
                  auth=None, on_sync=None, auth_source=None,
                  on_run=None, update=None, on_stop=None, files_root=None,
                  kinds=None, dial=None, on_serving=None, on_failed=None,
-                 system=None, on_paired=None, apps_root=None):
+                 system=None, on_paired=None, apps_root=None, official=None):
         self.port = DEFAULT_PORT if port is None else port
         self.carts_root = carts_root
         self.files_root = (moy_sync.files_root(carts_root)
@@ -312,6 +325,7 @@ class WebHost:
         self.on_sync = on_sync
         self.on_run = on_run
         self.update = update
+        self.official = official
         self.system = system
         self.on_stop = on_stop
         self.on_serving = on_serving
@@ -356,9 +370,12 @@ class WebHost:
         return moy_net.web_state()[4]
 
     def _defer(self):
-        if self.system is None:
-            return self.DEFER
-        return self.DEFER + (moy_sync.SYSTEM_PULL,)
+        out = self.DEFER
+        if self.official is not None:
+            out += ("/official",)
+        if self.system is not None:
+            out += (moy_sync.SYSTEM_PULL,)
+        return out
 
     def _configure(self, port):
         moy_net.web_start(port, self.carts_root, self.files_root,
@@ -410,10 +427,14 @@ class WebHost:
             pass
 
     def source_note(self):
-        """One line naming the bundle this board serves: the image's, always."""
+        """One line naming the bundle this board serves: the browser console
+        add-on cart that fits this image, or why there is none."""
         stamp = baked_stamp()
-        return "serving the bundle baked into this firmware (%s)" % (
-            stamp or "NONE -- this image has no web console")
+        if stamp:
+            return "serving the browser console add-on (%s)" % stamp
+        why = getattr(moy_net, "page_why", None)
+        return "serving no browser console -- %s" % (
+            (why() if why is not None else None) or "this image names none")
 
     def adopt(self, ws):
         """A host the kernel kept serving across a soft reset: take the radio
@@ -421,7 +442,7 @@ class WebHost:
         if not self.serving:
             return False
         try:
-            ws.wifi_hold("web")
+            ws.spine.wifi_hold("web")
             self._read_auth()
             moy_net.web_auth(self.auth or None)
         except Exception as exc:         # noqa: BLE001 -- the console boots regardless
@@ -449,7 +470,14 @@ class WebHost:
                 self.on_paired()
             except Exception as exc:     # noqa: BLE001 -- a hook is never fatal
                 print("WEBHOST on_paired:", exc)
-        req = moy_net.web_take()
+        try:
+            req = moy_net.web_take()
+        except MemoryError:
+            # The parked body is copied into this heap, which on a board with
+            # no PSRAM may not hold it: busy, which the page sends again,
+            # rather than an error out of the loop that serves the board.
+            moy_net.web_answer(http_response(503, '{"error":"busy"}'))
+            req = None
         if req is not None:
             did = True
             try:
@@ -466,6 +494,13 @@ class WebHost:
                     did = True
             except Exception as exc:     # noqa: BLE001 -- never break a frame
                 print("UPDATE ERR %s: %s" % (type(exc).__name__, exc))
+        o = self.official
+        if o is not None and o.busy():
+            try:
+                if o.step(OFFICIAL_SLICE_MS):
+                    did = True
+            except Exception as exc:     # noqa: BLE001 -- never break a frame
+                print("OFFICIAL ERR %s: %s" % (type(exc).__name__, exc))
         return did
 
     service = poll
@@ -569,7 +604,7 @@ class WebHost:
         resp, plain = moy_net.web_handle(method, target, body or b"")
         if resp is not None:
             return resp
-        resp = self.answer_vm(method, target, plain)
+        resp = self.answer_vm(method, _unprefixed(target), plain)
         return None if resp is None else moy_net.web_handle_answer(resp)
 
     def answer_vm(self, method, target, body):
@@ -580,6 +615,8 @@ class WebHost:
             return self._run(body)
         if path == "/update":
             return self._update(target, body if method == "POST" else None)
+        if path == "/official" and self.official is not None:
+            return self._official(body if method == "POST" else None)
         if self.system is not None:
             if path == moy_sync.SYSTEM_PULL and method == "GET":
                 return self._console(target)
@@ -634,6 +671,25 @@ class WebHost:
             return http_response(404, '{"error":"no cart"}')
         return http_response(200, _json.dumps({"run": title}))
 
+    def _official(self, body):
+        """The official carts' endpoint (web_addon.OfficialCarts, a board
+        with no screen); `body` is None on the GET. A POST only queues
+        `{"action": "check" | "install" | "remove" | "cancel", "folder"}`; the
+        work is the poll's slice, and a GET reads where it stands."""
+        o = self.official
+        if body is None:
+            return http_response(200, o.answer())
+        try:
+            if isinstance(body, bytes):
+                body = body.decode("utf-8")
+            sent = _json.loads(body or "{}")
+            action = sent.get("action") or ""
+            folder = sent.get("folder")
+        except (ValueError, AttributeError):
+            return http_response(400, '{"error":"bad json"}')
+        ok, msg = o.request(action, folder)
+        return http_response(200 if ok else 409, o.answer(ok, msg))
+
     def _update(self, target, body):
         """The firmware endpoint (#41/#53); `body` is None on the GET. Both
         methods are sealed routes: what a GET reveals is which firmware a
@@ -666,10 +722,7 @@ class WebHost:
 
 
 def _system_dir(ws):
-    try:
-        import ssh_service
-    except ImportError:                  # host: the runtime package
-        from runtime import ssh_service
+    import ssh_service
     return ssh_service.system_dir(ws)
 
 
@@ -688,9 +741,9 @@ def make_webhost(ws, carts_root, autoconnect=None, with_sd=None, port=None):
     return WebHost(carts_root, port=port, with_sd=with_sd,
                    dial=lambda: dial_saved(getattr(ws, "wifi", None)),
                    auth_source=lambda: _system_dir(ws),
-                   on_sync=lambda folders: ws.rescan_carts(folders),
-                   on_run=lambda name: ws.launch_named(name),
-                   on_stop=lambda: ws.wifi_release("web"),
+                   on_sync=lambda folders: ws.carts.synced(folders),
+                   on_run=lambda name: ws.home.launch_named(name),
+                   on_stop=lambda: ws.spine.wifi_release("web"),
                    on_serving=lambda: ws.web.on_serving(),
                    on_failed=lambda: ws.web.on_failed(),
                    on_paired=lambda: ws.web.on_paired(),

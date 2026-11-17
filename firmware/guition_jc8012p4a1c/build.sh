@@ -14,7 +14,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/.build"
 MPY_DIR="${BUILD_DIR}/micropython"
-MPY_TAG="${MPY_TAG:-v1.28.0}"
 BOARD="MOYBYTE_GUITION_P4"
 BOARD_DIR="${SCRIPT_DIR}/boards/${BOARD}"
 DIST_DIR="${REPO_ROOT}/dist/guition_p4"
@@ -29,7 +28,7 @@ mkdir -p "${BUILD_DIR}" "${DIST_DIR}" "${MODULES_DIR}"
 
 # ---------------------------------------------------------------------------
 # 1) Toolchain: our OWN MicroPython checkout (sharing one would race the other
-#    boards' sed-patched esp32_common.cmake), and ESP-IDF v5.5.1 reused from
+#    boards' sed-patched esp32_common.cmake), and ESP-IDF reused from
 #    the Waveshare P4, which owns the shared checkout (see its build.sh) --
 #    falling back to a clone of our own, which is what happens on every CI
 #    runner. The #106 DSI patch below is marker-guarded, so two P4 builds over
@@ -44,12 +43,26 @@ moybyte_setup_idf esp32p4 \
 # ---------------------------------------------------------------------------
 
 # 2a) The P4 SILICON patch (shared lib, both P4 boards): the #106 DSI
-#     bridge-underrun ISR backport into the (shared) ESP-IDF checkout.
+#     bridge-underrun ISR and scan-out DMA priorities in the (shared) ESP-IDF
+#     checkout.
 moybyte_patch_p4_dsi_underrun
 
 # 2a') The P4 SRM macro-block-order bypass (shared lib, both P4 boards): the
 #     DIG-734 deadlock this board's rotated present hit (the lib says why).
 moybyte_patch_p4_ppa_srm_mb_order
+
+#     The core dump's DRAM region on a rev < v3 P4 (the lib says why).
+moybyte_patch_p4_coredump_dram
+
+#     The low SRAM's heap priority on a rev < v3 P4 (the lib says why).
+moybyte_patch_p4_heap_low_sram
+
+#     The PPA transactions' internal-RAM share (the lib says why).
+moybyte_patch_p4_ppa_trans_context
+
+#     The CPU clock switch's suspended-cache window kept in IRAM (the lib says
+#     why).
+moybyte_patch_p4_clk_switch
 
 # 2b) moy_dsi needs esp_lcd, moy_ppa needs esp_driver_ppa (the P4 pixel
 #     accelerator) in the main component's REQUIRES.

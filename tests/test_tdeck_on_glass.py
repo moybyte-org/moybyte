@@ -74,7 +74,7 @@ BATCH6_SRAM = 70
 # Plus MOVED_SRAM, internal statics moved to PSRAM against them, each made at
 # its first use: the per-verb profiler's counters (native/moycore/
 # moycore_prof.c, 2304 bytes, made when LUAPROF installs), the compiled face's
-# shape scratch (native/moy_ui/moy_ui_wasm.c, 1236, made while a compiled
+# shape scratch (native/moy_ui/moy_ui_run.c, 1236, made while a compiled
 # app's theme names another shape) and the dev channel's `state` line while a
 # run is in front (native/moy_kernel/moy_devch.c, 1024): 4560 bytes by the
 # heap's start against 65e7e49ae, link maps, 2026-11-09. With them the
@@ -87,7 +87,23 @@ MOVED_SRAM = 4560
 # every row, so they stay internal. 24 bytes of .bss by the link map against
 # dev 57dfc2d20, 2026-11-11.
 TAP_FONTS_SRAM = 24
-WASM_IDLE_BASELINE = (125863 + 1849 - CORE_DUMP_SRAM - BATCH6_SRAM + MOVED_SRAM - TAP_FONTS_SRAM,
+# And STATICS_1116_SRAM, the internal statics added against dev b909d0d96
+# (2026-11-16): the back-stack's kind-to-qstr cache (native/moy_spine/
+# modmoy_spine.c's `s_kq`, 161), the desk restore's shadow fill and its
+# colour table (native/moy_ui/moy_shape.c, 52), the browser console page's
+# state (native/moy_net/moy_page.c, 16), the quiet collect's retry counters
+# and the window stamp's (native/moy_kernel/moy_loop_board.c, 16) and the
+# profiler's phase (4): 249 bytes of .bss and .data by the link maps, which
+# move the heap's start a 256-byte step, against bc539dd86, 2026-11-17. The
+# browser console's add-on cart on the store costs nothing: fresh boots of one
+# image read the same with and without it, and move by up to 156 bytes (the
+# largest block by a 4096-byte step) with the store's folders alone. A cart
+# pushed over the cable costs 240 bytes once a boot (the SHA engine's first
+# digest and the first `recv`), which is why a board pass reboots after it
+# installs the add-on.
+STATICS_1116_SRAM = 256
+WASM_IDLE_BASELINE = (125863 + 1849 - CORE_DUMP_SRAM - BATCH6_SRAM + MOVED_SRAM - TAP_FONTS_SRAM
+                      - STATICS_1116_SRAM,
                       86016)
 WASM_BOARD_DIR = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 
@@ -468,14 +484,14 @@ def test_the_homes_letter_keys_arrive_from_the_matrix(board):
     for data, ch in HOME_KEYS:
         assert board.pyval(_DECODE % data, strict=True) == ord(ch), ch
     try:
-        board.pyexec("ws.set_home_tab('games'); ws.launcher.sel = [i for i, it in "
+        board.pyexec("ws.home.set_home_tab('games'); ws.launcher.sel = [i for i, it in "
                      "enumerate(ws.launcher.items) if it.get('path')][0]", strict=True)
         board.pyexec("ws.input.source('local').key(%s)" % (_DECODE % HOME_KEYS[0][0]),
                      strict=True)
         board.drain(0.8)
         assert board.pyval("ws.screen", strict=True) == "menu", "C did not open the Editor"
     finally:
-        board.pyexec("ws.go_home()", strict=True)
+        board.pyexec("ws.home.go_home()", strict=True)
         board.drain(0.5)
 
 
@@ -504,14 +520,14 @@ def test_a_field_reads_the_matrix_and_mic_cancels_it(board):
     try:
         board.pyexec("ws.open_settings(); ws.settings_layer.show_row('name')", strict=True)
         board.drain(0.8)
-        assert board.pyval("ws.settings_layer.editing_field()", strict=True) is True
+        assert board.pyval("ws.settings_layer.typing()", strict=True) is True
         assert board.pyval("ws.input.text_mode", strict=True) is True
         assert board.pyval("ws.keyboard.raw_mode", strict=True) is True, \
             "a text surface reads the matrix"
         _glass_key(board, ord("q"))
         _glass_start(board)
         assert board.pyval("ws.system.get('name', '')", strict=True) == was
-        assert board.pyval("ws.settings_layer.editing_field()", strict=True) is False
+        assert board.pyval("ws.settings_layer.typing()", strict=True) is False
         assert board.pyval("ws.sysmenu.open", strict=True) is False
         board.pyexec("ws.settings_layer.show_row('name')", strict=True)
         board.drain(0.5)
@@ -521,7 +537,7 @@ def test_a_field_reads_the_matrix_and_mic_cancels_it(board):
         _glass_start(board)                       # outside the field: the console's key
         assert board.pyval("ws.sysmenu.open", strict=True) is True
     finally:
-        board.pyexec("ws.sysmenu.close(); ws.popover_touch(); ws.go_home()", strict=True)
+        board.pyexec("ws.sysmenu.close(); ws.popover_touch(); ws.home.go_home()", strict=True)
         board.pyval("ws.system.set('name', %r)" % (was,))   # a flash write: its own line
         board.drain(0.5)
 
@@ -581,8 +597,8 @@ def test_draw_gates_take_the_traffic(board):
     on_glass.draw_gates_take_the_traffic(board)
 
 
-def test_the_web_console_is_baked_into_this_image(board):
-    on_glass.web_console_is_baked_into_the_image(board)
+def test_the_web_console_add_on_fits_this_image(board):
+    on_glass.web_console_add_on_fits_the_image(board)
 
 
 def test_idle_screen_blank_and_wake(board):
@@ -600,6 +616,10 @@ def test_mem_reports_the_heap(board):
 
 def test_a_quiet_console_collects_its_garbage(board):
     on_glass.a_quiet_console_collects_its_garbage(board)
+
+
+def test_a_quiet_console_leaves_a_live_heap_alone(board):
+    on_glass.a_quiet_console_leaves_a_live_heap_alone(board)
 
 
 def test_the_saver_comes_and_its_wake_repaints(board):
@@ -623,8 +643,8 @@ def test_perf_line_is_the_one_format(board):
         assert got[name] is None, (name, got[name])
 
 # -- the engine's radio guards (docs/history/wasm_tier_plan_2026-09.md, phase 1) ------
-# LAST in the file: both bring WiFi up (released again), and the WiFi driver
-# keeps its internal RAM for the rest of the boot; the second starts BLE, which
+# LAST in the file: both bring WiFi up (released again, which ends the
+# driver and gives its internal RAM back); the second starts BLE, which
 # is off here until Settings asks for it, and stops it again.
 
 

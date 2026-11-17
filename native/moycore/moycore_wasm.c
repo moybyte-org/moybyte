@@ -2,6 +2,8 @@
 // engine's callbacks, and the module's verbs for it (`wasm_open`,
 // `files_keep`, `frame`, ...).
 
+#include "moy_kmem.h"
+
 #include "modmoycore_int.h"
 #include "moy_proc.h"
 
@@ -78,9 +80,14 @@ typedef struct moycore_wrun {
 // (the Zero) has no extension, and a module importing from it is refused as
 // any import outside "moy" is.
 #define APP_EXT "moybyte.app"
-const NativeSymbol *moy_app_wasm_natives(uint32_t *count) __attribute__((weak));
-int moy_app_wasm_admit(const struct moy_app_run *r, const uint8_t *head, size_t n, char *err,
-                       size_t errlen) __attribute__((weak));
+#if __has_include("moy_app_wasm.h")
+#include "moy_app_wasm.h"
+#else
+const moy_app_native_t *moy_app_wasm_natives(uint32_t *count);
+int moy_app_wasm_admit(const moy_app_run_t *r, const uint8_t *head, size_t n, char *err, size_t errlen);
+#endif
+#pragma weak moy_app_wasm_natives
+#pragma weak moy_app_wasm_admit
 
 // The run a native's call is for (moy_app_wasm.h): the engine's handle on the
 // call -- the instance's exec env, its custom data libmoy's binding, or in
@@ -113,7 +120,7 @@ static uint32_t app_ext(moy_wasm_ext *x)
     return 0;
 #endif
     x->module = APP_EXT;
-    x->rows = moy_app_wasm_natives(&n);
+    x->rows = (const NativeSymbol *)moy_app_wasm_natives(&n);   // its layout
     x->count = n;
     return 1;
 }
@@ -124,16 +131,12 @@ uint32_t moycore_wpages;        // the manifest's "memory"
 
 static void *wmem_calloc(size_t n, size_t size)
 {
-#ifdef MOYCORE_PSRAM
-    void *p = heap_caps_calloc(n, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (p) return p;
-#endif
-    return calloc(n, size);
+    return moy_kalloc(n * size, MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK | MOY_KMEM_ZERO);
 }
 
 static void wmem_free(void *p)
 {
-#ifdef MOYCORE_PSRAM
+#ifdef MOY_ON_BOARD
     heap_caps_free(p);
 #else
     free(p);
@@ -221,7 +224,7 @@ static void keep_log(char op, const char *path)
     if (need > g_keep.cap) {
         size_t cap = g_keep.cap ? g_keep.cap : 256;
         while (cap < need) cap *= 2;
-        if ((log = (char *)realloc(g_keep.log, cap)) == NULL) return;
+        if ((log = (char *)moy_krealloc(g_keep.log, cap, MOY_KMEM_LIBC)) == NULL) return;
         g_keep.log = log;
         g_keep.cap = cap;
     }
@@ -386,7 +389,7 @@ static int wo_runtime_up(void *user, char *err, size_t errlen)
     }
     if (moy_app_wasm_natives != NULL) {
         uint32_t an = 0;
-        const NativeSymbol *rows = moy_app_wasm_natives(&an);
+        const NativeSymbol *rows = (const NativeSymbol *)moy_app_wasm_natives(&an);
         if (!moy_wasm_register_rows(APP_EXT, rows, an)) {
             snprintf(err, errlen, "the app extension's table did not register");
             return 1;
@@ -1011,7 +1014,12 @@ MP_DEFINE_CONST_FUN_OBJ_0(moycore_frame_settle_obj, mod_frame_settle);
 // the run's draw target, an owed or kept frame on the screen written in
 // first, as libmoy's own verbs settle it before they draw. NULL with no
 // compiled run, or inside one of par's items, which reach no import.
-int moy_wasm_tlane_here(void) __attribute__((weak));
+#if __has_include("moy_wasm_session.h") && __has_include("wasm_export.h")
+#include "moy_wasm_session.h"
+#else
+int moy_wasm_tlane_here(void);
+#endif
+#pragma weak moy_wasm_tlane_here
 void *moycore_ui_target(void);
 void *moycore_ui_target(void)
 {

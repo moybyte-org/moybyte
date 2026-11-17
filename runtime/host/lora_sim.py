@@ -22,10 +22,7 @@ implementations.
 import os
 import struct
 
-try:
-    from . import moy_lora as _N
-except ImportError:  # loaded flat
-    import moy_lora as _N
+import moy_lora as _N
 
 EU868_RX2 = 869525000
 

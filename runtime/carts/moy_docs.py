@@ -14,14 +14,9 @@ MicroPython-safe (json + os only).
 
 import json
 
-try:
-    from moy_store_base import CARTS_DIR, _sibling_path, ensure_dirs
-    from moy_fs import (_mkdir, _read, _read_bak, _read_recover, _write, _write_atomic,
-                        _write_atomic_steps)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import CARTS_DIR, _sibling_path, ensure_dirs
-    from runtime.moy_fs import (_mkdir, _read, _read_bak, _read_recover, _write,
-                                _write_atomic, _write_atomic_steps)
+from moy_store_base import CARTS_DIR, _sibling_path, ensure_dirs
+from moy_fs import (_mkdir, _read, _read_bak, _read_recover, _write, _write_atomic,
+                    _write_atomic_steps)
 
 
 def _load_store_json(path, pick):
@@ -181,10 +176,7 @@ def system_store_path(root=CARTS_DIR):
 
 
 def _rows():
-    try:
-        import moy_spine
-    except ImportError:  # pragma: no cover - the host: the runtime package's
-        from runtime import moy_spine
+    import moy_spine
     return moy_spine.Settings()
 
 

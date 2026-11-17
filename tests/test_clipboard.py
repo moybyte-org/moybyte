@@ -107,7 +107,7 @@ def test_code_tab_editor_rides_the_workstation_clipboard(tmp_path):
     title = next(c["title"] for c in ws.launcher.items if c.get("path"))
     select_on_home(ws, title)
     ws.open_in_editor()
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     assert ws.editor is not None
     assert ws.editor.clip is ws.clipboard
 

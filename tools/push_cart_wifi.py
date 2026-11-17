@@ -179,7 +179,7 @@ def main(argv=None):
         # also how this gets a network; the dev word `web` answers once the
         # join has settled. Idempotent: already-on stays on.
         board.cmd("web", wait_for="WEB ", timeout=60.0)
-        print("board wifi:", board.pyval("ws.webhost_label()"))
+        print("board wifi:", board.pyval("ws.web.label()"))
         code = ("HOST = %r\nPORT = %d\nWEBDIR = %r\nFILES = %r\n"
                 % (ip, args.http_port, args.web_dir, list(FILES))) + DOWNLOADER
         board.lines.clear()
@@ -202,7 +202,7 @@ def main(argv=None):
             ok = True
             print("all %d files match. open http://%s in a browser."
                   % (len(FILES),
-                     (board.pyval("ws.webhost_label()") or "the board")))
+                     (board.pyval("ws.web.label()") or "the board")))
     finally:
         board.close()
         httpd.shutdown()

@@ -3,6 +3,12 @@
 # on the Waveshare's glass and carried over UNCHANGED as the same silicon's
 # answer; a per-board re-measure is welcome and would go in the README.
 
+# The silicon is ESP32-P4 rev v1.x, which ESP-IDF builds for only when told:
+# without this an image needs rev v3.1 or later and esptool and the
+# bootloader refuse it on this chip. MicroPython's sdkconfig.p4 supplies
+# CONFIG_ESP32P4_REV_MIN_0, which this makes selectable.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+
 # PSRAM at 200MHz: the 800x1280@60Hz DPI scan-out streams ~123MB/s from the
 # PSRAM framebuffer (MORE than the Waveshare's 104MB/s); at the default speed
 # the DSI fetcher underruns ("can't fetch data from external memory fast
@@ -14,7 +20,7 @@ CONFIG_IDF_EXPERIMENTAL_FEATURES=y
 # The DSI driver restarts its full-frame DW-GDMA transfer from the completion
 # ISR every refresh. Keep that path in internal RAM so scan-out remains viable
 # during cache-disabled operations and when it runs at the #106 level-3 priority.
-CONFIG_LCD_DSI_ISR_IRAM_SAFE=y
+CONFIG_LCD_DSI_ISR_CACHE_SAFE=y
 
 # L2 cache 128KB (IDF default) -> 256KB (#159, A/B'd on glass 2026-07-27): the
 # desktop working set thrashes a 128KB L2 -- Brick Siege busy 15.5 -> 8.0ms,
@@ -30,7 +36,7 @@ CONFIG_CACHE_L2_CACHE_256KB=y
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 
 # Custom partition table: the default 4MiBplus table caps the app at ~1.94MB
-# and the frozen console overflows it. OTA-shaped 2x7.8125 MiB app slots + the
+# and the frozen console overflows it. OTA-shaped 2x6.5 MiB app slots + the
 # coredump partition + auto-vfs tail; the CSV lives in boards/MOYBYTE_GUITION_P4/ and build.sh
 # copies it into ports/esp32/ (the filename resolves project-relative).
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-guition-p4.csv"
@@ -68,6 +74,12 @@ CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=6144
 # (native/moy_input/moy_ble_task.c): the pairing survives a reboot with no file
 # on any volume.
 CONFIG_BT_NIMBLE_NVS_PERSIST=y
+
+# NimBLE's host pools are static (.bss), not allocated by nimble_port_init:
+# the kernel's BLE task starts and stops the host (native/moy_input/
+# moy_ble_task.c), and the internal-SRAM budget was measured with the pools
+# static. ESP-IDF defaults this to y; MicroPython's later sdkconfig.ble sets n.
+CONFIG_BT_NIMBLE_STATIC_TO_DYNAMIC=n
 
 
 # OTA rollback (#53). An app that does not call
@@ -189,6 +201,22 @@ CONFIG_BT_HCI_LOG_DEBUG_EN=n
 # boards first. The one behaviour lost is machine.freq(x) as a SETTER, which
 # starts raising ValueError; the getter is unaffected.
 CONFIG_PM_ENABLE=
+
+# Light sleep's code stays in flash: the console never light-sleeps (the PM
+# section above), and on a P4 each of these defaults pins code in internal
+# SRAM that only a sleep or an unused driver runs. WIFI_RMT_SLP_IRAM_OPT is
+# esp_wifi_remote's mirror of the C6's own option (this board's radio, over
+# ESP-Hosted); on the host it only sets ESP_WIFI_SLP_IRAM_OPT, which
+# MicroPython's sdkconfig.base turns off to save IRAM and the mirror turns
+# back on, and selects PM_SLEEP_FUNC_IN_IRAM, whose PM_SLP_IRAM_OPT places the
+# light-sleep path in IRAM. The PSRAM half-sleep is a light-sleep mode too.
+# The PARLIO ISR placements pin the GDMA link and DMA cache-split helpers in
+# IRAM for a driver no image links. What leaves IRAM and SPM goes to the
+# internal heap.
+CONFIG_WIFI_RMT_SLP_IRAM_OPT=n
+CONFIG_PM_SLP_SPIRAM_HALFSLEEP_ENABLED=n
+CONFIG_PARLIO_TX_ISR_HANDLER_IN_IRAM=n
+CONFIG_PARLIO_RX_ISR_HANDLER_IN_IRAM=n
 
 # The task watchdog (#160, native/moy_kernel/moy_kernel.c's header). The stock
 # build leaves it on, watching no idle task and only logging a timeout; the

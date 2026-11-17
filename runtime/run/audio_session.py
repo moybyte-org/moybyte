@@ -43,11 +43,7 @@ def native():
         try:
             import moy_audio as na
         except ImportError:
-            try:
-                from runtime import audio_binding
-                na = audio_binding.install() or False
-            except ImportError:
-                na = False
+            na = False
         if na is not False and not hasattr(na, "open"):
             na = False
         _NA[0] = na
@@ -221,7 +217,7 @@ class PcmPump:
             self._na.set_rate(self.rate)
         self._carry = 0.0
         self.rendered = 0
-        self.last_pcm = b""
+        self.last_pcm = b""         # the last tick's mix
         self.stream = None
 
     def frames(self, dt):
@@ -246,9 +242,3 @@ class PcmPump:
         pcm = self.block(self.frames(dt))
         if pcm:
             self.last_pcm = pcm
-
-    def take_pcm(self):
-        """The last tick's PCM, handed off once."""
-        pcm = self.last_pcm
-        self.last_pcm = b""
-        return pcm

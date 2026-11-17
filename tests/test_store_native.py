@@ -1,20 +1,20 @@
-"""The native store's catalogue and JSON scanner (native/moy_store/moy_cat.c,
-native/moy_spine/moy_json.c; docs/history/kernel_store_2026-10.md sections 6 and 10,
-slice 3) held to their twins: the desktop MicroPython, whose moy_carts reads
-through the C, against CPython over runtime/carts/moy_carts.py.
+"""The native store (native/moy_store: the catalogue, the seed, the journal,
+the archive; docs/history/kernel_store_2026-10.md) is one body on every tier,
+and its two faces build the same answers of it: the desktop MicroPython's
+module (modmoy_store.c) against CPython's (runtime/host/moy_store_binding.py),
+each running runtime/carts over it.
 
   * the shelf, key for key and icon for icon, over every seed, fixture and
     port cart and the sheet and folder shapes test_catalogue.py builds;
   * the same over generated folders: manifests valid, broken and odd, sheets,
     scenes, listings that prove a file absent and ones that cannot;
-  * moy_json against CPython's json: json.loads and json.dumps(json.loads())
-    over generated texts, refused where json refuses.
+  * moy_json against CPython's json, its oracle: json.loads and
+    json.dumps(json.loads()) over generated texts, refused where json refuses;
+  * the seed and the journal: the same answers and the same files.
 
-What the C leaves out, by decision: a manifest's lone surrogate escape reads
-as U+FFFD, a sheet is ASCII, a "broken" reason is the C's own words (the
-twin's is the exception's), so the comparison reads that field as present,
-and a text reads as its bytes, as MicroPython's open() reads it, where
-CPython's text mode turns CRLF into LF.
+A manifest's lone surrogate escape reads as U+FFFD, and a text reads as its
+bytes, as MicroPython's open() reads it, where CPython's text mode turns CRLF
+into LF.
 """
 
 import json
@@ -36,10 +36,9 @@ DRIVER = r'''
 import sys, json
 sys.path.insert(0, @RUNTIME@)
 import moy_carts
-try:
-    import moy_store
-except ImportError:
-    moy_store = None
+import moy_store
+if sys.implementation.name != "micropython":
+    moy_store = None                    # CPython: its own json, the C's oracle
 
 def ser(o):
     if isinstance(o, dict):
@@ -64,7 +63,7 @@ def scrub(e):
         e["broken"] = True
     return e
 
-print("native", getattr(moy_carts, "_store", None) is not None)
+print("impl", sys.implementation.name)
 with open(@OPS@) as f:
     ops = json.loads(f.read())
 for op in ops:
@@ -117,11 +116,11 @@ def _vm():
 def _both(ops, tmp):
     vm = _run([_vm(), "-X", "heapsize=64M"], ops, tmp)
     cp = _run([sys.executable], ops, tmp)
-    assert vm[0] == "native True" and cp[0] == "native False"
+    assert vm[0] == "impl micropython" and cp[0] == "impl cpython"
     return vm[1:], cp[1:]
 
 
-def test_the_native_shelf_is_the_twins_over_every_cart(tmp_path):
+def test_the_two_faces_read_the_same_shelf_over_every_cart(tmp_path):
     root = _store(tmp_path)
     ops = [["cat", root], ["cat", root + "/nowhere"]]
     for name in sorted(os.listdir(root)):
@@ -140,9 +139,9 @@ _KEYS = ("title", "author", "type", "runtime", "main", "format", "version",
          "memory", "writable", "graduated", "fps", "palette", "extensions",
          "icon", "edit", "permissions", "required", "input", "canvas", "assets", "id",
          "config", "sources", "description", "genre", "tags", "glass", "pictures",
-         "audio_ring", "handles")
+         "audio_ring", "handles", "animates")
 _VENDOR = ("type", "graduated", "edit", "permissions", "required", "handles", "assets", "config",
-           "glass",
+           "glass", "animates",
            "pictures", "audio_ring")
 
 
@@ -205,7 +204,7 @@ def _manifest(rng):
         if key == "pictures" and rng.random() < 0.7:
             man[key] = rng.choice([{"320x240": "wall"}, {"1024x600": "sky", "320x240": "wall"},
                                    {}, "wall", [["320x240", "wall"]]])
-        if key == "glass" and rng.random() < 0.7:
+        if key in ("glass", "animates") and rng.random() < 0.7:
             man[key] = rng.choice([True, False, "true", 1])
         if key == "id" and rng.random() < 0.6:
             man[key] = rng.choice(["kenny.star", "local.a_1", "moybyte.x", "Kenny.star",
@@ -311,7 +310,7 @@ def test_an_id_names_a_cart_only_where_no_folder_is_named_for_it(tmp_path):
     """The folder `<id>.moy` owns its id: a cart copied into another folder
     claiming it takes its own folder's name, while an id no folder is named
     for (a file of that name is no folder) stays the manifest's. The native
-    shelf reads the same ids, scanned and read alone (the twin test below)."""
+    shelf reads the same ids, scanned and read alone."""
     from runtime import moy_carts
     root = str(tmp_path / "carts")
     _folders(root, random.Random(1), 4)
@@ -324,7 +323,7 @@ def test_an_id_names_a_cart_only_where_no_folder_is_named_for_it(tmp_path):
 
 
 @pytest.mark.parametrize("seed", [1, 2, 3])
-def test_the_native_shelf_is_the_twins_over_generated_folders(tmp_path, seed):
+def test_the_two_faces_read_the_same_shelf_over_generated_folders(tmp_path, seed):
     rng = random.Random(seed)
     root = str(tmp_path / "carts")
     _folders(root, rng, 120)
@@ -338,10 +337,10 @@ def test_the_native_shelf_is_the_twins_over_generated_folders(tmp_path, seed):
 
 
 @pytest.mark.parametrize("ascii_only", [True, False])
-def test_the_native_shelf_reads_the_listing_vectors_as_the_twin_does(tmp_path, ascii_only):
-    """SPEC.md 3.7's description, genre and tags: the C reads each of
-    moy-spec's cases to the answer the twin gives, which test_cart_listing.py
-    holds to the spec's."""
+def test_the_shelf_reads_the_listing_vectors_as_the_spec_does(tmp_path, ascii_only):
+    """SPEC.md 3.7's description, genre and tags: the store reads each of
+    moy-spec's cases to the answer runtime/carts/cart_listing.py gives, which
+    test_cart_listing.py holds to the spec's, and both faces read it alike."""
     root = str(tmp_path / "carts")
     os.makedirs(root)
     for i, case in enumerate(_LISTING):
@@ -362,6 +361,11 @@ def test_the_native_shelf_reads_the_listing_vectors_as_the_twin_does(tmp_path, a
         assert a == b
     assert len(vm) == len(cp)
     assert any("s67,97,116,99,104," in ln for ln in vm)    # "Catch the stars." is in it
+    from runtime import cart_listing, moy_carts
+    for i, case in enumerate(_LISTING):
+        e = moy_carts.entry(os.path.join(root, "c%02d.moy" % i))
+        assert (e["description"], e["genre"], e["tags"]) == \
+            cart_listing.listing(case["manifest"]), case
 
 
 # -- moy_json against CPython's json ----------------------------------------------------
@@ -506,7 +510,7 @@ elif step == "warm":
                                progress)
 else:
     wrote = moy_carts.seed_any(roster, root, {}, progress)
-print("native", getattr(moy_carts, "_store", None) is not None)
+print("impl", sys.implementation.name)
 print("wrote", sorted(wrote))
 print("progress", seen)
 '''
@@ -532,11 +536,10 @@ def _seed_step(cmd, tmp, root, step):
     return out.stdout.splitlines()
 
 
-def test_the_native_seed_writes_the_twins_tree(tmp_path):
-    """The packed roster seeded by the C (moy_seed.c, under the desktop
-    MicroPython) and by seed_builtins (CPython): cold, warm, and over a store
-    whose built-ins are older and hold a kid's saves and config -- the same
-    files, byte for byte, every time."""
+def test_the_two_faces_seed_the_same_tree(tmp_path):
+    """The packed roster seeded (moy_seed.c) on the VM and on CPython: cold,
+    warm, and over a store whose built-ins are older and hold a kid's saves
+    and config -- the same files, byte for byte, every time."""
     sys.path.insert(0, os.path.join(ROOT, "tools"))
     import gen_device_carts
     packed = gen_device_carts.build_packed(os.path.join(ROOT, "system_carts"))
@@ -564,7 +567,7 @@ def test_the_native_seed_writes_the_twins_tree(tmp_path):
                         f.write('{"kid": "tuned"}')
         vm = _seed_step([exe], tmp_path, vm_root, step)
         cp = _seed_step([sys.executable], tmp_path, cp_root, step)
-        assert vm[0] == "native True" and cp[0] == "native False"
+        assert vm[0] == "impl micropython" and cp[0] == "impl cpython"
         assert vm[1:] == cp[1:], step
         a, b = _tree(vm_root), _tree(cp_root)
         assert sorted(a) == sorted(b), step
@@ -579,7 +582,7 @@ def test_the_native_seed_writes_the_twins_tree(tmp_path):
 
 def test_the_native_seed_carries_a_picture_carts_pictures(tmp_path):
     """A seed's manifest is regenerated, so every field it keeps is passed
-    through by name -- by the C and the twin alike."""
+    through by name, on either face."""
     sys.path.insert(0, os.path.join(ROOT, "tools"))
     import gen_device_carts
     src = tmp_path / "src" / "moybyte.pics.moy"
@@ -612,7 +615,7 @@ def test_the_native_seed_carries_a_picture_carts_pictures(tmp_path):
 def test_the_native_seed_carries_an_apps_service_entry(tmp_path):
     """An app with its own service (docs/app_api_v1.md section 7): the
     manifest keeps `entries` and the entry's file is written beside main,
-    by the C and the twin alike, and the seeded cart's service reads."""
+    on either face, and the seeded cart's service reads."""
     sys.path.insert(0, os.path.join(ROOT, "tools"))
     import gen_device_carts
     from runtime import moy_carts, scheduler
@@ -709,10 +712,10 @@ print("manifest", sorted((k, sorted(v.items()) if isinstance(v, dict) else v)
 '''
 
 
-def test_the_native_journal_writes_the_twins_files(tmp_path):
+def test_the_two_faces_journal_the_same_files(tmp_path):
     """A seeded session of commits, undos, redos, compactions and #136's
-    reads and restores, played by the C journal (desktop MicroPython) and the
-    twin (CPython): the same answers and the same files, byte for byte."""
+    reads and restores, played on the VM and on CPython (moy_journal.c under
+    each): the same answers and the same files, byte for byte."""
     exe = _vm()
     for seed in (1, 2, 3, 4):
         outs, trees = [], []
@@ -771,7 +774,7 @@ def _cart_tree(d):
 
 def test_the_archive_round_trips_with_the_browsers_codec(tmp_path):
     """moy_pack, which the browser's export and import run in its VM: the C
-    archive is the twin's byte for byte and a zip reader reads it as the cart
+    archive is the same on either face, byte for byte, and a zip reader reads it as the cart
     less what the wire skips; a stored zip, a deflated one and one with no
     top folder unpack in the C to the same files; adopt and the import put a
     cart on the shelf under the store's import rule (moy_pack.import_base)."""
@@ -829,11 +832,9 @@ print("packed", moy_carts.pack(D + "/src/doom.moy", D + "/@TAG@.moy"))
 for name in ("@TAG@.moy", "deflated.zip"):
     n, top = moy_carts.unpack(D + "/" + name, D + "/@TAG@-" + name.replace(".", "-"))
     print("unpacked", name, n, repr(top))
-try:
-    import moy_store
+import moy_store
+if hasattr(moy_store, "mem"):
     print("peak", moy_store.mem()[1])
-except ImportError:
-    pass
 '''
 
 

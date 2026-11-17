@@ -28,20 +28,12 @@ no state of its own: the windows, stamps and rings it reads are the WM's,
 made in `WindowedWM.__init__`.
 """
 
-try:
-    from wm import FullscreenStackWM, _VIEWPORT_BEZEL
-    from wm_parts import _Win, _overlap, _grow, MODE_MARK, _SHOWN
-    from wm_chrome import _SHADOW
-    from widgets import _Blit, _ticks_ms
-    import layout_base as _layout_base
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.wm import FullscreenStackWM, _VIEWPORT_BEZEL
-    from runtime.wm_parts import _Win, _overlap, _grow, MODE_MARK, _SHOWN
-    from runtime.wm_chrome import _SHADOW
-    from runtime.widgets import _Blit, _ticks_ms
-    from runtime import layout_base as _layout_base
-    from runtime import ui_draw as _ui_draw
+from wm import FullscreenStackWM, _VIEWPORT_BEZEL
+from wm_parts import _Win, _overlap, _grow, MODE_MARK, _SHOWN
+from wm_chrome import _SHADOW
+from widgets import _Blit, _ticks_ms
+import layout_base as _layout_base
+import ui_draw as _ui_draw
 
 
 class WindowPaint:
@@ -80,11 +72,11 @@ class WindowPaint:
         self._release_layer(buf)
 
     def _drop_wins(self):
-        for win in self._wins.values():
+        for win in self.windows.values():
             self._drop_win(win)
-        self._wins.clear()
+        self.windows.clear()
 
-    def _drop_backdrop(self):
+    def drop_backdrop(self):
         cache = self._backdrop
         self._backdrop = None
         if cache is not None:
@@ -95,10 +87,10 @@ class WindowPaint:
     def _ensure_backdrop(self):
         """The full-screen off-screen cache buffer (lazily allocated, re-made if
         the root canvas size changed under it)."""
-        sc = self._root_canvas
+        sc = self.root_canvas
         cache = self._backdrop
         if cache is None or cache.w != sc.w or cache.h != sc.h:
-            self._drop_backdrop()
+            self.drop_backdrop()
             cache = self._backdrop = sc.new_layer(sc.w, sc.h)
             self._backdrop_valid = False
         return cache
@@ -120,17 +112,17 @@ class WindowPaint:
         # every GC collect then scans a bigger heap, collect cost climbed
         # 13ms -> 380ms over one browsing session -- the owner's "the more the
         # kinetic scroll activates the slower it gets".
-        if self._backdrop_unsupported or self._backdrop_disabled:
+        if self._backdrop_unsupported or self.backdrop_disabled:
             return
         try:
             cache = self._ensure_backdrop()
-            self.ws.note_cost("desk.backdrop")
-            cache.blit_strip(self._root_canvas, 0, 0)
+            self.ws.perf.note_cost("desk.backdrop")
+            cache.blit_strip(self.root_canvas, 0, 0)
             self._backdrop_valid = True
             self._desk_tile = self.ws.bar_layer.tile_on()
         except Exception:  # noqa: BLE001 -- a failed capture (OOM, or a
             self._backdrop_valid = False   # recording root with no pixels to
-            self._drop_backdrop()          # snapshot) forfeits the cache; the
+            self.drop_backdrop()          # snapshot) forfeits the cache; the
             # drag re-renders live. Mark the mechanism unsupported so the next
             # frames don't retry (#113: each retry allocated a fresh layer --
             # on the web root that leaked one RecordingLayer per drag frame).
@@ -145,12 +137,12 @@ class WindowPaint:
         g = self._gesture()
         if g is None:
             return None
-        win = self._wins.get(g[0])
+        win = self.windows.get(g[0])
         if win is None:
             return None
         x, y, w, h = win.x, win.y, win.w, win.h
         # Gesture tuples carry the window REGISTRY key (g[0]); every
-        # gesture-vs-window test below resolves through _wins identity.
+        # gesture-vs-window test below resolves through windows identity.
         if g is self._resize:
             rx, ry, rw, rh = g[10], g[11], g[5], g[6]
             x1 = max(x + w, rx + rw)
@@ -179,11 +171,11 @@ class WindowPaint:
         yet (its streak short of N: a window opened, closed, restored), the
         first N restore the whole glass instead."""
         ext = self._gesture_extent()
-        n = self._retained_n()
+        n = self.retained_n()
         if ext is None:
             self._gesture_hist = []
         elif self._desk_streak < n:
-            full = self._root_canvas
+            full = self.root_canvas
             self._gesture_hist = [(0, 0, full.w, full.h)] * n
         else:
             self._gesture_hist = [ext] * n
@@ -203,10 +195,10 @@ class WindowPaint:
         self._restored_f = self.ws.frame_state.frames_drawn
         if self._backdrop is None:
             return
-        rc = self._root_canvas
+        rc = self.root_canvas
         ext = self._gesture_extent()
-        n = self._retained_n()
-        if (not hasattr(rc, "blit_strip_rect") or self._union_disabled or ext is None
+        n = self.retained_n()
+        if (not hasattr(rc, "blit_strip_rect") or self.union_disabled or ext is None
                 or not self._gesture_hist):
             rc.blit_strip(self._backdrop, 0, 0)
             self._restored = None
@@ -234,7 +226,7 @@ class WindowPaint:
         # union minus the body); the resize body is the rubber rect (live-body
         # covers it opaquely too).
         g = self._gesture()
-        win = self._wins.get(g[0]) if g is not None else None
+        win = self.windows.get(g[0]) if g is not None else None
         bx0 = by0 = bx1 = by1 = 0
         if win is not None:
             wx, wy, bw, bh = win.x, win.y, win.w, win.h
@@ -251,6 +243,7 @@ class WindowPaint:
         laid = self._laid
         del laid[:]
         if win is None or bx0 >= bx1 or by0 >= by1:
+            bx0 = bx1 = by0 = by1 = 0
             laid.append((x0, y0, x1 - x0, y1 - y0))
         else:
             if by0 > y0:                                       # top strip
@@ -261,11 +254,45 @@ class WindowPaint:
                 laid.append((x0, by0, bx0 - x0, by1 - by0))
             if bx1 < x1:                                       # right strip
                 laid.append((bx1, by0, x1 - bx1, by1 - by0))
-        for r in laid:
-            rc.blit_strip_rect(self._backdrop, 0, 0, r[0], r[1], r[2], r[3])
+        if self._fill_ok(rc, laid):
+            # laid by draw_unders with the first shadow over it, one pass
+            self._fill = (self._backdrop, (x0, y0, x1 - x0, y1 - y0),
+                          (bx0, by0, bx1 - bx0, by1 - by0))
+        else:
+            self._lay(laid)
         self._gesture_hist = (self._gesture_hist + [ext])[-n:]
         self._restored = (x0, y0, x1 - x0, y1 - y0)
         return self._restored
+
+    def _lay(self, laid):
+        rc = self.root_canvas
+        for r in laid:
+            rc.blit_strip_rect(self._backdrop, 0, 0, r[0], r[1], r[2], r[3])
+
+    def _fill_ok(self, rc, laid):
+        """Whether draw_unders lays the cache's `laid` rects with the first
+        shadow it draws (ui_draw.frame_under_fill): the depth's shadows are
+        on, the cache's buffer is laid out as the root canvas's, and no rect
+        is one the canvas moves by DMA (`FBCPY_MIN_PX`)."""
+        if not _ui_draw.depth()[12]:
+            return False
+        cache = self._backdrop
+        f = self._fill_on
+        if f is None or f[0] is not rc or f[1] is not cache:
+            ok = (getattr(rc, "_ui", None) is not None and getattr(cache, "_buf", None) is not None
+                  and getattr(rc, "_ox", 0) == 0 and getattr(rc, "_oy", 0) == 0
+                  and getattr(rc, "_stride", rc.w) == getattr(cache, "_stride", cache.w)
+                  and getattr(rc, "_bh", rc.h) == cache.h)
+            f = self._fill_on = (rc, cache, ok,
+                                 getattr(rc, "FBCPY_MIN_PX", None) if ok else None)
+        if not f[2]:
+            return False
+        mn = f[3]
+        if mn is not None:
+            for r in laid:
+                if r[2] * r[3] >= mn:
+                    return False
+        return True
 
     @staticmethod
     def _union_bbox(rects):
@@ -301,10 +328,10 @@ class WindowPaint:
         self._damage_rects = None
         if rects is None:
             return
-        nd = getattr(self._root_canvas, "note_damage", None)
+        nd = getattr(self.root_canvas, "note_damage", None)
         if nd is None:
             return
-        if (self._cache_sig & ~66) != 0:
+        if (self.cache_sig & ~66) != 0:
             return                        # the popover (64) is described below
         if getattr(self.ws.pointer, "visible", False):
             return
@@ -326,16 +353,16 @@ class WindowPaint:
 
     def app_surface(self):
         """(w, h) of the canvas a window-bound app cart draws on
-        (`Workstation._bind_window_canvas`): the desk's work area, so its
+        (`CanvasBinding._bind_window_canvas`): the desk's work area, so its
         window shows any size of it with no new pixels."""
-        _dx, _dy, dw, dh = self._desk_rect()
+        _dx, _dy, dw, dh = self.desk_rect()
         return (dw, dh)
 
     def app_window_content(self):
         """(w, h) of the content a window-bound app cart's window shows from
         its canvas's top left: the player window's content rect, or the one
         its window opens at."""
-        win = self._wins.get("desktop")
+        win = self.windows.get("desktop")
         if win is None:
             fs = self._fs()
             w, h = self._open_size("desktop", fs)
@@ -343,7 +370,7 @@ class WindowPaint:
             win.foot = self._win_foot(win)
             win.edge = self._win_edge(win)
         cr = win.content_rect()
-        lay = self._root_ctx.layout     # _desk_rect's source: app_surface's size
+        lay = self.root_ctx.layout     # _desk_rect's source: app_surface's size
         c = self._app_wc
         if c is not None and c[0] is cr and c[1] == lay.cw and c[2] == lay.ch:
             return c[3]
@@ -391,7 +418,7 @@ class WindowPaint:
         return self.mode == "console"
 
     def viewport(self):
-        win = self._wins.get("desktop")
+        win = self.windows.get("desktop")
         if win is None:
             return FullscreenStackWM.viewport(self)
         return self._player_view(win)
@@ -429,7 +456,7 @@ class WindowPaint:
             return False
         view = cf.take()
         if view is not None:
-            sc = self._root_canvas
+            sc = self.root_canvas
             if sc is not self._pf_for:
                 self._pf_for = sc
                 self._pf_fn = getattr(sc, "present_frame", None)
@@ -484,9 +511,9 @@ class WindowPaint:
         if self._view_src() is not None:
             return None
         if self.mode != "desktop":
-            return None if self._order else FullscreenStackWM.viewport(self)
-        win = self._wins.get("desktop")
-        order = self._order
+            return None if self.z_order else FullscreenStackWM.viewport(self)
+        win = self.windows.get("desktop")
+        order = self.z_order
         if (win is None or self.ws.run.app_window_canvas or not self.game_full()
                 or not order or order[-1] != "desktop"):
             self._pv_since = -1
@@ -500,7 +527,7 @@ class WindowPaint:
             self._pv_w = win.w
             self._pv_h = win.h
             return None
-        if drawn - self._pv_since <= self._retained_n():
+        if drawn - self._pv_since <= self.retained_n():
             return None
         return self._player_view(win)
 
@@ -525,7 +552,7 @@ class WindowPaint:
             self._bezel_key = bkey
             self._bezel_paints = 0
         self._bezel_frame = drawn
-        if self._bezel_paints < self._retained_n():
+        if self._bezel_paints < self.retained_n():
             self._bezel_paints += 1
             sc.cls(_VIEWPORT_BEZEL)    # letterbox fill
 
@@ -536,9 +563,9 @@ class WindowPaint:
         minimised state, focus. The ONE signature both retained-pixel voiders
         key on (window stamps AND the desk-restore streak) -- a change means
         pixels somewhere stopped being covered by what covered them last frame."""
-        return (tuple(self._order), self._focus,
+        return (tuple(self.z_order), self.focus_key,
                 tuple((w.x, w.y, w.w, w.h, w.minimized, w.kind)
-                      for w in (self._wins[k] for k in self._order)))
+                      for w in (self.windows[k] for k in self.z_order)))
 
     def _content_flinging(self):
         """True while a window's CONTENT is coasting on a kinetic fling (#113) --
@@ -576,7 +603,7 @@ class WindowPaint:
         not the focused window (whose content re-renders live), and nothing
         global invalidated the frame -- the desk backdrop repainting under it, a
         live animation, or a visible cursor whose old stamp would ghost."""
-        n = len(self._order)
+        n = len(self.z_order)
         # Any change to the window SHAPE of the frame (which windows, their
         # z-order, geometry, minimised state, or which one has focus) voids every
         # retained stamp. One signature comparison beats hunting each mutation
@@ -585,19 +612,19 @@ class WindowPaint:
         if sig != self._win_sig:
             self._win_sig = sig
             self._player_under = self._covers_player()
-            for k in self._order:
-                self._wins[k]._stamp_streak = 0
+            for k in self.z_order:
+                self.windows[k]._stamp_streak = 0
             self._sig_stable = False
             return 0
         self._sig_stable = True
         if not self._frame_is_quiet(dt):
             return 0                      # something under/over everything moved
-        horizon = self._retained_n()
+        horizon = self.retained_n()
         for i in range(n):
-            win = self._wins[self._order[i]]
+            win = self.windows[self.z_order[i]]
             if win.minimized:
                 continue                  # nothing painted -> nothing to skip past
-            if (self._order[i] == self._focus or win.kind == "desktop"
+            if (self.z_order[i] == self.focus_key or win.kind == "desktop"
                     or getattr(win, "_stamp_streak", 0) < horizon):
                 return i
         return n                          # every window is settled: draw none
@@ -607,14 +634,14 @@ class WindowPaint:
         shadow included (read once a shape change, by draw_stack's quiet
         path): the front's, or a running set's (another game's window
         over it included)."""
-        order = self._order
+        order = self.z_order
         n = len(order)
         for i in range(n):
-            win = self._wins[order[i]]
+            win = self.windows[order[i]]
             if win.minimized or win.kind != "desktop":
                 continue
             for k in order[i + 1:]:
-                up = self._wins[k]
+                up = self.windows[k]
                 if not up.minimized and _overlap(
                         self._pad_extent(up, up.x, up.y, up.w, up.h),
                         (win.x, win.y, win.w, win.h)):
@@ -629,7 +656,7 @@ class WindowPaint:
         content alone), and no cursor stamp needs erasing. Shared by the
         window-skip and the chrome freeze."""
         if (self._desk_painted or self._drag is not None
-                or self._resize is not None or self.ws._animating(dt, False)
+                or self._resize is not None or self.ws.animating(dt, False)
                 or self._scrim_up()):
             return False
         p = self.ws.pointer
@@ -638,10 +665,10 @@ class WindowPaint:
         return True
 
     def _draw_windows(self, dt):
-        self._sync_windows()
+        self.sync_windows()
         self._undock_orphans()
         self._resize_feet()
-        n = len(self._order)
+        n = len(self.z_order)
         # A full-screen window covers the glass: nothing under it is drawn.
         cover = self.full_cover()
         first = max(self._lowest_dirty_window(dt), cover)
@@ -651,16 +678,16 @@ class WindowPaint:
         # redrawing them is pure waste. Measured on P4 glass during a picker
         # scroll: 8.2ms of a 70ms frame, every frame, for an unchanged title bar.
         # _lowest_dirty_window sets _sig_stable (window shape/order/focus).
-        quiet = self._chrome_quiet = self._sig_stable and self._frame_is_quiet(dt)
+        quiet = self.chrome_quiet = self._sig_stable and self._frame_is_quiet(dt)
         touched = []
         self._under_hit = False
         below = self._below
         below[0] = below[1] = below[2] = below[3] = 0
-        top = self._wins[self._order[-1]] if n else None
+        top = self.windows[self.z_order[-1]] if n else None
         for i in range(n):
-            key = self._order[i]
-            win = self._wins[key]
-            focused = (key == self._focus)
+            key = self.z_order[i]
+            win = self.windows[key]
+            focused = (key == self.focus_key)
             if win.minimized:
                 continue                  # hidden: no z-slot, not replayed
             if i < first:
@@ -680,7 +707,7 @@ class WindowPaint:
             if quiet and below[2] > below[0]:
                 if ext is None:
                     ext = self._win_extent(win)
-                self._chrome_quiet = not (
+                self.chrome_quiet = not (
                     ext[0] < below[2] and below[0] < ext[0] + ext[2]
                     and ext[1] < below[3] and below[1] < ext[1] + ext[3])
             if win is not top:
@@ -724,18 +751,18 @@ class WindowPaint:
                     touched.append((pt[0], pt[1], pt[2] - pt[0], pt[3] - pt[1]))
                 else:
                     touched.append(self._win_extent(win))
-        self._chrome_quiet = quiet
+        self.chrome_quiet = quiet
         # The chips live on the OS bar, whose strip the compositor carries
         # when the chip draw says it moved; the resize outline lies inside the
         # gesture union. Neither is a rect of its own.
         self._hand_damage(touched)
         if cover < 0:                              # the bar is covered with the desk
-            self._draw_taskbar_chips(quiet=self._chrome_quiet or self._chips_untouched(dt))
+            self._draw_taskbar_chips(quiet=self.chrome_quiet or self._chips_untouched(dt))
         self._alone_note()
         if self._resize is not None:               # rubber-band resize preview
             g = self._resize
             kind, cw, chh, rx, ry = g[0], g[5], g[6], g[10], g[11]
-            win = self._wins.get(kind)
+            win = self.windows.get(kind)
             # App windows resize LIVE-BODY (drawn in _draw_app_window, #58 "real
             # OS" feel); the outline preview remains for the game window (its
             # content is the scaled composite -- cropping it mid-gesture reads as
@@ -743,7 +770,7 @@ class WindowPaint:
             # canvases without the rect stamp (the web RecordingLayer).
             if win is not None and (win.kind == "desktop"
                                     or not self._live_resize_ok()):
-                self._root_canvas.rectb(rx, ry, cw, chh,
+                self.root_canvas.rectb(rx, ry, cw, chh,
                                         self.ws.theme_colors["accent"])
 
     def _under_gesture(self, win, focused, top):
@@ -758,7 +785,7 @@ class WindowPaint:
         if not r or self._restored_f != self.ws.frame_state.frames_drawn or win is top:
             return None
         g = self._gesture()
-        if g is None or self._wins.get(g[0]) is not top:
+        if g is None or self.windows.get(g[0]) is not top:
             return None
         if (focused or win.kind == "desktop" or win.saved is not None or win.buf is None
                 or win._look_gen != self.ws.look.look_gen
@@ -781,13 +808,13 @@ class WindowPaint:
         cache over no bar."""
         ws = self.ws
         bar = ws.bar_layer
-        t = bar._clock_text()
+        t = bar.clock_text()
         f = ws.frame_state.frames_drawn
         h = self._clock_held
         r = self._restored if self._restored_f == f else False
         over = r is None
         if r:
-            for b in self._root_ctx.layout.bars:
+            for b in self.root_ctx.layout.bars:
                 if _overlap(r, b[1]):
                     over = True
         if h[0] == t and h[1] == f - 1 and not over:
@@ -796,7 +823,7 @@ class WindowPaint:
             h[0] = t
             h[2] = 1
         h[1] = f
-        if h[2] <= self._retained_n():
+        if h[2] <= self.retained_n():
             self._outside_f = f
             bar.redraw_clock("desk")
 
@@ -804,7 +831,7 @@ class WindowPaint:
         """The desk drawn whole this frame, its bar's clock with it: the
         first of the RETAINED_FRAMES frames that hold its text."""
         h = self._clock_held
-        h[0] = self.ws.bar_layer._clock_text()
+        h[0] = self.ws.bar_layer.clock_text()
         h[1] = self.ws.frame_state.frames_drawn
         h[2] = 1
 
@@ -815,7 +842,7 @@ class WindowPaint:
         r = self._restored
         if not r or self._restored_f != self.ws.frame_state.frames_drawn:
             return False
-        if getattr(self.ws.pointer, "visible", False) or self.ws._animating(dt, False):
+        if getattr(self.ws.pointer, "visible", False) or self.ws.animating(dt, False):
             return False
         got = self._chips_cell()
         if got is None:
@@ -828,7 +855,7 @@ class WindowPaint:
         stamp and what the windows above it cast on it in each, its chrome in
         their bounding box, which the gesture's window covers between them.
         Answers that box. The casts blend, so they land in the rects alone."""
-        rc = self._root_canvas
+        rc = self.root_canvas
         cx, cy, _cw, _ch = win.content_rect()
         for r in rects:
             rc.blit_strip_rect(win.buf, cx, cy, r[0], r[1], r[2], r[3])
@@ -853,7 +880,7 @@ class WindowPaint:
         swapped for the root, masked to the window's rect. That is why the
         viewport has to match win.buf exactly -- the layouts were built for that
         size, and a mismatch would lay the content out for the wrong surface."""
-        root = self._root_canvas
+        root = self.root_canvas
         if not hasattr(root, "set_viewport"):
             return False                      # web RecordingLayer: keep the stamp
         cx, cy, cw, ch = win.content_rect()
@@ -865,7 +892,7 @@ class WindowPaint:
         if cx < 0 or cy < 0 or cx + cw > root.w or cy + ch > root.h:
             return False
         ws = self.ws
-        content = self._content_for(win.kind)
+        content = self.content_for(win.kind)
         held = getattr(content, "HELD", False)
         # An app on the verbs: whether the buffer this frame paints holds
         # its page as the last frame left it, so its pages may move that
@@ -900,26 +927,26 @@ class WindowPaint:
             # 3: the ring's word too, that this buffer holds the page as the
             # frames RETAINED_FRAMES back left it, but for their changes
             vouched((3 if chain else 2) if self._vouches(win) else 1)
-        self._install(win.ctx, win)
-        ws._sys_canvas = root                 # ...but paint on the framebuffer
-        ws._surface_write(cx, cy)
+        self.install_window(win.ctx, win)
+        ws.bound_sys_canvas = root                 # ...but paint on the framebuffer
+        ws.surface_write(cx, cy)
         root.set_viewport(cx, cy, cw, ch)
         _ui_draw.window_frame(pages)
-        self._direct_root = True
+        self.direct_root = True
         try:
             if held:
                 content.retained(known, u[0], u[1], u[2], u[3])
-            content.draw(dt)
+            ws.bar_layer.draw_surface(content, dt)
         finally:
-            self._direct_root = False
-            if self._scale_owed:
+            self.direct_root = False
+            if self.scale_owed:
                 # The content changed the font scale: the root takes it now
                 # its page is drawn (`Appearance._font_scale_canvas`).
-                self._scale_owed = False
+                self.scale_owed = False
                 root.set_font_scale(ws.look.effective_font_scale())
             _ui_draw.window_frame(0)
             root.clear_viewport()
-            self._install(self._root_ctx)
+            self.install_window(self.root_ctx)
         # the row is the root's already where the root held the page as its
         # last draw left it, but for a lag clear of the row
         self._row_over(win, root, held, bool(known) and self._row_clear(win, u))
@@ -964,12 +991,12 @@ class WindowPaint:
         that window alone: it is on top and focused, nothing under it drew
         into it, and nothing above it draws -- no overlay, popover, scrim or
         cursor, the chrome quiet (no drag, resize or desk repaint)."""
-        if not self._chrome_quiet or self._under_hit:
+        if not self.chrome_quiet or self._under_hit:
             return False
-        if (self._cache_sig & ~2) != 0 or self._pop_live() or self.popover_owed():
+        if (self.cache_sig & ~2) != 0 or self._pop_live() or self.popover_owed():
             return False
-        order = self._order
-        return bool(order) and order[-1] == self._focus and self._wins.get(order[-1]) is win
+        order = self.z_order
+        return bool(order) and order[-1] == self.focus_key and self.windows.get(order[-1]) is win
 
     def _shown_chain(self, win, f, c):
         """Whether the root buffer frame `f` paints holds `win`'s page but
@@ -977,7 +1004,7 @@ class WindowPaint:
         grows `c`: the RETAINED_FRAMES painted frames before `f` all left
         their buffer holding the page, and the changes of all but the
         oldest are known."""
-        n = getattr(self._root_canvas, "RETAINED_FRAMES", 0)
+        n = getattr(self.root_canvas, "RETAINED_FRAMES", 0)
         if n < 1 or n > _SHOWN:
             return False
         ring = self._shown
@@ -1057,7 +1084,7 @@ class WindowPaint:
         e[10] = ch
         e[11] = self.ws.look.look_gen
         e[12] = 0                     # the windows' pass closes it (`_alone_note`)
-        n = getattr(self._root_canvas, "RETAINED_FRAMES", 0)
+        n = getattr(self.root_canvas, "RETAINED_FRAMES", 0)
         if ok and held and 1 <= n <= _SHOWN:
             sc = self._sc
             sc[0] = sc[1] = sc[2] = sc[3] = 0
@@ -1072,10 +1099,10 @@ class WindowPaint:
         hold the desk's cache, each window's stamp and the chips advance as
         an unchanged whole frame advances them, and its shown ring entry is
         the last frame's, the page unchanged."""
-        n = self._retained_n()
+        n = self.retained_n()
         if self._backdrop_valid and self._desk_streak < n:
             self._desk_streak += 1
-        for win in self._wins.values():
+        for win in self.windows.values():
             if not win.minimized:
                 win._stamp_streak = getattr(win, "_stamp_streak", 0) + 1
         if self._chip_streak < n:
@@ -1165,7 +1192,7 @@ class WindowPaint:
         draws (`_direct_render`), the shown ring vouching where its pages
         may move the last frame's pixels, and its window buffer is refilled
         from the glass where a reader needs it (`_fresh`)."""
-        c = self._content_for(win.kind)
+        c = self.content_for(win.kind)
         return (c is not None and not getattr(c, "HELD", False)
                 and (getattr(c, "UI", False) or getattr(c, "SPEAKS", False)))
 
@@ -1175,7 +1202,7 @@ class WindowPaint:
         the shown ring says that frame left the window's content rect, where
         it lies now and under the look in force, holding its page with
         nothing over it. Whether it did."""
-        root = self._root_canvas
+        root = self.root_canvas
         cli = getattr(root, "copy_last_into", None)
         buf = win.buf
         if cli is None or buf is None:
@@ -1201,19 +1228,19 @@ class WindowPaint:
         """`win.buf` holds its page before a reader stamps it: refilled from
         the last frame's buffer where the root keeps one apart from the one
         this frame draws (a single buffer is being drawn over), else drawn
-        (`_prewarm`)."""
+        (`prewarm`)."""
         if win.buf is None or not win._buf_stale:
             return
-        if getattr(self._root_canvas, "RETAINED_FRAMES", 1) > 1 and self._refill(win):
+        if getattr(self.root_canvas, "RETAINED_FRAMES", 1) > 1 and self._refill(win):
             return
-        self._prewarm(win)
+        self.prewarm(win)
 
     def refill_step(self):
         """A frame with nothing to paint: the focused window's buffer,
         which direct render left behind the glass, refilled from the last
         frame's buffer (the stamp run backwards, off the paint path). Whether
         it ran."""
-        win = self._wins.get(self._focus) if self._focus is not None else None
+        win = self.windows.get(self.focus_key) if self.focus_key is not None else None
         if (win is None or win.minimized or win.kind == "desktop" or win.buf is None
                 or not win._buf_stale or self.mode != "desktop"):
             return False
@@ -1257,7 +1284,7 @@ class WindowPaint:
 
         "Provably" is three facts together:
 
-        - Nothing marked the UI dirty. ws._dirty is still readable during the
+        - Nothing marked the UI dirty. ws.frame_state.dirty is still readable during the
           draw -- frame() clears it AFTER -- so a False here means no input or
           state handler reported a visible change this frame. MODE_MARK, the
           home's X bringing the desk back, is the WM's own and no change.
@@ -1270,7 +1297,7 @@ class WindowPaint:
           activity forces a live render. The click check reads BOTH frames'
           states because handlers consume p.click in place (a tap that opened a
           prompt zeroes it before the draw sees it); the previous frame's edge
-          is still visible in ws._last_ptr. A position/visibility-only change
+          is still visible in ws.last_ptr. A position/visibility-only change
           -- the moving cursor, its auto-hide -- is inert: no content surface
           draws hover feedback (audited 2026-07-27; the cursor is an overlay,
           and anything that appears without input must already be an
@@ -1302,13 +1329,13 @@ class WindowPaint:
                 return False
             if win.buf is None or win._buf_stale:
                 return False
-        d = ws._dirty
+        d = ws.frame_state.dirty
         if d and d is not MODE_MARK:
             return False
         if win._marked != self._marks_for(win):
             return False                  # it holds a focus mark it no longer shows, or lacks one
-        cur = ws._ptr_state()
-        last = ws._last_ptr
+        cur = ws.ptr_state()
+        last = ws.last_ptr
         if not self._grab:
             if cur is not None and (cur[3] or cur[4]):
                 return False
@@ -1321,12 +1348,9 @@ class WindowPaint:
         k = win.kind
         if k == "update":
             return False
-        if k == "settings" and ws.settings_layer.bluetooth_animating():
-            return False
-        if k == "settings" and ws.settings_layer.usb_moved():
-            return False
-        if k == "tasks" and ws.tasks_layer.moved():
-            return False
+        lyr = ws.layer_of(k)
+        if lyr is not None and lyr.moved():
+            return False                  # what it shows moved on its own
         if k == "menu" and ws.menu_view == "music" \
                 and ws.music_ui.music_preview is not None:
             return False
@@ -1341,10 +1365,10 @@ class WindowPaint:
         # the editor-tab layout every drag frame is pure waste -- blit the retained
         # buffer at the new position instead. A drag of ANOTHER window still lets
         # this one render live (it's not the one moving).
-        # Gesture keys are the window REGISTRY key -- resolve through _wins
+        # Gesture keys are the window REGISTRY key -- resolve through windows
         # identity (see _gesture_extent's note).
         if self._resize is not None \
-                and self._wins.get(self._resize[0]) is win \
+                and self.windows.get(self._resize[0]) is win \
                 and self._live_resize_ok():
             # Live-body resize: the frame follows the edge, content crops.
             self._win_touched = True
@@ -1353,9 +1377,9 @@ class WindowPaint:
             self._draw_resizing_window(win, focused, g[10], g[11], g[5], g[6])
             return
         moving = ((self._drag is not None
-                   and self._wins.get(self._drag[0]) is win)
+                   and self.windows.get(self._drag[0]) is win)
                   or (self._resize is not None
-                      and self._wins.get(self._resize[0]) is win))
+                      and self.windows.get(self._resize[0]) is win))
         if moving:
             self._win_touched = True
             self._fresh(win)              # the move stamps its page
@@ -1364,7 +1388,7 @@ class WindowPaint:
             # drawn while it had the focus mark.
             win._look_gen = self.ws.look.look_gen
             self._win_touched = True
-            self._prewarm(win)
+            self.prewarm(win)
         elif not focused:
             self._fresh(win)
         if focused and not moving:
@@ -1378,19 +1402,19 @@ class WindowPaint:
             # buffer is left behind the glass, and every reader of it brings it
             # up first (`_fresh`; the idle frames' `refill_step`).
             speaks = self._speaks(win)
-            content = self._content_for(win.kind)
+            content = self.content_for(win.kind)
             held = getattr(content, "HELD", False)
-            if (self._chrome_quiet
+            if (self.chrome_quiet
                     and (speaks or self._content_gesture or self._content_flinging()
                          or held and self._held_direct(win, content))
-                    and self._order and self._wins.get(self._order[-1]) is win):
+                    and self.z_order and self.windows.get(self.z_order[-1]) is win):
                 if speaks and self._still_shown(win):
                     # Nothing changed the page and this buffer holds it.
                     own = self._own
                     own[0] = own[1] = own[2] = own[3] = 0
                     own[4] = 1
                     self._shown_note(win, self.ws.frame_state.frames_drawn, True, False)
-                    self._win_chrome(win, focused, quiet=self._chrome_quiet)
+                    self._win_chrome(win, focused, quiet=self.chrome_quiet)
                     return
                 if self._direct_render(win, dt):
                     self._win_touched = True
@@ -1400,7 +1424,7 @@ class WindowPaint:
                         if ok and own[4]:
                             self._shown_part(win, own[0], own[1], own[2], own[3])
                         self._shown_note(win, self.ws.frame_state.frames_drawn, ok, held)
-                    self._win_chrome(win, focused, quiet=self._chrome_quiet)
+                    self._win_chrome(win, focused, quiet=self.chrome_quiet)
                     return
             # CONTENT FREEZE (docs/surface_model_v1.md §14.1, first slice): on a
             # painted frame that provably did not change this window's content
@@ -1408,7 +1432,7 @@ class WindowPaint:
             # buffer stamp below present it -- the map tab's draw is ~70ms on P4
             # glass, the stamp ~14ms, and the stamp runs either way.
             own = self._own
-            if (win._buf_stale and getattr(self._root_canvas, "RETAINED_FRAMES", 1) > 1
+            if (win._buf_stale and getattr(self.root_canvas, "RETAINED_FRAMES", 1) > 1
                     and self._content_static(win, False)):
                 self._refill(win)         # the freeze's buffer, from the glass
             if not self._content_static(win):
@@ -1416,7 +1440,7 @@ class WindowPaint:
                 # layout, telling a content that speaks the shown protocol
                 # (§14.3) what of its page the buffer holds.
                 self._win_touched = True
-                self._install(win.ctx, win)
+                self.install_window(win.ctx, win)
                 if speaks and not held:
                     _ui_draw.window_frame(1)
                 kept = held and not win._buf_stale
@@ -1430,10 +1454,10 @@ class WindowPaint:
                             content.retained(1, 0, 0, 0, 0)
                         else:
                             content.retained(lag[4], lag[0], lag[1], lag[2], lag[3])
-                    content.draw(dt)
+                    self.ws.bar_layer.draw_surface(content, dt)
                 finally:
                     _ui_draw.window_frame(0)
-                    self._install(self._root_ctx)
+                    self.install_window(self.root_ctx)
                 self._row_over(win, win.buf, held, kept)
                 win._buf_stale = False
                 if held:
@@ -1465,12 +1489,12 @@ class WindowPaint:
                     if x1 > x0 and y1 > y0:
                         _perf = getattr(self.ws, "perf_capture", False)
                         _t0 = _ticks_ms() if _perf else 0
-                        self._root_canvas.blit_strip_rect(win.buf, cx, cy, cx + x0,
+                        self.root_canvas.blit_strip_rect(win.buf, cx, cy, cx + x0,
                                                           cy + y0, x1 - x0, y1 - y0)
                         if _perf:
-                            self.ws._pf_wm_stamp = _ticks_ms() - _t0
+                            self.ws.pf_wm_stamp = _ticks_ms() - _t0
                     self._shown_note(win, f, ok, held)
-                    self._win_chrome(win, focused, quiet=self._chrome_quiet)
+                    self._win_chrome(win, focused, quiet=self.chrome_quiet)
                     return
             if held or speaks:
                 self._shown_note(win, f, ok, held)
@@ -1493,21 +1517,21 @@ class WindowPaint:
         #
         # Host/web canvases have no hook, so their path is byte-identical.
         moving_this = (self._drag is not None
-                       and self._wins.get(self._drag[0]) is win)
-        scrolling_this = (focused and self._chrome_quiet
+                       and self.windows.get(self._drag[0]) is win)
+        scrolling_this = (focused and self.chrome_quiet
                           and (self._content_gesture
                                or self._content_flinging()))
         if ((moving_this or scrolling_this)
-                and self._order and self._wins.get(self._order[-1]) is win):
-            rc = self._root_canvas
+                and self.z_order and self.windows.get(self.z_order[-1]) is win):
+            rc = self.root_canvas
             if hasattr(rc, "blit_strip_async"):
-                self._win_chrome(win, focused, quiet=self._chrome_quiet)
+                self._win_chrome(win, focused, quiet=self.chrome_quiet)
                 cx, cy, _cw, _ch = win.content_rect()
                 _perf = getattr(self.ws, "perf_capture", False)
                 _t0 = _ticks_ms() if _perf else 0
                 if rc.blit_strip_async(win.buf, cx, cy):
                     if _perf:                 # the stamp's CPU share: its submit
-                        self.ws._pf_wm_stamp = _ticks_ms() - _t0
+                        self.ws.pf_wm_stamp = _ticks_ms() - _t0
                     return
                 # non-fit / refusal: fall through to the sync stamp (the chrome
                 # is already down; the second draw below is harmless overdraw).
@@ -1515,10 +1539,10 @@ class WindowPaint:
         _perf = getattr(self.ws, "perf_capture", False)
         _t0 = _ticks_ms() if _perf else 0
         cx, cy, _cw, _ch = win.content_rect()
-        self._root_canvas.blit_strip(win.buf, cx, cy)
+        self.root_canvas.blit_strip(win.buf, cx, cy)
         if _perf:
-            self.ws._pf_wm_stamp = _ticks_ms() - _t0
-        self._win_chrome(win, focused, quiet=self._chrome_quiet)
+            self.ws.pf_wm_stamp = _ticks_ms() - _t0
+        self._win_chrome(win, focused, quiet=self.chrome_quiet)
 
     def _fps_chip_on(self):
         """The parent's overlay-sig bit 2, re-read where the chip is now drawn:
@@ -1538,7 +1562,7 @@ class WindowPaint:
         # would wipe the frame the cart just recorded.
         cx, cy, cw, ch = win.content_rect()
         ox, oy, scale = self._player_view(win)
-        _view = getattr(self._root_canvas, "view", None)
+        _view = getattr(self.root_canvas, "view", None)
         # A command-only game canvas (no `buf`) has NO pixels to composite, so the
         # bracket is not optional -- without it the cart's commands would land
         # unplaced at the desktop origin, unclipped. (That is exactly the bug the
@@ -1546,7 +1570,7 @@ class WindowPaint:
         # pixel path would have used, so the game FILLS its window.
         use_view = _view is not None and getattr(gc, "buf", None) is None
         if full and not ws.run.app_window_canvas:
-            self._root_canvas.rect(cx, cy, cw, ch, _SHADOW)   # letterbox bezel
+            self.root_canvas.rect(cx, cy, cw, ch, _SHADOW)   # letterbox bezel
         if running:
             # The Player ticks while it's the STACK top (the running process),
             # focused or not -- editing beside a live playtest keeps it alive.
@@ -1555,9 +1579,9 @@ class WindowPaint:
                 # used; vCW/vCH bound cls() and every draw to the cart surface, so
                 # a cart cannot paint over the desk around it.
                 _view(ox, oy, scale, gc.w, gc.h)
-            self._content_for("desktop").draw(dt)  # Player.tick -> the game canvas
+            self.content_for("desktop").draw(dt)  # Player.tick -> the game canvas
             if self._fps_chip_on():
-                ws._perf_layer.draw(dt)   # game domain: inside the bracket (above)
+                ws.perf_layer.draw(dt)   # game domain: inside the bracket (above)
             if use_view:
                 _view()
         if gc is not self._fb_for:     # the parent's cached flush_batch probe
@@ -1582,10 +1606,10 @@ class WindowPaint:
         if (ws.run.app_window_canvas and running and ws.run.cart_frame is None
                 and self._player_rows(win, gc, ox, oy, scale)):
             if full and win.docked is None:
-                self._win_chrome(win, focused, quiet=self._chrome_quiet)
+                self._win_chrome(win, focused, quiet=self.chrome_quiet)
             return
         if not self._window_frame(gc, ox, oy, scale, defer, src):
-            self._blit_game(self._root_canvas, gc, ox, oy, scale,
+            self._blit_game(self.root_canvas, gc, ox, oy, scale,
                             defer=defer, src=src)
         if full and win.docked is None:
             self._win_chrome(win, focused)
@@ -1601,19 +1625,19 @@ class WindowPaint:
         it composited."""
         ws = self.ws
         p = ws.run.player
-        ch = p.change
+        ch = p.face.change
         f = ws.frame_state.frames_drawn
         own = self._own
         ok = self._shown_ok(win)
         cx, cy, _cw, _ch = win.content_rect()
         cw, chh = self.app_window_content()     # what of the canvas the window shows
-        root = self._root_canvas
+        root = self.root_canvas
         if (scale != 1 or ox != cx or oy != cy or cw > gc.w or chh > gc.h
                 or not hasattr(root, "blit_strip_rect")):
             own[4] = 0
             self._shown_note(win, f, ok, False)
             return False
-        if (not ch[8] or p.change_f != _ui_draw.painted() or ch[4] > 0 or ch[5] > 0
+        if (not ch[8] or p.face.change_f != _ui_draw.painted() or ch[4] > 0 or ch[5] > 0
                 or ch[6] < cw or ch[7] < chh):
             own[4] = 0
             self._shown_note(win, f, ok, False)
@@ -1640,7 +1664,7 @@ class WindowPaint:
         x1 = sc[2] if sc[2] < cw else cw
         y1 = sc[3] if sc[3] < chh else chh
         if x1 > x0 and y1 > y0:
-            self._root_canvas.blit_strip_rect(gc, cx, cy, cx + x0, cy + y0, x1 - x0, y1 - y0)
+            self.root_canvas.blit_strip_rect(gc, cx, cy, cx + x0, cy + y0, x1 - x0, y1 - y0)
             self._win_touched = True
         self._shown_part(win, own[0], own[1], own[2], own[3])
         self._shown_note(win, f, ok, False)

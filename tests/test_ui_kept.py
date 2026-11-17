@@ -577,10 +577,10 @@ def test_the_lua_face_answers_the_floor_and_held(tmp_path):
     open_cart(ws, "Kept Lua")
     drv = make_drv(ws)
     for _ in range(3):
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(1 / 30)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
-    lua = ws.run.player._lua
+    lua = ws.run.player.lua
     if hasattr(lua._run, "pmem"):
         pm = list(lua._run.pmem()[1])[:12]
     else:
@@ -593,7 +593,7 @@ def test_the_lua_face_answers_the_floor_and_held(tmp_path):
     assert pm[9] == 10                                 # its end, 0: nothing lags
     assert pm[10] == 3                                 # every row shows
     assert pm[11] == 0                                 # no buffer holds the hint
-    ws.exit()
+    ws.spine.exit()
 
 
 _LUA_FACES = """
@@ -639,10 +639,10 @@ def test_the_lua_face_keeps_faces(tmp_path):
     ws.pointer.visible = False
     open_cart(ws, "Faces Lua")
     drv = make_drv(ws)
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
-    lua = ws.run.player._lua
+    lua = ws.run.player.lua
     if hasattr(lua._run, "pmem"):
         pm = list(lua._run.pmem()[1])[:22]
     else:
@@ -655,7 +655,7 @@ def test_the_lua_face_keeps_faces(tmp_path):
     # rows 2 .. 4 show (20 down, 60 tall), two parts each: then row 5 past
     # the end, then row 1 before the start, nearest first
     assert pm[20] == 10 and pm[6:16] == [3, 4, 5, 6, 7, 8, 9, 10, 2, 1]
-    ws.exit()
+    ws.spine.exit()
 
 
 def test_a_context_carries_no_kept_ring(th):

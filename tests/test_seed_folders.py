@@ -3,8 +3,8 @@ host) takes from the served cart folders, decided in the VM -- the browser's
 worker writes what it reports into OPFS and decides nothing itself
 (docs/moycore_direction.md section 3).
 
-Run by CPython over the twin store and by the desktop MicroPython over the
-native one, which is what the wasm links: the same report and the same tree.
+Run by CPython and by the desktop MicroPython, which is what the wasm links,
+each over its face of the one native store: the same report and the same tree.
 """
 
 import json
@@ -18,7 +18,7 @@ DRIVER = r'''
 import sys, json
 sys.path.insert(0, @RUNTIME@)
 import moy_carts
-print("native", getattr(moy_carts, "_store", None) is not None)
+print("impl", sys.implementation.name)
 print(json.dumps(moy_carts.seed_folders(@SRC@, @ROOT@)))
 '''
 
@@ -140,7 +140,7 @@ def _check_returning(got, tree):
 
 def test_a_returning_store_takes_only_its_system_carts(tmp_path):
     native, got, tree = _seed([sys.executable], tmp_path, LOCAL)
-    assert native == "native False"
+    assert native == "impl cpython"
     _check_returning(got, tree)
 
 
@@ -160,7 +160,7 @@ def test_the_native_store_seeds_the_same(tmp_path):
     for local, tag in ((LOCAL, "back"), ({}, "first")):
         vm = _seed([exe, "-X", "heapsize=16M"], tmp_path / ("vm-" + tag), local)
         cp = _seed([sys.executable], tmp_path / ("cp-" + tag), local)
-        assert vm[0] == "native True"
+        assert vm[0] == "impl micropython"
         assert vm[1] == cp[1] and vm[2] == cp[2], tag
 
 

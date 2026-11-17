@@ -81,7 +81,7 @@ CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y
 # Do NOT read the generated sdkconfig's FLASHFREQ string to check this landed
 # ("80m" is correct and stays -- the image header cannot encode 120M; the MSPI
 # tuning code applies it at runtime). One divergence from the T-Deck: its
-# flash is octal, this board's is DIO -- whether IDF 5.5.1 carries a DIO@120M
+# flash is octal, this board's is DIO -- whether IDF 5.5 carries a DIO@120M
 # timing config is part of what this A/B answers -- it does: the build takes
 # it and the board runs it. A/B'D ON THIS GLASS 2026-08-19, identical image,
 # only the MSPI profile differing, and 120M won EVERYWHERE: Star Catcher
@@ -155,6 +155,12 @@ CONFIG_BT_NIMBLE_NVS_PERSIST=y
 # Python: sdkconfig.ble's 6144 was sized for MicroPython's BLE IRQ handlers,
 # and the 2 KB it carries above IDF's default is internal SRAM.
 CONFIG_BT_NIMBLE_TASK_STACK_SIZE=4096
+
+# NimBLE's host pools are static (.bss), not allocated by nimble_port_init:
+# the kernel's BLE task starts and stops the host (native/moy_input/
+# moy_ble_task.c), and the internal-SRAM budget was measured with the pools
+# static. ESP-IDF defaults this to y; MicroPython's later sdkconfig.ble sets n.
+CONFIG_BT_NIMBLE_STATIC_TO_DYNAMIC=n
 
 # --- TCP throughput: Espressif's "Iperf rank" set, which is ATOMIC ---------
 # Measured on the T-Deck (same SoC) 2026-08-20, pinned to one AP: 400 -> 2121

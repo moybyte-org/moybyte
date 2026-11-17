@@ -22,7 +22,7 @@ inside the frame; stage 7's flush overlap fixed it. Two `pump=` fields look
 alike and are not one instrument: HITCH's `pump=%.1f`, and the `PUMP` line,
 which `_diag_pump` emits only when `comp.bounce_flush` is set, so **the `PUMP`
 line appearing at all is the proof the overlap is in an image.** The frame
-rates are #66's; "the compositor" below says what to watch if it regresses.
+rates are `docs/perf/ledger.md`'s; "the compositor" below says what to watch if it regresses.
 
 Stage 2 also settles where the module list lives: `board.toml` + `tools/board_config.py`,
 the same declaration every board uses, and the whole shared console
@@ -33,13 +33,14 @@ subsystem under test and not also by a megabyte of frozen bytecode.
 ### What it replaced
 
 This build replaced the LVGL fork (deleted 2026-08-17) with the same console
-and the same baked browser bundle in a much smaller image: LVGL, `lcd_bus`,
+and the same browser bundle in a much smaller image: LVGL, `lcd_bus`,
 `st7789`, `task_handler`, `rgb_bus`, `spi3wire` and the fork's `i2c` are simply
 not in it, and the panel is one C file. Both builds stamped OTA board id
 `tdeck` against a byte-identical partition table, so a payload from either
 installed into the other's inactive slot — which made the migration an OTA
 rather than a cable flash. The build prints the image's headroom; nothing else
-is current. The slots are 7 MiB since 2026-10-26, and the 128 KiB coredump
+is current. The slots are 6 MiB since 2026-11-17 (the browser console is an
+add-on cart, not in the image), and the 128 KiB coredump
 partition after them (2026-11-09: a panic's ESP-IDF core dump,
 `tools/coredump.py`) came off the vfs; the table's CSV,
 `boards/MOYBYTE_TDECK/partitions-moybyte-tdeck.csv`, carries why.
@@ -73,6 +74,7 @@ Outputs land in `dist/tdeck_mainline/`:
 |---|---|---|
 | `moybyte_tdeck.bin` | bootloader + partition table + app, merged | cable flash at **0x0** (the S3's bootloader offset; the P4's is 0x2000) |
 | `moybyte_tdeck_app.bin` | the app partition alone | what an OTA writes into the inactive slot |
+| `moybyte_tdeck_install.bin` | the merged image, then at the internal store's 0xC40000 a store holding the browser console add-on (`tools/store_image.py firmware/lilygo_t_deck_plus_mainline`) | the website's install at **0x0**: it erases the internal store, an SD card is not touched, and the first boot on a card moves the add-on there |
 
 The merged image leaves `otadata` (0x1D000) erased, so the bootloader falls back
 to `ota_0` — the same effect the fork build got by erasing that region
@@ -250,7 +252,7 @@ would be a teardown after the attach.
 #### `MODE = "audio"` (stage 5)
 
 The speaker is a MAX98357 class-D amp on I2S: BCK GPIO 7, WS GPIO 5, DOUT
-GPIO 6 (`MOY_AUDIO_I2S_*` in `mpconfigboard.h`, from LilyGO's `I2SPlay`
+GPIO 6 (board.toml's `speaker` row, `MOY_HW_SPEAKER_*`, from LilyGO's `I2SPlay`
 example). I2S is its own peripheral, not the SPI host the panel and the card
 share, so audio takes no part in the bus rules below. The amp sits behind the
 board power rail with the panel (`BOARD_POWERON`, GPIO 10, driven high at
@@ -294,7 +296,7 @@ from the REPL stops it.
 
 The real thing: `moy_runtime.run_desktop()` over the shared boot spine
 (`runtime/boot/device_boot.py`), the shared `console.Workstation`, carts on SD, Lua
-carts through `moycore`, OTA, and the browser console baked into the image.
+carts through `moycore`, OTA, and the browser console add-on its image names.
 
 Boot is the same sequence every console board runs, because it is the same
 code. What you should see:
@@ -774,7 +776,7 @@ Every one of these was learned by hanging or bricking a board.
   (`native/moy_flush/moy_flush.h`), which stops the feeder queuing bands and
   lets the queued ones finish before the radio's command goes out.
   The cover prefetch is not one of them: `CoverCache._src_load` reads a cart's
-  `cover.png` off `/sd` on idle frames through `ws._with_sd`, like every other
+  `cover.png` off `/sd` on idle frames through `ws.with_sd`, like every other
   store read (`tests/test_cover_pipeline.py` pins the gate).
   Worth being honest about the size of this risk rather than repeating the
   folklore: what the boards rule records as having actually hung boards is
@@ -822,22 +824,24 @@ Every one of these was learned by hanging or bricking a board.
   (owner call 2026-10-23, `moy_kbd.c`'s THE MOVE KEYS): only a game
   (`cart_keys`) reads them as both. A roll of the trackball is those
   directions, and its click Enter, on every surface but a running cart, a
-  canvas and a caret (`Workstation.ball`, the "ball" input source;
+  canvas and a caret (`InputRouter.ball`, the "ball" input source;
   `docs/ui_api_2026-10.md` says which); mid-roll a step across the roll's
   axis takes a firmer turn, so a roll along the home's row (the system
   button, the tabs, Wi-Fi, the battery and the clock) or the Editor's (the
   system button, the seven tabs, undo, redo, Play, the battery and the
-  clock) stays on it (`Workstation.BALL_TURN`). The hint strips stay up under a tap: they name
+  clock) stays on it (`InputRouter.BALL_TURN`). The hint strips stay up under a tap: they name
   the keyboard's keys until another keyboard is used
-  (`docs/ui_api_2026-10.md`, Hints). A menu over a text surface takes the
-  keys out of text mode while it shows (`Workstation._menu_keys`). A key already down when the
-  matrix starts, or when a surface turns to text, types nothing until it is
-  pressed again, and `_set_text_mode(True)` seeds every typed-key edge with
-  the byte already in `last_key`. `Workstation._set_text_mode` →
+  (`docs/ui_api_2026-10.md`, Hints). Which mode the keyboard is in is the
+  input policy's (`runtime/shell/input_policy.py`): derived each frame from
+  the surface holding the keys and applied on change, a menu over a text
+  surface taking the keys out of text mode while it shows. A key already
+  down when the matrix starts, or when a surface turns to text, types
+  nothing until it is pressed again: turning text on seeds every typed-key
+  edge with the byte already in `last_key`. The policy's
   `ws.keyboard.set_game_mode(on)` queues a request the input task's next
   pass applies; the driver boots in ASCII and never enables raw by itself,
   and the console asks for it as it attaches the keyboard
-  (`Workstation.sync_keyboard_mode`). Raw needs keyboard firmware
+  (`InputPolicy.attach_keyboard`). Raw needs keyboard firmware
   **≥ 2025-06-12** (`T-Keyboard_..._250620.bin`): on older firmware the raw
   read sees the stray ASCII byte and keeps the session on the 1-byte + latch
   path (`raw_unsupported`), as `RAW_GAME_MODE = False` on the driver does;
@@ -911,7 +915,7 @@ The three readings any future flush change is read against:
   "closed the gap, bought no fps", and it retired the core-1 feeder unbuilt;
   #66's ledger carries it, so read that before repeating it). A `pump=` near
   the whole transfer would mean the no-acquire patch is not in the image.
-* **fps**, against the per-cart ledger in #66.
+* **fps**, against the per-cart ledger, `docs/perf/ledger.md`.
 
 If the serial dev channel is alive on this board (see the RX section — that is
 its own open question), the cheapest check needs no diag tick and no hitch:
@@ -965,8 +969,9 @@ the reading is meaningless. A stale or torn backdrop is the one failure here
 that is a correctness bug rather than a speed one: `LAYER_COPY_ASYNC = False`
 and reflash.
 
-The image includes the baked browser bundle. Build on a tree with no
-`firmware/web_runner/dist` and the image is that much smaller, with
-a warning — such an image serves a console only from a copy on its storage. The
-warning becomes a hard failure under `CI` (or `MOYBYTE_REQUIRE_WEB_BUNDLE=1`),
-because a published image with no console is the whole bug the baking fixes.
+The image names the browser bundle it was built with, and the build writes
+that bundle's pack beside it (`dist/`) for the add-on cart. Build on a tree
+with no `firmware/web_runner/dist` and the image names none, with a warning —
+such an image serves no console. The warning becomes a hard failure under `CI`
+(or `MOYBYTE_REQUIRE_WEB_BUNDLE=1`), because a published image with no
+console is a release with no add-on to publish.

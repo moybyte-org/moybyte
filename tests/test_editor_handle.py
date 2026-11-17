@@ -148,6 +148,7 @@ def test_the_t_deck_keyboard_types_into_the_focused_handle(tmp_path):
     _dframe(ws, 2)
     ed = ws.run.player.ns["open_editor"]("typed")
     ed.focus()
+    _dframe(ws)
     assert ws.input.text_mode is True          # the keyboard went to ASCII
     for ch in "hi":
         src.last_key = ord(ch)
@@ -163,7 +164,8 @@ def test_taking_the_keyboard_swallows_the_key_that_took_it(tmp_path):
     first frame reads it -- so a note opened with a key would have typed it."""
     ws, src = _device_ws(tmp_path)
     _dframe(ws, 2)
-    src.last_key = ord("k")                    # the key that opens the note
+    src.last_key = ord("k")                    # the key that opens the note,
+    _dframe(ws)                                # read by the cart this frame
     ed = ws.run.player.ns["open_editor"]("seeded")
     ed.focus()
     _dframe(ws, 2)
@@ -181,15 +183,17 @@ def test_a_focused_handle_owns_the_keyboard_and_the_cart_reads_nothing(tmp_path)
     _dframe(ws, 2)
     ed = ws.run.player.ns["open_editor"]("owned")
     ed.focus()
+    _dframe(ws)
     src.last_key = ord("q")
     _dframe(ws)
     assert ws.input.cart_key == 0 and ws.input.cart_keyp == 0
     assert ed.text() == "q"
-    # ...and releasing focus hands it back, keyboard mode included.
+    # ...and releasing focus hands it back, keyboard mode included: the
+    # cart's own (Notes' list is in game mode).
     ed.focus(False)
-    assert ws.input.text_mode is False
     src.last_key = 0
     _dframe(ws)
+    assert ws.input.text_mode is ws.run.textmode
     src.last_key = ord("w")
     _dframe(ws)
     assert ws.input.cart_key == ord("w") and ed.text() == "q"
@@ -357,9 +361,10 @@ def test_leaving_the_cart_writes_a_dirty_handle(tmp_path):
     ed = ws.run.player.ns["open_editor"]("unsaved")
     ed.set_text("do not lose me")
     assert ed.dirty() is True
-    ws._exit_to_caller()
+    ws.spine.exit_to_caller()
     assert moy_carts.load_file("docs", "unsaved", ws.carts_root) \
         == "do not lose me"
+    ws.input_policy.sync()                     # the next frame's look at the mode
     assert ws.input.text_mode is False         # and the keyboard came back
 
 

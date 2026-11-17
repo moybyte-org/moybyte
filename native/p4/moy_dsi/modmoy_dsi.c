@@ -43,6 +43,11 @@ typedef ek79007_vendor_config_t moy_dsi_vendor_config_t;
 #define MOY_DSI_BUS_CONFIG()      EK79007_PANEL_BUS_DSI_2CH_CONFIG()
 #define MOY_DSI_DBI_CONFIG()      EK79007_PANEL_IO_DBI_CONFIG()
 #define MOY_DSI_DPI_CONFIG(fmt)   EK79007_1024_600_PANEL_60HZ_CONFIG(fmt)
+// 60 MHz: a 69.7 Hz refresh over the 1354x636 timing. The vendor's 52 MHz is
+// no whole divisor of the 240 MHz PLL: ESP-IDF v5.5.6 clocks it at 48 MHz and
+// stretches the line timing back to 52's 60.4 Hz, where the drag's two-refresh
+// frame is 33 ms, not 28.7.
+#define MOY_DSI_DPI_MHZ           60
 #define moy_dsi_new_panel         esp_lcd_new_panel_ek79007
 #elif defined(MOY_DSI_PANEL_JD9365)
 // Guition JC8012P4A1C: JD9365, 10.1" 800x1280 PORTRAIT-native glass, 2-lane
@@ -64,6 +69,7 @@ typedef jd9365_vendor_config_t moy_dsi_vendor_config_t;
 #define MOY_DSI_BUS_CONFIG()      JD9365_PANEL_BUS_DSI_2CH_CONFIG()
 #define MOY_DSI_DBI_CONFIG()      JD9365_PANEL_IO_DBI_CONFIG()
 #define MOY_DSI_DPI_CONFIG(fmt)   JD9365_800_1280_PANEL_60HZ_DPI_CONFIG(fmt)
+#define MOY_DSI_DPI_MHZ           60
 #define moy_dsi_new_panel         esp_lcd_new_panel_jd9365
 #else
 #error "moy_dsi: the board must name its panel in mpconfigboard.cmake (MICROPY_DEF_BOARD MOY_DSI_PANEL_EK79007=1 or MOY_DSI_PANEL_JD9365=1)"
@@ -145,6 +151,11 @@ static esp_err_t moy_dsi_bringup(const char **what) {
     MOY_DSI_TRY(esp_lcd_new_panel_io_dbi(s_bus, &dbi_cfg, &s_io), "dbi io");
 
     esp_lcd_dpi_panel_config_t dpi_cfg = MOY_DSI_DPI_CONFIG(LCD_COLOR_PIXEL_FORMAT_RGB565);
+    // The scan-out clock is the panel's, set here as a whole divisor of the
+    // 240 MHz PLL so the driver's divider has nothing to round.
+    dpi_cfg.dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_PLL_F240M;
+    dpi_cfg.dpi_clock_freq_mhz = MOY_DSI_DPI_MHZ;
+    _Static_assert(240 % MOY_DSI_DPI_MHZ == 0, "the DPI clock divides the 240 MHz PLL");
     dpi_cfg.num_fbs = 3;    // triple-buffer: 3x the frame in PSRAM (both boards
                             // have 32MB) -- scan + DMA-pending + paint (#58)
     // Nothing here ever draw_bitmaps a FOREIGN buffer -- show() hands the DPI

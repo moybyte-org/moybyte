@@ -14,9 +14,5 @@ that no import site moved. If the device tier ever grows a genuinely
 device-only cart verb, THIS is where its wrapper would live; today there is
 none, and an empty home is the honest state."""
 
-try:                                    # device: staged flat namespace
-    from cart_api import (CART_BUTTONS, _Layer,  # noqa: F401 -- re-exports
-                          _decode_moyimg, make_api)
-except ImportError:                     # host tests importing the device module
-    from runtime.cart_api import (CART_BUTTONS, _Layer,  # noqa: F401
-                                  _decode_moyimg, make_api)
+from cart_api import (CART_BUTTONS, _Layer,  # noqa: F401 -- re-exports
+                      _decode_moyimg, make_api)

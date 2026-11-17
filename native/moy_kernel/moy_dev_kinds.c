@@ -5,9 +5,7 @@
 // the lease table's lock (moy_dev.c), which each driver's verbs that take or
 // let a lease take first too, so the lease lock is always the outer one.
 
-#if defined(__has_include) && !__has_include("esp_heap_caps.h") && !defined(_POSIX_C_SOURCE)
-#define _POSIX_C_SOURCE 200809L     // clock_gettime under -std=c99 (moy_sync.h)
-#endif
+#include "moy_platform.h"
 
 #include "moy_dev.h"
 
@@ -17,13 +15,13 @@
 #include "moy_lease.h"
 #include "moy_sync.h"
 
-extern const moy_dev_ops_t moy_dev_lora __attribute__((weak));
-extern const moy_dev_ops_t moy_dev_mic __attribute__((weak));
-extern const moy_dev_ops_t moy_dev_midi __attribute__((weak));
-extern const moy_dev_ops_t moy_dev_http __attribute__((weak));
-extern const moy_dev_ops_t moy_dev_usb __attribute__((weak));
-extern const moy_dev_ops_t moy_dev_ble __attribute__((weak));
-extern const moy_dev_ops_t moy_dev_media __attribute__((weak));
+#pragma weak moy_dev_lora
+#pragma weak moy_dev_mic
+#pragma weak moy_dev_midi
+#pragma weak moy_dev_http
+#pragma weak moy_dev_usb
+#pragma weak moy_dev_ble
+#pragma weak moy_dev_media
 
 static const struct {
     const char *name;

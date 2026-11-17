@@ -51,7 +51,7 @@ TTY_SOURCES = ("moy_tty.c", "moy_tty_sys.c", "moy_tty_sh.c", "moy_tty_ws.c", "mo
 NET_SOURCES = [os.path.join(NET, n) for n in (
     "moy_http.c", "moy_net_port.c", "moy_sync.c", "moy_sync_apply.c", "moy_webhost.c",
     "moy_ota.c", "moy_webconsole.c", "moy_gpio.c", "moy_dns.c", "moy_net_host.c",
-    "moy_webauth.c")]
+    "moy_webauth.c", "moy_page.c")]
 NET_SOURCES.append(os.path.join(STORE, "moy_journal.c"))
 
 pytestmark = pytest.mark.skipif(shutil.which("cc") is None, reason="needs a C compiler")

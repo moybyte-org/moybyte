@@ -20,6 +20,7 @@ import re
 
 import pytest
 
+import pixel_goldens
 import ui_twin as twin
 from runtime import chrome, glass_binding, moy_play, ui_draw
 from runtime.chrome import theme_colors
@@ -186,11 +187,16 @@ def _non_ascii_frame():
                               "wräp by býtes \U0001f600 ok", 9):
         cv.print(line, 4, y, th["ink"])
         y += 18
-    return hashlib.sha256(indices_of(cv)).hexdigest()[:16]
+    return indices_of(cv)
 
 
 def test_a_non_ascii_frame_is_pinned():
-    assert _non_ascii_frame() == NON_ASCII_GOLDEN
+    frame = _non_ascii_frame()
+    got = hashlib.sha256(frame).hexdigest()[:16]
+    png = pixel_goldens.check("non_ascii", got, NON_ASCII_GOLDEN,
+                              lambda: pixel_goldens.index_rows(frame, 320, 240),
+                              320, 240)
+    assert got == NON_ASCII_GOLDEN, pixel_goldens.message([png])
 
 
 def test_a_heading_is_one_text_op():

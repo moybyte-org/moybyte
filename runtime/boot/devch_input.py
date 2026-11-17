@@ -13,11 +13,8 @@ it to the pointer exactly as it hands over a finger's.
 
 try:                        # a VM: the kernel's module
     import moy_loop as _loop
-except ImportError:         # host CPython: the ctypes binding
-    try:
-        from runtime import moy_loop as _loop
-    except ImportError:     # a tier whose frames are not the kernel's yet
-        _loop = None
+except ImportError:     # a tier whose frames are not the kernel's yet
+    _loop = None
 
 
 def tap(chan, ws, parts, line):
@@ -66,11 +63,11 @@ def drag(chan, ws, parts, line):
     # Grab the TOP window's title strip and oscillate it for n frames,
     # so the PERF sampler reports DRAG-time fps. Windowed tier only --
     # a WM without windows declines, it does not traceback.
-    order = getattr(ws.wm, "_order", None) or []
+    order = getattr(ws.wm, "z_order", None) or []
     if not order:
         print("REMOTE drag: no window open")
         return
-    win = ws.wm._wins[order[-1]]
+    win = ws.wm.windows[order[-1]]
     n = 120
     step = 6
     if len(parts) >= 2:

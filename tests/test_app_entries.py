@@ -21,6 +21,7 @@ import time
 import pytest
 
 from runtime import app_perms, moy_evq, moybyte, os_log, scheduler as S
+from runtime import sched_lua
 from runtime import moy_log as L
 from runtime.shell import shell_servers
 
@@ -87,7 +88,7 @@ def moy_start():
 
 @pytest.fixture(params=["python", "lua"])
 def tier(request):
-    if request.param == "lua" and S._svc() is None:
+    if request.param == "lua" and sched_lua.runtime() is None:
         pytest.skip("no Lua runtime on this host")
     return request.param
 
@@ -239,7 +240,7 @@ end
 
 
 def test_a_lua_app_starts_its_own_service(tmp_path, tier):
-    if S._svc() is None:
+    if sched_lua.runtime() is None:
         pytest.skip("no Lua runtime on this host")
     root = _cart(tmp_path, "service.lua" if tier == "lua" else "service.py",
                  LUA_SVC if tier == "lua" else PY_SVC)
@@ -278,7 +279,7 @@ def test_a_lua_service_runs_its_apps_shared_scripts_first(tmp_path):
     """A Lua app's Lua entry runs after the scripts its `sources` lists
     before main, in order, as its window does; never main or what follows
     it, and never the entry twice."""
-    if S._svc() is None:
+    if sched_lua.runtime() is None:
         pytest.skip("no Lua runtime on this host")
     root = _cart(tmp_path, "service.lua", LUA_SVC_SHARED)
     man = json.loads((root / "manifest.json").read_text())

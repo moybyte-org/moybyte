@@ -241,7 +241,7 @@ def test_a_bound_run_canvas_never_becomes_the_preview_surface(tmp_path):
     cart with a small raster (SPEC.md 3.1) has ws.run.canvas bound to ITS size --
     which would otherwise key the sidecar and shape the render to that cart."""
     ws = _ws(tmp_path, sys_size=(1024, 600))
-    assert ws.bind_run_canvas(128, 120)
+    assert ws.binding.bind_run_canvas(128, 120)
     assert (ws.run.canvas.w, ws.run.canvas.h) == (128, 120)
     before = bytes(ws.run.canvas._buf)
 

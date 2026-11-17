@@ -81,7 +81,7 @@ class _TDeck:
         self.kbd = mi.KbdDriver(ws.input, self.fake)
         self.fake.frames = IDLE
         ws.keyboard = self.kbd
-        ws.sync_keyboard_mode()
+        ws.input_policy.attach_keyboard()
         ui_draw.input_kind("tdeck")
         self.tick()
 
@@ -118,7 +118,7 @@ def _pixels(drv):
 
 
 def _make_card(ws, t):
-    ws.set_home_tab("make")
+    ws.home.set_home_tab("make")
     t.tick(4)
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items) if it.get("path"))
     t.tick(2)
@@ -155,7 +155,7 @@ def test_a_menu_over_the_code_tab_steps_and_gives_the_tab_its_text_back(tmp_path
     ws, drv, t = _console(tmp_path)
     _make_card(ws, t)
     t.key("c")
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     t.tick(2)
     assert ws.input.text_mode
     src = ws.editor.text()
@@ -177,7 +177,7 @@ def test_a_menu_row_that_opens_a_surface_keeps_its_mode(tmp_path):
     ws, _drv, t = _console(tmp_path)
     _make_card(ws, t)
     t.key("c")
-    ws.set_menu_view("code")
+    ws.text.set_menu_view("code")
     t.tick(2)
     ws.system_key()
     t.tick(2)
@@ -189,16 +189,16 @@ def test_a_menu_row_that_opens_a_surface_keeps_its_mode(tmp_path):
 
 def test_files_rows_step_and_its_rename_field_types(tmp_path):
     ws, drv, t = _console(tmp_path)
-    ws.open_app(ws._apps_by_id["files"])
+    ws.spine.open_app(ws.app("files"))
     t.tick(3)
     assert not ws.input.text_mode, "Files' rows are no text surface"
     before = _pixels(drv)
     t.key("s")
     assert _pixels(drv) != before
-    files = ws.files_app
+    files = ws.app("files")
     files.dialog = "rename"
     files.rename_text = ""
-    t.tick(2)
+    t.tick(3)                         # drawn, its field focused, the mode applied
     assert ws.input.text_mode
     t.key("w", settle=2)
     assert files.rename_text.endswith("w"), "the field types W"
@@ -224,7 +224,7 @@ def test_the_sprite_tab_w_moves_the_cursor_and_e_steps_the_sprite(tmp_path):
     ws, _drv, t = _console(tmp_path)
     _make_card(ws, t)
     t.key("c")
-    ws.set_menu_view("paint")
+    ws.text.set_menu_view("paint")
     t.tick(2)
     pe = ws.paint
     cur = ws.paint_layer._cur
@@ -240,10 +240,10 @@ def test_the_sprite_tab_w_moves_the_cursor_and_e_steps_the_sprite(tmp_path):
 
 def test_my_art_w_is_no_wallpaper_on_the_tdeck(tmp_path):
     ws, _drv, t = _console(tmp_path)
-    ws.open_app(ws._apps_by_id["myart"])
+    ws.spine.open_app(ws.app("myart"))
     t.tick(3)
     calls = []
-    art = ws.myart_app
+    art = ws.app("myart")
     art._verb = lambda v, *a, **k: calls.append(v)
     t.key("w", settle=2)
     assert calls == []

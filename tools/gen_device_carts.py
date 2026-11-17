@@ -29,8 +29,8 @@ Phase 5, 2026-08-19). A system cart declares, in its own `manifest.json`'s
                                is derived from this, not from a list in its
                                build.sh.
     "app": {...}            -- optional; a SYSTEM APP (docs/app_api_v1.md):
-                               id / entry ("module:Class") / text_mode /
-                               order (registration precedence) / min_size.
+                               id / entry ("module:Class") / order
+                               (registration precedence) / min_size.
 
 Five hand-maintained lists used to hold that same information -- `CART_ORDER`
 here, the title->folder map in tests/test_device_seed_parity.py, the web
@@ -57,13 +57,11 @@ the plain one fits: 2,830,672 B of that board's 2,883,584 B OTA slot, 51 KB
 left -- under the board's headroom floor, a failed build, in a slot
 paid for twice. The packed image is 2,399,232 B and leaves 473 KB.
 
-Why a Python bytes literal and not a second `.incbin` beside the web bundle's:
-`moy_web` exists because a memoryview straight at flash goes to lwIP with
-nothing in between, and NOTHING here can use that -- `deflate.DeflateIO` reads a
+Why a Python bytes literal and not an `.incbin`: `deflate.DeflateIO` reads a
 STREAM, so a board pays one copy of one cart's compressed bytes whichever way
-the blob is spelled. What a literal buys instead is that this file stays the
-only thing between `system_carts/` and a board, with no C module to compile, no
-`[native]` entry to deny, and no fourth generated translation unit. The frozen
+the blob is spelled. What a literal buys is that this file stays the only
+thing between `system_carts/` and a board, with no C module to compile, no
+`[native]` entry to deny, and no generated translation unit. The frozen
 bytes land in ROM either way (`frozen_content.c` emits them as a `static const
 mp_obj_str_t`), which is the property that actually mattered.
 
@@ -208,7 +206,6 @@ def app_decls(system_carts_dir=None):
         decl = {
             "id": app["id"],
             "entry": app["entry"],
-            "text_mode": bool(app.get("text_mode", False)),
             "order": int(app.get("order", 0)),
             "folder": folder,
             "title": man["title"],
@@ -410,23 +407,18 @@ def pack_cart(cart):
     return comp.compress(body) + comp.flush()
 
 
-def build_packed(system_carts_dir, skip=(), first=()):
-    """The packed roster: [(title, version, blob)], in seed order, less the
-    cart folders named in `skip`; with `first` (manifest types), the carts of
-    those types lead in that order, each group in seed order, so a seed cut
-    short (the Zero's reserve) leaves out the rest."""
+def build_packed(system_carts_dir, only=()):
+    """The packed roster: [(title, version, blob)], in seed order; with
+    `only` (cart ids), those alone -- a Zero's image carries the set its
+    board.toml's `[roster] image` names (board_config.roster_only)."""
     mans = read_manifests(system_carts_dir)
     folders = [f for f, _m in mans]
-    unknown = set(skip) - set(folders)
+    unknown = set(only) - set(folders)
     if unknown:
-        raise ValueError("--skip names no system cart: %s" % ", ".join(sorted(unknown)))
-    rows = [(m, (c["title"], int(c.get("version", 0)), pack_cart(c)))
-            for (f, m), c in zip(mans, build_carts(system_carts_dir)) if f not in skip]
-
-    def rank(row):
-        kind = vendor(row[0]).get("type")
-        return first.index(kind) if kind in first else len(first)
-    return [r for _m, r in sorted(rows, key=rank)]
+        raise ValueError("--only names no system cart: %s" % ", ".join(sorted(unknown)))
+    return [(c["title"], int(c.get("version", 0)), pack_cart(c))
+            for (f, _m), c in zip(mans, build_carts(system_carts_dir))
+            if not only or f in only]
 
 
 def render_packed_module(packed):
@@ -463,7 +455,6 @@ APP_DECLS_HEADER = (
     "\n"
     "  id         the process kind (router / back-stack / window key)\n"
     "  entry      \"module:Class\" -- a runtime/ module staged to every target\n"
-    "  text_mode  True = a TYPING app (the clean ASCII keyboard)\n"
     "  order      registration precedence (NOT the cart's shelf order)\n"
     "  folder     the identity cart it rides on, in system_carts/\n"
     "  title      that cart's title\n"
@@ -529,10 +520,9 @@ def main(argv):
     """CLI.
 
       gen_device_carts.py [OUT [SYSTEM_CARTS]]   the frozen carts_data.py
-      gen_device_carts.py --packed OUT [SRC] [--skip F,F] [--first T,T]
-                                                 the same, PACKED (the Zero),
-                                                 less the named cart folders,
-                                                 the named manifest types first
+      gen_device_carts.py --packed OUT [SRC] [--only F,F]
+                                                 the same, PACKED, the named
+                                                 cart ids alone (the Zeros)
       gen_device_carts.py --app-decls [OUT]      regenerate runtime/shell/app_decls.py
       gen_device_carts.py --roster TARGET        the cart folders for a target,
                                                  one `<folder>.moy` per line
@@ -546,15 +536,10 @@ def main(argv):
         sys.stdout.write(main.__doc__.split("\n", 1)[1].rstrip() + "\n")
         return 0
     src = _default_system_carts()
-    skip = ()
-    if "--skip" in argv:
-        i = argv.index("--skip")
-        skip = tuple(x for x in argv[i + 1].split(",") if x)
-        del argv[i:i + 2]
-    first = ()
-    if "--first" in argv:
-        i = argv.index("--first")
-        first = tuple(x for x in argv[i + 1].split(",") if x)
+    only = ()
+    if "--only" in argv:
+        i = argv.index("--only")
+        only = tuple(x for x in argv[i + 1].split(",") if x)
         del argv[i:i + 2]
     packed = False
     if argv and argv[0] == "--packed":
@@ -581,7 +566,7 @@ def main(argv):
     if len(argv) > 1:
         src = argv[1]
     if packed:
-        blobs = build_packed(src, skip, first)
+        blobs = build_packed(src, only)
         text = render_packed_module(blobs)
         sys.stderr.write(
             "seed roster packed: %d carts, %d B compressed (%d KB), %d B plain\n"

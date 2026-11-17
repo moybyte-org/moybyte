@@ -50,7 +50,7 @@ def _package(ws):
 
 def test_the_door_opens_a_copy_on_config_and_done_comes_back(tmp_path):
     ws = build_ws(tmp_path)
-    ws.open_app(ws._apps_by_id["appearance"])
+    ws.spine.open_app(ws.app("appearance"))
     _frames(ws)
     doc = _open(ws)
     assert ws.look.theme_name == "custom" and ws.menu_view == "theme_config"
@@ -67,7 +67,7 @@ def test_delete_in_config_takes_the_character_after_the_caret(tmp_path):
     from runtime import host_app
     ws = build_ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    ws.open_app(ws._apps_by_id["appearance"])
+    ws.spine.open_app(ws.app("appearance"))
     drv.frame(1 / 30)
     doc = _open(ws)
     ed = doc.ed
@@ -85,7 +85,7 @@ def test_esc_and_the_bars_back_are_done(tmp_path):
     from runtime import host_app
     ws = build_ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    ws.open_app(ws._apps_by_id["appearance"])
+    ws.spine.open_app(ws.app("appearance"))
     drv.frame(1 / 30)
     _open(ws)
     drv.key_down(27)
@@ -226,8 +226,8 @@ def test_the_tdeck_hints_name_its_own_keys(tmp_path):
 
 def test_the_desk_shows_config_beside_sprites(tmp_path):
     ws = build_desktop_ws(tmp_path, panel_diagonal_in=7.0, font_scale=1)
-    ws.open_desk()
-    ws.open_app(ws._apps_by_id["appearance"])
+    ws.home.open_desk()
+    ws.spine.open_app(ws.app("appearance"))
     _frames(ws)
     _open(ws)
     _frames(ws)

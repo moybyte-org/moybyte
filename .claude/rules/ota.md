@@ -7,6 +7,8 @@ paths:
   - "tools/ota_*.py"
   - "tools/release.py"
   - "tools/publish_firmware_release.py"
+  - "tools/gen_ota_manifest.py"
+  - "tools/web_pack.py"
 ---
 
 <!-- Firmware updates: install machine, channels, signature policy. -->
@@ -15,8 +17,12 @@ paths:
   P4 (2026-08-02: real WiFi, on-device signature check, streamed install, boot
   into the new slot, rollback self-heal). **Timings, sizes and rates live in
   #53**, not here.
-  - **Every board is dual-OTA** (`otadata + ota_0 + ota_1 + vfs`), so the
-    one-time migration is HISTORY. The slot sizes differ per board and are NOT
+  - **Every board but the C3 Zero is dual-OTA** (`otadata + ota_0 + ota_1 +
+    vfs`), so the one-time migration is HISTORY. The C3 Zero is one factory
+    slot and the store (owner, 2026-11-17: no OTA): its updater's
+    `available()` is False, a new image goes on by cable (the cable flash, or
+    the website's update download, which keeps its carts), and the board
+    installs the browser console add-on that fits it. The slot sizes differ per board and are NOT
     repeated here: each board's partition CSV is the only thing that decides
     whether an image fits, and the build prints the headroom against it (#168).
     **The Zero's is the one authored under a real constraint** — 8MB of flash,
@@ -34,6 +40,43 @@ paths:
   - **The OTA payload is the APP-PARTITION image, never the merged one.**
     `…_app.bin` is the payload; `…​.bin` is bootloader+table+app for a cable flash.
     The merged one is refused at close: it does not verify as an app image.
+  - **The browser console is an add-on cart, published beside every payload**
+    (owner, 2026-11-17). Every board's build packs the console
+    (`moybyte_web.pack`, `tools/gen_web_blob.py --pack`) and its image carries
+    only the sha256 of the pack's body. The release and the LAN mirror
+    (`tools/publish_firmware_release.py`, `tools/gen_ota_manifest.py`, both
+    through `tools/web_pack.py`) put beside the payload the cart
+    `moybyte_web-<digest>.moy.zip`, its licence, and `carts-<board>.json`: an
+    index in moy-spec's format (version 1, signed as a carts index is) with
+    one entry per add-on ever published for the board, newest first. An
+    index lists an id once, so an entry's id is `web_console_<12 hex of the
+    digest>` and its `moybyte.fits` the whole digest; a console installs the
+    entry that fits its running image, through the ordinary Install, which
+    holds the cart to the index's size and sha256. That happens on both
+    channels for every board, whether or not any console has the add-on, and
+    the manifest names the cart (`cart`, unsigned). **No add-on published is
+    removed** and each index keeps the entries of the one it replaces, so a
+    console a step behind its channel, rolled back or installed by hand still
+    finds its own. The seed carts' zips and covers (the official carts,
+    `.claude/rules/carts.md`) are the one thing a publish deletes: every
+    changed cart adds two assets and a release holds at most 1,000, so after
+    the upload one that no index on the release references, now or before
+    this publish, goes (`publish_firmware_release.prune_carts`; a dry run
+    names them). A board whose run carries no page its image names keeps
+    the manifest already published and fails the publish. On the console,
+    the add-on that fits a new image is installed only AFTER that image
+    confirms itself (`runtime/carts/web_addon.py`, under the radio's "update"
+    hold), so a rollback finds the add-on its old image serves still on the
+    shelf; an install a reset cuts short resumes on the next boot, and the
+    recovery floor never touches the add-on. The same step brings one to a
+    board that has none, unless its owner removed it (`.claude/rules/web.md`).
+  - **The website's download is an INSTALL, not an update** (owner,
+    2026-11-17): each board's is its merged image followed, at the internal
+    store's offset, by a store holding the add-on that fits
+    (`tools/store_image.py`, which CI's firmware build runs; site/build.py's
+    `downloads`), so it erases the internal store and an SD card is not
+    touched. A board updates over the air; the C3, with no OTA, also offers
+    its merged image as it is, an update that keeps its carts.
   - **`step()` returns True WHILE MORE REMAINS** (`update_ui` drives it as
     `more = u.step()`). Inverting it writes a truncated image, whose `set_boot` is
     then correctly refused with `ESP_ERR_OTA_VALIDATE_FAILED`.

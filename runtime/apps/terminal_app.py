@@ -12,17 +12,11 @@ bar, and the frame's keys; the face answers what the host owes after it.
 import sys as _sys
 from array import array as _array
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-
-try:
-    import layout_base as _lb
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import layout_base as _lb
+import ui as _ui
+import ui_draw as _ui_draw
+from layers import AppLayer
+import layout_base as _lb
+from moy_store_base import session_root as _session_root
 
 try:
     import moy_sh as _sh
@@ -60,7 +54,7 @@ class TerminalLayout:
             self.w, self.h, 0 if windowed else _lb.bar_rows(self.cs))
 
 
-class TerminalAppLayer:
+class TerminalAppLayer(AppLayer):
     """The Terminal: the C shell's screen face (see the section above)."""
 
     id = "terminal"
@@ -93,10 +87,7 @@ class TerminalAppLayer:
         path = cart.get("path")
         if not path:
             return int(cart.get("version", 0)) >= 1
-        try:
-            from moy_store_base import builtin_name
-        except ImportError:  # host: the runtime package
-            from runtime.moy_store_base import builtin_name
+        from moy_store_base import builtin_name
         return builtin_name(path) == "moybyte.terminal.moy"
 
     def open(self):
@@ -125,7 +116,7 @@ class TerminalAppLayer:
         if self.face is None and _sh is not None:
             try:
                 if getattr(_sh, "HOST", False) or _BROWSER_SHELL:
-                    self.face = _sh.Face(_host_root(self._install.root()))
+                    self.face = _sh.Face(_session_root(self._install.root()))
                 else:
                     self.face = _sh.Face()
             except OSError:
@@ -139,7 +130,11 @@ class TerminalAppLayer:
 
     # -- input --------------------------------------------------------------------
 
-    def cancel_field(self):
+    def typing(self):
+        """The Terminal types, always."""
+        return True
+
+    def cancel(self):
         """The board's cancel key (the T-Deck's Mic) for the text app in
         front (`edit`, `top`, `python`): True when it took it; with none in
         front Mic stays the console's key."""
@@ -204,12 +199,3 @@ class TerminalAppLayer:
             self._damage.all()
 
 
-def _host_root(carts_root):
-    """The files tree a host session sees: the folder whose `sd/moybyte/carts`
-    is the carts root, as on a board, else the carts root's own folder."""
-    r = (carts_root or "").rstrip("/")
-    tail = "/sd/moybyte/carts"
-    if r.endswith(tail):
-        return r[:-len(tail)] or "/"
-    i = r.rfind("/")
-    return r[:i] if i > 0 else r

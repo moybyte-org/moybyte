@@ -41,12 +41,21 @@
 // slot 1 is the interruptee's saved `ra` (the handler below says when that is
 // the caller).
 //
+// PHASES. `phase(n)` names what the program is doing (a small int the caller
+// chooses: a stage, a layer, a call) and every sample records the phase that
+// stood when it was taken, so one capture splits by the caller's own regions
+// as well as by PC: the VM's share of one region against another's, which no
+// PC can tell. It returns the phase it replaced, so a bracket nests:
+// `p = phase(k); ...; phase(p)`. One store, armed or not.
+//
 // dump() stays raw so that layout remains checkable: an aggregate cannot tell
 // you what you got wrong, and this index is a property of IDF's dispatch path
 // rather than a law. The ring costs internal SRAM only while armed.
 //
 // Disarmed this module costs the image its code size and nothing else: no
 // timer exists, no ISR is installed, and nothing in a frame tests a flag.
+
+#include "moy_kmem.h"
 
 #include "py/obj.h"
 #include "py/runtime.h"
@@ -74,6 +83,7 @@
 
 typedef struct {
     uint32_t pc[MOY_PROF_FRAMES];
+    uint32_t phase;
 } moy_prof_sample_t;
 
 static gptimer_handle_t s_timer = NULL;
@@ -82,6 +92,7 @@ static uint32_t s_cap = 0;        // ring capacity in samples
 static volatile uint32_t s_head = 0;
 static volatile uint32_t s_taken = 0;   // total samples recorded (may exceed cap)
 static volatile uint32_t s_hz = 0;
+static volatile uint32_t s_phase = 0;   // phase(): stamped on every sample
 
 // The sampling ISR. Deliberately NOT registered ESP_INTR_FLAG_IRAM: the Xtensa
 // backtrace helper's entry half is not guaranteed resident, and an ISR that
@@ -124,6 +135,7 @@ static bool moy_prof_on_alarm(gptimer_handle_t timer,
     slot->pc[1] = f != NULL ? (uint32_t)f->ra : 0;
 #endif
 
+    slot->phase = s_phase;
     s_head = (s_head + 1) % s_cap;
     s_taken++;
     return false;   // no task woken
@@ -147,7 +159,7 @@ static mp_obj_t moy_prof_start(size_t n_args, const mp_obj_t *args) {
     // trying to measure, and on the Guition this allocation is a fifth of the
     // free internal region -- which is why it is freed on stop().
     size_t bytes = (size_t)cap * sizeof(moy_prof_sample_t);
-    s_ring = heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    s_ring = moy_kalloc(bytes, MOY_KMEM_INTERNAL);
     if (s_ring == NULL) {
         mp_raise_msg(&mp_type_MemoryError,
                      MP_ERROR_TEXT("no internal SRAM for the sample ring"));
@@ -235,7 +247,18 @@ static mp_obj_t moy_prof_stats(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_prof_stats_obj, moy_prof_stats);
 
-// dump() -> list of per-sample tuples, oldest first. Raw on purpose: the host
+// phase([n]) -> the phase that stood; with `n`, the phase from now on.
+static mp_obj_t moy_prof_phase(size_t n_args, const mp_obj_t *args) {
+    uint32_t was = s_phase;
+    if (n_args > 0) {
+        s_phase = (uint32_t)mp_obj_get_int(args[0]);
+    }
+    return MP_OBJ_NEW_SMALL_INT(was);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_prof_phase_obj, 0, 1, moy_prof_phase);
+
+// dump() -> list of per-sample tuples, oldest first: the FRAMES pcs, then
+// the sample's phase. Raw on purpose: the host
 // tool decides which frame is the interruptee, and an aggregate here would
 // hide the evidence for that decision.
 static mp_obj_t moy_prof_dump(void) {
@@ -247,17 +270,19 @@ static mp_obj_t moy_prof_dump(void) {
     mp_obj_t out = mp_obj_new_list(0, NULL);
     for (uint32_t i = 0; i < n; i++) {
         moy_prof_sample_t *s = &s_ring[(start + i) % s_cap];
-        mp_obj_t fr[MOY_PROF_FRAMES];
+        mp_obj_t fr[MOY_PROF_FRAMES + 1];
         for (int j = 0; j < MOY_PROF_FRAMES; j++) {
             fr[j] = mp_obj_new_int_from_uint(s->pc[j]);
         }
-        mp_obj_list_append(out, mp_obj_new_tuple(MOY_PROF_FRAMES, fr));
+        fr[MOY_PROF_FRAMES] = mp_obj_new_int_from_uint(s->phase);
+        mp_obj_list_append(out, mp_obj_new_tuple(MOY_PROF_FRAMES + 1, fr));
     }
     return out;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_prof_dump_obj, moy_prof_dump);
 
-// hist(frame=2, top=40) -> [(pc, count), ...] densest first.
+// hist(frame=2, top=40, phase=-1) -> [(pc, count), ...] densest first, of
+// the samples taken in `phase` (-1: every sample).
 //
 // Aggregating HERE and not on the host is a wire decision: 2,048 raw samples
 // is ~123 KB of Python repr through a 115200 console, about 11 seconds, which
@@ -272,6 +297,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(moy_prof_dump_obj, moy_prof_dump);
 static mp_obj_t moy_prof_hist(size_t n_args, const mp_obj_t *args) {
     mp_int_t frame = (n_args > 0) ? mp_obj_get_int(args[0]) : MOY_PROF_SELF;
     mp_int_t top = (n_args > 1) ? mp_obj_get_int(args[1]) : 40;
+    mp_int_t only = (n_args > 2) ? mp_obj_get_int(args[2]) : -1;
     if (frame < 0 || frame >= MOY_PROF_FRAMES) {
         mp_raise_ValueError(MP_ERROR_TEXT("frame index out of range"));
     }
@@ -290,7 +316,7 @@ static mp_obj_t moy_prof_hist(size_t n_args, const mp_obj_t *args) {
     uint32_t distinct = 0;
     for (uint32_t i = 0; i < n; i++) {
         uint32_t pc = s_ring[i].pc[frame];
-        if (pc == 0) {
+        if (pc == 0 || (only >= 0 && s_ring[i].phase != (uint32_t)only)) {
             continue;
         }
         uint32_t j = 0;
@@ -331,7 +357,7 @@ static mp_obj_t moy_prof_hist(size_t n_args, const mp_obj_t *args) {
     m_del(uint32_t, seen, 2 * n);
     return out;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_prof_hist_obj, 0, 2, moy_prof_hist);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_prof_hist_obj, 0, 3, moy_prof_hist);
 
 #else   // not ESP-IDF: the host/unix build gets a module that says so.
 
@@ -345,6 +371,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(moy_prof_free_obj, moy_prof_unsupported);
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_prof_stats_obj, moy_prof_unsupported);
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_prof_dump_obj, moy_prof_unsupported);
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_prof_hist_obj, moy_prof_unsupported);
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_prof_phase_obj, moy_prof_unsupported);
 
 #endif
 
@@ -356,6 +383,7 @@ static const mp_rom_map_elem_t moy_prof_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&moy_prof_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_dump), MP_ROM_PTR(&moy_prof_dump_obj) },
     { MP_ROM_QSTR(MP_QSTR_hist), MP_ROM_PTR(&moy_prof_hist_obj) },
+    { MP_ROM_QSTR(MP_QSTR_phase), MP_ROM_PTR(&moy_prof_phase_obj) },
 #ifdef ESP_IDF_VERSION
     // The frame index of the interrupted function. 2 on Xtensa (the ISR
     // and the level-1 dispatcher sit below it), 0 on RISC-V where mepc is

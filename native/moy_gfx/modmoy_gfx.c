@@ -9,6 +9,8 @@
 // compositors (device/banded_panel.py + native/moy_flush) for packing bands into
 // the DMA bounce slots. docs/surface_model_v1.md is the presentation contract.
 
+#include "moy_platform.h"
+
 #include <string.h>
 #include <math.h>
 #include "py/obj.h"
@@ -23,6 +25,7 @@
 // The C draw API exported to sibling native modules (moy_lua's libmoy-direct
 // verbs, #189) -- declarations only; the definitions sit with the DrawCtx
 // machinery they wrap, below.
+#include "moy_gfx_base.h"
 #include "moy_gfx_capi.h"
 
 // The draw gates read their canvas's row (native/moy_glass): its pixels, its
@@ -64,7 +67,7 @@
 // Async layer copy (#54 Stage 2 / #63): GDMA-driven PSRAM->PSRAM memcpy so the
 // per-frame draw_layer background restore (~7ms CPU for a full screen) can run
 // WHILE the cart's _update executes. Guarded so this file stays VM-neutral: the
-// unix-port build (tools/bench_unix_mp.py) has no esp_async_memcpy.h, and its
+// unix-port build has no esp_async_memcpy.h, and its
 // layer restore refuses the engine and copies synchronously.
 #if defined(__has_include)
 #if __has_include("esp_async_memcpy.h")
@@ -1041,7 +1044,7 @@ static mp_obj_t moy_gfx_tint(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_tint_obj, 9, 12, moy_gfx_tint);
 
-// shape_stats() -> moy_shape.h's counters; shape_reset(caches); shape_order(swapped).
+// shape_stats() -> moy_shape.h's counters; shape_reset(caches).
 static mp_obj_t moy_gfx_shape_stats(void) {
     uint32_t st[MOY_SHAPE_STATS];
     moy_shape_stats(st);
@@ -1059,12 +1062,12 @@ static mp_obj_t moy_gfx_shape_reset(mp_obj_t caches) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(moy_gfx_shape_reset_obj, moy_gfx_shape_reset);
 
-static mp_obj_t moy_gfx_shape_order(mp_obj_t swapped) {
-    moy_shape_wire_swapped(mp_obj_is_true(swapped));
-    moy_path_wire_swapped(mp_obj_is_true(swapped));
-    return mp_const_none;
+// wire() -> bool: whether text, shapes and paths write byte-swapped words;
+// wire(swapped) sets it for all three (moy_gfx_base.h) and answers what it was.
+static mp_obj_t moy_gfx_wire_fn(size_t n_args, const mp_obj_t *a) {
+    return mp_obj_new_bool(moy_gfx_wire(n_args > 0 ? mp_obj_is_true(a[0]) : -1));
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(moy_gfx_shape_order_obj, moy_gfx_shape_order);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_wire_obj, 0, 1, moy_gfx_wire_fn);
 
 // -- paths and the outline faces (moy_path.h) --------------------------------------
 //
@@ -2254,8 +2257,8 @@ static MP_DEFINE_CONST_FUN_OBJ_0(moy_gfx_native_code_free_all_obj, moy_gfx_nativ
 // fail on the S3 -- that failure is the point of the 8-bit candidate):
 //   (fill16_sram, fill16_psram, fill8_sram, fill8_psram,
 //    blit16_sram, blit16_psram, blit8_sram, blit8_psram, resolve, bounce)
-#ifdef MOY_GFX_HAS_ASYNC_COPY   // proxy for "an ESP-IDF build with heap_caps"
-#include "esp_heap_caps.h"
+#ifdef MOY_ON_BOARD
+#include "moy_kmem.h"
 #define MOY_GFX_HAS_MEMBENCH 1
 
 #define MB_W 320
@@ -2346,14 +2349,14 @@ static uint32_t mb_bounce(const uint16_t *s16, uint16_t *chunk) {
     } while (0)
 
 static mp_obj_t moy_gfx_membench(void) {
-    uint16_t *d16s = heap_caps_malloc(MB_PX * 2, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    uint16_t *d16p = heap_caps_malloc(MB_PX * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    uint8_t *d8s = heap_caps_malloc(MB_PX, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    uint8_t *d8p = heap_caps_malloc(MB_PX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint16_t *d16s = moy_kalloc(MB_PX * 2, MOY_KMEM_INTERNAL);
+    uint16_t *d16p = moy_kalloc(MB_PX * 2, MOY_KMEM_PSRAM);
+    uint8_t *d8s = moy_kalloc(MB_PX, MOY_KMEM_INTERNAL);
+    uint8_t *d8p = moy_kalloc(MB_PX, MOY_KMEM_PSRAM);
     size_t src_px = 64 * 1024;               /* sprite caches live in PSRAM */
-    uint16_t *src16 = heap_caps_malloc(src_px * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    uint8_t *src8 = heap_caps_malloc(src_px, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    uint16_t *chunk = heap_caps_malloc(MB_CHUNK_PX * 2, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    uint16_t *src16 = moy_kalloc(src_px * 2, MOY_KMEM_PSRAM);
+    uint8_t *src8 = moy_kalloc(src_px, MOY_KMEM_PSRAM);
+    uint16_t *chunk = moy_kalloc(MB_CHUNK_PX * 2, MOY_KMEM_INTERNAL);
     mp_int_t r[10];
     for (int i = 0; i < 10; i++) r[i] = -1;
     if (src16 != NULL) {
@@ -2418,7 +2421,7 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_tint),       MP_ROM_PTR(&moy_gfx_tint_obj) },
     { MP_ROM_QSTR(MP_QSTR_shape_stats), MP_ROM_PTR(&moy_gfx_shape_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_shape_reset), MP_ROM_PTR(&moy_gfx_shape_reset_obj) },
-    { MP_ROM_QSTR(MP_QSTR_shape_order), MP_ROM_PTR(&moy_gfx_shape_order_obj) },
+    { MP_ROM_QSTR(MP_QSTR_wire), MP_ROM_PTR(&moy_gfx_wire_obj) },
     { MP_ROM_QSTR(MP_QSTR_path_fill),  MP_ROM_PTR(&moy_gfx_path_fill_obj) },
     { MP_ROM_QSTR(MP_QSTR_path_text),  MP_ROM_PTR(&moy_gfx_path_text_obj) },
     { MP_ROM_QSTR(MP_QSTR_path_width), MP_ROM_PTR(&moy_gfx_path_width_obj) },

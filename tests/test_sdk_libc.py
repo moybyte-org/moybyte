@@ -315,9 +315,9 @@ def test_the_sysroot_s_values_are_lwip_s():
 
 
 def test_the_kernel_reads_mmap_s_values_as_the_sdk_writes_them():
-    """moy_os.c's fallback for a board with no sys/mman.h is the SDK's."""
+    """moy_os_int.h's fallback for a board with no sys/mman.h is the SDK's."""
     ours = _defines(os.path.join(SYSROOT, "sys", "mman.h"))
-    kernel = _defines(os.path.join(ROOT, "native", "moy_elf", "moy_os.c"))
+    kernel = _defines(os.path.join(ROOT, "native", "moy_elf", "moy_os_int.h"))
     for name in ("PROT_READ", "PROT_WRITE", "PROT_EXEC", "MAP_SHARED", "MAP_PRIVATE",
                  "MAP_ANONYMOUS"):
         assert _value(kernel[name], kernel) == _value(ours[name], ours), name

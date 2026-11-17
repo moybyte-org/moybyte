@@ -1,6 +1,6 @@
 // moy_img on the host, by ctypes (runtime/host/moy_play.py's image_decode): one
-// decode with its work on the stack, for the parity test against
-// runtime/carts/moyimg.py.
+// decode with its work on the stack, for the tests that hold it to
+// runtime/carts/moyimg.py's decoder.
 
 #include "moy_img.h"
 

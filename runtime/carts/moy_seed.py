@@ -5,6 +5,12 @@
 #   adopt_bundle            a served bundle taken whole on a first visit
 #   seed_packed             the packed roster, one cart inflated at a time
 #   prune_retired           the folders of seeds that no longer ship, once per store
+#   sweep_store             the store's format stamp (STORE_FORMAT) and its one door
+#   stamp_board             the board stamp, and the rows a foreign one drops
+#   is_core                 CORE, the official carts a console never removes; removable
+#   note_removed            a removed built-in's record, which the seed honours; the browser console's line
+#   keep_record             installed.json held to the cart folders
+#   bring_addon             the browser console the internal store holds, moved to a card's store
 #   seed_any                the seed a board's boot runs
 """Seeding the `.moy` store: the built-in roster, its PACKED form, and the
 once-per-store sweep of seeds that no longer ship.
@@ -17,26 +23,11 @@ the core, so `moy_carts` re-exports these names rather than the reverse.
 
 import json
 
-try:
-    from moy_fs import (_exists, _mkdir, _read, _read_bytes, _read_recover,
-                        _remove, _write, _write_atomic, _write_bytes)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_fs import (_exists, _mkdir, _read, _read_bytes, _read_recover,
-                                _remove, _write, _write_atomic, _write_bytes)
-try:
-    from moyimg import _b64_decode
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moyimg import _b64_decode
-try:
-    from moy_store_base import (CARTS_DIR, CART_FORMAT, COVER_FILE, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _has, _listing, _rmtree, _sibling_path, cart_path, cart_folder, store_path, BUILTIN_NS, CART_EXT, VENDOR_KEY)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import (CARTS_DIR, CART_FORMAT, COVER_FILE, FLAGS_NAME, IMAGES_DIR, IMAGE_EXT, SCENES_DIR, SCENE_EXT, _canvas_str, _has, _listing, _rmtree, _sibling_path, cart_path, cart_folder, store_path, BUILTIN_NS, CART_EXT, VENDOR_KEY)
-try:
-    from moy_fs import _native as _store
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_fs import _native as _store
-if _store is not None and not hasattr(_store, "seed"):
-    _store = None
+from moy_fs import (_exists, _mkdir, _read, _read_bytes, _read_recover,
+                    _remove, _write, _write_atomic, _write_bytes)
+from moy_store_base import (CARTS_DIR, _has, _listing, _rmtree, _sibling_path, cart_path,
+                            cart_folder, store_path, BUILTIN_NS, CART_EXT, VENDOR_KEY)
+from moy_fs import _native as _store
 
 
 def _cart_version(path):
@@ -100,159 +91,46 @@ def _make_room(d, version):
 
 
 def seed_builtins(seed_list, root=CARTS_DIR, progress=None, ns=BUILTIN_NS):
-    """Write missing/outdated built-in carts to SD as editable .moy folders.
+    """Write missing/outdated built-in carts (cart dicts) to the store as
+    editable .moy folders: the folders written, in roster order.
 
-    A seed dict that carries a non-empty "sprites" hex blob also gets a
-    sprites.moygfx written, so the device's paint editor (and the cart's spr()
-    tile draws) have the real art -- without this the device seeds blank sheets
-    and the games fall back to nothing. The manifest is COMPLETE (canvas +
-    permissions + full edit schema + version) so the visual "Make it mine" cards
-    render on device exactly as on host.
+    The writer is the store's (native/moy_store/moy_seed.c), the one body a
+    seed goes through on every tier: each dict travels to it as a packed
+    roster entry (`_pack`). Its rules: the manifest is REGENERATED from the
+    cart's fields, in their key order, so the "Make it mine" cards render on
+    device as on the host; every payload the cart carries is written (a sheet,
+    sounds, map, flags, cover, images, blocks, scenes, the other scripts) and
+    the manifest LAST, published, so a folder whose manifest reads is whole.
 
-    Versioning (the re-seed): a cart already on SD is left untouched UNLESS the
-    built-in's "version" is newer than the on-SD one -- then its CODE + ART are
-    REPLACED (everything in the folder but the kid's data is removed first),
-    and the kid's data (pmem.json saves + config.json tuning, see
-    _RESEED_PRESERVE) stays where it is. So a content update keeps high scores
-    and settings; on-device edits to a built-in's *code/sprites* are discarded.
-    Pre-versioning carts read as version 0, so bumping a built-in to >=1
-    refreshes stale copies automatically. Bump a built-in's manifest "version"
-    whenever you change its content. A folder with no manifest that reads is a
-    seed a power cut stopped, and is written again from nothing.
+    Versioning (the re-seed, #47): a cart already in the store is left as it
+    is UNLESS the built-in's "version" is newer -- then its CODE + ART are
+    replaced and the kid's data (pmem.json saves, config.json tuning) stays.
+    Pre-versioning carts read as version 0. A folder with no manifest that
+    reads is a seed a power cut stopped, and is written again from nothing.
 
-    (Migration note: a preserved config.json keeps the kid's old values, so a
-    NEW default for an EXISTING config key won't apply to an already-seeded cart;
-    a brand-new key just falls back to its code default via cfg(key, default).)"""
-    # `progress(done, total, title)` is called once per seed considered, so a
-    # boot screen can show a bar. Measured on a full-erase P4 boot: seeding all
-    # 32 built-ins takes 17.5 of the 25 seconds before the desktop composes, and
-    # it is the only stage of that boot with a countable unit of work. Optional
-    # and best-effort -- a progress callback must never be able to fail a seed.
-    _total = len(seed_list)
-    wrote = []
-    for _seeded, cart in enumerate(seed_list):
-        if progress is not None:
-            try:
-                progress(_seeded, _total, cart.get("title", ""))
-            except Exception:                 # noqa: BLE001
-                progress = None               # broken hook: drop it, keep seeding
-        name = cart_folder(cart["title"], ns)
-        d = cart_path(root, name)
-        seed_ver = int(cart.get("version", 0))
-        if not _make_room(d, seed_ver):
-            continue
-        _mkdir(d)
-        manifest = {
-            # This manifest is REGENERATED, not copied, so every field a built-in
-            # declares has to be passed through explicitly or the seeded copy
-            # loses it. `format` especially: the device seeds from the baked blob
-            # while the host copies the source folder, so hardcoding CART_FORMAT
-            # here restamped a "moy-1" built-in on device and nowhere else.
-            "format": cart.get("format", CART_FORMAT),
-            "title": cart["title"], "id": name[:-len(CART_EXT)],
-            # #67 dual-runtime passthrough: a baked "lua" built-in seeds with its
-            # runtime + main.lua intact.
-            "runtime": cart.get("runtime", "python"),
-            "main": cart.get("main", "main.py"),
-            "version": seed_ver,
-        }
-        ven = {"type": cart["type"], "edit": cart.get("edit", [])}
-        # SPEC.md 4's load order, rebuilt from the two lists: `main` sits
-        # between them and must appear, so a reader gets the same order this
-        # cart was written with. Omitted entirely for a one-script cart, which
-        # is what [main] means.
-        _pre = list(cart.get("src_before") or ())
-        _post = list(cart.get("src_after") or ())
-        if _pre or _post:
-            manifest["sources"] = ([n for n, _ in _pre]
-                                   + [manifest["main"]]
-                                   + [n for n, _ in _post])
-        if cart.get("fps"):               # frame pacing (#63): "fps": 60 opt-out
-            manifest["fps"] = cart["fps"]
-        if cart.get("icon"):              # launcher icon tiles (SPEC.md 3.4)
-            manifest["icon"] = list(cart["icon"])
-        if cart.get("canvas") is not None:
-            # A baked seed carries the manifest string; a load()ed cart carries
-            # the normalized (w, h) -- both serialize back to the "WxH" form.
-            manifest["canvas"] = _canvas_str(cart["canvas"])
-        if cart.get("input") is not None:               # #42 Thread 3 input-kind hint
-            manifest["input"] = list(cart["input"])
-        for k in ("description", "genre", "tags"):    # SPEC.md 3.7 list fields
-            if cart.get(k):
-                manifest[k] = cart[k]
-        if cart.get("permissions") is not None:
-            ven["permissions"] = cart["permissions"]
-        if cart.get("handles") is not None:      # the MIME types its app opens
-            ven["handles"] = cart["handles"]
-        if cart.get("receives") is not None:     # the message names other apps may send it
-            ven["receives"] = cart["receives"]
-        if cart.get("entries") is not None:      # its entry points beside main
-            ven["entries"] = cart["entries"]
-        if cart.get("achievements") is not None:  # the badges it declares
-            ven["achievements"] = cart["achievements"]
-        if cart.get("glass") is True:             # a per-glass wallpaper
-            ven["glass"] = True
-        if cart.get("animates") is True:          # an app drawn every frame
-            ven["animates"] = True
-        if cart.get("pictures") is not None:     # a picture wallpaper
-            ven["pictures"] = cart["pictures"]
-        scenes = cart.get("scenes")               # {name: .moyscene blob}, optional (#85)
-        if scenes:
-            # Register the ordered set in manifest.moybyte.assets.scenes (element 0 = default
-            # active) BEFORE the manifest is written, so load() finds them. A seed may
-            # pin the order via "scene_order"; else sorted names (bump the built-in's
-            # version, #47, whenever a seed's scenes change -- like any other content).
-            ven["assets"] = {"scenes": list(cart.get("scene_order")
-                                            or sorted(scenes.keys()))}
-        _write(d + "/" + cart.get("main", "main.py"), cart["src"])
-        # The cart's other scripts beside it (SPEC.md 4), and `sources` in the
-        # manifest above naming the order -- a port's main.lua cannot run
-        # without its shim chunk, and nothing else says where that goes.
-        # Its entry files (an app's service, docs/app_api_v1.md section 7)
-        # likewise.
-        for script, text in list(cart.get("src_before") or ()) \
-                + list(cart.get("src_after") or ()) + list(cart.get("entry_src") or ()):
-            _write(d + "/" + script, text)
-        if not _exists(d + "/config.json"):      # the kid's config stands
-            _write(d + "/config.json", json.dumps(cart["cfg"]))
-        sprites = cart.get("sprites")
-        if sprites:
-            _write(d + "/sprites.moygfx", sprites)
-        sounds = cart.get("sounds")               # AudioBank dict, optional (#16)
-        if sounds:
-            _write(d + "/sounds.json", json.dumps(sounds))
-        tilemap = cart.get("map")                 # TileMap.to_hex() blob, optional (#32)
-        if tilemap:
-            _write(d + "/map.moymap", tilemap)
-        flags = cart.get("flags")                 # tile flags (SPEC.md 3.5), optional
-        if flags:
-            _write(d + "/" + FLAGS_NAME, flags)
-        cover = cart.get("cover")                 # cover.png as base64, optional (SPEC.md 3.6)
-        if cover:
-            _write_bytes(d + "/" + COVER_FILE, _b64_decode(cover))
-        images = cart.get("images")               # {name: .moyimg blob}, optional (#63)
-        if images:
-            _mkdir(d + "/" + IMAGES_DIR)
-            for iname, iblob in images.items():
-                _write(d + "/" + IMAGES_DIR + "/" + iname + IMAGE_EXT, iblob)
-        blocks = cart.get("blocks")               # block program tree, optional (#29)
-        if blocks:
-            # a block-authored seed (tap_game) ships its blocks.json so it opens in
-            # the on-device block editor as blocks, not just compiled code.
-            _write(d + "/blocks.json", json.dumps(blocks))
-        if scenes:                                # scene assets (#85), written last
-            _mkdir(d + "/" + SCENES_DIR)
-            for sname, sblob in scenes.items():
-                _write(d + "/" + SCENES_DIR + "/" + sname + SCENE_EXT, sblob)
-        # The manifest LAST, and published: a folder whose manifest reads is
-        # whole. A power cut before it leaves the older version's manifest (a
-        # re-seed) or none (a first seed), so the next boot's seed writes the
-        # cart again; a manifest first would carry the seed's version over a
-        # folder missing its payloads, and the version check would keep it so.
-        manifest[VENDOR_KEY] = ven
-        _write_atomic(d + "/manifest.json", json.dumps(manifest))
-        wrote.append(name)
-    return wrote
+    `progress(done, total, title)` is called once per seed considered, so a
+    boot screen can show a bar; a hook that raises is dropped, never fatal."""
+    return _store.seed(root, [_pack(c) for c in seed_list], {}, progress, ns)
+
+
+def _pack(cart):
+    """A cart dict as a packed roster entry: (title, version, its JSON as raw
+    deflate at _SEED_WBITS), what tools/gen_device_carts.py --packed writes."""
+    text = json.dumps(cart).encode()
+    try:
+        import deflate
+    except ImportError:                  # CPython (host suites, the simulator)
+        import zlib
+        comp = zlib.compressobj(1, zlib.DEFLATED, -_SEED_WBITS)
+        blob = comp.compress(text) + comp.flush()
+    else:
+        import io as _io
+        buf = _io.BytesIO()
+        stream = deflate.DeflateIO(buf, deflate.RAW, _SEED_WBITS)
+        stream.write(text)
+        stream.close()
+        blob = buf.getvalue()
+    return (cart["title"], int(cart.get("version", 0)), blob)
 
 
 # -- a store of RECORD seeded from cart folders --------------------------------
@@ -379,7 +257,7 @@ def adopt_bundle(src, dest, top=None, skip=None):
 
 # -- the PACKED seed roster (2026-08-30) -------------------------------------
 #
-# `seed_builtins` above takes cart DICTS, and on the console boards those come
+# A roster of cart DICTS, as the console boards once froze it, comes
 # straight out of a frozen `carts_data.CARTS` -- 732 KB of literal source whose
 # strings live in ROM and cost no heap. That representation is free on a board
 # with the flash for it, and the Zero is the board without. Both forms were
@@ -390,8 +268,8 @@ def adopt_bundle(src, dest, top=None, skip=None):
 # So the Zero froze `carts_data.CARTS_Z` instead: the SAME carts, one raw
 # deflate stream each (tools/gen_device_carts.py --packed), which builds to
 # 2,399,232 B and leaves 473 KB. The unit of work is ONE CART -- inflate it,
-# hand it to `seed_builtins`, drop it -- because the roster inflates to 732 KB
-# and no board should ever hold that at once.
+# write it, drop it -- because the roster inflates to 732 KB and no board
+# should ever hold that at once.
 #
 # EVERY BOARD FREEZES THE PACKED ROSTER since 2026-08-30, and the argument on
 # the three that fit is not the fit, it is the MARGIN: the roster only grows and
@@ -400,8 +278,8 @@ def adopt_bundle(src, dest, top=None, skip=None):
 # `seed_any` below is the one door a boot calls, so nothing else had to change.
 #
 # Nothing about the seed CONTRACT changes: the #47 version rules, the manifest
-# regeneration, the preserved pmem/config all stay in `seed_builtins`, which is
-# the one body that writes a cart to a store. This is a decoder in front of it.
+# regeneration and the preserved pmem/config are native/moy_store/moy_seed.c's,
+# the one body that writes a seed to a store, on every tier.
 
 # The deflate window the roster was compressed with. `tools/gen_device_carts.py`
 # holds the writer's copy (SEED_WBITS) and tests/test_seed_pack.py pins the two
@@ -428,7 +306,7 @@ def _packed_stream(blob):
 
 
 def unpack_seed(blob):
-    """One packed blob -> the cart dict `seed_builtins` takes.
+    """One packed blob -> the cart dict it packs.
 
     `json.load` over the inflating stream, NOT `json.loads(stream.read())`:
     read() materializes the whole inflated document beside the objects parsed
@@ -442,7 +320,8 @@ def unpack_seed(blob):
 
 def seed_packed(packed, root=CARTS_DIR, progress=None, only_new=False,
                 ns=BUILTIN_NS, room=None):
-    """`seed_builtins` over a PACKED roster, one cart inflated at a time.
+    """A PACKED roster seeded, one cart inflated at a time (`seed_builtins`'
+    rules).
 
     `packed` is `[(title, version, blob)]`. The title and the version ride
     outside the blob so the #47 already-there check can be answered WITHOUT
@@ -450,21 +329,16 @@ def seed_packed(packed, root=CARTS_DIR, progress=None, only_new=False,
     directory stats and no decompression at all, which is what keeps this off
     the warm-boot path rather than merely cheap on it.
 
-    `only_new` changes the skip rule from "already CURRENT" to "already THERE",
-    and it is the Zero's (2026-08-30). On a console board the store is a CACHE
-    of the image's built-ins, so #47 replaces a cart whose baked version is
-    newer and accepts that on-device edits to a built-in's code are lost. On the
-    Zero the store is the RECORD -- the only copy of a cart made in a browser,
-    with a `moy_journal` history behind it -- and `seed_builtins` names a folder
-    by the TITLE slug, so a version bump is exactly what would overwrite a kid's
-    edited "Hop Quest". A cart that is not there yet has nothing to overwrite,
-    which is the whole difference: this seeds what is MISSING and never rewrites
-    what is present.
+    `only_new` changes the skip rule from "already CURRENT" to "already THERE":
+    the versions are not read, and only a missing cart is written. The Zero
+    asks it while its store's stamp names the roster it was seeded from
+    (zero_host.seed_carts), so a warm boot of the same image reads no manifest.
 
     `room`, where given, is asked before each cart and again once it has
-    landed: False before stops the seed, False after removes the cart just
-    written and stops it, so the room it keeps is never spent on a seed (the
-    Zero's SEED_RESERVE).
+    landed: False before stops the seed, False after removes a cart that was
+    not there before and stops it (a replaced one stays, the kid's saves in
+    it), so the room it keeps is never spent on a new seed (the Zero's
+    SEED_RESERVE).
 
     Returns the number of carts actually written.
     """
@@ -482,26 +356,19 @@ def seed_packed(packed, root=CARTS_DIR, progress=None, only_new=False,
                 progress = None
         name = cart_folder(title, ns)
         d = cart_path(root, name)
-        if _has(names, root, name) and (only_new
-                                        or int(version) <= _cart_version(d)):
+        there = _has(names, root, name)
+        if there and (only_new or int(version) <= _cart_version(d)):
             continue
         if room is not None and not room():
             break
-        # One cart in flight. seed_builtins gets a ONE-element list so every
-        # rule it owns still applies -- and no progress hook, because the
-        # counting is this loop's (it would report 1-of-1, 35 times).
-        #
-        # NO `gc.collect()` here, and that is MEASURED rather than assumed. The
-        # obvious version collects after each cart to "make peak heap be one
-        # cart"; under the desktop MicroPython the smallest heap the whole
-        # roster seeds in is 680 KB either way, and the collecting version is
-        # ~10% slower for it. The allocator already collects at the moment
-        # peak matters -- when an allocation cannot be served -- and on a board
-        # whose heap is megabytes of PSRAM a full scan per cart is a real cost
-        # paid 35 times for a bound it does not move.
-        seed_builtins([unpack_seed(blob)], root, ns=ns)
+        # One cart in flight: the store's seed with a ONE-element roster and
+        # no progress hook, because the counting is this loop's.
+        _store.seed(root, [entry], {}, None, ns)
         if room is not None and not room():
-            _rmtree(d)
+            if not there:
+                _rmtree(d)
+                break
+            written += 1
             break
         if names is not None:
             names[name] = True
@@ -538,10 +405,6 @@ def is_packed(seed):
 # who later makes their own cart under a retired title keeps it. Bump
 # RETIRED_GEN in the same commit that adds titles, or the new ones never sweep.
 #
-# The Zero is deliberately NOT a caller (it seeds `seed_packed(only_new=True)`
-# directly): its store is the RECORD -- the only copy of a cart made in a
-# browser -- where a console board's store is a CACHE of the image's built-ins.
-#
 # The list is the 2026-09-06 bench fold (three benches became phases of Bench
 # and Bench Lua) plus the 2026-07-29 RENAME's leftovers: b4cc0d8 renamed the
 # folders as well as the titles, so every board seeded before it has carried a
@@ -563,39 +426,94 @@ RETIRED = ("Ray Test", "Ray Lua", "Layer Test", "Battle City", "Bubble Trouble",
 # folder, never its title, whose bare folder (mesh.moy) is the installed one.
 # It also takes RETIRED_SIBLINGS, folders beside the carts folder: `written/`
 # held a compiled cart's written files until they moved to `apps/<id>/`
-# (bd4d890a9, 2026-11-08), and nothing reads it.
+# (bd4d890a9, 2026-11-08), and nothing reads it. The generation lives in the
+# store's stamp (`store.ver`, below); `retired.ver`, which held it alone
+# before the stamp, is a sibling the sweep takes.
 RETIRED_FOLDERS = tuple("moybyte.%s.moy" % s for s in (
     "ocean", "pet", "platformer", "scroll_demo", "tap_red", "theme_picker",
     "wallpaper_space", "wifi", "mesh"))
-RETIRED_SIBLINGS = ("written",)
+RETIRED_SIBLINGS = ("written", "retired.ver")
 RETIRED_GEN = 8
-RETIRED_VER_NAME = "retired.ver"
+# -- the store's format and its one door (docs/refactor_2026-11.md, phase 13) --
+#
+# A store carries a FORMAT STAMP: the sidecar `store.ver` beside the carts
+# folder, one line "moystore <format> <generation>\n", the format the store's
+# layout and files are in and the RETIRED generation it was swept at. One file,
+# so the warm path of the door below stays one small read. It is written the
+# first time a store opens (`sweep_store` on a store with none: a new store, at
+# STORE_FORMAT) and after every sweep or step; its reader is strict, and a line
+# it does not read is no stamp.
+#
+# STORE_FORMAT 1 is the trial's (2026-11-15): tests/fixtures/store_trial/ is a
+# store in it, and tests/test_store_one_body.py opens it on every tree.
+#
+# THE DOOR. A format change ships as a STEP in FORMAT_STEPS -- `step(root)`
+# takes the store at `root` from its key's format to the next -- and a bumped
+# STORE_FORMAT, in the same commit as a test that takes the fixture through it.
+# `sweep_store` runs the steps of a store behind this firmware, in order, each
+# stamped as it lands, and BEFORE THE FIRST, the export of a kid's work: the
+# backup archive (runtime/carts/moy_backup.py) in the user files. An export
+# that cannot be written runs no step: the store stays in its format, readable
+# by nothing that changed, and the next boot tries again. A store AHEAD of this
+# firmware (a newer image's, then a downgrade) is not touched. No step exists:
+# none is written until a format changes (CLAUDE.md, "A store format change
+# goes through ONE door").
+#
+# A BACKUP is a copy of the whole folder the carts folder sits in, `system/`
+# and its settings included, and a restore is that folder put back and a boot
+# (#127, tools/console_backup.py). A folder older than this firmware comes
+# through the door above like any store.
+STORE_FORMAT = 1
+STORE_VER_NAME = "store.ver"
+RECORD_NAME = "installed.json"
+FORMAT_STEPS = {}
+_VER_HEAD = "moystore "
 
 
-def retired_version_path(root=CARTS_DIR):
-    """Sidecar (a sibling of the carts dir, like shared.moygfx) holding the
-    RETIRED generation this store has already been swept for."""
-    return _sibling_path(root, RETIRED_VER_NAME)
+def store_version_path(root=CARTS_DIR):
+    """The store's stamp: a sibling of the carts folder."""
+    return _sibling_path(root, STORE_VER_NAME)
+
+
+def load_store_version(root=CARTS_DIR):
+    """The store's (format, generation), or None when it has no stamp this
+    reads: absent, unreadable, or any other line."""
+    try:
+        line = _read(store_version_path(root))
+    except (OSError, ValueError):
+        return None
+    if not line.startswith(_VER_HEAD) or not line.endswith("\n"):
+        return None
+    bits = line[len(_VER_HEAD):-1].split(" ")
+    if len(bits) != 2 or not all(b.isdigit() for b in bits):
+        return None
+    fmt, gen = int(bits[0]), int(bits[1])
+    return (fmt, gen) if fmt > 0 else None
+
+
+def _save_store_version(root, fmt, gen):
+    _write(store_version_path(root), "%s%d %d\n" % (_VER_HEAD, fmt, gen))
 
 
 def load_retired_version(root=CARTS_DIR):
-    """The generation the store was swept at -- 0 when absent/unreadable, so a
-    store that predates this sweeps once."""
-    try:
-        return int(_read(retired_version_path(root)).strip())
-    except (OSError, ValueError, AttributeError):
-        return 0
+    """The generation the store was swept at -- 0 with no stamp, so a store
+    that has none sweeps once."""
+    v = load_store_version(root)
+    return 0 if v is None else v[1]
 
 
 def prune_retired(root=CARTS_DIR, titles=RETIRED, generation=RETIRED_GEN,
-                  folders=(), siblings=()):
+                  folders=(), siblings=(), ver=None):
     """Remove the folders of seeds that no longer ship, once per store: each
     title's bare folder, each of `folders` by name, and each of `siblings`
-    beside the carts folder.
+    beside the carts folder. `ver` is the stamp the caller already read.
 
     Returns the number of folders removed (0 when the store is already at this
     generation, which is the warm-boot path and costs one small file read)."""
-    if load_retired_version(root) >= generation:
+    if ver is None:
+        ver = load_store_version(root)
+    fmt, gen = ver if ver is not None else (STORE_FORMAT, 0)
+    if gen >= generation:
         return 0
     gone = 0
     names = [cart_folder(t) for t in titles] + list(folders)
@@ -603,28 +521,352 @@ def prune_retired(root=CARTS_DIR, titles=RETIRED, generation=RETIRED_GEN,
     for d in paths:
         if _exists(d):
             _rmtree(d)
+            _remove(d)
             gone += 1
     try:
-        _write(retired_version_path(root), str(int(generation)))
+        _save_store_version(root, fmt, generation)
     except OSError:
         return gone          # a read-only store: sweep again next boot, harmless
     return gone
 
 
-def sweep_store(root=CARTS_DIR, seed=None):
+def _export(root, fmt):
+    """The export before a step: the backup archive, named for the format the
+    store leaves."""
+    import moy_backup
+    return moy_backup.archive(root, name="moybyte-format-%d.zip" % fmt)
+
+
+def step_store(root, ver, export=_export):
+    """The store at `root`, stamped `ver`, taken to STORE_FORMAT through
+    FORMAT_STEPS, each step stamped as it lands; `export(root, format)` runs
+    before the first (None skips it: a restore's stage, whose archive is the
+    export). Returns the stamp it leaves."""
+    fmt, gen = ver
+    if export is not None and fmt < STORE_FORMAT:
+        export(root, fmt)
+    while fmt < STORE_FORMAT:
+        FORMAT_STEPS[fmt](root)
+        fmt += 1
+        _save_store_version(root, fmt, gen)
+    return (fmt, gen)
+
+
+def sweep_store(root=CARTS_DIR, seed=None, export=_export, board=None):
     """The one-shot pass a store OPENING runs, behind one door. Returns the
     number of retired folders removed. `seed` is the roster the store is
     seeded from, whose titles' bare folders generation 5 takes.
 
-    The door is kept for the next sweep that earns it, and the bar it has to
-    clear is `prune_retired`'s: gated on a generation sidecar, so the warm path
-    is one small read and the cold one is bounded. A FORMAT change does not
-    clear it and does not belong here -- readers are strict and a bumped seed
-    version re-seeds the content (CLAUDE.md, 2026-09-07)."""
+    The door is gated on the store's stamp, so the warm path is one small
+    read: a store behind STORE_FORMAT is stepped (the format door above, its
+    export first), one ahead of it is left alone, and a store behind
+    RETIRED_GEN is swept (`prune_retired`). A store in this firmware's format
+    then has its board stamp checked (`stamp_board`) against `board`, None
+    for this board's own id (`board_id`)."""
+    ver = load_store_version(root)
+    if ver is not None and ver[0] > STORE_FORMAT:
+        return 0
+    if ver is not None and ver[0] < STORE_FORMAT:
+        try:
+            ver = step_store(root, ver, export)
+        except OSError as exc:
+            print("store: format %d kept, no export (%r)" % (ver[0], exc))
+            return 0
     titles = list(RETIRED)
     if seed:
         titles += [item[0] if is_packed(seed) else item["title"] for item in seed]
-    return prune_retired(root, titles, folders=RETIRED_FOLDERS, siblings=RETIRED_SIBLINGS)
+    gone = prune_retired(root, titles, folders=RETIRED_FOLDERS, siblings=RETIRED_SIBLINGS,
+                         ver=ver)
+    stamp_board(root, board_id() if board is None else board)
+    return gone
+
+
+# THE BOARD STAMP. `system/board`, beside the settings, names the board the
+# store last opened on: one line "moyboard <id>\n", the id the hex of the
+# chip's unique id (machine.unique_id(), its factory MAC). A backup copies the
+# whole folder (above), so a folder can open on another board, and a few of
+# the things it carries belong to the board that wrote them:
+#
+#   system/webkeys        the paired browsers and the web console's board id
+#                         (moy_webauth.c): a browser pairs again by the QR
+#   system/ssh_host_key   Dropbear's host key (moy_ssh.c makes one at the
+#                         next setup)
+#   app_guard, wallpaper_guard   the crash guard's strike ledgers in
+#                         system/settings (runtime/shell/crash_guard.py): what
+#                         failed on one board is no strike on another
+#
+# A store that opens with another board's stamp loses those, then takes this
+# board's stamp; on its own board the check is one small read. A store with no
+# stamp (a new one, or one from before the stamp) is taken as this board's and
+# loses nothing. Bluetooth bonds, the kernel's crash record and touch
+# calibration are not in the folder: the bonds and the record live in the
+# board's NVS, and a panel's touch mapping is its board's code. A tier with no
+# unique id (the CPython host, the browser) keeps no stamp.
+BOARD_STAMP_NAME = "system/board"
+DEVICE_FILES = ("system/webkeys", "system/ssh_host_key")
+DEVICE_ROWS = ("app_guard", "wallpaper_guard")
+_BOARD_HEAD = "moyboard "
+
+
+def board_id():
+    """This board's id, the hex of machine.unique_id(), or None on a tier
+    that has none."""
+    try:
+        import machine
+        from binascii import hexlify
+        return hexlify(machine.unique_id()).decode()
+    except (ImportError, AttributeError):
+        return None
+
+
+def board_stamp_path(root=CARTS_DIR):
+    return _sibling_path(root, BOARD_STAMP_NAME)
+
+
+def forget_device(root=CARTS_DIR):
+    """Drop what the store holds that belongs to the board that wrote it:
+    DEVICE_FILES (each with its crash-safe backup) and DEVICE_ROWS."""
+    for name in DEVICE_FILES:
+        path = _sibling_path(root, name)
+        _remove(path)
+        _remove(path + ".bak")
+    import moy_docs
+    rows = moy_docs.load_system(root)
+    if any(k in rows for k in DEVICE_ROWS):
+        for k in DEVICE_ROWS:
+            rows.pop(k, None)
+        moy_docs.save_system(rows, root)
+
+
+def stamp_board(root, me):
+    """The board stamp checked against `me`, this board's id (None: no
+    stamp). Another board's stamp drops the device's rows (`forget_device`);
+    a store with none, or another's, then takes this one. Returns whether
+    rows were dropped. The warm path, this board's own stamp, is one small
+    read."""
+    if not me:
+        return False
+    want = _BOARD_HEAD + me + "\n"
+    try:
+        line = _read(board_stamp_path(root))
+    except (OSError, ValueError):
+        line = None
+    if line == want:
+        return False
+    if line is not None:
+        forget_device(root)
+    try:
+        _mkdir(_sibling_path(root, "system"))
+        _write(board_stamp_path(root), want)
+    except OSError:
+        pass                 # a read-only store: checked again next boot
+    return line is not None
+
+
+# -- the official carts: core, optional, and a removal's record ---------------
+#
+# Every seed cart is an OFFICIAL cart: its release publishes it in the board's
+# own index (tools/web_pack.py), beside the browser console add-on. CORE is
+# what a console cannot work without and never offers to remove, by the ids
+# the shell opens or names: Get Carts (the way back to everything else),
+# Files, Appearance (Settings' APPEARANCE row and Files open it by id),
+# Achievements (the kernel's notify rows name it), the Wallpaper slot a
+# drawing is copied into (Files' and Paint's WALL), and Moy Night, the first
+# wallpaper and so the default backdrop (appearance.Appearance.
+# _default_wallpaper). Settings and the update screen are the shell's own and
+# no cart. tests/test_official_carts.py holds each reason to the code.
+#
+# Every other seed cart is OPTIONAL: a console removes it like any cart, and
+# the removal is RECORDED in `system/removed` beside the carts folder, one
+# folder a line, so the seed (moy_catalogue.seed) never writes it again, a
+# newer version's replacement included. Installing it from Get Carts drops its
+# line (pkg.landed), and from then on the seed keeps it current as it does
+# every built-in. The record is native/moy_store/moy_removed.c's on every
+# tier, which the C shell's `pkg remove` and a page's delete over the sync
+# wire write too; its CORE is moy_core.h, generated from this tuple
+# (tools/gen_core_carts.py). The record is a sidecar whose absence means
+# nothing was removed, so a store from before it reads as it did and takes no
+# format step; a firmware that predates it seeds the cart back, which loses
+# nothing.
+#
+# THE BROWSER CONSOLE is one line of the same record, ADDON_LINE: its add-on
+# is a folder per page (ADDON_PREFIX and the page's 12 hex, moy_page.h's
+# MOY_PAGE_CART), and removing any of them -- Get Carts' Remove, the shelf's
+# delete, `pkg remove`, a page's delete -- records the console, so the board
+# never fetches it again (runtime/carts/web_addon.py's AddonStep); installing
+# one drops the line. `recorded` is what a removal writes a line for.
+CORE = ("moybyte.achievements", "moybyte.appearance", "moybyte.files",
+        "moybyte.get_carts", "moybyte.moy_night", "moybyte.wallpaper")
+REMOVED_NAME = "system/removed"
+ADDON_LINE = "web_console"
+ADDON_PREFIX = "web_console_"
+
+
+def _cart_id(name):
+    return name[:-len(CART_EXT)] if name.endswith(CART_EXT) else name
+
+
+def is_core(name):
+    """Whether the cart `name` (an id or a folder) is a core cart."""
+    return _cart_id(name) in CORE
+
+
+def removable(name):
+    """Whether the built-in `name` (an id or a folder) may be removed: one
+    of the built-ins' namespace that is not core."""
+    cid = _cart_id(name)
+    return cid.startswith(BUILTIN_NS + ".") and cid not in CORE
+
+
+def is_addon(name):
+    """Whether `name` (an id or a folder) is a browser console add-on's."""
+    cid = _cart_id(name)
+    return cid == ADDON_LINE or (cid.startswith(ADDON_PREFIX) and len(cid) > len(ADDON_PREFIX))
+
+
+def recorded(name):
+    """Whether a removal of `name` (an id or a folder) is recorded: an
+    optional built-in, or a browser console add-on."""
+    return removable(name) or is_addon(name)
+
+
+def addon_removed(root=CARTS_DIR):
+    """Whether the browser console was removed from the store at `root`."""
+    return ADDON_LINE in load_removed(root)
+
+
+def load_removed(root=CARTS_DIR):
+    """The folders of the built-ins removed from the store at `root`."""
+    return _store.removed_load(root).split("\n")[:-1]
+
+
+def note_removed(root, folder):
+    """Record that the built-in `folder` was removed: the seed writes it no
+    more; a browser console add-on's records ADDON_LINE. A core cart, or any
+    other folder, records nothing."""
+    return _store.removed_note(root, folder)
+
+
+def unremove(root, folders):
+    """The built-ins `folders` taken off the removal record (an add-on's
+    folder takes ADDON_LINE off): those it held."""
+    return [f for f in folders if _store.removed_drop(root, f)]
+
+
+def unremoved(seed, root):
+    """The roster `seed` less the built-ins removed from the store `root`."""
+    removed = load_removed(root)
+    if not removed:
+        return seed
+    packed = is_packed(seed)
+    return [e for e in seed if cart_folder(e[0] if packed else e["title"],
+                                           BUILTIN_NS) not in removed]
+
+
+def put_back(root, seed, titles):
+    """The built-ins of `seed` titled `titles` that a removal took off the
+    store `root`, taken off the record and seeded again: their titles. A
+    tool that measures a seed cart calls it first (tools/perf_pass.py)."""
+    removed = load_removed(root)
+    packed = is_packed(seed)
+    back, entries = [], []
+    for e in seed:
+        title = e[0] if packed else e["title"]
+        if title in titles and cart_folder(title, BUILTIN_NS) in removed:
+            back.append(title)
+            entries.append(e)
+    if back:
+        unremove(root, [cart_folder(t, BUILTIN_NS) for t in back])
+        seed_any(entries, root, {})
+    return back
+
+
+# THE BROWSER CONSOLE ON A CARD. The website's install writes a board's
+# internal store with the add-on that fits its image in it (tools/
+# store_image.py) and nothing else; a board whose carts live on a card seeds
+# the card, so its first boot on the card moves the add-on there: copied
+# into the card's carts folder (unless that holds it already) under a name
+# no scan reads, renamed into place, then taken off the internal store. Every
+# later boot pays one lookup on the internal flash.
+_PART = ".part"
+_COPY_CHUNK = 16384
+
+
+def _page_want():
+    try:
+        import moy_web
+        return moy_web.page_want()
+    except (ImportError, AttributeError):
+        return None
+
+
+def _copy_folder(src, dst):
+    import os
+    os.mkdir(dst)
+    for name in os.listdir(src):
+        with open(src + "/" + name, "rb") as f, open(dst + "/" + name, "wb") as g:
+            while True:
+                b = f.read(_COPY_CHUNK)
+                if not b:
+                    break
+                g.write(b)
+
+
+def bring_addon(src, root, want=None):
+    """The add-on for the page `want` (64 hex; None for the one this image
+    names) moved from the carts folder `src` (the internal store) to `root`
+    (the card's), and the add-ons for other pages taken off both, no removal
+    recorded: True when there was one to move. With none to move it is one
+    look, a warm boot's."""
+    if want is None:
+        want = _page_want()
+    if not want or src == root:
+        return False
+    folder = ADDON_PREFIX + want[:12] + CART_EXT
+    have = cart_path(src, folder)
+    if not _exists(have):
+        return False
+    dest = cart_path(root, folder)
+    if not _exists(dest):
+        import os
+        part = dest + _PART
+        _rmtree(part)
+        _copy_folder(have, part)
+        os.rename(part, dest)
+    _rmtree(have)
+    for carts in (src, root):
+        for name in _listing(carts) or ():
+            if name.startswith(ADDON_PREFIX) and name.endswith(CART_EXT) and name != folder:
+                _rmtree(cart_path(carts, name))
+    return True
+
+
+def keep_record(root, folders):
+    """The shelf's record (installed.json, native/moy_store/moy_shelf.h) held
+    to the cart folders: an entry whose folder is not among `folders` (the
+    boot's scan, so this lists nothing) is dropped and the record written
+    again. Returns the entries dropped. A record that names only folders
+    there is read and left; while `install/` holds a stage, the record is
+    left to cart_index.recover_steps, whose old copy may come back."""
+    text = _store.shelf_record(root)
+    if text is None:
+        return 0
+    try:
+        rec = json.loads(text)
+    except ValueError:
+        return 0
+    carts = rec.get("carts") if type(rec) is dict else None
+    if type(carts) is not dict:
+        return 0
+    have = set(f.lower() for f in folders)
+    gone = [f for f in carts if f.lower() not in have]
+    if not gone or _listing(_sibling_path(root, "install")):
+        return 0
+    for f in gone:
+        del carts[f]
+    _write_atomic(_sibling_path(root, RECORD_NAME),
+                  json.dumps({"version": 1, "carts": carts}))
+    return len(gone)
 
 
 def seed_any(seed, root, present, progress=None):
@@ -633,34 +875,16 @@ def seed_any(seed, root, present, progress=None):
 
     `present` is each cart folder the scan found and its version ({folder:
     version}), so deciding what to write reads no manifest and lists nothing:
-    a built-in absent from it, or present and older, goes to `seed_builtins`,
-    which writes it whole and keeps its saves and config across a re-seed. A
-    packed roster is inflated one cart at a time, and only for a cart that is
-    written. `progress(done, total, title)` is called once per built-in.
-    Returns the folders written, for the caller to read again. A packed
-    roster is the native store's to write wherever it is linked (moy_seed.c,
-    the same files byte for byte); each built-in's folder is
-    `moybyte.<slug>.moy` (#162)."""
-    packed = is_packed(seed)
-    if packed and _store is not None:
-        return _store.seed(root, seed, present, progress, BUILTIN_NS)
-    total = len(seed)
-    wrote = []
-    for index, item in enumerate(seed):
-        if packed:
-            title, version = item[0], item[1]
-        else:
-            title, version = item["title"], item.get("version", 0)
-        if progress is not None:
-            try:
-                progress(index, total, title)
-            except Exception:             # noqa: BLE001 -- as in seed_builtins
-                progress = None
-        name = cart_folder(title, BUILTIN_NS)
-        if name in present and int(version) <= present[name]:
-            continue
-        wrote += seed_builtins([unpack_seed(item[2]) if packed else item], root)
-    return wrote
+    a built-in absent from it, or present and older, is written whole, its
+    saves and config kept across a re-seed (`seed_builtins`' rules). A packed
+    roster is inflated one cart at a time, and only for a cart that is
+    written; a roster of dicts is packed first. `progress(done, total,
+    title)` is called once per built-in. Returns the folders written, for the
+    caller to read again; each built-in's folder is `moybyte.<slug>.moy`
+    (#162). native/moy_store/moy_seed.c writes them."""
+    if not is_packed(seed):
+        seed = [_pack(c) for c in seed]
+    return _store.seed(root, seed, present, progress, BUILTIN_NS)
 
 
 def embedded_floor(seed):

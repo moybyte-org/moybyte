@@ -215,7 +215,7 @@ def _open_map(tmp_path, title="Hop Quest"):
     import ws_helpers
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws_helpers.open_cart(ws, title)
-    ws._open_map()
+    ws.text.open_map()
     assert ws.menu_view == "map" and ws.map_ui.mapedit is not None
     return ws, host_app.ConsoleDriver(ws)
 
@@ -225,7 +225,7 @@ def _paint(ws, drv):
     achievement, and its toast covers a third of the map view."""
     import ws_helpers
     ws_helpers.quiesce(ws)
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
 
 
@@ -559,7 +559,7 @@ def test_the_map_editor_renders_at_overview_on_every_tier(tmp_path):
         ws = host_app.build_workstation(
             str(tmp_path / ("t%dx%d" % (w, h))), sys_size=(w, h), font_scale=fs)
         ws_helpers.open_cart(ws, "Sky Run")
-        ws._open_map()
+        ws.text.open_map()
         drv = host_app.ConsoleDriver(ws)
         _to_overview(ws)
         tm = ws.run.project.tilemap

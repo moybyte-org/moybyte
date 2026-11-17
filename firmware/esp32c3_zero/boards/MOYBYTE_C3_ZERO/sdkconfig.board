@@ -1,0 +1,54 @@
+# Moybyte Zero board fragment (ESP32-C3, mainline build).
+#
+# This file is the ONE store of every ESP-IDF setting this repo decided for the
+# C3 Zero, prose included; `moybyte_sdkconfig_guard` derives its required
+# options from it. The XIAO's fragment
+# (firmware/seeed_xiao_esp32s3_zero/boards/MOYBYTE_ZERO/sdkconfig.board) is the
+# reference: a line taken from it keeps its reason there, and what is written
+# here is what the C3 decides on its own.
+#
+# Under it, MicroPython's ESP32_GENERIC_C3 fragments (mpconfigboard.cmake):
+# sdkconfig.base, sdkconfig.riscv (size optimisation: RISC-V code is larger
+# than Xtensa's) and the C3's USB fragment (the v0.3 revision floor, and the
+# hardware stack guard off for ESP-IDF issue 14456). The flash is the base's
+# 4 MB at the chip's default mode and speed.
+
+# THE PARTITION TABLE: one factory slot and the store. The CSV has the
+# arithmetic and board.toml why there is no second slot.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-c3-zero.csv"
+
+# No core dump: the table has no coredump partition (the XIAO's reason).
+CONFIG_ESP_COREDUMP_ENABLE_TO_NONE=y
+
+# NOT TAKEN from the XIAO: its WiFi/lwIP window set (64 KB TCP windows, 64
+# dynamic buffers each way) and CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC. The XIAO's
+# set is RAM-positive only because CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP moves
+# those buffers into PSRAM, and mbedTLS's external allocator is PSRAM's; this
+# chip has none, so every buffer is internal and ESP-IDF's defaults stand.
+
+# THE USB CONSOLE: USB-Serial/JTAG as the PRIMARY console, which is what gives
+# esptool a reset it can use (the XIAO's reason, 2026-08-30).
+CONFIG_ESP_CONSOLE_UART_DEFAULT=
+CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# Power management off: nothing in this repo touches the PM API (the XIAO's
+# reason).
+CONFIG_PM_ENABLE=
+
+# Drivers with no caller here, flash this one slot pays for (the XIAO's
+# reasons): Ethernet and WPA2/3-Enterprise.
+CONFIG_ETH_USE_SPI_ETHERNET=
+CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=
+
+# NTP asks the moment the station has an address (the XIAO's reason).
+CONFIG_LWIP_SNTP_STARTUP_DELAY=n
+
+# --- Left out (the XIAO's reasons) -------------------------------------------
+CONFIG_LWIP_PPP_SUPPORT=n
+CONFIG_LWIP_PPP_PAP_SUPPORT=n
+CONFIG_LWIP_PPP_CHAP_SUPPORT=n
+CONFIG_LOG_MAXIMUM_LEVEL_INFO=n
+CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT=y

@@ -269,3 +269,53 @@ def test_a_store_that_cannot_be_given_back_warns_and_does_not_raise(monkeypatch)
     with pytest.warns(UserWarning, match="left folders on the store"):
         with on_glass.session("/dev/ttyACM2", board_dir=TDECK) as b:
             b.store.append("stuck.moy")
+
+
+class _ChunkedSerial:
+    """A port that hands the reader one prepared read at a time: each entry of
+    `reads` is what one `in_waiting`-sized read returns, so two lines in one
+    entry arrive in the same `_pump`."""
+
+    port = "fake"
+
+    def __init__(self, reads):
+        self.reads = [r.encode() for r in reads]
+
+    @property
+    def in_waiting(self):
+        return len(self.reads[0]) if self.reads else 0
+
+    def read(self, n=1):
+        return self.reads.pop(0) if self.reads else b""
+
+    def write(self, data):
+        return len(data)
+
+    def flush(self):
+        pass
+
+    def close(self):
+        pass
+
+
+def test_two_lines_in_one_read_are_both_found_in_order():
+    """`KSTOP i/n before` and `after` print a short teardown apart and can
+    reach the host in one serial read. `wait_line` reads only what is still
+    to come, so the second line of that read is behind it; `_line_since`
+    walks the transcript by index and finds both, in order."""
+    burst = ("KSTOP 1/2 before psram=5/4\nKSTOP 1/2 after psram=7/5\n",
+             "MPY: soft reboot\n",
+             "KSTOP 2/2 before psram=5/4\nKSTOP 2/2 after psram=7/5\n")
+    b = p4_autotest.P4Board("fake", board_dir=GUITION, ser=_ChunkedSerial(burst))
+    assert b.wait_line("KSTOP ", 0.2).startswith("KSTOP 1/2 before")
+    assert b.wait_line("KSTOP 1/2 after", 0.2) is None
+
+    b = p4_autotest.P4Board("fake", board_dir=GUITION, ser=_ChunkedSerial(burst))
+    seen, at = [], 0
+    for _ in range(4):
+        line, at = on_glass._line_since(b, at, "KSTOP ", 1.0)
+        seen.append(line.split(" psram", 1)[0])
+    assert seen == ["KSTOP 1/2 before", "KSTOP 1/2 after",
+                    "KSTOP 2/2 before", "KSTOP 2/2 after"]
+    assert on_glass._line_since(b, at, "KSTOP ", 0.1) == (None, at)
+    assert on_glass._said_since(b, 0, "MPY: soft reboot", 0)

@@ -214,10 +214,10 @@ def test_the_cross_cart_shared_sheet_is_spec_shaped():
         carts_root = "/nonexistent"
         carts_store = _Store
 
-        def _with_sd(self, fn):
+        def with_sd(self, fn):
             return fn()
 
-    shared = console.Workstation._load_shared_sheet(_WS())
+    shared = console.Saves(_WS())._load_shared_sheet()
     assert shared.is_spec_shape()
     assert shared.count == 512
     cart = SpriteSheet()

@@ -12,11 +12,24 @@
 // client's cache aliased a recreated surface; here the table's owner checks
 // every use and there is no remote cache.)
 //
+// RESULT CODES. 0 is OK: every module's MOY_<M>_OK is 0
+// (tests/test_os_table.py holds it), and a code is the module's own, in its
+// own enum. A function that answers only how it went answers its code; one
+// that answers a value (a count, a length, a handle) answers it, or a
+// refusal below 0, and its header says which: the app ABI's rows answer
+// -MOY_APP_<code> (moy_app.h), moy_crypto.h's bodies their MOY_CRYPTO_E*.
+// What a compiled program reads for the app ABI's and the event queue's
+// codes is a column of native/os_calls.json (its errors and evq_errors),
+// generated into moy_app_err.h and moy_evq_codes.h for both tiers'
+// numberings: no tier maps a code by hand.
+//
 // KERNEL DATA IS PSRAM. Moving state out of the GC heap into C can be a net
 // internal SRAM loss (.bss, task stacks and small mallocs land internal, and
 // the S3's internal budget is shared with WiFi, BLE and the panel's DMA), so
-// kernel data is allocated with heap_caps(MALLOC_CAP_SPIRAM) unless it is
-// latency-bound, and tests/test_moy_spine_twins.py asserts the placement. The
+// kernel data is placed in PSRAM unless it is latency-bound (on a board built
+// without PSRAM that placement is the one internal heap: moy_platform.h). Every block is
+// one moy_kalloc call whose flags name its placement (moy_kmem.h);
+// tests/test_native_platform.py holds every native allocation to it. The
 // kernel's share is configuration (native/moy_play/moy_play.h, "the shares").
 //
 // STOPPING THE VM. The VM runs the console; the kernel stops it for a run
@@ -173,14 +186,18 @@ const uint32_t *moy_kernel_stamps(void);
 // the next cart (#224). The store, the glass, the audio mixer and the spine
 // take every block of at most MOY_KPOOL_MAX bytes from this pool, made before
 // the VM's first area and below every area a VM holds; a larger block, or one
-// the full pool cannot take, comes from PSRAM as before.
+// the full pool cannot take, comes from PSRAM as before. A board built without
+// PSRAM keeps no pool (moy_platform.h): there its 64 KB would be a fifth of the
+// one internal heap WiFi shares, and the free run it keeps is a VM stop's, a
+// lever (MOY_VM_STOP) such a board does not take.
 #define MOY_KPOOL_BYTES (64u * 1024u)
 #define MOY_KPOOL_MAX 1024u
 // A zeroed block from the pool, or NULL: too big, the pool full, or no pool.
 void *moy_kpool_alloc(size_t n);
 // Frees `p` when it is the pool's: false when it is not.
 bool moy_kpool_free(void *p);
-// (bytes in use at the high water, allocations the pool could not take)
-void moy_kpool_stats(size_t *high, uint32_t *misses);
+// (bytes in use at the high water, allocations the pool could not take);
+// false, the high water 0, when there is no pool.
+bool moy_kpool_stats(size_t *high, uint32_t *misses);
 
 #endif // MOY_KERNEL_H

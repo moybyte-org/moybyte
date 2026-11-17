@@ -135,21 +135,16 @@
 #define MOY_KERNEL_PANEL_SWAP               (0)
 #define MOY_KERNEL_IDLE_SAFE_MS             (30000)
 
-// The kernel's I2C bus (native/moy_kernel/moy_bus.h): I2C0, the GSL3680 touch
+// The kernel's I2C bus (native/moy_kernel/moy_bus.h): I2C0 (its pins are
+// board.toml's `i2c0` row, MOY_HW_I2C0_SDA/_SCL), the GSL3680 touch
 // and the ES8311/ES7210 codecs.
 #define MOY_BUS_I2C_PORT                    (0)
-#define MOY_BUS_I2C_SDA                     MICROPY_HW_I2C0_SDA
-#define MOY_BUS_I2C_SCL                     MICROPY_HW_I2C0_SCL
 #define MOY_BUS_I2C_HZ                      (400000)
 
 // The speaker (native/moy_audio/moy_aud_out.c, #82): the ES8311 codec on the
-// bus above, clocked from MCLK, and its power amplifier's enable.
+// bus above, clocked from MCLK, and its power amplifier's enable, on the pins
+// of board.toml's `speaker` row (MOY_HW_SPEAKER_*).
 #define MOY_AUDIO_CODEC_ES8311              (1)
-#define MOY_AUDIO_I2S_MCLK                  (13)
-#define MOY_AUDIO_I2S_BCK                   (12)
-#define MOY_AUDIO_I2S_WS                    (10)
-#define MOY_AUDIO_I2S_DOUT                  (9)
-#define MOY_AUDIO_PA_GPIO                   (20)
 // 44.1 kHz stereo out (docs/os_2026-11/hardware.md section 3): the mix,
 // 22,050 Hz mono as on every board, upsampled 2x by the feeder, the streams
 // added after it. The ES8311 is a mono DAC that reads one slot, so the two
@@ -167,15 +162,14 @@
 #define MOY_INPUT_BLE_HOSTED                (1)     // the C6 over ESP-Hosted
 
 // Input's touch (native/moy_input/moy_input_task.c): the GSL3680 at 0x40, RST
-// 22, INT 21 (held low across a reset to pick the address), RAM-loaded with
+// and INT on board.toml's `i2c0` row (INT held low across a reset to pick the
+// address), RAM-loaded with
 // this glass's firmware (gsl_fw_jc8012.c). Calibrated on glass 2026-09-06: it
 // reports LANDSCAPE, aligned with the desk at ROTATION 270 (no swap, no
 // flips), its space starting ~10 x ~21 counts in and spanning 1640 x 865 over
 // the 1280x800 glass. At ROTATION 90 both flips go true.
 #define MOY_INPUT_TOUCH_KIND                (2)     // MOY_TOUCH_GSL3680
 #define MOY_INPUT_TOUCH_ADDR                (0x40)
-#define MOY_INPUT_TOUCH_RST                 (22)
-#define MOY_INPUT_TOUCH_INT                 (21)
 #define MOY_INPUT_TOUCH_FW                  moy_gsl_fw
 #define MOY_INPUT_TOUCH_FW_LEN              moy_gsl_fw_LEN
 #define MOY_INPUT_TOUCH_SWAP                (0)

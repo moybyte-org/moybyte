@@ -36,24 +36,19 @@ service was bound with; the shell itself (pid 1) always may. Without it the
 post answers None and nothing shows. A request is the shell's to post and
 needs no permission.
 
-A compiled program's notification is the kernel's queue's
-(native/moy_kernel/moy_notes.h): posted on the program's own task, VM or no
-VM, under the `notifications` its event queue was opened with, and taken
-into the list here at the console's next frame (`drain`). Every id, the
-console's own posts' too, is that queue's (`moy_notes_id`), so an id names
+Every tier's notification is the kernel's queue's (native/moy_kernel/
+moy_notes.h), under the `notifications` the poster's event queue was opened
+with (the shell's as the system's): a compiled program's posted on its own
+task, VM or no VM, and taken into the list here at the console's next frame
+(`drain`); a Python process's (`post`) taken at once, its icon, actions and
+urgency beside it. Every id is that queue's (`moy_notes_id`), so an id names
 one notification whoever posted it.
 
 `gen` moves with every change, the task manager's cue to read the list again.
 """
 
-try:
-    from ticks import _ticks_ms, _ticks_diff, _ticks_add
-except ImportError:  # host: the runtime package
-    from runtime.ticks import _ticks_ms, _ticks_diff, _ticks_add
-try:
-    import moy_evq as _E
-except ImportError:  # host: the runtime package
-    from runtime import moy_evq as _E
+from ticks import _ticks_ms, _ticks_diff, _ticks_add
+import moy_evq as _E
 
 LOW, NORMAL, CRITICAL = 0, 1, 2
 BANNER_MS = 5000                # a NORMAL banner's time up
@@ -121,6 +116,7 @@ class Notifications:
         self.titled = None          # fn(app id) -> its cart or None, the shell's
         self.shown = None           # fn(note|None, until) the banner went up or down
         self.acted = None           # fn(note, key) a notification was acted on
+        self._posting = {}          # kernel id -> what a Python post carries beside its texts
 
     def find(self, nid):
         for n in self.list:
@@ -130,7 +126,9 @@ class Notifications:
 
     def post(self, pid, summary, body="", icon=None, actions=(), urgency=NORMAL,
              replaces_id=0):
-        """Process `pid` posts: its id, or None where it may not."""
+        """Process `pid` posts, through the kernel's queue as every tier's
+        notification does (moy_notes.h; the shell's as the system's), taken
+        into the list at once: its id, or None where it may not."""
         title, cart, may = self._who(pid)
         if not may:
             return None
@@ -143,7 +141,15 @@ class Notifications:
         n = self.find(replaces_id) if replaces_id else None
         if n is not None and (n.pid != pid or n.then is not None):
             n = None
-        return self._put(n, pid, title, cart, summary, body, icon, acts, urgency).id
+        summary, body = _text(summary, SUMMARY_MAX), _text(body, BODY_MAX)
+        nid = _E.notes_system(summary, body) if pid <= SHELL else \
+            _E.notes_post(pid, summary, body)
+        if nid <= 0:
+            return None
+        got = self._posting[nid] = [n, summary, body, icon, acts, urgency, None]
+        self.drain()
+        self._posting.pop(nid, None)
+        return got[6].id if got[6] is not None else None
 
     def request(self, pid, summary, then):
         """Process `pid` asked for what `then()` does: a notification under
@@ -171,7 +177,11 @@ class Notifications:
             if title is None:           # its process ended since: its app's cart
                 cart = self.titled(app) if self.titled is not None else None
                 title = (cart.get("title") if cart is not None else None) or app or "App"
-            self._put(None, pid, title, cart, summary, body, None, (), NORMAL, nid)
+            p = self._posting.get(nid)
+            if p is None:
+                self._put(None, pid, title, cart, summary, body, None, (), NORMAL, nid)
+            else:                       # a Python post: its own texts, icon and actions
+                p[6] = self._put(p[0], pid, title, cart, p[1], p[2], p[3], p[4], p[5], nid)
             got = _E.notes_take()
 
     def _put(self, n, pid, title, cart, summary, body, icon, acts, urgency, nid=0):

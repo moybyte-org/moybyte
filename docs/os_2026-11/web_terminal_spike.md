@@ -69,7 +69,7 @@ the terminal.
 **It builds and runs.** `native/moy_sh/micropython.mk` is the cmake file's
 twin for the webassembly port: dash's sources take the shim by target
 (`$(BUILD)/moy_sh/dash/%.o`), the shell's own files `-std=gnu99`, and the
-host table is `moy_sh_board.c` without `MOY_SH_ON_BOARD`, as the CPython
+host table is `moy_sh_board.c` without `MOY_ON_BOARD` (`moy_platform.h`), as the CPython
 host builds it (`runtime/host/moy_sh.py`). `MOY_WEB_SHELL=1
 firmware/web_runner/build.sh` stages it; without the variable the bundle is
 as on dev. the probe `shell_probe.mjs` (the spike's branch, commit 3cd02d40f) boots the console under
@@ -293,7 +293,7 @@ last answer):
 | capability | the route | the browser's half | where |
 |---|---|---|---|
 | the store | `POST /sync`, `GET /carts.json`, `GET /files.json`, `GET /apps.json` | the worker's sync pump, `runtime/carts/moy_sync.py` | every board |
-| pins | `GET`/`POST /gpio` | `firmware/web_runner/gpio_link.py` (`ws.gpio`) | the Zero only (`MOY_NET_GPIO_PINS`) |
+| pins | `GET`/`POST /gpio` | `firmware/web_runner/gpio_link.py` (`ws.gpio`) | the Zero only (`MOY_NET_GPIO_ROUTE`, over its `gpio` lease row) |
 | the firmware | `GET`/`POST /update` | `firmware/web_runner/update_link.py` (`ws.updater`) | every board |
 | the board's Settings | `GET /console.json`, system batches | the worker | consoles |
 

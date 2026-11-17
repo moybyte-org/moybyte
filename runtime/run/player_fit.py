@@ -4,6 +4,7 @@
 #   _exc_cart_line        the cart line a Python exception was raised at
 #   _compiled             a compiled ("runtime": "wasm") cart
 #   newer_notice          the notice for a cart built for a newer console
+#   _format_newer         a cart whose format level is above this console's
 #   fit_notice            the notice for a cart too big to load
 #   _cart_fit             what a cart's load needs against what the console has; _fits its verdict
 #   _out_of_memory        a start that failed for want of memory
@@ -25,20 +26,10 @@ MicroPython-safe.
 
 import sys
 
-try:
-    import chrome_ops as _ch
-    from widgets import _err_text
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import chrome_ops as _ch
-    from runtime.widgets import _err_text
-try:
-    import moy_carts as _carts
-except ImportError:  # pragma: no cover - host
-    from runtime import moy_carts as _carts
-try:
-    import moy_play as _moy_play
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import moy_play as _moy_play
+import chrome_ops as _ch
+from widgets import _err_text
+import moy_carts as _carts
+import moy_play as _moy_play
 
 
 def _nativize(src):
@@ -153,7 +144,7 @@ _OUT_OF_MEMORY = "out of memory"
 # firmware", 2026-09-30): device/moycore_glue.WasmRun retries it on the
 # interpreter before this layer ever sees an error, so the cart plays, only
 # slower, and INTERP_NOTICE is the short system NOTICE that says so
-# (`ws.notice`, runtime/shell/console_notices.py's `_draw_notice` -- the same body
+# (`ws.notices.notice`, runtime/shell/console_notices.py's `_draw_notice` -- the same body
 # "MOYBYTE UPDATED" uses, never `_draw_toast`'s achievement banner, and it
 # expires on its own rather than needing a dismissal). A module whose
 # SIGNATURE is present and does not verify keeps the ordinary error panel --
@@ -181,6 +172,26 @@ INTERP_NOTICE_SUB_DEFAULT = INTERP_NOTICE_SUB["missing"]
 class _Refused(Exception):
     """A compiled cart refused before it loads: args are the notice and
     the title it is drawn under."""
+
+
+# The moy-spec format level this console implements (SPEC.md 13). A cart whose
+# `format` names a level above it was built for a newer console, and is refused
+# before any of its code runs, whatever its runtime, on the notice a compiled
+# cart missing an import gets. A `format` that names no level -- Moybyte's own
+# "moybyte-cart-v1", or none -- is a Moybyte cart and runs.
+FORMAT_LEVEL = 1
+
+
+def _format_newer(cart):
+    """The cart's `format` when it names a level above FORMAT_LEVEL ("moy-"
+    and a decimal integer from 1, no sign, no leading zero), else None."""
+    fmt = (cart or {}).get("format")
+    if not isinstance(fmt, str) or not fmt.startswith("moy-"):
+        return None
+    digits = fmt[4:]
+    if not digits or digits[0] == "0" or any(d not in "0123456789" for d in digits):
+        return None
+    return fmt if int(digits) > FORMAT_LEVEL else None
 
 
 def newer_notice(missing):
@@ -235,6 +246,19 @@ def _cart_missing(make, cart):
         return fn(cart) or None
     except Exception:  # noqa: BLE001 -- a report is advisory; the load decides
         return None
+
+
+def _cart_unbuilt(make, cart):
+    """True when a native cart carries no module for this console's chip
+    (the runtime's `module`): it is refused before it loads, with the
+    notice that says so, as a cart too big for the console is."""
+    fn = getattr(make, "module", None)
+    if fn is None:
+        return False
+    try:
+        return fn(cart) is None
+    except Exception:  # noqa: BLE001 -- a report is advisory; the load decides
+        return False
 
 
 def _out_of_memory(exc):

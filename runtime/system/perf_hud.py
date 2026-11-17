@@ -2,10 +2,10 @@
 Workstation (runtime/shell/console.py).
 
 Two layers, the same split as the console's other sub-UIs:
-  * The perf *query* API -- perf_sample / perf_breakdown / perf_breakdown_raw /
-    perf_backdrop / perf_pointer / perf_batch -- is the PerfMeters mixin's
+  * The perf *query* API -- perf_sample / perf_breakdown /
+    perf_backdrop / perf_pointer / perf_batch -- is `ws.perf`'s
     (runtime/shell/console_perf.py). Those are the device backend's measurement
-    contract (device_diag calls `ws.perf_sample()` / `ws.perf_breakdown()`
+    contract (device_diag calls `ws.perf.perf_sample()` / `ws.perf.perf_breakdown()`
     every few seconds for its PERF/DRAWBRK diag lines). They read the
     frame-timing fields the frame loop writes.
   * PerfHud (here) -- the tiny bottom-right FPS chip + optional frame-time
@@ -17,7 +17,7 @@ Dependency profile (the facade lens, runtime/shell/system_api.py) -- PerfHud is
 the console's *cleanest* seam: it touches NO privileged verbs at all, only
 read-only frame-timing state through its `self.ws` back-reference:
   * shared (non-privileged):   ws.run.canvas, ws.theme_colors, ws.perf_hud,
-                               ws.frame_state.fps, ws._flush_ms, ws._draw_ms, ws._upd_ms
+                               ws.frame_state.fps, ws.flush_ms, ws.draw_ms, ws.upd_ms
 `NAMES` is injected at construction (same reason as BlockEditorUI: importing it
 back from console.py would be a circular import, since console.py builds the one
 PerfHud a Workstation holds). It draws through native/moy_ui's `moy_ui_perf`
@@ -71,9 +71,9 @@ class PerfHud:
         a[_FPS] = fps
         a[_FS] = 1
         if ws.perf_hud:
-            logic = int(ws._upd_ms * 10 + 0.5)
-            flush = int(ws._flush_ms * 10 + 0.5)
-            draw = int(ws._draw_ms * 10 + 0.5) - logic
+            logic = int(ws.upd_ms * 10 + 0.5)
+            flush = int(ws.flush_ms * 10 + 0.5)
+            draw = int(ws.draw_ms * 10 + 0.5) - logic
             draw = draw if draw > 0 else 0
             frame = (10000 + fps // 2) // fps if fps else draw + flush + logic
             idle = frame - draw - flush - logic
@@ -100,7 +100,7 @@ class PerfHud:
         _ui_draw.overdrew(b[0], b[1], b[2], b[3])
         pl = ws.run.player
         if pl is not None:
-            pl.overdrew(cv, b[0], b[1], b[2], b[3])
+            pl.face.overdrew(cv, b[0], b[1], b[2], b[3])
 
     def _fps_tap_rect(self):
         """The bottom-right corner the FPS readout lives in, used as the tap target

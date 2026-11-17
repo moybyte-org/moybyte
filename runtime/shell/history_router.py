@@ -82,25 +82,10 @@ an editor or a layer stack -- so `project`, `editor`, `menu_view`, `cart`,
 reached through `ws` at the moment of use and never captured here.
 """
 
-try:
-    from op_history import History, TextEditCodec, text_diff_op
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.op_history import History, TextEditCodec, text_diff_op
-
-try:
-    import moy_catalogue
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import moy_catalogue
-
-try:
-    from chrome import _err_text
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.chrome import _err_text
-
-try:
-    from ticks import _ticks_ms, _ticks_diff
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.ticks import _ticks_ms, _ticks_diff
+from op_history import History, TextEditCodec, text_diff_op
+import moy_catalogue
+from chrome import _err_text
+from ticks import _ticks_ms, _ticks_diff
 
 # The Editor tabs a kid DRAWS on rather than types on: they take the long quiet
 # window in `idle_tick`. Code/blocks/config are typed or tapped a field at a time,
@@ -133,7 +118,7 @@ class HistoryRouter:
         # The idle-typing debounce (Stage 7 of
         # docs/history/shell_ux_technical_plan_v1.md). `edit_ms` is the ticks of
         # the last keystroke in the code editor (None = no pending edit) and is
-        # a PLAIN PUBLIC ATTRIBUTE because `Workstation.handle_input` stores to
+        # a PLAIN PUBLIC ATTRIBUTE because `InputRouter.handle_input` stores to
         # it on every keypress that reaches the code tab -- one attribute store,
         # never a call, never a forward (doc 3e). `idle_tick()` below fires a
         # durable, INVISIBLE autosave-commit once the tab's quiet window of no
@@ -299,7 +284,7 @@ class HistoryRouter:
         committed gesture calls, `scene_editor_ui._sync_live`), so a bar-driven
         undo/redo must call it too."""
         ws = self.ws
-        ws._dirty = True
+        ws.mark_dirty()
         ws.bar_layer.invalidate()
         if ws.menu_view == "code" and ws.editor is not None:
             ws.editor.dirty = True
@@ -405,7 +390,7 @@ class HistoryRouter:
             # (SPEC.md 4, #89). Scoping to the OPEN file is the same rule the
             # rest of this table follows -- an undo on p8.lua must not revert
             # the newest commit to main.lua any more than the Map tab's should.
-            return (ws.code_file_name(),)
+            return (ws.text.code_file_name(),)
         if v == "blocks":
             # blocks.json is not itself journaled today (block saves write it straight to
             # disk); main.py IS -- so the pair is walked together and can't desync, and a
@@ -481,7 +466,7 @@ class HistoryRouter:
         if not changed:
             return False           # at a floor/ceiling -- nothing to restore
         self._reload_after_walk(changed)
-        ws._dirty = True
+        ws.mark_dirty()
         # The walk just moved the journal cursor, flipping can_undo()/can_redo() --
         # invalidate so the bar's UNDO/REDO icons re-check + repaint their dimmed
         # state on the NEXT frame (#88) instead of showing a stale enabled/disabled
@@ -506,14 +491,14 @@ class HistoryRouter:
         if not fresh:
             return
         ws.cart = fresh
-        ws.config = dict(fresh.get("cfg", {}))
+        ws.run.project.config = dict(fresh.get("cfg", {}))
         ws.run.project.reset_config_history()  # #111 phase 4: fresh baseline post-walk
-        ws.sheet = ws._build_sheet()
-        ws.tilemap = ws._build_tilemap()
-        ws.images = fresh.get("images") or {}
-        ws.scenes = ws._build_scenes()   # a scene undo must reach the live rows (#85)
+        ws.sheet = ws.build_sheet()
+        ws.run.project.tilemap = ws.build_tilemap()
+        ws.run.project.images = fresh.get("images") or {}
+        ws.run.project.scenes = ws.build_scenes()   # a scene undo must reach the live rows (#85)
         ws.cart_error = None
-        ws.crash_line = None
+        ws.run.player.crash_line = None
         ws.crash_popup = None        # the popup is transient -- any walk ends it
         # Keep the kid's place in the code: the rebuild below resets the fresh
         # CodeEditor's caret to the top, which read as "undo threw me to the
@@ -533,14 +518,14 @@ class HistoryRouter:
         view = ws.menu_view
         if ws.wm.top_is("menu") and view in ("code", "paint", "map", "scene",
                                              "blocks", "music"):
-            ws.set_menu_view(view)     # rebuild the active editor from fresh data
+            ws.text.set_menu_view(view)     # rebuild the active editor from fresh data
             if caret is not None and ws.editor is not None:
                 ws.editor.goto_row(caret[0], caret[1])
             if view == "code":
                 # Re-check the restored text (owner 2026-07-23): a marker only
                 # retires when the code actually parses again.
                 ws.code_layer._recheck_err()
-        ws._start()
+        ws.start()
 
     # -- the idle-typing autosave (Stage 7 soft trigger) ---------------------
 

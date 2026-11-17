@@ -65,7 +65,7 @@ def _ws(tmp_path, config, theme, inputs):
 def _frames(ws, drv, n=4):
     for _ in range(n):
         g._quiesce(ws)
-        ws._dirty = True
+        ws.mark_dirty()
         drv.frame(g._DT)
 
 
@@ -73,7 +73,7 @@ def _bar_origin(ws):
     """The glass origin of the Editor's bar: its window's content origin plus
     the bar's place in it on the desk, the bar's place on the glass
     elsewhere."""
-    win = getattr(ws.wm, "_wins", {}).get("menu")
+    win = getattr(ws.wm, "windows", {}).get("menu")
     if win is not None and getattr(ws.wm, "mode", None) == "desktop":
         cx, cy = win.content_rect()[:2]
         bar = win.ctx.layout.bars[0][1]
@@ -93,7 +93,7 @@ def _drawn_in(ws, drv, monkeypatch):
     """(`_drawn`'s list, the rect the draw was lent)."""
     app = ws.editor_app
     got = []
-    inside = []          # a draw helper that paints through ws._icon is running
+    inside = []          # a draw helper that paints through ws.icon is running
     band = []            # the rect the draw was lent
 
     def zone(cv, rect):
@@ -142,7 +142,7 @@ def _drawn_in(ws, drv, monkeypatch):
     real_zone = app.draw_zone
     real_tab, real_button = editor_app._ui_draw.tab, editor_app._ui_draw.button
     real_history, real_play, real_bare = app._draw_history_icon, app._draw_play, app._bare_play
-    real_icon = ws._icon
+    real_icon = ws.icon
     with monkeypatch.context() as m:
         m.setattr(app, "draw_zone", zone)
         m.setattr(editor_app._ui_draw, "tab", tab)
@@ -150,7 +150,7 @@ def _drawn_in(ws, drv, monkeypatch):
         m.setattr(app, "_draw_history_icon", history)
         m.setattr(app, "_draw_play", play)
         m.setattr(app, "_bare_play", bare)
-        m.setattr(ws, "_icon", icon)
+        m.setattr(ws, "icon", icon)
         ws.bar_layer.invalidate()
         _frames(ws, drv, 2)
     return list(got), band[0]
@@ -215,19 +215,19 @@ def _editor(ws, drv, desk, size=None):
     full = size == "full"
     if desk:
         ws.system.set("win_full", {"menu": full})
-        ws.open_desk()
+        ws.home.open_desk()
         _frames(ws, drv)
     ws.open_in_editor(g._cart_by_title(ws, "Star Catcher"))
     _frames(ws, drv)
     if desk:
-        win = ws.wm._wins["menu"]
+        win = ws.wm.windows["menu"]
         assert getattr(ws.wm, "mode", None) == "desktop" and ws.wm.input_holder() == "menu"
         assert win.full() == full
         if full:
             return
         if size is not None:
             win.x, win.y = 160, 60
-            ws.wm._resize_window(win, *size)
+            ws.wm.resize_window(win, *size)
             _frames(ws, drv)
         assert win.content_rect()[:2] != (0, 0)
 
@@ -250,9 +250,9 @@ def test_a_tap_on_a_drawn_editor_bar_item_fires_that_item(tmp_path, monkeypatch,
     actions = [a for a, _r in drawn]
     if isinstance(size, tuple):
         # the window stops at the workspace's least size (`EditorDesk.min_window`)
-        win = ws.wm._wins["menu"]
+        win = ws.wm.windows["menu"]
         mw, mh = ws.editor_desk.min_window()
-        assert win.w >= min(mw, ws.wm._desk_rect()[2]), (win.w, mw)
+        assert win.w >= min(mw, ws.wm.desk_rect()[2]), (win.w, mw)
     assert sorted(set(actions), key=_all(ws).index) == _all(ws), drawn
     taps = _taps(ws, drv, monkeypatch, drawn)
     wrong = [t for t in taps if t[2] != [t[0]]]
@@ -306,7 +306,7 @@ def test_the_status_widgets_give_way_only_where_the_ladder_needs_their_room(
 
 @pytest.mark.parametrize("where,opener", [
     ("menu", lambda ws: ws.open_in_editor(g._cart_by_title(ws, "Star Catcher"))),
-    ("projects", lambda ws: ws.open_projects()),
+    ("projects", lambda ws: ws.home.open_projects()),
     ("settings", lambda ws: ws.open_settings()),
 ])
 def test_a_desk_window_zone_is_tapped_on_the_rect_it_is_drawn_on(tmp_path, monkeypatch,
@@ -314,7 +314,7 @@ def test_a_desk_window_zone_is_tapped_on_the_rect_it_is_drawn_on(tmp_path, monke
     """Every zone owner a desk window holds is handed one rect for its draw
     and its tap, at the zone's far end as at its head."""
     ws, drv = _ws(tmp_path, DESK, "moy", "touch")
-    ws.open_desk()
+    ws.home.open_desk()
     _frames(ws, drv)
     opener(ws)
     _frames(ws, drv)
@@ -329,7 +329,7 @@ def test_a_desk_window_zone_is_tapped_on_the_rect_it_is_drawn_on(tmp_path, monke
     ws.bar_layer.invalidate()
     _frames(ws, drv, 2)
     assert drew, "the window's bar drew no zone"
-    win = ws.wm._wins[ws.wm.input_holder()]
+    win = ws.wm.windows[ws.wm.input_holder()]
     cx, cy = win.content_rect()[:2]
     bar = win.ctx.layout.bars[0][1]
     x, y, w, h = drew[-1]

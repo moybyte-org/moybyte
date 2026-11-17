@@ -13,7 +13,6 @@
     "app": {
       "id": "myart",
       "entry": "myart_app:MyArtAppLayer",
-      "text_mode": false,
       "order": 15
     },
     "permissions": [

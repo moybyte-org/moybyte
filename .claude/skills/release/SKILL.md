@@ -18,6 +18,21 @@ offers). Host CI runs on both. The project site is two pages in one deploy
 builds are path-filtered, and the workflow's per-ref `cancel-in-progress`
 collapses a burst of dev pushes into one build of the last commit.
 
+**Each rolling release carries, per board, the flashable image, the OTA
+payload and `latest-<board>.json`, and the browser console add-on its image
+names**: the cart `moybyte_web-<digest>.moy.zip`, its licence and the index
+`carts-<board>.json`, which lists every add-on published for the board, one
+entry per digest (`tools/web_pack.py`). The publisher replaces only what a run
+built, never deletes an add-on, and writes each index over the one already
+published, so every add-on an image ever named stays on its channel's release
+and in its index. The one asset it deletes is an official cart's zip or cover
+that no index on the release references now or referenced before the publish
+(`prune_carts`). A board whose
+artifacts carry no page its image names is refused (its published manifest
+stays) and the publish job fails. `make ota-publish-unstable` and
+`tools/gen_ota_manifest.py` write the same add-on beside a LAN mirror's
+payload.
+
 **The merge into master IS the release**:
 
 ```bash

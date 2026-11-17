@@ -5,7 +5,7 @@ the system canvas was a `web_view.CommandCanvas` that recorded draw commands for
 a JS replayer in the page, so the console never touched a pixel ("the browser is
 the GPU"). That thesis is retired: the same `moy_gfx` + libmoy kernel the boards
 run is compiled into this build, the canvas is literally `device_canvas.
-DeviceCanvas` over `web_canvas.WebCompositor`, and the page's only job is to
+DeviceCanvas` over the one-buffer compositor (`web_canvas.compositor`), and the page's only job is to
 blit the finished RGB565 framebuffer. See web_canvas.py for why the boards'
 class runs unmodified in a browser.
 
@@ -309,7 +309,7 @@ def boot(carts_root=web_vfs.CARTS, cart=None, width=320, height=240,
         # placement bracket (#175) for the page to honour, and a genuine
         # rasterizer here was unaffordable at ~85ms/frame interpreted.
         sysc = web_canvas.make_canvas(width, height, font_scale=font_scale)
-        game = web_canvas.WebSystemCanvas(web_canvas.WebCompositor(320, 240))
+        game = web_canvas.WebSystemCanvas(web_canvas.compositor(320, 240))
         ws = console.Workstation(host_api._NullComp(), game, inp, carts,
                                  sys_canvas=sysc, font_scale=font_scale,
                                  panel_diagonal_in=DESK_DIAGONAL_IN)
@@ -320,7 +320,7 @@ def boot(carts_root=web_vfs.CARTS, cart=None, width=320, height=240,
     # raster (celeste's view(128, 120)) plays on its own off-screen canvas and
     # blit_game upscales it, same as both boards.
     ws.make_game_canvas = lambda w, h, owner=None: web_canvas.WebSystemCanvas(
-        web_canvas.WebCompositor(int(w), int(h)))
+        web_canvas.compositor(int(w), int(h)))
     # Cart runtimes: moycore, the SAME native module and glue the boards run --
     # third architecture, one engine. A build without the usermod still boots
     # (a lua cart opens the Player's runtime-missing panel). A compiled cart
@@ -363,13 +363,14 @@ def boot(carts_root=web_vfs.CARTS, cart=None, width=320, height=240,
     # or all of them and the badges where the board serves no /console.json.
     # can_manage is wired AFTER the launcher was built, so rebuild the shelf for it
     # to appear.
-    ws.launcher.items = ws._launcher_items(ws.carts.all)
+    ws.launcher.items = ws.home.launcher_items(ws.carts.all)
     # Get Carts (#124), by where this page's carts live (`_cart_seams`).
-    seams = _cart_seams(ws, _S.get("store_mode"))
+    seams = _cart_seams(ws, _S.get("store_mode"), carts_root)
     ws.cart_net = seams[0]
     ws.cart_keep = seams[1]
     ws.cart_pick = seams[2]
     ws.cart_home = seams[3]
+    ws.cart_board = seams[4]
     ws.media_net = _media_net(ws, _S.get("store_mode"), carts_root)
     # The Moybyte shell's achievements are gamification for the kid console,
     # which the console page is, as on a board; they are no part of the
@@ -380,14 +381,14 @@ def boot(carts_root=web_vfs.CARTS, cart=None, width=320, height=240,
     if cart:
         ws.ach.mute = True
         ws.ach.toast = None
-        ws._achievement_unlocked = lambda *a, **k: None
+        ws.notices.achievement_unlocked = lambda *a, **k: None
     # The Pointer boots visible (a device shows the trackball cursor until its
     # idle timeout) -- in the browser that composited an arrow over the first
     # game frames (owner report: "a cursor flashes at open"). Start hidden; a
     # real trackball-style pan on a system surface re-shows it, a mouse/touch
     # place() keeps it hidden as always.
     ws.pointer.visible = False
-    if windowed and ws._sys_canvas is not None:
+    if windowed and ws.bound_sys_canvas is not None:
         # A windowed composite must NOT letterbox. `blit_game` means two things
         # -- fill everything outside the game rect black (this canvas IS the
         # glass, the handheld tier below) versus put a cart inside a WINDOW --
@@ -398,13 +399,13 @@ def boot(carts_root=web_vfs.CARTS, cart=None, width=320, height=240,
         # is chosen HERE, so this is where the canvas is told which meaning it
         # serves -- the same line, in the same place, as
         # host_app.build_workstation.
-        ws._sys_canvas.letterbox_composite = False
+        ws.bound_sys_canvas.letterbox_composite = False
         # Installed LAST so it anchors its root context -- and its per-window
         # content buffers, via root.new_layer -- to the system canvas. Two
         # worlds (#105): boot onto the desk.
         from wm_windowed import WindowedWM
         ws.wm = WindowedWM(ws)
-        ws.open_desk()
+        ws.home.open_desk()
     # HUD (perf_hud.PerfHud): the bottom-right FPS chip draws onto the GAME
     # canvas, so on the handheld tier -- where the system canvas IS the game
     # canvas -- it lands inside the cart's own 320x240 raster and ships in the
@@ -458,7 +459,7 @@ def boot(carts_root=web_vfs.CARTS, cart=None, width=320, height=240,
     _S["driver"] = driver
     _S["sink"] = _PointerSink(driver)
     _S["root"] = carts_root
-    _S["exit"] = ws._exit_to_caller     # the real exit (reload_cart uses it)
+    _S["exit"] = ws.spine.exit_to_caller     # the real exit (reload_cart uses it)
     _site_carts_made(ws)
     if cart:
         open_cart(cart)
@@ -484,27 +485,34 @@ def _site_carts_made(ws):
                       or (c.get("path") or "").rsplit("/", 1)[-1] in served])
 
 
-def _cart_seams(ws, mode):
-    """(cart_net, cart_keep, cart_pick, cart_home) for Get Carts (#124), by
-    the page's mode, which is where its carts live.
+def _cart_seams(ws, mode, root):
+    """(cart_net, cart_keep, cart_pick, cart_home, cart_board) for Get Carts
+    (#124), by the page's mode, which is where its carts live.
 
     BOARD: the carts this page shows are the serving console's, and that
     console gets its own -- with its own module for its own chip, and while
     this page is connected its glass is parked, so the two never install side
     by side. The page fetches nothing and the app says where carts come from
-    ("board"; `update_enable` learns whether that console has a screen).
+    ("board"; `update_enable` learns whether that console has a screen); one
+    with no screen that answered the /official probe (`official_enable`)
+    installs its official carts when this page asks (`carts_link.BoardCarts`).
     SITE: the page's own store, so the page's fetch is the network and OPFS
     keeps what lands (`carts_link`). NONE (no OPFS): the same network, and an
     install lives in this tab like every other edit here, which the page
     already says out loud."""
     if mode == "board":
-        return None, None, None, "board"
+        board = None
+        link = _worker_link(ws, mode) if _S.get("official") else None
+        if link is not None:
+            import carts_link
+            board = carts_link.BoardCarts(link, root)
+        return None, None, None, "board", board
     link = _worker_link(ws, mode)
     if link is None:
-        return None, None, None, None
+        return None, None, None, None, None
     import carts_link
     keep = carts_link.WebCartKeep(link) if mode == "site" else None
-    return carts_link.WebCartNet(link), keep, link.pick, None
+    return carts_link.WebCartNet(link), keep, link.pick, None, None
 
 
 def _worker_link(ws, mode):
@@ -522,7 +530,7 @@ def _worker_link(ws, mode):
         return None
 
     def _wake():
-        ws._dirty = True
+        ws.mark_dirty()
     link = carts_link.CartsLink(wake=_wake, landed=_cart_landed)
     _S["carts"] = link
     return link
@@ -702,7 +710,7 @@ def kiosk(name):
     def _restart():
         real_exit()
         open_cart(name)
-    ws._exit_to_caller = _restart
+    ws.spine.exit_to_caller = _restart
 
 
 def _rescan():
@@ -729,7 +737,7 @@ def _rescan():
     blanking it, which is its deliberate failure direction and now this one's."""
     ws = _S["ws"]
     ws.carts.apply(moy_catalogue.catalogue(_S["root"]))
-    ws._dirty = True
+    ws.mark_dirty()
 
 
 def rescan_store():
@@ -753,7 +761,7 @@ def reload_cart(name=None):
     if name is None and cart is not None:
         name = (cart.get("path") or "").rsplit("/", 1)[-1]
     if cart is not None:
-        _S["exit"]()          # the REAL exit (kiosk wraps ws._exit_to_caller)
+        _S["exit"]()          # the REAL exit (kiosk wraps ws.spine.exit_to_caller)
     _rescan()
     for w in _watchers():
         # The reload just re-pulled the served store over the VFS -- adopt it as
@@ -771,12 +779,12 @@ def _select_cart(name):
     want = str(name).lower()
     if want.endswith(".moy"):
         want = want[:-4]
-    for c in ws._runnable_items():
+    for c in ws.home.runnable_items():
         folder = c.get("path", "").rsplit("/", 1)[-1].lower()
         if folder.endswith(".moy"):
             folder = folder[:-4]
         if want in (folder, c.get("title", "").lower()):
-            return ws.select_cart(c)
+            return ws.home.select_cart(c)
     return False
 
 
@@ -815,7 +823,7 @@ def edit_cart(name, tab=None):
     # meant to show -- and the run's world would outlive the workspace the
     # Editor rebuilds. PLAY in the Editor is how it starts again.
     if getattr(ws, "cart", None) is not None:
-        _S["exit"]()              # the REAL exit (kiosk wraps ws._exit_to_caller)
+        _S["exit"]()              # the REAL exit (kiosk wraps ws.spine.exit_to_caller)
     ok = _select_cart(name)
     if ok:
         ws.open_in_editor()
@@ -823,7 +831,7 @@ def edit_cart(name, tab=None):
         if opener is not None:
             getattr(ws.editor_app, opener)()
         elif tab:
-            ws.set_menu_view(tab)         # a tab with no opener of its own (code)
+            ws.text.set_menu_view(tab)         # a tab with no opener of its own (code)
     return json.dumps({
         "ok": ok,
         "screen": getattr(ws, "screen", None),
@@ -933,7 +941,7 @@ def assets_json():
     show, and how this build orders the bytes of a 565 pixel (below).
     """
     ws = _S["ws"]
-    ws._dirty = True                 # the reloaded page wants a full frame
+    ws.mark_dirty()                 # the reloaded page wants a full frame
     cv = _S["canvas"]
     return json.dumps({
         "v": 3,
@@ -1050,11 +1058,11 @@ def _edit_state(ws):
             # row. On the desk the Code tab lays out in its pane's body
             # (EditorDesk.laid_out), the pane in the Editor window's content.
             ox = oy = 0
-            desk = getattr(ws, "_editor_desk", None)
+            desk = getattr(ws, "built_editor_desk", None)
             got = desk.laid_out("code") if desk is not None else None
             if got is not None:
                 (ox, oy, _w, _h), lay = got
-                win = getattr(getattr(ws, "wm", None), "_wins", {}).get("menu")
+                win = getattr(getattr(ws, "wm", None), "windows", {}).get("menu")
                 if win is not None:
                     cx, cy = win.content_rect()[:2]
                     ox, oy = ox + cx, oy + cy
@@ -1086,7 +1094,7 @@ def state_json():
     st["sync"] = {"acked": _S.get("sync_acked", 0),
                   "busy": any(w.busy() for w in _watchers())}
     st["edit"] = _edit_state(_S["ws"])
-    term = getattr(getattr(_S["ws"], "terminal_app", None), "face", None)
+    term = getattr(_S["ws"].app("terminal"), "face", None)
     st["term"] = term.lines() if term is not None else None
     try:
         import moy_audio
@@ -1106,7 +1114,7 @@ def state_json():
     # The running cart's first pmem slots, where a fixture reports its checks:
     # the run's flush, which hands a moved image to the console's pmem to be
     # kept at the next boundary as the periodic flush does, then its image.
-    run = getattr(_S["ws"].run.player, "_lua", None)
+    run = getattr(_S["ws"].run.player, "lua", None)
     flush = getattr(run, "flush_pmem", None)
     if flush is not None:
         flush()
@@ -1284,6 +1292,7 @@ def services_json():
         "cart_net": getattr(ws, "cart_net", None) is not None,
         "cart_keep": getattr(ws, "cart_keep", None) is not None,
         "cart_home": getattr(ws, "cart_home", None),
+        "cart_board": getattr(ws, "cart_board", None) is not None,
     })
 
 
@@ -1317,6 +1326,15 @@ def update_enable(status_json):
         print("update unavailable:", exc)
     if _S["ws"].cart_home is not None and not doc.get("screen"):
         _S["ws"].cart_home = "headless"
+    return ""
+
+
+def official_enable():
+    """The serving console answered the /official probe: it has no screen
+    and installs its official carts when this page asks. Called before
+    `boot`, which hands Get Carts the asking (`_cart_seams`), so the app
+    never opens on a page that says the console gets its own."""
+    _S["official"] = True
     return ""
 
 

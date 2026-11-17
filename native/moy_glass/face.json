@@ -1,0 +1,11 @@
+{
+  "moy_glass": {
+    "about": "the glass: canvases, buffers and their presenters",
+    "host": "glass_binding",
+    "lazy": true,
+    "structs": [
+      "moy_glass_stats_t", "moy_dsi_ops_t", "moy_dsi_t", "moy_rect_t", "moy_rot_ops_t",
+      "moy_rot_game_t", "moy_rot_stamp_t", "moy_rot_t"
+    ]
+  }
+}

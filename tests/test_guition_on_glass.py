@@ -146,7 +146,7 @@ BATCH6_SRAM = 46 + 68
 # Plus MOVED_SRAM, internal statics moved to PSRAM against them, each made at
 # its first use: the per-verb profiler's counters (native/moycore/
 # moycore_prof.c, 2304 bytes, made when LUAPROF installs), the compiled face's
-# shape scratch (native/moy_ui/moy_ui_wasm.c, 1236, made while a compiled
+# shape scratch (native/moy_ui/moy_ui_run.c, 1236, made while a compiled
 # app's theme names another shape) and the dev channel's `state` line while a
 # run is in front (native/moy_kernel/moy_devch.c, 1024): 4560 bytes by the
 # heap's start against 65e7e49ae, link maps, 2026-11-09. With them the
@@ -405,6 +405,10 @@ def test_a_lua_service_runs_on_a_task_of_its_own(board):
     on_glass.a_lua_service_runs_on_a_task_of_its_own(board)
 
 
+def test_a_lua_service_s_timers_run_through_a_vm_stop(board):
+    on_glass.a_lua_service_s_timers_run_through_a_vm_stop(board)
+
+
 def test_an_asyncio_service_runs_beside_the_desk(board):
     on_glass.an_asyncio_service_runs_beside_the_desk(board)
 
@@ -553,6 +557,10 @@ def test_a_quiet_console_collects_its_garbage(board):
     on_glass.a_quiet_console_collects_its_garbage(board)
 
 
+def test_a_quiet_console_leaves_a_live_heap_alone(board):
+    on_glass.a_quiet_console_leaves_a_live_heap_alone(board)
+
+
 def test_the_saver_comes_and_its_wake_repaints(board):
     on_glass.idle_saver_and_wake(board)
 
@@ -594,8 +602,8 @@ def test_the_cart_store_is_the_card_when_one_mounted(board):
     on_glass.cart_store_follows_the_card(board)
 
 
-def test_the_web_console_is_baked_into_this_image(board):
-    on_glass.web_console_is_baked_into_the_image(board)
+def test_the_web_console_add_on_fits_this_image(board):
+    on_glass.web_console_add_on_fits_the_image(board)
 
 
 def _skip_unparked(board, why):
@@ -608,7 +616,7 @@ def _skip_unparked(board, why):
     test read an idle board, and `test_perf_line_is_the_one_format` failed with
     "no PERF lines in 5s" -- a real failure, of the previous test's tidying.
     The finally at the bottom does this for the paths that reach it."""
-    board.cmd("py ws.stop_web_console(); print('WEBOFF')",
+    board.cmd("py ws.web.stop(); print('WEBOFF')",
               wait_for="WEBOFF", timeout=8.0)
     # A push that reached the board leaves its handler rescanning the store,
     # and on this board's TF card that is a minute during which nothing
@@ -688,7 +696,7 @@ def test_sync_push_writes_the_store_and_the_shelf_follows(board):
         board.drain(0.5)
         line = board.cmd(
             "py print('SYNCED=' + repr(any((c.get('path') or '')"
-            ".endswith('pytest_sync.moy') for c in ws._runnable_items())))",
+            ".endswith('pytest_sync.moy') for c in ws.home.runnable_items())))",
             wait_for="SYNCED=", timeout=8.0)
         assert line is not None and "SYNCED=True" in line, line
         # ...and the dc op takes it back off the card AND the shelf.
@@ -703,7 +711,7 @@ def test_sync_push_writes_the_store_and_the_shelf_follows(board):
         line = board.cmd(
             "py import os; print('GONE=' + repr("
             "any((c.get('path') or '').endswith('pytest_sync.moy') "
-            "for c in ws._runnable_items()) is False "
+            "for c in ws.home.runnable_items()) is False "
             "and 'pytest_sync.moy' not in os.listdir(ws.carts_root)))",
             wait_for="GONE=", timeout=8.0)
         assert line is not None and "GONE=True" in line, line
@@ -711,7 +719,7 @@ def test_sync_push_writes_the_store_and_the_shelf_follows(board):
         # Leave the board as found: unpark the glass and stop the host.
         # stop_web_console, not toggle -- a toggle would START a host that
         # died under the parked screen (the reason the verb exists).
-        board.cmd("py ws.stop_web_console(); print('WEBOFF')",
+        board.cmd("py ws.web.stop(); print('WEBOFF')",
                   wait_for="WEBOFF", timeout=8.0)
 
 

@@ -11,8 +11,15 @@
 # the board's own sdkconfig.board.
 #
 # Callers set (before sourcing or before the call that needs them):
-#   REPO_ROOT SCRIPT_DIR BUILD_DIR MPY_DIR MPY_TAG DIST_DIR MODULES_DIR
+#   REPO_ROOT SCRIPT_DIR BUILD_DIR MPY_DIR DIST_DIR MODULES_DIR
 # Every function says what else it reads.
+
+# The pinned upstream releases, MOYBYTE_MPY_TAG and MOYBYTE_IDF_VER, from the
+# one file that names them. MPY_TAG in the environment overrides the tag for
+# one build; nothing overrides the ESP-IDF release.
+# shellcheck source=upstream_pins.env
+source "$(dirname "${BASH_SOURCE[0]}")/upstream_pins.env"
+MPY_TAG="${MPY_TAG:-${MOYBYTE_MPY_TAG}}"
 
 # Parallelism for every make below (MOYBYTE_BUILD_JOBS overrides -- CI runners
 # report more CPUs than they schedule).
@@ -180,19 +187,91 @@ moybyte_clone_micropython() {
   bash "${REPO_ROOT}/tools/mpy_tree.sh" "${MPY_DIR}" "${MPY_TAG}"
 }
 
-# Resolve + activate ESP-IDF v5.5.1 for $1 (the idf.py target, e.g. esp32s3).
-# Reuse an existing checkout when one is passed as $2..$n (they are ~500MB and
-# the same version): an explicit IDF_DIR wins, then the candidates in order,
-# then a clone into ${BUILD_DIR}/esp-idf.
-#
-# The toolchains + IDF python env live in ~/.espressif, OUTSIDE the esp-idf
-# tree: a runner can have the tree (restored .build cache) but not the tools
-# (evicted ~/.espressif cache). export.sh can NOT be trusted to report that --
-# v5.5.1 ends in an unconditional `return 0` (only its inner activate.py
-# fails) -- so probe the real outcome (idf.py on PATH) and self-heal with the
-# official installer.
-moybyte_setup_idf() {
-  local chip="$1"; shift
+# The release an ESP-IDF checkout at $1 is, as `vX.Y.Z`, read from its
+# tools/cmake/version.cmake (a `--depth 1` clone holds no tag to describe).
+# Prints nothing when $1 is not a checkout.
+moybyte_idf_version() {
+  local f="$1/tools/cmake/version.cmake"
+  [ -f "${f}" ] || return 0
+  awk -F'[( )]' '/^set\(IDF_VERSION_(MAJOR|MINOR|PATCH) /{v[$2]=$3}
+    END{print "v" v["IDF_VERSION_MAJOR"] "." v["IDF_VERSION_MINOR"] "." v["IDF_VERSION_PATCH"]}' "${f}"
+}
+
+# MicroPython v1.28's ports/esp32/network_wlan.c pins the size of ESP-IDF's
+# wifi_auth_mode_t with a static assertion that predates ESP-IDF v5.5.6, which
+# appended WIFI_AUTH_UNKNOWN (WIFI_AUTH_MAX 17 -> 18). The constants table the
+# assertion guards ends before it, so on v5.5.6 the assertion takes 18, and 17
+# too: a P4 compiles the enum from esp_wifi_remote's own v5.5 copy. Run by
+# moybyte_setup_idf for every board. A no-op on a tree already edited, and a
+# FAILURE when the line changed shape. Reads MPY_DIR.
+moybyte_mpy_wlan_auth_max() {
+  local f="${MPY_DIR}/ports/esp32/network_wlan.c"
+  [ -f "${f}" ] || return 0
+  grep -q "Moybyte: ESP-IDF v5.5.6 appends WIFI_AUTH_UNKNOWN" "${f}" && return 0
+  local old='#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)'
+  if [ "$(grep -cF -- "${old}" "${f}")" != "2" ] \
+     || ! grep -q '^_Static_assert(WIFI_AUTH_MAX == 17, ' "${f}"; then
+    echo "!! network_wlan.c's WIFI_AUTH_MAX assertion changed shape" >&2
+    exit 1
+  fi
+  awk -v old="${old}" '
+    !done && $0 == old { getline nxt
+      if (nxt ~ /^_Static_assert\(WIFI_AUTH_MAX == 17, /) {
+        print "// Moybyte: ESP-IDF v5.5.6 appends WIFI_AUTH_UNKNOWN (tools/esp32_build_lib.sh)."
+        print "#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 6)"
+        print "_Static_assert(WIFI_AUTH_MAX == 17 || WIFI_AUTH_MAX == 18, \"Synchronize WIFI_AUTH_XXX constants with the ESP-IDF. Look at esp-idf/components/esp_wifi/include/esp_wifi_types_generic.h\");"
+        print "#elif ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)"
+        print nxt; done = 1; next }
+      print; print nxt; next }
+    { print }' "${f}" > "${f}.moy" && mv "${f}.moy" "${f}"
+  grep -q "Moybyte: ESP-IDF v5.5.6 appends WIFI_AUTH_UNKNOWN" "${f}" || {
+    echo "!! network_wlan.c's WIFI_AUTH_MAX assertion did not take the edit" >&2
+    exit 1
+  }
+  echo "== patched ports/esp32/network_wlan.c: WIFI_AUTH_MAX of ESP-IDF v5.5.6"
+}
+
+# MicroPython v1.28's USB-Serial/JTAG console (ports/esp32/usb_serial_jtag.c)
+# enables the start-of-frame interrupt and clears it in an ISR that does
+# nothing else with it, once a millisecond. ESP-IDF v5.5.6's console VFS
+# writes and reads only while its connection monitor saw that raw bit in the
+# last tick, so with the ISR clearing it first every C printf on the console
+# was dropped (the kernel's "interrupted -> REPL", a stop's error line, every
+# ESP_LOG). The edit leaves the SOF interrupt off; nothing in the port reads
+# it. Run by moybyte_setup_idf for every board. A no-op on a tree already
+# edited, and a FAILURE when the line changed shape. Reads MPY_DIR.
+moybyte_mpy_usj_sof() {
+  local f="${MPY_DIR}/ports/esp32/usb_serial_jtag.c"
+  [ -f "${f}" ] || return 0
+  grep -q "Moybyte: no SOF interrupt" "${f}" && return 0
+  local old='        USB_SERIAL_JTAG_INTR_SOF | USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);'
+  if [ "$(grep -cxF -- "${old}" "${f}")" != "1" ]; then
+    echo "!! usb_serial_jtag.c's interrupt enable changed shape" >&2
+    exit 1
+  fi
+  awk -v old="${old}" '
+    $0 == old {
+      print "        USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);"
+      print "    // Moybyte: no SOF interrupt: ESP-IDF v5.5.6'"'"'s console VFS reads its raw bit"
+      print "    // (tools/esp32_build_lib.sh, moybyte_mpy_usj_sof)."
+      next }
+    { print }' "${f}" > "${f}.moy" && mv "${f}.moy" "${f}"
+  grep -q "Moybyte: no SOF interrupt" "${f}" || {
+    echo "!! usb_serial_jtag.c's interrupt enable did not take the edit" >&2
+    exit 1
+  }
+  echo "== patched ports/esp32/usb_serial_jtag.c: the SOF interrupt stays off"
+}
+
+# Pick the ESP-IDF checkout for this build into IDF_DIR: an explicit IDF_DIR
+# wins, then the first of the candidates $1..$n that exists (they are ~600MB
+# and one release, so a board reuses its sibling's), then a clone of
+# MOYBYTE_IDF_VER into ${BUILD_DIR}/esp-idf. Whichever it picks must BE
+# MOYBYTE_IDF_VER, or the build stops and names it: a warm checkout at another
+# release would otherwise compile, with the patches below cut against the
+# wrong sources, and nothing would say so. The fix is to move that checkout
+# aside; the owning board's next build clones the pinned release.
+moybyte_resolve_idf() {
   if [ -z "${IDF_DIR:-}" ]; then
     local cand
     for cand in "$@"; do
@@ -202,21 +281,57 @@ moybyte_setup_idf() {
   if [ -z "${IDF_DIR:-}" ]; then
     IDF_DIR="${BUILD_DIR}/esp-idf"
     if [ ! -f "${IDF_DIR}/export.sh" ]; then
-      echo "== cloning esp-idf v5.5.1"
-      git clone --depth 1 -b v5.5.1 --recursive --shallow-submodules \
-        https://github.com/espressif/esp-idf "${IDF_DIR}"
+      echo "== cloning esp-idf ${MOYBYTE_IDF_VER}"
+      git clone --depth 1 -b "${MOYBYTE_IDF_VER}" --recursive --shallow-submodules \
+        https://github.com/espressif/esp-idf "${IDF_DIR}" || return 1
     fi
   fi
-  echo "== using ESP-IDF at ${IDF_DIR}"
+  local have
+  have="$(moybyte_idf_version "${IDF_DIR}")"
+  if [ "${have}" != "${MOYBYTE_IDF_VER}" ]; then
+    echo "!! ${IDF_DIR} is ESP-IDF ${have:-of no known release}; this build needs ${MOYBYTE_IDF_VER}." >&2
+    echo "!! Move it aside: the board that owns it clones ${MOYBYTE_IDF_VER} on its next build." >&2
+    return 1
+  fi
+}
+
+# Resolve (moybyte_resolve_idf, over the candidates $2..$n) and activate
+# ESP-IDF for $1 (the idf.py target, e.g. esp32s3).
+#
+# The toolchains + IDF python env live in ~/.espressif, OUTSIDE the esp-idf
+# tree: a runner can have the tree (restored .build cache) but not the tools
+# (evicted ~/.espressif cache), and a machine can hold another release's
+# compiler for this chip, or this release's for another chip only (the P4's
+# build installs the RISC-V one; an S3 build after it needs Xtensa). export.sh
+# can NOT be trusted to report either -- it ends in an unconditional
+# `return 0` (only its inner activate.py fails) and puts idf.py on PATH while
+# the chip's compiler is missing -- so probe the real outcome (idf.py AND the
+# chip's compiler on PATH) and self-heal with the official installer.
+moybyte_idf_compiler() {
+  case "$1" in
+    esp32|esp32s2|esp32s3) echo "xtensa-$1-elf-gcc" ;;
+    *) echo "riscv32-esp-elf-gcc" ;;
+  esac
+}
+
+moybyte_setup_idf() {
+  local chip="$1"; shift
+  moybyte_resolve_idf "$@" || exit 1
+  echo "== using ESP-IDF ${MOYBYTE_IDF_VER} at ${IDF_DIR}"
+  moybyte_mpy_wlan_auth_max
+  moybyte_mpy_usj_sof
+  local cc
+  cc="$(moybyte_idf_compiler "${chip}")"
   set +u
   # shellcheck disable=SC1091
   source "${IDF_DIR}/export.sh" >/dev/null 2>&1 || true
-  if ! command -v idf.py >/dev/null 2>&1; then
-    echo "== ESP-IDF tools missing (fresh runner / evicted cache): running install.sh ${chip}"
+  if ! command -v idf.py >/dev/null 2>&1 || ! command -v "${cc}" >/dev/null 2>&1; then
+    echo "== ESP-IDF tools for ${chip} missing (fresh runner / evicted cache / new release): running install.sh ${chip}"
     "${IDF_DIR}/install.sh" "${chip}"
     # shellcheck disable=SC1091
     source "${IDF_DIR}/export.sh" >/dev/null
     command -v idf.py >/dev/null 2>&1 || { echo "!! idf.py still missing after install.sh" >&2; exit 1; }
+    command -v "${cc}" >/dev/null 2>&1 || { echo "!! ${cc} still missing after install.sh" >&2; exit 1; }
   fi
   set -u
   moybyte_ccache
@@ -486,19 +601,22 @@ moybyte_patch_gc_grow_step() {
 # S3 board one fragmented Python allocation took every remaining byte of
 # PSRAM and every big cart then failed at load with Lua's "not enough
 # memory" until a hard reset (2026-09-02, #66). The patch caps what a growth
-# may take so MOYBYTE_GC_SPLIT_RESERVE bytes of PSRAM always stay outside
-# the Python heap; a board that defines nothing reserves nothing. A GUARDED
-# SED on the one-line port hook, like repr_c. Reads MPY_DIR.
+# may take so MOYBYTE_GC_SPLIT_RESERVE bytes of the C side's heap always stay
+# outside the Python heap: PSRAM on a board that has it, and on a build without
+# PSRAM (the C3 Zero) the one internal heap, which WiFi, lwIP and the native
+# tier allocate from and which stock growth takes to the last byte. A board
+# that defines nothing reserves nothing. A GUARDED SED on the one-line port
+# hook, like repr_c. Reads MPY_DIR.
 moybyte_patch_gc_split_reserve() {
   local f="${MPY_DIR}/ports/esp32/gccollect.c"
   if ! grep -q "MOYBYTE_GC_SPLIT_RESERVE" "${f}"; then
-    sed -i 's|^    return heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);|    size_t avail = heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);\n    size_t psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);   /* Moybyte: MOYBYTE_GC_SPLIT_RESERVE stays C-side */\n    if (psram <= MOYBYTE_GC_SPLIT_RESERVE) return 0;\n    return avail < psram - MOYBYTE_GC_SPLIT_RESERVE ? avail : psram - MOYBYTE_GC_SPLIT_RESERVE;|' "${f}"
-    sed -i 's|^size_t gc_get_max_new_split(void) {|#ifndef MOYBYTE_GC_SPLIT_RESERVE\n#define MOYBYTE_GC_SPLIT_RESERVE 0\n#endif\nsize_t gc_get_max_new_split(void) {|' "${f}"
-    grep -q "psram - MOYBYTE_GC_SPLIT_RESERVE" "${f}" || {
+    sed -i 's|^    return heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);|    size_t avail = heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);\n#if CONFIG_SPIRAM\n    size_t pool = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);   /* Moybyte: MOYBYTE_GC_SPLIT_RESERVE stays C-side */\n#else\n    size_t pool = heap_caps_get_free_size(MALLOC_CAP_DEFAULT);  /* no PSRAM: the internal heap is the C side'"'"'s */\n#endif\n    if (pool <= MOYBYTE_GC_SPLIT_RESERVE) return 0;\n    return avail < pool - MOYBYTE_GC_SPLIT_RESERVE ? avail : pool - MOYBYTE_GC_SPLIT_RESERVE;|' "${f}"
+    sed -i 's|^size_t gc_get_max_new_split(void) {|#include "sdkconfig.h"\n#ifndef MOYBYTE_GC_SPLIT_RESERVE\n#define MOYBYTE_GC_SPLIT_RESERVE 0\n#endif\nsize_t gc_get_max_new_split(void) {|' "${f}"
+    grep -q "pool - MOYBYTE_GC_SPLIT_RESERVE" "${f}" || {
       echo "!! gc split reserve patch did not apply -- gccollect.c's gc_get_max_new_split changed shape" >&2
       exit 1
     }
-    echo "== patched gccollect.c: split-heap growth keeps MOYBYTE_GC_SPLIT_RESERVE of PSRAM (#66)"
+    echo "== patched gccollect.c: split-heap growth keeps MOYBYTE_GC_SPLIT_RESERVE of the C side's heap (#66)"
   fi
 }
 
@@ -506,13 +624,15 @@ moybyte_patch_gc_split_reserve() {
 # by every P4 board since 2026-09-06 (it was the Waveshare's own `patches/`
 # until the Guition P4 became its second consumer):
 #
-#   dsi_underrun      #106: backport current ESP-IDF's dedicated DSI
-#                     bridge-underrun ISR and keep the frame-restart DW-GDMA
-#                     interrupt above ESP-Hosted's SDIO interrupt. IDF v5.5
-#                     checks the bridge only from the DMA callback; if SDIO
-#                     delays that callback the panel has already gone blue.
-#                     Patches the (possibly shared) ESP-IDF checkout, so the
-#                     marker is what makes two P4 builds over one IDF safe.
+#   dsi_underrun      #106: raise ESP-IDF's DSI bridge-underrun ISR to level
+#                     3, keep the frame-restart DW-GDMA interrupt at level 3,
+#                     both above ESP-Hosted's level-1 SDIO interrupt (a BLE
+#                     burst there otherwise delays the restart past the
+#                     panel's blanking window), and call the board's weak
+#                     moy_dsi_note_underrun hook from the ISR so native/p4
+#                     counts each underrun. Patches the (possibly shared)
+#                     ESP-IDF checkout, so the marker is what makes two P4
+#                     builds over one IDF safe.
 moybyte_patch_p4_dsi_underrun() {
   local f="${IDF_DIR}/components/esp_lcd/dsi/esp_lcd_panel_dpi.c"
   if [ -f "${f}" ] && \
@@ -524,8 +644,9 @@ moybyte_patch_p4_dsi_underrun() {
 
 # The ESP32-P4 SRM macro-block-order patch (both P4 boards, marker-guarded
 # like the DSI one because the IDF checkout is shared): ESP-IDF's DIG-734
-# workaround, backported from release/v5.5 (1b13ef0498) and extended to
-# 90/270 rotations. The SRM's macro-block reorder deadlocks against the 2D-DMA
+# workaround, which measures an operation's last transfer unit on the input
+# block only, extended to measure a 90/270 rotation's turned block as well.
+# The SRM's macro-block reorder deadlocks against the 2D-DMA
 # RX FIFO when an operation's last transfer unit is smaller than the FIFO:
 # the TX channel delivers the whole input, the RX FIFO fills and never drains,
 # no EOF comes, and every later PPA transaction queues behind it -- the
@@ -537,6 +658,73 @@ moybyte_patch_p4_ppa_srm_mb_order() {
   if [ -f "${f}" ] && ! grep -q "Moybyte P4: the SRM engine's macro-block reorder" "${f}"; then
     echo "== applying P4 PPA SRM macro-block-order bypass (DIG-734)"
     patch -d "${IDF_DIR}" -p1 < "${REPO_ROOT}/patches/p4_ppa_srm_mb_order_bypass.patch"
+  fi
+}
+
+# The ESP32-P4 core-dump DRAM patch (both P4 boards, marker-guarded like the
+# two above): ESP-IDF's linker template for a rev < v3 P4 maps dram0_data a
+# second time into the high SRAM's .dram1.data. That mapping places nothing
+# (the first one already took every section it names) but defines the
+# SURROUND symbols again, so _coredump_dram_start/_end end up equal and a core
+# dump carries none of the COREDUMP_DRAM_ATTR data: neither ESP-IDF's nor the
+# kernel's module table (native/moy_elf/moy_elf_maps.c), which
+# `tools/coredump.py check-elf` refuses at the end of every build. The patch
+# drops the second mapping.
+moybyte_patch_p4_coredump_dram() {
+  local f="${IDF_DIR}/components/esp_system/ld/ld.dram.sections"
+  if [ -f "${f}" ] && ! grep -q "Moybyte P4: dram0_data is mapped once" "${f}"; then
+    echo "== applying P4 core-dump DRAM linker patch (one dram0_data mapping)"
+    patch -d "${IDF_DIR}" -p1 < "${REPO_ROOT}/patches/p4_coredump_dram_mapped_once.patch"
+  fi
+}
+
+# The ESP32-P4 heap-priority patch (both P4 boards, marker-guarded like the
+# ones above). ESP-IDF registers a rev < v3 P4's low SRAM as RETENT_RAM, which
+# serves a plain internal allocation only at medium priority, after every
+# L2MEM heap: each internal allocation then fills the high SRAM first, the one
+# region with room for the crisp PPA path's two 64 KB DMA blocks, which the
+# idle desk then no longer had. The patch puts the low SRAM at the high
+# priority of the rest of L2MEM; at one priority the heaps are tried smallest
+# first. The retention cap stays the low SRAM's alone.
+moybyte_patch_p4_heap_low_sram() {
+  local f="${IDF_DIR}/components/heap/port/esp32p4/memory_layout.c"
+  if [ -f "${f}" ] && ! grep -q "Moybyte P4: on a rev < v3 P4 the low SRAM" "${f}"; then
+    echo "== applying P4 low-SRAM heap priority patch"
+    patch -d "${IDF_DIR}" -p1 < "${REPO_ROOT}/patches/p4_heap_low_sram_priority.patch"
+  fi
+}
+
+# The ESP32-P4 PPA transaction patch (both P4 boards, marker-guarded like the
+# ones above). ESP-IDF allocates each of a PPA client's transaction elements
+# whole from internal RAM because one part of it, the 2D-DMA transaction
+# context, holds an atomic; a client holds max_pending_trans_num of them for as
+# long as it is registered, and moy_ppa's SRM client queues 24. The patch
+# allocates the 16-byte context from internal RAM and the rest of the element
+# with the driver's PPA_MEM_ALLOC_CAPS, which puts it in PSRAM.
+moybyte_patch_p4_ppa_trans_context() {
+  local f="${IDF_DIR}/components/esp_driver_ppa/src/ppa_core.c"
+  if [ -f "${f}" ] && ! grep -q "Moybyte P4: only the 2D-DMA transaction context" "${f}"; then
+    echo "== applying P4 PPA transaction context patch"
+    patch -d "${IDF_DIR}" -p1 < "${REPO_ROOT}/patches/p4_ppa_trans_context_internal_only.patch"
+  fi
+}
+
+# The ESP32-P4 CPU clock switch patch (both P4 boards, marker-guarded like the
+# ones above). ESP-IDF switches the CPU clock at startup with the external
+# memory cache suspended, in an IRAM_ATTR helper, but the helper is static
+# with one caller, esp_clk_init, which is in flash, so the compiler inlines it
+# there and the code between the suspend and the resume runs from flash. An
+# instruction fetch that misses the L1 cache in that window is a cache error
+# at the first boot step: no console is up, the panic cannot finish with the
+# cache off, and the bootloader's RTC watchdog resets the board 9 s later,
+# forever. Whether a fetch misses is the image's layout: the Guition P4's
+# image without the browser console put a cache line boundary inside the
+# window (2026-11-17). The patch keeps the helper out of line, in IRAM.
+moybyte_patch_p4_clk_switch() {
+  local f="${IDF_DIR}/components/esp_system/port/soc/esp32p4/clk.c"
+  if [ -f "${f}" ] && ! grep -q "Moybyte P4: the isolated switch stays out of line" "${f}"; then
+    echo "== applying P4 CPU clock switch patch (the isolated switch out of line)"
+    patch -d "${IDF_DIR}" -p1 < "${REPO_ROOT}/patches/p4_clk_switch_out_of_line.patch"
   fi
 }
 
@@ -586,8 +774,9 @@ moybyte_stage_native() {
   moybyte_board_impls
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" stage-native "${SCRIPT_DIR}"
   # WHERE it staged them is the board's to say ([native] dest). Asked rather
-  # than restated: a board moving its dest would otherwise leave the blob
-  # ungenerated, and an image with no console is a silent pass.
+  # than restated: a board moving its dest would otherwise leave the digest
+  # ungenerated, and an image that names no console is a silent pass. The
+  # pack, the add-on cart's payload, goes beside the image (tools/web_pack.py).
   local dest
   dest="$("${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" native-dest "${SCRIPT_DIR}")"
   local staged="${SCRIPT_DIR}/${dest}"
@@ -596,6 +785,8 @@ moybyte_stage_native() {
     if [ -n "${CI:-}" ] || [ "${MOYBYTE_REQUIRE_WEB_BUNDLE:-0}" = "1" ]; then
       args+=(--require)
     fi
+    mkdir -p "${DIST_DIR}"
+    args+=(--pack "${DIST_DIR}/moybyte_web.pack")
     moybyte_phase web-blob
     "${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_web_blob.py" "${args[@]}"
   fi
@@ -794,8 +985,9 @@ moybyte_sdkconfig_report_inert() {
   fi
 }
 
-# The #168 size guard: the app image ($2) must fit the ota_0 slot read from
-# the board's OWN partition table ($1) -- read, not restated, so the check
+# The #168 size guard: the app image ($2) must fit the app slot read from
+# the board's OWN partition table ($1) -- ota_0, or the factory slot of a
+# table with no OTA slots (the C3 Zero) -- read, not restated, so the check
 # cannot drift from the layout it is checking -- and leave the board ($4) at
 # least its headroom floor ($3 bytes, `[image] headroom_floor_kib` in its
 # board.toml). Both FAIL the build. An image that does not fit cannot be
@@ -807,22 +999,25 @@ moybyte_sdkconfig_report_inert() {
 # anyway (an experiment, never a release).
 moybyte_app_size_guard() {
   local csv="$1" app_bin="$2" floor_bytes="$3" board="$4"
-  local slot_hex slot_bytes size_bytes headroom
-  slot_hex="$(awk -F',' '/^[[:space:]]*ota_0[[:space:]]*,/ { gsub(/[[:space:]]/, "", $5); print $5; exit }' "${csv}")"
+  local slot slot_hex slot_bytes size_bytes headroom
+  for slot in ota_0 factory; do
+    slot_hex="$(awk -F',' -v s="${slot}" '$1 ~ "^[[:space:]]*" s "[[:space:]]*$" { gsub(/[[:space:]]/, "", $5); print $5; exit }' "${csv}")"
+    [ -z "${slot_hex}" ] || break
+  done
   slot_bytes="${MOYBYTE_APP_SLOT_BYTES:-$(( ${slot_hex:-0x400000} ))}"
   size_bytes="$(wc -c < "${app_bin}" | tr -d '[:space:]')"
   headroom=$(( slot_bytes - size_bytes ))
-  printf 'App image: %s bytes of a %s-byte ota_0 slot -- %s bytes headroom (%s KB), floor %s KB (%s)\n' \
-    "${size_bytes}" "${slot_bytes}" "${headroom}" "$(( headroom / 1024 ))" \
+  printf 'App image: %s bytes of a %s-byte %s slot -- %s bytes headroom (%s KB), floor %s KB (%s)\n' \
+    "${size_bytes}" "${slot_bytes}" "${slot}" "${headroom}" "$(( headroom / 1024 ))" \
     "$(( floor_bytes / 1024 ))" "${board}"
   if [ "${headroom}" -lt 0 ]; then
     echo "" >&2
-    echo "!! Moybyte BUILD FAILED (#168): the app image does not fit its OTA slot" >&2
+    echo "!! Moybyte BUILD FAILED (#168): the app image does not fit its app slot" >&2
     echo "!!   board:    ${board}" >&2
-    echo "!!   slot:     ${slot_bytes} bytes (ota_0/ota_1, $(basename "${csv}"))" >&2
+    echo "!!   slot:     ${slot_bytes} bytes (${slot}, $(basename "${csv}"))" >&2
     echo "!!   image:    ${size_bytes} bytes" >&2
     echo "!!   OVERFLOW: $(( -headroom )) bytes ($(( (-headroom) / 1024 )) KB)" >&2
-    echo "!! Trim it (the baked web console -- see tools/gen_web_blob.py)" >&2
+    echo "!! Trim it (docs/perf/image.md says what it is made of)" >&2
     echo "!! or change the partition table, which costs every deployed device a" >&2
     echo "!! full-erase USB flash." >&2
     exit 1
@@ -880,12 +1075,12 @@ moybyte_kernel_entry() {
 
 # The build's native configuration, as one line: the native modules this board
 # stages (board.toml's takes and denials) and every MOY_*_IMPL hook in the
-# environment (tools/moy_index_spike.py names them, MOY_INDEX_BENCH included).
+# environment (tools/native_check.py names them).
 # Reads BUILD_PYTHON SCRIPT_DIR.
 moybyte_native_config() {
   {
     "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" list-native "${SCRIPT_DIR}"
-    env | { grep -E '^MOY_([A-Z]+_IMPL|INDEX_BENCH)=' || true; } | sort
+    env | { grep -E '^MOY_[A-Z]+_IMPL=' || true; } | sort
     # The board's own switches (MICROPY_PY_BLUETOOTH, MOY_NET_*) decide which
     # modules a source registers, as surely as a take or a deny does.
     if [ -n "${BOARD_DIR:-}" ] && [ -f "${BOARD_DIR}/mpconfigboard.h" ]; then
@@ -899,7 +1094,9 @@ moybyte_native_config() {
 # back to py, a module the board file now denies -- links a module table that
 # names code it no longer has (`undefined reference to moy_kernel_module`).
 # $1 is the build dir: when the native configuration is not the one it was last
-# built with, its genhdr starts afresh. The record is written here, before the
+# built with, its genhdr starts afresh, and so does frozen_content.c, which
+# cites the qstrs the C provided (a newly denied module's own name among them:
+# `'MP_QSTR_<module>' undeclared`). The record is written here, before the
 # build, so a build that fails half-way still leaves genhdr and the record
 # naming the same configuration. A build dir with no record has none to trust.
 # Reads BUILD_PYTHON SCRIPT_DIR.
@@ -908,7 +1105,7 @@ moybyte_native_config_guard() {
   want="$(moybyte_native_config)"
   if [ "$(cat "${bout}/moy_native_config" 2>/dev/null)" != "${want}" ]; then
     echo "== native configuration changed: starting ${bout}/genhdr afresh"
-    rm -rf "${bout}/genhdr"
+    rm -rf "${bout}/genhdr" "${bout}/frozen_content.c"
   fi
   mkdir -p "${bout}"
   printf '%s\n' "${want}" > "${bout}/moy_native_config"
@@ -948,6 +1145,23 @@ moybyte_submodules() {
   fi
 }
 
+# A P4 image's CPU clock switch, the code that runs with the external memory
+# cache suspended, must be its own function in internal RAM
+# (moybyte_patch_p4_clk_switch says why): an image where the compiler put it
+# back into flash-resident esp_clk_init is refused, since it may not boot.
+moybyte_p4_clk_switch_guard() {
+  local bout="$1"
+  grep -q '^CONFIG_IDF_TARGET_ESP32P4=y' "${bout}/sdkconfig" 2>/dev/null || return 0
+  local syms
+  syms="$(riscv32-esp-elf-nm "${bout}/micropython.elf")" || return 1
+  if ! grep -qE '^4ff[0-9a-f]{5} t esp_clk_cpu_freq_set_config_isolated$' <<< "${syms}"; then
+    echo "!! esp_clk_cpu_freq_set_config_isolated is not an IRAM function of its" >&2
+    echo "!! own in ${bout}/micropython.elf: the CPU clock switch would run from" >&2
+    echo "!! flash with the cache suspended (moybyte_patch_p4_clk_switch)" >&2
+    return 1
+  fi
+}
+
 moybyte_build_and_collect() {
   local csv="$1" stem="$2" flash_note="$3"
   moybyte_phase mpy-cross
@@ -984,12 +1198,19 @@ moybyte_build_and_collect() {
            headroom-floor "${SCRIPT_DIR}")"
   board_id="${floor#* }"
   floor="${floor%% *}"
+  # The image's bytes by part, from the link map, for docs/perf/image.md
+  # (tools/image_ledger.py); before the guard, so an image the guard refuses
+  # still says what it is made of.
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/image_ledger.py" record "${SCRIPT_DIR}" \
+    "${bout}" "${DIST_DIR}/${stem}_app.bin" \
+    || echo "!! image ledger: no record for this build" >&2
   moybyte_app_size_guard "${csv}" "${DIST_DIR}/${stem}_app.bin" \
     "${floor}" "${board_id}"
   # A core dump must carry the loaded modules' table (tools/coredump.py).
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/coredump.py" check-elf "${bout}/micropython.elf" \
     || exit 1
-  echo "OK -> ${DIST_DIR}/${stem}.bin (${flash_note})"
+  moybyte_p4_clk_switch_guard "${bout}" || exit 1
+  echo "OK ->${DIST_DIR}/${stem}.bin (${flash_note})"
   echo "OK -> ${DIST_DIR}/${stem}_app.bin (OTA payload, app partition)"
 }
 

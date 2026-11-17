@@ -14,23 +14,15 @@
 #ifndef MOY_SYNC_H
 #define MOY_SYNC_H
 
+#include "moy_platform.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdlib.h>
 
-#if defined(__has_include) && __has_include("esp_heap_caps.h")
-#define MOY_SYNC_RTOS 1
-#include "esp_heap_caps.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#elif !defined(__EMSCRIPTEN__) && defined(__has_include) && __has_include(<pthread.h>)
-#define MOY_SYNC_THREADS 1
-#include <pthread.h>
-#include <time.h>
-#endif
+#include "moy_kmem.h"
 
-#ifdef MOY_SYNC_RTOS
+#ifdef MOY_ON_BOARD
 #define MOY_SYNC_LOCK_T portMUX_TYPE
 #define MOY_SYNC_LOCK_INIT portMUX_INITIALIZER_UNLOCKED
 #define MOY_SYNC_LOCK(l) portENTER_CRITICAL(l)
@@ -50,7 +42,7 @@ static inline moy_sync_who_t moy_sync_me(void) {
 }
 #endif
 
-#ifdef MOY_SYNC_THREADS
+#ifdef MOY_THREADS
 extern pthread_mutex_t moy_sync_mu;
 extern pthread_cond_t moy_sync_cv;
 #endif
@@ -64,10 +56,10 @@ static inline bool moy_sync_wait(volatile uint32_t *word, uint32_t seen, uint32_
     if (ms == 0) {
         return false;
     }
-    #if defined(MOY_SYNC_RTOS)
+    #if defined(MOY_ON_BOARD)
     TickType_t t = pdMS_TO_TICKS(ms);
     ulTaskNotifyTake(pdTRUE, t > 0 ? t : 1);
-    #elif defined(MOY_SYNC_THREADS)
+    #elif defined(MOY_THREADS)
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     ts.tv_sec += ms / 1000u;
@@ -90,11 +82,11 @@ static inline bool moy_sync_wait(volatile uint32_t *word, uint32_t seen, uint32_
 // *word moved on and its waiter (`who`, NULL for none recorded) woken.
 static inline void moy_sync_wake(volatile uint32_t *word, moy_sync_who_t who) {
     __atomic_add_fetch(word, 1u, __ATOMIC_RELEASE);
-    #if defined(MOY_SYNC_RTOS)
+    #if defined(MOY_ON_BOARD)
     if (who != NULL) {
         xTaskNotifyGive(who);
     }
-    #elif defined(MOY_SYNC_THREADS)
+    #elif defined(MOY_THREADS)
     (void)who;
     pthread_mutex_lock(&moy_sync_mu);
     pthread_cond_broadcast(&moy_sync_cv);
@@ -115,15 +107,12 @@ static inline void *moy_sync_table(void **t, size_t n) {
     if (p != NULL) {
         return p;
     }
-    #if defined(MOY_SYNC_RTOS)
-    p = heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM);
-    #endif
-    if (p == NULL && (p = calloc(1, n)) == NULL) {
+    if ((p = moy_kalloc(n, MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK | MOY_KMEM_ZERO)) == NULL) {
         return NULL;
     }
     void *none = NULL;
     if (!__atomic_compare_exchange_n(t, &none, p, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
-        free(p);
+        moy_kfree(p);
         return none;
     }
     return p;

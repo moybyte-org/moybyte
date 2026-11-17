@@ -8,7 +8,7 @@ holds when no field is focused. The trackball steps an app's page, as it
 does every surface that takes the keys (`Workstation.ball_steps`), and does
 not show the cursor. Mic (the T-Deck's cancel), Esc and B cancel a field's
 edit in progress: the field gets back the text the edit began from and
-focus steps up off it (native/moy_ui's `api_cancel`, `Player.cancel_field`);
+focus steps off it (native/moy_ui's `api_cancel`, `AppFace.cancel`);
 with no edit, Mic stays the console's key."""
 
 import json
@@ -132,14 +132,14 @@ def _open(tmp_path, name, src, runtime):
 
 
 def _focus(ws):
-    lua = ws.run.player._lua
+    lua = ws.run.player.lua
     if lua is not None:
         return lua.get_global("FOCUS")
     return ws.run.player.ns["focus"]
 
 
 def _name(ws):
-    lua = ws.run.player._lua
+    lua = ws.run.player.lua
     if lua is not None:
         return lua.get_global("NAME")
     return ws.run.player.ns["name"]
@@ -155,7 +155,7 @@ def _type(drv, text):
 def _mic(ws, drv):
     """The T-Deck's Mic let go, as console_input answers it (the host's
     table has no `start`): a field's cancel, else the console's key."""
-    if not ws.cancel_field():
+    if not ws.input_policy.cancel():
         ws.system_key()
     for _ in range(3):
         drv.frame(DT)
@@ -188,7 +188,7 @@ def test_a_lua_field_types_the_keys(tmp_path):
         drv.type_char(ord(ch))
         drv.frame(DT)
     drv.frame(DT)
-    assert ws.run.player._lua.get_global("NAME") == "wasd"
+    assert ws.run.player.lua.get_global("NAME") == "wasd"
     assert _focus(ws) == "Name"
 
 
@@ -200,8 +200,8 @@ def test_a_lua_carts_textmode_reaches_the_keyboard(tmp_path):
 @pytest.mark.parametrize("runtime", ["lua", "python"])
 def test_the_trackball_steps_an_apps_page_and_shows_no_cursor(tmp_path, runtime):
     ws, drv = _open(tmp_path, "Field App", LUA_APP if runtime == "lua" else PY_APP, runtime)
-    assert ws.ball_steps(), "an app's page takes the trackball as its W A S D"
-    ws._ball_axis_at -= ws.BALL_ROLLING_MS + 1
+    assert ws.input_policy.ball_steps(), "an app's page takes the trackball as its W A S D"
+    ws._ball_axis_at -= ws.router.BALL_ROLLING_MS + 1
     drv.pan(0, 1)
     for _ in range(2):
         drv.frame(DT)
@@ -229,7 +229,7 @@ def test_mic_cancels_an_apps_field_edit(tmp_path, runtime):
 def test_mic_on_a_field_with_no_edit_opens_the_menu(tmp_path, runtime):
     ws, drv = _open(tmp_path, "Edit App", LUA_EDIT if runtime == "lua" else PY_EDIT, runtime)
     assert _focus(ws) == "Name"
-    assert not ws.run.player.cancel_field()
+    assert not ws.run.player.face.cancel()
     _type(drv, "x")
     drv.type_char(8)                     # typed and deleted: nothing to give back
     for _ in range(2):
@@ -247,7 +247,7 @@ def test_enter_keeps_what_it_confirmed(tmp_path):
     for _ in range(2):
         drv.frame(DT)
     assert _name(ws) == "Srbija1"
-    assert not ws.run.player.cancel_field(), "Enter ends the edit: nothing to give back"
+    assert not ws.run.player.face.cancel(), "Enter ends the edit: nothing to give back"
     _type(drv, "2")
     _mic(ws, drv)
     assert _name(ws) == "Srbija1"
@@ -262,7 +262,7 @@ def _stop(ws):
     i.begin_frame()
     ws.input = i
     try:
-        ws.handle_input()
+        ws.router.handle_input()
     finally:
         ws.input = was
 
@@ -271,7 +271,7 @@ def _stop(ws):
 def test_esc_cancels_a_field_edit_before_it_goes_back(tmp_path, how):
     ws, drv = _open(tmp_path, "Edit App", PY_EDIT, "python")
     _type(drv, "xy")
-    assert ws.run.player.has_page(), "an edit in progress is the app's to step out of"
+    assert ws.run.player.face.has_page(), "an edit in progress is the app's to step out of"
     if how == "escape":
         drv.escape()
     else:
@@ -288,7 +288,7 @@ def test_a_cancel_onto_the_field_above_gives_each_its_own_text(tmp_path):
     it left gets its text back, the one it reaches keeps its own, and an
     edit there cancels to that."""
     ws, drv = _open(tmp_path, "Two Fields", LUA_TWO, "lua")
-    lua = ws.run.player._lua
+    lua = ws.run.player.lua
     assert _focus(ws) == "Second"
     _type(drv, "x")
     _mic(ws, drv)
@@ -299,3 +299,94 @@ def test_a_cancel_onto_the_field_above_gives_each_its_own_text(tmp_path):
     _mic(ws, drv)
     assert (lua.get_global("FIRST"), lua.get_global("SECOND")) == ("aa", "bb")
     assert not ws.sysmenu.open
+
+
+# -- the shell's own apps ---------------------------------------------------------
+#
+# A shell app's field is drawn through its AppHost's context, so Mic reaches it
+# there (`InputPolicy.cancel` asks `ui_draw.app_cancel` where the app has
+# no `cancel` of its own). Each row opens the app's field on a draft and
+# names where the app keeps it.
+
+def _files_rename(ws):
+    app = ws.app("files")
+    app.open_place("documents")
+    app._act("NAME", "notes")
+    return lambda: app.rename_text
+
+
+def _appearance_name(ws):
+    app = ws.app("appearance")
+    app._open_name()
+    app.name_text = "bubble"
+    app._damage.all()
+    return lambda: app.name_text
+
+
+def _storybook_rename(ws):
+    app = ws.app("storybook")
+    app.typed = "Mine"
+    app.asking = "rename"
+    app._damage.all()
+    return lambda: app.typed
+
+
+def _myart_rename(ws):
+    app = ws.app("myart")
+    app._verb("rename", "kite")
+    return lambda: app.renaming[1]
+
+
+SHELL_FIELDS = {"files": _files_rename, "appearance": _appearance_name,
+                "storybook": _storybook_rename, "myart": _myart_rename}
+
+
+@pytest.mark.parametrize("app_id", sorted(SHELL_FIELDS))
+def test_mic_cancels_a_shell_apps_field(tmp_path, app_id):
+    carts = str(tmp_path / "carts")
+    from runtime import moy_carts
+    moy_carts.save_file("docs", "notes", "x", carts)
+    moy_carts.save_file("drawings", "kite",
+                        moy_carts.encode_moyimg(8, 8, bytes((14,)) * 64), carts)
+    ws = host_app.build_workstation(carts)
+    drv = host_app.ConsoleDriver(ws)
+    ws.spine.open_app(ws.app(app_id))
+    for _ in range(3):
+        drv.frame(DT)
+    draft = SHELL_FIELDS[app_id](ws)
+    for _ in range(3):
+        drv.frame(DT)
+    was = draft()
+    _type(drv, "xy")
+    assert draft() == was + "xy", "the field types each key once"
+    _mic(ws, drv)
+    assert draft() == was, "Mic gives the field back the text the edit began from"
+    assert not ws.sysmenu.open, "a cancel is not the console's key"
+    assert ws.wm.top_kind() == app_id, "and the app stays"
+
+
+# -- a cart app: Notes ------------------------------------------------------------
+#
+# Notes' list and its new-note dialog are an app's page like any other: the
+# keyboard is in text mode while the dialog's field holds focus, and back in
+# game mode on the list and after Mic cancels the field.
+
+def test_notes_holds_text_mode_only_while_its_field_does(tmp_path):
+    ws = build_ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    assert select_on_home(ws, "Notes") is not None
+    ws.open()
+    for _ in range(3):
+        drv.frame(DT)
+    ns = ws.run.player.ns
+    assert ns["ed"] is None and ws.screen == "desktop"
+    assert not ws.input.text_mode, "the list steps with the move keys"
+    _type(drv, "n")
+    assert ns["asking"] == "new", "N opens the new-note dialog"
+    assert ws.input.text_mode, "its field types"
+    _type(drv, "ab")
+    assert ns["typed"] == "ab"
+    _mic(ws, drv)
+    assert ns["asking"] is None or ns["typed"] == "", "Mic gives back the empty draft"
+    assert not ws.input.text_mode, "off the field the keyboard is the page's again"
+    assert not ws.sysmenu.open, "a cancel is not the console's key"

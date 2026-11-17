@@ -55,9 +55,10 @@ def _fake_firmware(root, boards=None, stamp=True):
             continue
         folder = os.path.join(src, board["id"])
         os.makedirs(folder)
-        # Its published image, plus a decoy the picker must not choose.
-        with open(os.path.join(folder, board["images"][0]), "wb") as f:
-            f.write(bytes(range(256)) * 8 + board["id"].encode())
+        # Its downloads, plus a decoy the picker must not choose.
+        for _kind, name in build.downloads(board):
+            with open(os.path.join(folder, name), "wb") as f:
+                f.write(bytes(range(256)) * 8 + (board["id"] + name).encode())
         with open(os.path.join(folder, "not-the-flashable-one.bin"), "wb") as f:
             f.write(b"\xff" * 64)
         if stamp:
@@ -88,6 +89,26 @@ def test_publishes_one_image_per_board(site):
         assert entry["size"] == len(blob)
         assert entry["sha256"] == hashlib.sha256(blob).hexdigest()
         assert entry["file"] not in ("not-the-flashable-one.bin",)
+        # The page fetches the gzip and inflates it: the same bytes.
+        import gzip
+        assert gzip.open(os.path.join(out, entry["gz"])).read() == blob
+
+
+def test_the_page_offers_the_install_and_on_the_c3_its_update(site):
+    """Every card's first build is the install (tools/store_image.py's
+    name), which says it starts the board fresh; only the C3, with no OTA,
+    adds its app image as an update that keeps its carts."""
+    out, html = site
+    manifest = json.load(open(os.path.join(out, "firmware", "manifest.json")))
+    for entry in manifest["boards"]:
+        kinds = [b["kind"] for b in entry["builds"]]
+        assert entry["kind"] == "install" and entry["file"].endswith("_install.bin")
+        assert "Installs Moybyte fresh" in entry["note"]
+        assert "internal storage" in entry["note"]
+        assert kinds == (["install", "update"] if entry["id"] == "c3_zero" else ["install"])
+    c3 = next(e for e in manifest["boards"] if e["id"] == "c3_zero")["builds"][1]
+    assert c3["file"] == "moybyte_c3_zero.bin" and "keeps" in c3["note"]
+    assert 'class="erase"><input' not in html, "an install erases by itself"
 
 
 def test_manifest_carries_what_the_flasher_needs(site):
@@ -352,34 +373,24 @@ def test_the_reset_is_the_boards_own_declaration():
     assert p4["rest"] == {"dtr": False, "rts": False}
 
 
-def test_the_zero_is_reset_into_the_loader_but_not_out_of_it():
-    """The Zero (#41) shares the Guition's chip and, since 2026-08-30, its USB
-    peripheral: USB-Serial/JTAG at 303a:1001, which is the PID esptool-js takes
-    its JTAG reset path off -- so the page drives this board into the loader the
-    same way. Coming back out is the half it cannot do: the board declares
-    `after = watchdog_reset` (proven here; `hard_reset` is an RTS wiggle with no
-    circuit behind it), and esptool-js implements no such sequence, so the card
-    asks for a replug instead."""
+def test_the_zero_is_reset_into_the_loader_and_out_of_it():
+    """The Zero (#41) shares the Guition's chip and its USB peripheral:
+    USB-Serial/JTAG at 303a:1001, which is the PID esptool-js takes its JTAG
+    reset path off -- so the page drives this board into the loader and back
+    out the same way, and nobody replugs it."""
     zero = {b["id"]: b for b in build.BOARDS}["xiao_zero"]
     assert zero["chip"] == "ESP32-S3"
-    assert zero["reset"] == "default_reset"   # in: the peripheral does it
-    assert zero["after"] is None              # out: the human replugs
-    assert zero["after_lines"] is None
-    assert "plug" in zero["done"]
+    assert zero["reset"] == "default_reset"
+    assert zero["after"] == "hard_reset"
+    assert zero["after_lines"] == build.HARD_RESET_LINES[True]
+    assert "plug it back" not in zero["done"] + zero["prep"]
     assert zero["manual"] and "BOOT" in zero["manual"]
-    # The board's own file is the authority for both halves; if it stops saying
-    # so, the values above are the ones to revisit.
-    toml = open(os.path.join(ROOT, "firmware", "seeed_xiao_esp32s3_zero",
-                             "board.toml"), encoding="utf-8").read()
-    assert '303a:1001' in toml
-    assert "watchdog_reset" in toml
-    # It IS the cart store -- no card slot -- so its erase warning cannot borrow
-    # the Guition's "with a TF card in the slot the cartridges survive it". Both
-    # halves matter to whoever ticks that box: where the carts are, and that
-    # nothing here comes through.
-    erase = zero["erase"].lower()
-    assert "internal flash" in erase
-    assert "survive" not in erase
+    # It IS the cart store -- no card slot -- so its install note cannot
+    # borrow a console's "an SD card is not touched", and it updates from its
+    # browser page.
+    note = zero["install"].lower()
+    assert "internal storage" in note and "sd card" not in note
+    assert "browser page" in note
 
 
 def test_the_fetcher_and_the_workflow_agree_on_artifact_names():

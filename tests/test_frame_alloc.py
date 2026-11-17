@@ -386,7 +386,7 @@ def measure(loop):
     ws = loop.ws
     for _ in range(30):
         loop.step()
-    title = ws.launch_named("Frame Probe")
+    title = ws.home.launch_named("Frame Probe")
     for _ in range(60):
         loop.step()
     info = {"title": title, "error": str(ws.cart_error),
@@ -397,7 +397,7 @@ def measure(loop):
     t0 = time.ticks_ms()
     while time.ticks_diff(time.ticks_ms(), t0) < 10000:
         now = time.ticks_ms()
-        if not (ws._toast_until and time.ticks_diff(ws._toast_until, now) > 0):
+        if not (ws.toast_until and time.ticks_diff(ws.toast_until, now) > 0):
             break
         loop.step()
     for _ in range(30):                  # the held key's first edges, settled
@@ -609,7 +609,7 @@ def _typing(loop, ms, least=0):
     over `ms` and at least `least` frames."""
     from gc import mem_alloc
     keys = b"the quick brown fox jumps over the lazy dog "
-    fed = loop.ws.run.player._focus_editor
+    fed = loop.ws.run.player.focus_editor
     out = []
     n = 0
     t0 = time.ticks_ms()
@@ -627,10 +627,10 @@ def notes(loop, info):
     """Notes with a note open, idle and typed into: the app cart a desk
     runs every day, on the verbs."""
     ws = loop.ws
-    ws.exit()
+    ws.spine.exit()
     for _ in range(30):
         loop.step()
-    info["notes_title"] = ws.launch_named("Notes")
+    info["notes_title"] = ws.home.launch_named("Notes")
     for _ in range(30):
         loop.step()
     ns = ws.run.player.ns
@@ -639,11 +639,11 @@ def notes(loop, info):
     for _ in range(60):
         loop.step()
     info["notes_error"] = str(ws.cart_error)
-    info["notes_focused"] = ws.run.player._focus_editor is not None
+    info["notes_focused"] = ws.run.player.focus_editor is not None
     _typing(loop, 1500)                  # the first keys' edges, settled
     # ...and the idle save they owe (EditorHandle.AUTOSAVE_MS), an event of
     # its own: idle is what comes after it.
-    fed = ws.run.player._focus_editor
+    fed = ws.run.player.focus_editor
     t0 = time.ticks_ms()
     while fed.dirty() and time.ticks_diff(time.ticks_ms(), t0) < 15000:
         loop.step()
@@ -655,11 +655,11 @@ def notes(loop, info):
     d0 = ws.frame_state.frames_drawn
     info["notes_idle"] = _frames(loop, @WINDOW_MS@, False, @MIN_FRAMES@)
     d1 = ws.frame_state.frames_drawn
-    info["notes_text0"] = len(ws.run.player._focus_editor.text())
+    info["notes_text0"] = len(ws.run.player.focus_editor.text())
     info["notes_typing"] = _typing(loop, @WINDOW_MS@, @MIN_FRAMES@)
     info["notes_idle_drawn"] = d1 - d0
     info["notes_typing_drawn"] = ws.frame_state.frames_drawn - d1
-    info["notes_text"] = len(ws.run.player._focus_editor.text())
+    info["notes_text"] = len(ws.run.player.focus_editor.text())
     gc.enable()
     notes_swiped(loop, info)
 
@@ -671,7 +671,7 @@ def notes_swiped(loop, info):
     import moy_loop
     from gc import mem_alloc
     ws = loop.ws
-    fed = ws.run.player._focus_editor
+    fed = ws.run.player.focus_editor
     fed.set_text("\n".join("Line %d of a long note, with words enough to wrap past the "
                            "edge of the paper" % i for i in range(120)))
     fed.save()
@@ -703,17 +703,17 @@ def code(loop, info):
     which a moved caret makes again."""
     from gc import mem_alloc
     ws = loop.ws
-    ws.exit()
+    ws.spine.exit()
     for _ in range(30):
         loop.step()
     ed = None
     for cart in ws.carts.all:            # a cart whose code the Editor opens
         ws.open_in_editor(cart)
-        ws.set_menu_view("code")
+        ws.text.set_menu_view("code")
         ed = ws.editor
         if ed is not None:
             break
-        ws.exit()
+        ws.spine.exit()
     info["code_cart"] = cart.get("title")
     ed.set_text("\n".join("value_%d = probe(%d) + 1  # a line of the cart" % (i, i)
                           for i in range(120)))
@@ -804,7 +804,7 @@ def code(loop, info):
     del cl._rows
     del cl._draw_code
     del cl._draw_status
-    ws.exit()
+    ws.spine.exit()
     for _ in range(30):
         loop.step()
 
@@ -852,7 +852,7 @@ def apps(loop, info):
     import ui
     from gc import mem_alloc
     ws = loop.ws
-    ws.exit()
+    ws.spine.exit()
     for _ in range(30):
         loop.step()
     ws.cart_net = _Net(json.load(open(ROOT + "/net/routes.json")))
@@ -866,14 +866,14 @@ def apps(loop, info):
     ui.card = counted
     W, H = ws.sys_canvas.w, ws.sys_canvas.h
     for app in APPS:
-        a = ws._apps_by_id[app]
-        info[app + "_open"] = ws.open_app(a)
+        a = ws.app(app)
+        info[app + "_open"] = ws.spine.open_app(a)
         for _ in range(60):
             loop.step()
         t0 = time.ticks_ms()
         while time.ticks_diff(time.ticks_ms(), t0) < 20000:
             now = time.ticks_ms()
-            if not ((ws._toast_until and time.ticks_diff(ws._toast_until, now) > 0)
+            if not ((ws.toast_until and time.ticks_diff(ws.toast_until, now) > 0)
                     or getattr(a, "phase", "list") != "list"
                     or getattr(a, "_covers", None)):
                 break
@@ -915,7 +915,7 @@ def apps(loop, info):
                              ws.frame_change == "shift"))
             gc.enable()
         info[app + "_drag"] = drag
-        ws.exit()
+        ws.spine.exit()
         for _ in range(30):
             loop.step()
     ui.card = card
@@ -930,10 +930,10 @@ def editor(loop, info):
     from gc import mem_alloc
     ws = loop.ws
     W, H = ws.sys_canvas.w, ws.sys_canvas.h
-    banner = ws._toast_until
+    banner = ws.toast_until
     ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Star Catcher"))
     for tab in ("blocks",):
-        ws.set_menu_view(tab)
+        ws.text.set_menu_view(tab)
         bu = ws.block_ui
         be = bu.blocks_ed
         while len(be.rows) < 40:
@@ -984,8 +984,8 @@ def editor(loop, info):
             gc.enable()
         page.draw = draw
         info[tab + "_drag"] = drag
-        info[tab + "_banner"] = ws._toast_until != banner
-    ws.exit()
+        info[tab + "_banner"] = ws.toast_until != banner
+    ws.spine.exit()
     for _ in range(30):
         loop.step()
 
@@ -1177,7 +1177,7 @@ def achievements(loop, info):
         info[key] = idle
         gc.enable()
         moy_loop.swipe(W // 2, H * 3 // 4, W // 2, H // 4, 25)
-    ws._exit_settings()
+    ws.exit_settings()
     ws.system.set(ws.ach.key, earned if earned is not None else {})
     for _ in range(30):
         loop.step()
@@ -1259,7 +1259,7 @@ class _Loop:
             frame(FRAME_S)
         ws.frame = _frame
         bar_layer._wc = _HeldClock()
-        ws.bar_layer._clock_at = -1      # read the held clock from the next frame
+        ws.bar_layer.clock_at = -1      # read the held clock from the next frame
 
 
 def main():
@@ -1547,7 +1547,7 @@ def test_notes_is_the_run_being_measured(result):
 
 
 def test_notes_idle_paints_nothing_and_a_key_paints_its_frame(result):
-    """An app on the verbs is drawn on change (Player.animates): idle, not a
+    """An app on the verbs is drawn on change (AppFace.animates): idle, not a
     frame; typed into, the frame each key lands in."""
     info, text = result
     assert info["notes_idle_drawn"] == 0, info["notes_idle_drawn"]
@@ -1628,7 +1628,7 @@ def test_a_desk_code_drag_frame_does_not_rebuild_the_code_layout(tmp_path):
     dt = 1 / 30
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
                                     panel_diagonal_in=7.0, font_scale=1, windowed=True)
-    ws.open_desk()
+    ws.home.open_desk()
     drv = host_app.ConsoleDriver(ws)
     for _ in range(3):
         drv.frame(dt)
@@ -1637,8 +1637,8 @@ def test_a_desk_code_drag_frame_does_not_rebuild_the_code_layout(tmp_path):
     for _ in range(4):
         drv.frame(dt)
     rebuilt = []
-    real = ws._relayout_code
-    ws._relayout_code = lambda: rebuilt.append(1) or real()
+    real = ws.relayout_code
+    ws.relayout_code = lambda: rebuilt.append(1) or real()
     was = ui_draw.input_kind()
     ui_draw.input_kind("touch")
     try:

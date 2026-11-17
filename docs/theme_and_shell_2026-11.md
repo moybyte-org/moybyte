@@ -22,7 +22,7 @@ model and each theme's fields, `GAPS.md` what the engine lacked, and
 is `docs/app_api_v1.md`; the shell's process model is `docs/shell_ux_v1.md`;
 the dirty protocol every cache here obeys is `docs/surface_model_v1.md` §3,
 and its §14.6-§14.7 state the copy and shift frames §9 relies on. Numbers
-that measure any of this live in **#66** (frames, per board), **#58** (the
+that measure any of this live in `docs/perf/ledger.md` and **#66** (frames, per board), **#58** (the
 P4 port), **#113** (the shift costs) and `docs/perf_native_gap_v1.md`
 (**#77**); this doc cites them and copies none.
 
@@ -235,7 +235,7 @@ Nothing is pending the owner.
   menu's "Delete cart" all open one `ui.dialog`, "Delete <title>?" over
   "This can't be undone.", Cancel (where focus opens) and Delete (the
   danger button), dimming what is behind it (D-01;
-  `console_notices.DeleteConfirm`).
+  `shell_cards.DeleteConfirm`).
 
 ### 1.4 Scrolling and text editing (2026-10-27)
 
@@ -319,7 +319,7 @@ renders the owner chose from):
 9. **Stop & play.** When the VM must stop for a compiled game and the
    music's stream holds the Wi-Fi, the Player asks first: "Stop the music to play <game>?",
    Cancel (focused) and Stop & play, which stops the stream and opens the
-   game (`Player._music_keeps_the_vm`, `Workstation.ask_stop_music`).
+   game (`Pace.music_keeps_the_vm`, `Notices.ask_stop_music`).
 10. The system menu has no Stop music row: the music app's status item is
     where a stream stops.
 
@@ -530,7 +530,7 @@ comes when a surface first paints text on it.
 **The seeds.** The shipped themes are the three seed packages of §1.3
 (`moy`, the default, `blocks` and `contrast`), `native/moy_ui/themes/*.json`
 in format 2, each with its modes' tables, embedded in every image by
-`tools/gen_ui_tables.py`; `native/moy_ui/moy_theme.c` loads them and
+`tools/gen_os_table.py`; `native/moy_ui/moy_theme.c` loads them and
 `runtime/shell/chrome.py`'s `theme_colors(name, variant)` is its Python face.
 `runtime/shell/appearance.py`'s `set_theme` installs a set and writes it into
 native/moy_app's live token table. The persisted settings are `theme` and
@@ -732,7 +732,7 @@ another role than `title` hands the toolbar's text that role's ink of
 - **The text never reaches a draw.** The loader compiles every surface once
   into a small integer record (a style id, `stid`; not
   `docs/surface_model_v1.md`'s Surface `sid`) in a C table. A draw is **one C
-  call through the toolkit's sink** (`docs/kernel_toolkit_2026-10.md` §3.1),
+  call through the toolkit's sink** (`docs/history/kernel_toolkit_2026-10.md` §3.1),
   the path every primitive already draws through: a primitive whose kind has a
   surface paints it in place of its field and edge, and the WMs' decorations
   reach it through one `ui` face. Colours stay MOY64 indices resolved through
@@ -870,7 +870,7 @@ Font preset of Appearance (style.json's `preset_fonts`) and the face of a
 package that names it. Petme128 stays the carts' font, and the cart
 `print` path is byte-identical, including the Lua C API that shares
 `mg_text_raw`. The one text path for every app runtime is sprint 6's
-`moy_text` (`docs/kernel_toolkit_2026-10.md` §4).
+`moy_text` (`docs/history/kernel_toolkit_2026-10.md` §4).
 
 - **A theme font is a row behind `moy_text`'s font argument.** The call takes
   a `uint32` font id (petme128 is 0) at every scale; a theme font is another
@@ -1062,7 +1062,7 @@ Ruled 2026-10-13 by step 3 (Tiny5 lands), each the pick that builds least:
     come back after. A responsive app's mode (`CART_APP`) keeps its print
     and its colours inside while its `ui` verbs' sinks are outside. A
     run's page on the RUN face draws as a cart's, petme128, unless its
-    snapshot's face names the look (`moy_ui_wasm.h`).
+    snapshot's face names the look (`moy_ui_run.h`).
     A built-in app cart (`system_carts/`, `system_api.draws_in_look`:
     Notes) runs outside it: its page is the verbs' and its note the editor
     handle's, both in the look's colours and faces; a copy of it is a
@@ -1133,7 +1133,7 @@ host runs instead).
   like any other, and an absent one falls back to the theme's image.
 - **The default is static.** An animated wallpaper defeats the redraw gate and
   the home's retained stamp (`launcher_layer._try_stamp_retained` is skipped
-  while `ws._animating(dt)`). That is the open live-wallpaper defect (#66, #73). So
+  while `ws.animating(dt)`). That is the open live-wallpaper defect (#66, #73). So
   Moy's night, the default, is a still image, or animates only small dirty
   rects.
 - **A wallpaper per glass** (docs/history/look_2026-10.md step 28, GAPS 23). A
@@ -1161,7 +1161,7 @@ host runs instead).
   read on glass, the planned answer is a label pill under the focused
   card's title; it is not built.
 - **Prefer wallpapers that need no VM.** A live Python wallpaper keeps the
-  Python VM up, against the memory goal of `docs/native_kernel_2026-09.md` §4.4. Images and
+  Python VM up, against the memory goal of `docs/history/native_kernel_2026-09.md` §4.4. Images and
   Lua or wasm wallpapers are preferred; a Python wallpaper stays allowed and is
   charged as such.
 
@@ -1312,7 +1312,7 @@ since the face's preview ring holds four looks and would thrash.
   stays the cart's. That is the "don't theme our apps" lesson turned around: the
   chrome is fully themeable, game pixels are not.
 - **A switch is one Class A dirty plus one integer.** A theme load, switch,
-  install or in-place edit is an un-attributed Class A dirty (`ws._dirty`, the
+  install or in-place edit is an un-attributed Class A dirty (`ws.mark_dirty()`, the
   global epoch; `docs/surface_model_v1.md` §3) and moves one monotonic
   integer, `ws.look.look_gen`: a plain attribute `publish()` sets from
   native/moy_app's token-table generation (`theme_write` answers it), which
@@ -1343,7 +1343,7 @@ since the face's preview ring holds four looks and would thrash.
   **No cache keys on object identity.** A freed theme's `id()` can be reused by
   MicroPython, and identity keying is what `docs/surface_model_v1.md` §7 retired.
   The kernel ABI's theme handle carries the same generation (index plus
-  generation, `docs/native_kernel_2026-09.md` §4.3). This is the existing dirty protocol, not a new
+  generation, `docs/history/native_kernel_2026-09.md` §4.3). This is the existing dirty protocol, not a new
   mechanism; `set_theme` pokes no cache. `tests/test_theme_look_gen.py`
   re-installs a package under its own name with one role changed and holds the
   live console's pixels to a console booted under the edited package.
@@ -1398,8 +1398,8 @@ Kids will trade themes, so a theme is untrusted input:
 
 ## 7. Placement against the native kernel
 
-Sprint 6 of `docs/native_kernel_2026-09.md` put the toolkit's bodies in C with
-style as data (`docs/kernel_toolkit_2026-10.md`); the WMs stay Python (its §10
+Sprint 6 of `docs/history/native_kernel_2026-09.md` put the toolkit's bodies in C with
+style as data (`docs/history/kernel_toolkit_2026-10.md`); the WMs stay Python (its §10
 question 8: sprint 7 does not run); sprint 5 turned the app roles into an
 import-shaped ABI with a live token table and its generation. **Theming is
 written in C against the toolkit, with no Python reference** (owner,
@@ -1410,10 +1410,10 @@ written in C against the toolkit, with no Python reference** (owner,
 | the package format and the loader: validate, clamp, inherit, derive, readability (§2-§4, §6) | **C**, `native/moy_ui/moy_theme.c`, with its rules and seeds as style.json data | the toolkit's look is C; the loader writes the token row the look resolves against, and the boards, the host and the browser run the same reader |
 | the seeds as packages and style data | data | data crosses unchanged |
 | toolkit reach | Python surfaces calling the C toolkit | the apps and the WMs stay Python; a screen on the toolkit draws through its C primitives |
-| the surface painter and pattern lane, 9-slice and mask blits | **C**, `native/moy_ui` over `moy_gfx` and upstream libmoy | draw kernels are C; "a hot loop lives on one side" (`docs/native_kernel_2026-09.md` §4.1). The painter is an op of the toolkit's sink |
+| the surface painter and pattern lane, 9-slice and mask blits | **C**, `native/moy_ui` over `moy_gfx` and upstream libmoy | draw kernels are C; "a hot loop lives on one side" (`docs/history/native_kernel_2026-09.md` §4.1). The painter is an op of the toolkit's sink |
 | frame styles | **C** beside the primitives, reached from the WMs' decoration path | a style is our code, a theme only names it (§3.5) |
 | fonts | **C**, a row behind `moy_text`'s font argument | the one text call exists; a font is data behind it |
-| theme assets (fonts, sheets, images) | loader-owned buffers in PSRAM (`MALLOC_CAP_SPIRAM`), each a BUF row of the kernel's handle table with a role, as every off-heap buffer is (`docs/kernel_survival_2026-10.md`) | no second handle mechanism |
+| theme assets (fonts, sheets, images) | loader-owned buffers in PSRAM (`MALLOC_CAP_SPIRAM`), each a BUF row of the kernel's handle table with a role, as every off-heap buffer is (`docs/history/kernel_survival_2026-10.md`) | no second handle mechanism |
 
 **Memory rule.** On the S3 boards, PSRAM outside the Python heap is the
 cart-runtime reserve, and the biggest carts need most of it
@@ -1421,7 +1421,7 @@ cart-runtime reserve, and the biggest carts need most of it
 holds the seeds as flash constants and one installed package beside them),
 a hard byte cap (a theme.json is capped at 16384 bytes; owner, 2026-10-18:
 a theme may be big, the cap only has to exist), no per-tint bakes (§3.6),
-and the internal-SRAM gate of `docs/native_kernel_2026-09.md` §4.6. The
+and the internal-SRAM gate of `docs/history/native_kernel_2026-09.md` §4.6. The
 loader allocates nothing at boot: the installed slot is allocated on the
 first install. A new theme is data and moves only its own goldens.
 
@@ -1434,7 +1434,7 @@ PLAY opens) are the owner's (2026-09-27); the owner's direction on scope
 and a desktop mode for large ones; a layout is a short list of bars holding
 built-in widgets; a widget opens its component as a popover; fancy desktop
 things are wallpaper carts' job (§12.2). The rulings are §1.2's table (L0-L18).
-The WMs stay Python (`docs/native_kernel_2026-09.md` §10 question 8, and §7
+The WMs stay Python (`docs/history/native_kernel_2026-09.md` §10 question 8, and §7
 here).
 
 ### 8.1 The two modes, and the switch as explicit state
@@ -1464,7 +1464,7 @@ window), and every exit door, each tested by name.
 
 **Parked windows live outside the stack.** Entering console mode moves the
 desk's window records — kind, rect, focus, the retained `win.buf` stamp —
-from `_order` to `wm._parked`, truncates the kernel back-stack to its root
+from `_order` to `wm.parked`, truncates the kernel back-stack to its root
 (`MOY_ROOT`, the home) and sets the mode; the processes behind the records
 (the Editor, Settings, an app) are not stopped, since a kind has one process
 and `goto(kind)` finds it. Leaving console mode restores `_order` from
@@ -1787,7 +1787,7 @@ strip — is declined (§12.2).
 |---|---|
 | app carts (Python, `type: app`) | nothing breaks: `bar_h()` stays; `content_rect()` is the verb to move to; `docs/app_api_v1.md` says so in place |
 | shipped apps | read the content rect through their layouts (step 3 is byte-identical under the top bar) |
-| compiled apps (`moy_app` ABI) | untouched: a compiled app keeps the player window, a fixed canvas the WM scales (`docs/kernel_toolkit_2026-10.md` §6, owner 2026-10-11); `content_rect` joins the role `wasm: null` like `bar_h` |
+| compiled apps (`moy_app` ABI) | untouched: a compiled app keeps the player window, a fixed canvas the WM scales (`docs/history/kernel_toolkit_2026-10.md` §6, owner 2026-10-11); `content_rect` joins the role `wasm: null` like `bar_h` |
 | games | untouched: the Player surface is the cart's; no mode draws a bar over a game; on the desk a play opens full screen and the Editor's playtest docks (§8.1), and a game moved to a window keeps the size it opened at (#178) |
 | versioning | `docs/app_api_v1.md` stays v1: one additive verb; the role table's generation moves as any row addition does |
 
@@ -1936,9 +1936,9 @@ the open one its current mark, so the two read apart; the hint strip names
 the row's keys, the bar's (`ui_draw.BAR_KEYS`). Where the tabs sit below the
 bar (`LauncherHomeLayer.tabs_in_bar` empty), the row stops at the tabs'
 ends and up goes on to the bar. A trackball roll steps on its stronger axis,
-and mid-roll the other axis takes `Workstation.BALL_TURN` pulses, so a roll
+and mid-roll the other axis takes `InputRouter.BALL_TURN` pulses, so a roll
 along the row that drifts a pulse or two down stays on it; a pause frees it
-(`Workstation._ball_roll`).
+(`InputRouter._ball_roll`).
 
 **The Editor's tabs and the bar's items are one row too** (owner call
 2026-10-27). On a handheld the tab ladder sits in the bar: on the T-Deck the
@@ -2050,7 +2050,7 @@ edited through Appearance's Edit theme…, the Editor's theme mode
 resolves, else the active theme's, else the default; then §8.8's per-element
 rule and §8.7's rule for the current mode. It runs at boot's `load_system`
 cascade, at the end of `set_theme`, at the Settings write, and at a mode
-switch (the catalogue changes), and on a change marks `ws._dirty` and runs
+switch (the catalogue changes), and on a change calls `ws.mark_dirty()` and runs
 `_relayout()` (§8.11). It is never read per frame.
 
 **Settings.** One row after FONT SIZE, `LAYOUT: THEME / <package names>`,
@@ -2096,7 +2096,7 @@ arrangement (look step 18).
 |---|---|---|---|
 | Games | the installed carts that are games — the seeds and the store's — and not the kid's own | run, fullscreen | PLAY, CHANGE (an editable one), SEARCH (the launcher's search row, `tests/test_launcher_search_favorites.py`) |
 | Mine | the kid's own carts | run | PLAY, CHANGE |
-| Apps | the registered apps (`ws._apps`, minus `HIDDEN_APPS`) | the app fullscreen, pushed | OPEN |
+| Apps | the registered apps (`ws.app_layers`, minus `HIDDEN_APPS`) | the app fullscreen, pushed | OPEN |
 | Make | "+ New" first, then every editable cart (owner, 2026-10-13): the one projects list (L15) | the Editor: fullscreen, pushed, on a board with no desk; a window on the desk on one with a desk (L18) | NEW, CHANGE, COPY, DEL (DEL asks first); in the desk's Projects window PLAY too, the third button, which runs the cart in a desk window (§8.1) |
 
 Games and Mine do not overlap: a cart the kid made or took to make their own
@@ -2242,7 +2242,7 @@ round them (design review R5-10, F6-04).
 
 | piece | side | why |
 |---|---|---|
-| both WMs and the mode state, the bar layer (a list of bars), the popover layer, the home layer, Settings rows, the resolver, slot packing (arithmetic once per relayout, cached on the layout object) | **Python** | `docs/native_kernel_2026-09.md` §10 question 8: sprint 7 does not run; the WMs are policy, and this doc adds policy, not kernels |
+| both WMs and the mode state, the bar layer (a list of bars), the popover layer, the home layer, Settings rows, the resolver, slot packing (arithmetic once per relayout, cached on the layout object) | **Python** | `docs/history/native_kernel_2026-09.md` §10 question 8: sprint 7 does not run; the WMs are policy, and this doc adds policy, not kernels |
 | the widget painters, the band, the tab row, the chips, the pill, the frames, the calendar grid | **C, existing and extended in place** | `moy_chrome_strip_band`, `chrome_strip_right` and the `ui` kinds are C already; a widget painter is one more op of the toolkit's sink, the calendar a grid of `ui.cell`s |
 | the RGB565 scaled blit | **C, a kernel** in `moy_gfx`: `blit565_resize` | one call per card, any ratio; benched on every board (#66) |
 | the compositor's strip rect list | **C, `native/moy_glass`** | a list set on relayout, each strip rotated only when it moved, is the Guition P4's lever (`docs/history/shell_layout_2026-10.md` §13 step 2); step 5 feeds it one strip a bar |
@@ -2284,7 +2284,7 @@ relayout) and exit (the desk re-render, the stamps, one full frame) — are
 gated as single-frame maxima. Idle
 stays zero under every layout and in both modes: `tools/p4_bench.py`'s
 `desk idle`, `library idle`, `settings idle` and `app idle` capture no frame,
-and `ws.note_cost`'s `bar.strip.render` count over an idle minute is one
+and `ws.perf.note_cost`'s `bar.strip.render` count over an idle minute is one
 (the clock's) (`runtime/shell/console_perf.py`). The carousel's motion cost is
 §8.10's and goes to #66; parked windows' memory and the off-heap census are #58's.
 
@@ -2342,7 +2342,7 @@ ONE function on every surface, and the twin test runs it once.
 **Motion is a declared Class B source.** `api_moving(ctx)` answers whether
 any nest of the context glides or flings; `AppHost.keys()` and `still()`
 read it beside `owed`, the frame gate reads it as animation, and the
-windowed WM reads it in place of `ws._animating` for the content freeze and
+windowed WM reads it in place of `ws.animating` for the content freeze and
 direct render (`docs/history/scroll_and_text_2026-10.md` §8): a surface moving on its own is the one legitimate
 reason to paint with nothing dirty, and the WM must know it is the focused
 window's content and nothing else.
@@ -2463,7 +2463,8 @@ on the same board.
 | the Waveshare P4's root (the DSI compositor, `moy_dsi_last`) | the ring's front or pending buffer, fenced as `copy_last` fences | the 2D-DMA M2M block copy (`esp_async_fbcpy`), submitted async, fenced at the content's close; cross-buffer in either direction |
 | the Guition P4's root (the rotated compositor, `moy_rot_last`) | the other of its two landscape paint buffers (`retained_frames` 2) | the same 2D-DMA; **answers False while a rotate is in flight** (the rotate shares the DMA2D, and a shift queued behind it would wait for it); the shifted R is handed to `note_damage` or the compositor never rotates it |
 | the T-Deck's and Guition S3's root (the banded compositor, `moy_banded_last`) | the other of two buffers, the one the feeder is shipping | a CPU row copy, synchronous, reading alongside the feeder (read against read) |
-| one persistent buffer: the host's and web runner's root, every window buffer (`win.buf`), every layer, a cart's canvas (`RETAINED_FRAMES` 1) | this buffer | `moy_gfx.scroll_rect` in place |
+| the host's and the browser's root (the one-buffer compositor, `runtime/toolkit/one_buffer.py`; `RETAINED_FRAMES` 1) | this buffer | `moy_gfx.shift_rect` in place |
+| one persistent buffer: every window buffer (`win.buf`), every layer, a cart's canvas (`RETAINED_FRAMES` 1) | this buffer | `moy_gfx.scroll_rect` in place |
 
 What each shift costs per board is in #113 (2026-10-23 comment). The S3
 root lever is present (2026-10-27; it was `None` on 2026-10-23) because what
@@ -2527,7 +2528,7 @@ Per canvas, then per source:
 |---|---|---|
 | `shift_last` across buffers | the P4 roots (2D-DMA), the S3 roots (CPU row copy) | a one-buffer canvas (shifts in place instead); the Guition's root while a rotate is in flight (answers False, the frame draws) |
 | `shift_last` in place | one persistent buffer: the host's and web's root, every `win.buf`, every layer, a cart's canvas | the P4 and S3 roots (a second buffer exists; the CPU in-place shift loses) |
-| `copy_last_into` a layer | roots with a `last` buffer (the P4s, the S3s), and the host's compositor, whose `last` is a test's ring as for `copy_last` | one persistent buffer with no ring: the web's canvas, every layer |
+| `copy_last_into` a layer | roots with a `last` buffer (the P4s, the S3s), and the one-buffer compositor (the host's and the browser's root), which reads its one buffer, or on the host a test's ring as for `copy_last` | every layer |
 | the PPA ground fill before R opens | the P4s | the S3s, the host, the web |
 | a shift frame of a nest | a nest whose app passes every gen it draws inside R | a nest with a `ui.part` and no gen, a placed `ui.at` stop, a Lua or wasm app |
 | a host's rows frame (an editor handle's) | a Python app on the verbs with one handle, its page under a gen | a Lua or wasm app, two handles, a declared `background`, an embed in view |
@@ -2589,7 +2590,7 @@ records who it is returning to: the run's caller kind (`ws.returns`) for a run
 (the Notes cart), `_project_return` for a project file (which returns through
 the loader), and the app-return (`ws.returns.back()`) for a jump into another
 app's own surface (Paint, a project's Editor) -- popped by
-`Workstation._go_home_or_back`, which is what every exit gesture ends in. HOME is still home, and going home clears the return.
+`Spine._go_home_or_back`, which is what every exit gesture ends in. HOME is still home, and going home clears the return.
 
 **Modes** are the only thing that differs per file. Every file draws as its
 monospace source in `ui.text_view` (`runtime/editors/editor_handle.py`): Markdown wraps
@@ -2644,7 +2645,7 @@ foot and after a rule on the desk; any cart holding a handle gets the same verb.
 
 The T-Deck is the writing device (keyboard, trackball as caret, the symbol
 palette for the keys it lacks). **The trackball is the caret in a cart's editor
-handle too, not only in the Code tab**: `Workstation.nav` is the one place that
+handle too, not only in the Code tab**: `InputRouter.nav` is the one place that
 decides, and it answers whether it spent the roll so the board loop can give the
 same pulses to the cursor when nothing holds a caret.
 
@@ -2768,7 +2769,7 @@ About eighteen systems were studied; the lessons that shaped this doc:
   is the ratchet; pinned apps are the desk's icon column, running ones the
   `chips` widget.
 - **A tiling WM**: two windows side by side need a reflowing compiled app,
-  which `docs/kernel_toolkit_2026-10.md` §12 defers; the Editor beside a
+  which `docs/history/kernel_toolkit_2026-10.md` §12 defers; the Editor beside a
   playtest is #178 and floating does it.
 - **Desktop mode on the T-Deck and the Guition S3**: §8.1's hardware reasons.
 - **Refusing PLAY while a playtest runs**: it is ended instead (owner,

@@ -49,34 +49,22 @@ try:
 except ImportError:  # the host, or an image without the server
     _N = None
 
-try:
-    import moy_docs as _docs
-except ImportError:  # host: the runtime package
-    from runtime import moy_docs as _docs
+import moy_docs as _docs
 
 try:
     import moybyte as _moybyte
-except ImportError:  # host: the runtime package
-    try:
-        from runtime import moybyte as _moybyte
-    except ImportError:  # the Zero: no console, so no wakes (_leases)
-        _moybyte = None
+except ImportError:  # the Zero: no console, so no wakes (_leases)
+    _moybyte = None
 
 try:
     import moy_log as _L
-except ImportError:  # pragma: no cover - an image without the kernel
-    try:
-        from runtime import moy_log as _L
-    except ImportError:
-        _L = None
+except ImportError:
+    _L = None
 
 try:
     import devices as _D
-except ImportError:  # host: the runtime package
-    try:
-        from runtime import devices as _D
-    except ImportError:  # the Zero: no console's processes
-        _D = None
+except ImportError:  # the Zero: no console's processes
+    _D = None
 
 TAG = "ssh"
 PASSWORD = "password"
@@ -199,7 +187,7 @@ def _leases(ws):
     """Whether the server holds the radio and the name for itself: a
     console's radio is off unless held. A console with no lease
     (`wifi_hold` None, the Zero) keeps both up for its webhost."""
-    return getattr(ws, "wifi_hold", None) is not None
+    return getattr(getattr(ws, "spine", None), "wifi_hold", None) is not None
 
 
 def rename(ws):
@@ -217,13 +205,13 @@ def start(ws):
     _unpark()
     lease = _leases(ws)
     if lease:
-        ws.wifi_hold(TAG)
+        ws.spine.wifi_hold(TAG)
     try:
         _N.start(system_dir(ws))
     except Exception as exc:  # noqa: BLE001 -- a server that will not start serves nothing
         print("Moybyte ssh: %s" % (exc,))
         if lease:
-            ws.wifi_release(TAG)
+            ws.spine.wifi_release(TAG)
         return False
     _state["serving"] = True
     if lease:
@@ -245,7 +233,7 @@ def _unannounce():
 
 def _let_go(ws):
     _unannounce()
-    ws.wifi_release(TAG)
+    ws.spine.wifi_release(TAG)
 
 
 def _unpark():
@@ -331,14 +319,11 @@ def set_password(ws, password):
 def _day(t):
     try:
         import wallclock as _wc
-    except ImportError:
-        try:  # host: the runtime package
-            from runtime import wallclock as _wc
-        except ImportError:  # the Zero: no zone, the date in UTC
-            import time
-            if time.gmtime(0)[0] == 2000:   # MicroPython's epoch; a stamp is Unix seconds
-                t -= 946684800
-            return "%d-%02d-%02d" % time.gmtime(t)[:3]
+    except ImportError:  # the Zero: no zone, the date in UTC
+        import time
+        if time.gmtime(0)[0] == 2000:   # MicroPython's epoch; a stamp is Unix seconds
+            t -= 946684800
+        return "%d-%02d-%02d" % time.gmtime(t)[:3]
     y, m, dd = _wc.localtime(t)[:3]
     return "%d-%02d-%02d" % (y, m, dd)
 

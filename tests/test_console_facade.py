@@ -1,110 +1,304 @@
-"""The two façade ratchets (#209, docs/history/console_architecture_2026-08.md 3d).
+"""The console's façade, as final rules (docs/refactor_2026-11.md, phase 9).
 
-The carve moves state and verbs off `Workstation` onto collaborator objects,
-and leaves fixed-signature forwards behind for the long tail of callers. Two
-things have to be pinned, and neither is visible to the goldens:
+`Workstation` is a compositor with services: each `console_*` module holds
+one object over the console that its `__init__` builds (`ws.router`,
+`ws.home`, `ws.spine`, ...; tests/ws_services.py reads them), beside the six
+collaborators of the 2026-08 carve. Six rules hold it there, none of them a
+count:
 
-  1. WHAT IS STILL FORWARDED. A forward is migration debt with a name on it --
-     the set may shrink, and a new one must be a deliberate edit here rather
-     than something a landing adds without noticing. The walk covers `class
-     Workstation` in console.py AND the mixins it lists as bases (each in its
-     own runtime module), so moving a method onto a mixin hides nothing. This also pins the two
-     banned shapes: a `*a, **kw` shim (which allocates a tuple per call -- the
-     churn class #63/#66 were about) and a `property` forward (measured at
-     +5.1us against a plain hop's +0.5us, banned repo-wide).
+  1. NO PRIVATE NAME IS READ FROM OUTSIDE ITS OWNER. A `ws._x` (or
+     `ws.<service>._x`), `wm._x`, `bar_layer._x` or `player._x` read, a
+     scheduler tier's (`SCHED.python._x`, `.lua._x`, `.compiled._x`, or its
+     module's, `sched_lua._x`) outside the scheduler's modules, or a
+     `getattr` of one by literal, in runtime/, device/, firmware/ or tools/
+     outside the module that owns it is a private that became an API without
+     anyone deciding so. A name the owner never defines (a tool's own stash
+     on the console over the serial link) is not the owner's private.
 
-  2. WHAT `getattr(ws, "X", default)` STILL EXPECTS TO FIND. Eighty-odd sites
-     across runtime/, device/ and tools/ read the console this way, and a moved
-     attribute does not raise there -- it silently returns the default. That is
-     the failure this file exists for: a landing renames `ws.webhost`, the dev
-     channel's `state` snapshot quietly reports "no service" forever, and every
-     host test stays green.
+  2. THE PROJECTIONS ARE THE SIX BIG ONES. `cart`, `sheet`, `ns`,
+     `cart_error`, `menu_view` and `screen` stay properties on the façade for
+     the outside callers and tests; nothing else is a property forward, no
+     verb is a one-call forward to a collaborator or a service, and no
+     service's module reads one of the six -- a service names the owning
+     object (`ws.run.project.cart`, `ws.wm.top_kind()`).
 
-`COLLABORATORS` grew a name per landing (prefs, covers, carts, look, history)
-and `FORWARDS` grew that landing's set; landing E is the last of the six, so
-what is pinned below is now the END STATE rather than a waypoint -- every
-surviving forward is a deliberate public surface with a named caller.
+  3. EACH SERVICE'S MODULE HOLDS ONLY ITS OWN VERBS: one class, its service,
+     and no verb that only hands the call to another service.
+
+  4. WHAT `getattr(ws, "X", default)` EXPECTS TO FIND IS THERE. A moved
+     attribute does not raise behind a defaulted probe -- it silently returns
+     the default -- so every probed name is checked against a console that has
+     built and drawn a frame.
+
+  5. SETTINGS AND THE TASK MANAGER ARE REGISTERED APPS, NOT KINDS ANYONE
+     COMPARES. No module compares a kind to "settings" or "tasks" (`==`,
+     `in`, `top_is`): what the frame, the bar and the input
+     policy need of a surface is its Layer's protocol (`moved`,
+     `ON_WALLPAPER`, `BAR`, `leave`, `blur`), and a verb that is about one
+     of them names the registered object (`ws.settings_layer.id`).
+
+  6. NO APP REACHES THE CONSOLE (owner, 2026-11-15). An app -- each module
+     app_decls.APPS declares and every module of runtime/apps/, and a cart
+     app's namespace -- holds no `ws`: it reaches the shell through
+     its AppContext's roles alone. The console's own modules (runtime/system/,
+     runtime/editors/, Settings and the task manager among them) call
+     `ws.<service>` directly and are not routed through roles: the gain is
+     minor, as they ship and change with the console, which stays Python
+     (native/moy_kernel/README.md).
 """
 
 import ast
 import re
+import subprocess
 from pathlib import Path
 
 from ws_helpers import build_desktop_ws, build_ws
+from ws_services import classdef, services
 from tools.board_config import runtime_file
 
 ROOT = Path(__file__).resolve().parent.parent
 CONSOLE = runtime_file("console.py")
 
-# The collaborator attributes on Workstation -- all six of the architecture
-# doc's clusters, complete as of landing E.
+# The collaborators of the 2026-08 carve (docs/history/console_architecture_2026-08.md).
 COLLABORATORS = ("web", "prefs", "covers", "carts", "look", "history")
 
-# name on Workstation -> method on the collaborator. Every entry is a caller
-# that has not moved; the comment says who, so retiring one is a search with an
-# answer rather than a guess.
-FORWARDS = {
-    "web": {
-        "web_console_url": "url",            # dev_channel's `web`
-        "park_web_console": "park",          # layers.py's contract comment
-        "stop_web_console": "stop",          # the Guition on-glass suite (serial)
-        "webhost_serving": "serving",        # settings_layer, tools/push_cart_wifi
-        "webhost_label": "label",            # settings_layer, tools/push_cart_wifi
-        "toggle_webhost": "toggle",          # settings_layer, dev_channel, push_cart_wifi
-    },
-    # Landing B. ZERO forwards: `ws.system` is a plain alias of the rows
-    # `prefs.rows` and SystemStore loads them IN PLACE, every reader calls
-    # `ws.system.get` and every writer `ws.system.set`, which persists, so the
-    # write verb that used to be forwarded (`_persist_system`) has no callers.
-    # Landing C. ZERO forwards, and that is the finding rather than an
-    # omission: every cover verb was kernel-INTERNAL. The three consumer
-    # classes 3d names were all swept before the move -- the dev channel and
-    # the three on-glass suites speak no cover vocabulary at all, `tools/`
-    # mentions the pipeline only in prose, and the two per-card hooks
-    # (`cover_for`, `icon_sheet_for`) are handed to the grids as BOUND METHODS
-    # rather than reached through the console. The rest migrated in this commit:
-    # launcher_layer's eight `ws.covers.gen` keys and its six
-    # `ws.covers.icon_sheet_for` draw arguments, wm_windowed's desk icon, and
-    # the direct suites.
-    "covers": {},
-    # Landing C, commit 2. ONE forward, and it is the one #209's own 3d blind
-    # spot names: `moy_webhost` captures `lambda folders: ws.rescan_carts(folders)` when the
-    # webhost is CONSTRUCTED, and the Guition on-glass suite's sync test drives
-    # it end to end from a browser batch. Everything else migrated in-commit --
-    # the roster attribute (`carts.all`) has no `ws` mirror at all, because a
-    # re-scan REBINDS the list and an alias would go stale on the first sync.
-    "carts": {
-        "rescan_carts": "synced",            # device/moy_webhost's on_sync lambda
-    },
-    # Landing D. ZERO forwards, like the cover cache, and for the same reason:
-    # the look's callers are all IN this tree and all moved with it. The three
-    # 3d blind spots were swept first -- the dev channel speaks no appearance
-    # vocabulary at all (`state` reports no theme/wallpaper/font field), none of
-    # the three on-glass suites names one, and the two SERIAL tools that do
-    # (`tools/p4_chrome_freeze.py` drives `ws.set_theme`/`ws.theme_name` over
-    # pyexec, `tools/p4_scroll_ab.py` reads `ws.font_scale` over pyval) moved in
-    # the same commit -- against this tree they would have raised on the board
-    # and reported nothing about the console. `moy_webhost` captures no look
-    # verb. What is left on the kernel is not a forward but the tokens
-    # themselves: `ws.theme_colors` stays a flat attribute ~70 surface sites
-    # read per draw, with `look.set_theme` as its only author.
-    "look": {},
-    # Landing E. ZERO forwards -- the third of the six to land with none, and
-    # the reason is the same each time: every caller was IN this tree and moved
-    # with the verbs. The #111 bar pair had four external callers and they are
-    # all shell surfaces (editor_app's UNDO/REDO icons + their dim state,
-    # code_layer's Ctrl+Z/Ctrl+Y and its nine typing-burst pokes, bar_layer's
-    # strip cache key, project.py's commit_code drain), so they name
-    # `ws.history.*` directly on a per-TAP path. The three 3d blind spots were
-    # swept before the move: the dev channel speaks no history vocabulary
-    # (`state` carries no undo/journal field), none of the three on-glass suites
-    # names one, `moy_webhost` captures none -- and the one SERIAL tool that
-    # does, `tools/p4_hitch.py`, moved in THIS commit: it wraps the idle tick BY
-    # NAME over `pyexec` and its `_wrapm` returns silently on a name that is
-    # gone, so against this tree it would have reported `journal=0` on every
-    # hitch forever rather than raising.
-    "history": {},
+# The services Workstation builds over itself, by attribute: (class, module).
+SERVICES = {
+    "router": ("InputRouter", "console_input"),
+    "home": ("Home", "console_home"),
+    "text": ("Text", "console_text"),
+    "binding": ("CanvasBinding", "console_canvas"),
+    "perf": ("PerfMeters", "console_perf"),
+    "toggles": ("SettingsToggles", "console_settings"),
+    "saves": ("Saves", "console_saves"),
+    "notices": ("Notices", "console_notices"),
+    "intents": ("Intents", "console_intents"),
+    "spine": ("Spine", "console_spine"),
 }
+
+# The projections the façade keeps, over the objects that own the state.
+PROJECTIONS = {
+    "project": {"cart", "sheet"},
+    "player": {"cart_error", "ns"},
+    "editor_app": {"menu_view"},
+    "wm": {"screen"},
+}
+SIX = set().union(*PROJECTIONS.values())
+
+
+def _workstation():
+    return classdef(CONSOLE, "Workstation")
+
+
+def _classes():
+    """The Workstation and every service class."""
+    return [_workstation()] + [cls for _a, _n, _m, cls in services()]
+
+
+def _methods():
+    for cls in _classes():
+        for fn in cls.body:
+            if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                yield fn
+
+
+def _statements(fn):
+    """The function's body with a leading docstring dropped."""
+    body = fn.body
+    if (body and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)):
+        body = body[1:]
+    return body
+
+
+def _is_property(fn):
+    return any((isinstance(d, ast.Name) and d.id == "property")
+               or (isinstance(d, ast.Attribute) and d.attr in ("setter", "getter"))
+               for d in fn.decorator_list)
+
+
+def _tracked(*tops):
+    out = subprocess.check_output(["git", "-C", str(ROOT), "ls-files", "*.py"],
+                                  text=True).split()
+    return [p for p in out if p.split("/", 1)[0] in tops]
+
+
+# -- the services -------------------------------------------------------------
+
+def test_the_walk_sees_every_service():
+    """The console has no base class, and builds exactly these services, each
+    from the module SERVICES pins."""
+    assert not _workstation().bases
+    assert {a: (n, m) for a, n, m, _c in services()} == SERVICES
+
+
+def test_each_service_module_holds_only_its_service():
+    """Rule 3: one class per service module, and no verb on it whose whole
+    body hands the call to another service or a collaborator."""
+    others = set(SERVICES) | set(COLLABORATORS)
+    for attr, name, mod, cls in services():
+        tree = ast.parse(runtime_file(mod + ".py").read_text(encoding="utf-8"))
+        classes = [n.name for n in tree.body if isinstance(n, ast.ClassDef)]
+        assert classes == [name], "%s.py holds %s" % (mod, classes)
+        for fn in cls.body:
+            if not isinstance(fn, ast.FunctionDef):
+                continue
+            body = [s for s in _statements(fn)
+                    if not (isinstance(s, ast.Assign) and ast.unparse(s) == "ws = self.ws")]
+            if len(body) != 1 or not isinstance(body[0], (ast.Return, ast.Expr)):
+                continue
+            call = body[0].value
+            if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)):
+                continue
+            owner = call.func.value
+            hop = (isinstance(owner, ast.Attribute) and owner.attr in others
+                   and ast.unparse(owner.value) in ("ws", "self.ws"))
+            assert not hop, "%s.%s only forwards to %s" % (
+                name, fn.name, ast.unparse(call.func))
+
+
+# -- the projections ------------------------------------------------------------
+
+def test_no_verb_is_a_one_call_forward():
+    """Rule 2: a method of the console whose whole body is one call on a
+    collaborator or a service is a name kept for callers that never moved.
+    The callers move instead."""
+    hops = set(COLLABORATORS) | set(SERVICES)
+    for fn in _workstation().body:
+        if not isinstance(fn, ast.FunctionDef) or _is_property(fn):
+            continue
+        body = _statements(fn)
+        if len(body) != 1 or not isinstance(body[0], (ast.Return, ast.Expr)):
+            continue
+        call = body[0].value
+        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)):
+            continue
+        owner = call.func.value
+        assert not (isinstance(owner, ast.Attribute)
+                    and isinstance(owner.value, ast.Name) and owner.value.id == "self"
+                    and owner.attr in hops), (
+            "Workstation.%s forwards to self.%s.%s"
+            % (fn.name, owner.attr, call.func.attr))
+
+
+def test_the_projections_are_exactly_the_six():
+    """Rule 2: the property forwards are the six big ones, over the objects
+    that own their state, and nothing else is a property over a collaborator
+    or a service (a property hop measured +5.1 us against a plain one's
+    +0.5)."""
+    found = {owner: set() for owner in PROJECTIONS}
+    banned = set(COLLABORATORS) | set(SERVICES)
+    for fn in _methods():
+        if not _is_property(fn):
+            continue
+        for node in ast.walk(fn):
+            if not isinstance(node, ast.Attribute):
+                continue
+            base = node.value
+            if (isinstance(base, ast.Name) and base.id == "self"
+                    and node.attr in banned):
+                raise AssertionError("%s is a property over self.%s"
+                                     % (fn.name, node.attr))
+            if node.attr in found:
+                if (isinstance(base, ast.Attribute) and base.attr == "run"
+                        and node.attr in ("project", "player")):
+                    base = base.value
+                if isinstance(base, ast.Name) and base.id == "self":
+                    found[node.attr].add(fn.name)
+    assert found == PROJECTIONS
+
+
+def test_no_service_reads_a_projection():
+    """Rule 2: a service names the object that owns the state, never the
+    façade's projection of it."""
+    rx = re.compile(r"(?<![\w.])(?:ws|self\.ws)\.(%s)\b" % "|".join(sorted(SIX)))
+    bad = []
+    for _a, _n, mod, _c in services():
+        for i, line in enumerate(runtime_file(mod + ".py").read_text(
+                encoding="utf-8").splitlines(), 1):
+            code = line.split("#", 1)[0]
+            for m in rx.finditer(code):
+                bad.append("%s.py:%d ws.%s" % (mod, i, m.group(1)))
+    assert not bad, "a service reads the façade's projection:\n" + "\n".join(bad)
+
+
+# -- the privates ---------------------------------------------------------------
+
+def _defined(paths, recv=("self",)):
+    """Every private name the given modules define on their objects: a def, a
+    class attribute, or a store on `self` (or on the console, `ws`, inside a
+    service)."""
+    out = set()
+    for p in paths:
+        tree = ast.parse(Path(p).read_text(encoding="utf-8"))
+        for x in ast.walk(tree):
+            if isinstance(x, (ast.FunctionDef, ast.ClassDef)):
+                out.add(x.name)
+            if isinstance(x, ast.ClassDef):
+                for st in x.body:
+                    if isinstance(st, ast.Assign):
+                        out.update(t.id for t in st.targets if isinstance(t, ast.Name))
+            if (isinstance(x, ast.Attribute) and isinstance(x.value, ast.Name)
+                    and x.value.id in recv and isinstance(x.ctx, ast.Store)):
+                out.add(x.attr)
+    return {n for n in out if n.startswith("_") and not n.startswith("__")}
+
+
+# The Player's modules: the class and its two parts (`player.face`,
+# `player.pace`), which read its state as their own.
+PLAYER = ("player", "player_face", "player_pace")
+
+# The scheduler's tiers: the objects `Scheduler` holds, by attribute, and
+# their modules; the scheduler's own modules are those and `scheduler` and
+# `sched_proc`, the row they share.
+SCHED_TIERS = {"python": "sched_python", "lua": "sched_lua", "compiled": "sched_compiled"}
+SCHED_MODULES = ("scheduler", "sched_proc") + tuple(SCHED_TIERS.values())
+
+
+def _owners():
+    shell = sorted(str(p) for p in Path(ROOT / "runtime/shell").glob("console*.py"))
+    svc = "|".join(SERVICES)
+    return {
+        "ws": (_defined(shell, ("self", "ws")),
+               lambda f: f.startswith("runtime/shell/console"),
+               r"(?:ws|_ws|__ws|ws2|nws|workstation)(?:\.(?:%s))?" % svc),
+        "wm": (_defined(sorted(Path(ROOT / "runtime/wm").glob("*.py"))),
+               lambda f: f.startswith("runtime/wm/"), r"(?:wm|_wm)"),
+        "bar_layer": (_defined([ROOT / "runtime/shell/bar_layer.py"]),
+                      lambda f: f == "runtime/shell/bar_layer.py", r"bar_layer"),
+        "player": (_defined([ROOT / ("runtime/run/%s.py" % m) for m in PLAYER]),
+                   lambda f: f in ["runtime/run/%s.py" % m for m in PLAYER], r"(?:player|pl)"),
+        "scheduler tier": (
+            _defined([runtime_file(m + ".py") for m in SCHED_TIERS.values()]),
+            lambda f: f in [str(runtime_file(m + ".py").relative_to(ROOT))
+                            for m in SCHED_MODULES],
+            r"(?:[A-Za-z_]\w*\.(?:%s)|%s)" % ("|".join(SCHED_TIERS),
+                                            "|".join(SCHED_TIERS.values()))),
+    }
+
+
+def test_no_private_is_read_from_outside_its_owner():
+    """Rule 1, over the code that ships and the tools that drive it."""
+    owners = _owners()
+    bad = []
+    for rel in _tracked("runtime", "device", "firmware", "tools"):
+        src = (ROOT / rel).read_text(encoding="utf-8")
+        for key, (names, own, recv) in owners.items():
+            if own(rel):
+                continue
+            pats = (r"(?<![\w])%s\.(_[a-z]\w*)" % recv,
+                    r"(?:get|has|set)attr\(\s*(?:[\w.]*\.)?%s\s*,\s*[\"'](_[a-z]\w*)[\"']"
+                    % recv)
+            for pat in pats:
+                for m in re.finditer(pat, src):
+                    if m.group(1) in names:
+                        line = src.count("\n", 0, m.start()) + 1
+                        bad.append("%s:%d %s.%s" % (rel, line, key, m.group(1)))
+    assert not bad, "a private read from outside its owner:\n" + "\n".join(bad)
+
+
+# -- the probes -------------------------------------------------------------------
 
 # `getattr(ws, "X")` names that are deliberately absent from a host console.
 # Each must STAY absent -- an entry whose name has appeared is a stale
@@ -119,246 +313,51 @@ GETATTR_ABSENT = {
     # a defaulted probe: wm_windowed stamps these under perf_capture, so a board
     # that does not stage it never has them and a board with the deep meters off
     # has not measured them -- either way the line prints `-`, which is a
-    # different reading from a 0. Giving them a value on the console would turn
-    # "no windowed WM" into "the WM cost nothing", the fold=0 bug over again.
-    "_pf_wm_restore": "windowed-WM drag restore ms; only wm_windowed under "
-                      "perf_capture writes it, and `-` is the honest reading",
-    "_pf_wm_windows": "windowed-WM window-stack pass ms, same condition",
-    "_pf_wm_stamp": "windowed-WM content stamp ms, same condition",
+    # different reading from a 0.
+    "pf_wm_restore": "windowed-WM drag restore ms; only wm_windowed under "
+                     "perf_capture writes it, and `-` is the honest reading",
+    "pf_wm_windows": "windowed-WM window-stack pass ms, same condition",
+    "pf_wm_stamp": "windowed-WM content stamp ms, same condition",
 }
 
 GETATTR_RE = re.compile(
-    r'getattr\(\s*(?:self\.ws|self\._ws|ws|workstation)\s*,\s*'
-    r'"([A-Za-z_][A-Za-z0-9_]*)"')
+    r'getattr\(\s*(?:self\.ws|self\._ws|ws|workstation)'
+    r'(?:\.(%s))?\s*,\s*"([A-Za-z_][A-Za-z0-9_]*)"' % "|".join(SERVICES))
 
-# A helper that probes BY LITERAL is still a probe. `PerfSampler._take` reads a
-# console attribute and CLEARS it (the PERF line's wm columns say what one
-# sample measured, not what the WM last cost), so the names it hands out must be
-# checked exactly like a getattr's. Without this row the scan quietly stops
-# covering those three -- an exemption nothing probes any more, which is half of
-# what test_the_absent_list_stays_absent_and_stays_used exists to catch.
+# A helper that probes BY LITERAL is still a probe: `PerfSampler._take` reads
+# a console attribute and CLEARS it, so its names are checked like a getattr's.
 TAKE_RE = re.compile(r'self\._take\(\s*"([A-Za-z_][A-Za-z0-9_]*)"')
 
 
-def _workstation():
-    tree = ast.parse(CONSOLE.read_text(encoding="utf-8"))
-    for node in tree.body:
-        if isinstance(node, ast.ClassDef) and node.name == "Workstation":
-            return node
-    raise AssertionError("Workstation is not a class in runtime/shell/console.py")
-
-
-def _mixin_modules(tree, bases):
-    """base class name -> the runtime module console.py imports it from."""
-    out = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module:
-            for alias in node.names:
-                if alias.name in bases and (alias.asname or alias.name) in bases:
-                    out.setdefault(alias.name, node.module.split(".")[-1])
-    return out
-
-
-def _workstation_classes():
-    """The Workstation ClassDef plus every mixin it lists as a base, each
-    parsed from its own module. The ratchets walk ALL of them: a method moved
-    onto a mixin is still a Workstation method, and a forward or a property
-    that hid there would otherwise vanish from every check below."""
-    tree = ast.parse(CONSOLE.read_text(encoding="utf-8"))
-    ws = _workstation()
-    bases = {b.id for b in ws.bases if isinstance(b, ast.Name)}
-    found = _mixin_modules(tree, bases)
-    assert set(found) == bases, "a Workstation base is not imported by name"
-    out = [ws]
-    for name in sorted(bases):
-        path = runtime_file(found[name] + ".py")
-        for node in ast.parse(path.read_text(encoding="utf-8")).body:
-            if isinstance(node, ast.ClassDef) and node.name == name:
-                out.append(node)
-                break
-        else:
-            raise AssertionError("%s is not a class in %s" % (name, path))
-    return out
-
-
-def _methods():
-    """Every function defined on Workstation or one of its mixins."""
-    for cls in _workstation_classes():
-        for fn in cls.body:
-            if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                yield fn
-
-
-# The mixins Workstation lists as bases, by module. A new one is a deliberate
-# edit here: the ratchets below walk exactly these, so a base that was not
-# imported by name -- or a carve that forgot this table -- fails here first.
-MIXINS = {
-    "InputVerbs": "console_input",
-    "HomeVerbs": "console_home",
-    "TextVerbs": "console_text",
-    "CanvasBinding": "console_canvas",
-    "PerfMeters": "console_perf",
-    "SettingsToggles": "console_settings",
-    "SaveVerbs": "console_saves",
-    "Notices": "console_notices",
-    "SpineVerbs": "console_spine",
-}
-
-
-def test_the_ratchet_sees_every_mixin():
-    """The walk covers exactly the mixins console.py names as bases, each
-    from the module MIXINS pins."""
-    tree = ast.parse(CONSOLE.read_text(encoding="utf-8"))
-    bases = {b.id for b in _workstation().bases if isinstance(b, ast.Name)}
-    assert _mixin_modules(tree, bases) == MIXINS
-    names = [c.name for c in _workstation_classes()]
-    assert names == ["Workstation"] + sorted(MIXINS), names
-
-
-def _statements(fn):
-    """The function's body with a leading docstring dropped."""
-    body = fn.body
-    if (body and isinstance(body[0], ast.Expr)
-            and isinstance(body[0].value, ast.Constant)
-            and isinstance(body[0].value.value, str)):
-        body = body[1:]
-    return body
-
-
-def _collaborator_call(node):
-    """(collaborator, method) if `node` is a call on `self.<collaborator>`."""
-    if not isinstance(node, ast.Call):
-        return None
-    fn = node.func
-    if not (isinstance(fn, ast.Attribute)
-            and isinstance(fn.value, ast.Attribute)
-            and isinstance(fn.value.value, ast.Name)
-            and fn.value.value.id == "self"
-            and fn.value.attr in COLLABORATORS):
-        return None
-    return fn.value.attr, fn.attr
-
-
-def _forwards():
-    """Every Workstation method whose whole body is one collaborator call."""
-    found = {}
-    for fn in _methods():
-        body = _statements(fn)
-        if len(body) != 1:
-            continue
-        stmt = body[0]
-        call = stmt.value if isinstance(stmt, (ast.Return, ast.Expr)) else None
-        hit = _collaborator_call(call)
-        if hit is not None:
-            found[fn.name] = (hit[0], hit[1], fn)
-    return found
-
-
-def test_the_forward_set_is_exactly_what_is_pinned():
-    """A new forward or a retired one is a deliberate edit to FORWARDS."""
-    found = {n: (c, t) for n, (c, t, _fn) in _forwards().items()}
-    pinned = {n: (c, t) for c, m in FORWARDS.items() for n, t in m.items()}
-    assert found == pinned
-
-
-def test_no_forward_is_a_star_args_shim():
-    """`*a, **kw` allocates a tuple (and a dict) per call. Forwards are plain
-    methods with the signature they forward -- fixed, and cheap."""
-    for name, (_c, _t, fn) in _forwards().items():
-        assert fn.args.vararg is None, "%s forwards through *args" % name
-        assert fn.args.kwarg is None, "%s forwards through **kwargs" % name
-        call = _statements(fn)[0].value
-        assert not any(isinstance(a, ast.Starred) for a in call.args), name
-        assert all(kw.arg is not None for kw in call.keywords), name
-
-
-def test_no_property_forwards_to_a_collaborator():
-    """Measured on this codebase: a plain hop is +0.5us, a property forward
-    +5.1us. Live state is read through a method, everywhere."""
-    for fn in _methods():
-        decorated = any(
-            (isinstance(d, ast.Name) and d.id == "property")
-            or (isinstance(d, ast.Attribute) and d.attr in ("setter", "getter"))
-            for d in fn.decorator_list)
-        if not decorated:
-            continue
-        for node in ast.walk(fn):
-            hit = (isinstance(node, ast.Attribute)
-                   and isinstance(node.value, ast.Name)
-                   and node.value.id == "self"
-                   and node.attr in COLLABORATORS)
-            assert not hit, "%s is a property over self.%s" % (fn.name, node.attr)
-
-
-# The pre-carve property forwards, over the objects the 2026-07 shell split off
-# (the run's project and player, editor_app, wm) rather than the six carve collaborators. They
-# are exempt from the rule above BY MEASUREMENT, not by oversight: `ns` alone is
-# read at 257 sites and `cart` at 168, so retiring the set is a ~920-site
-# mechanical rename -- the big-bang the architecture doc's Section 9 rules out.
-# Their own docstrings say the projections stay "as tested surface" until the
-# OS-arch capability track removes them. Pinned here so the ban's SCOPE is
-# honest and this set can only ever shrink.
-LEGACY_PROPERTY_FORWARDS = {
-    "project": {"cart", "config", "images", "pmem", "scenes",
-                "sheet", "tilemap"},
-    "player": {"_cart_key_prev", "_draw", "_update",
-               "cart_error", "crash_line", "ns"},
-    "editor_app": {"menu_view"},
-    "wm": {"screen"},
-}
-
-
-def test_the_legacy_property_forwards_are_exactly_the_pinned_set():
-    """A NEW property forward -- to any of these four -- is caught here, and a
-    retired one is a deliberate edit down. Without this the rule above reads as
-    "banned repo-wide" while seventeen of them stand."""
-    found = {owner: set() for owner in LEGACY_PROPERTY_FORWARDS}
-    for fn in _methods():
-        if not any((isinstance(d, ast.Name) and d.id == "property")
-                   or (isinstance(d, ast.Attribute)
-                       and d.attr in ("setter", "getter"))
-                   for d in fn.decorator_list):
-            continue
-        for node in ast.walk(fn):
-            if not (isinstance(node, ast.Attribute) and node.attr in found):
-                continue
-            base = node.value
-            if (isinstance(base, ast.Attribute) and base.attr == "run"
-                    and node.attr in ("project", "player")):
-                base = base.value       # the run's Player and Project: self.run.<x>
-            if isinstance(base, ast.Name) and base.id == "self":
-                found[node.attr].add(fn.name)
-    assert found == LEGACY_PROPERTY_FORWARDS
-
-
 def _getattr_sites():
-    """name -> the files that probe the console for it."""
+    """(service or "", name) -> the files that probe the console for it."""
     sites = {}
-    for top in ("runtime", "device", "tools"):
-        for path in sorted((ROOT / top).rglob("*.py")):
-            src = path.read_text(encoding="utf-8")
-            for name in GETATTR_RE.findall(src) + TAKE_RE.findall(src):
-                sites.setdefault(name, set()).add(
-                    str(path.relative_to(ROOT)))
+    for rel in _tracked("runtime", "device", "tools"):
+        src = (ROOT / rel).read_text(encoding="utf-8")
+        found = GETATTR_RE.findall(src) + [("", n) for n in TAKE_RE.findall(src)]
+        for svc, name in found:
+            sites.setdefault((svc, name), set()).add(rel)
     return sites
 
 
 def test_every_getattr_name_resolves_on_a_real_workstation(tmp_path):
-    """The silent-default catcher. A `getattr(ws, "X", default)` whose X has
-    moved reports the default forever and raises nothing, so the name strings
-    are checked against a console that has been built AND has drawn a frame
-    (several perf fields are written at the top of `frame`)."""
+    """Rule 4. The names are checked against a console that has been built
+    AND has drawn a frame (several perf fields are written at its top)."""
     sites = _getattr_sites()
     assert len(sites) > 50, "the scan stopped finding the getattr sites"
     ws = build_ws(tmp_path / "fullscreen")
     ws.frame(1 / 30.0)
     win = build_desktop_ws(tmp_path / "windowed")
     win.frame(1 / 30.0)
+
+    def has(console, svc, name):
+        return hasattr(getattr(console, svc) if svc else console, name)
+
     missing = sorted(
-        "%s (%s)" % (name, ", ".join(sorted(where)))
-        for name, where in sites.items()
-        if name not in GETATTR_ABSENT
-        and not hasattr(ws, name) and not hasattr(win, name))
+        "%s%s (%s)" % (svc + "." if svc else "", name, ", ".join(sorted(where)))
+        for (svc, name), where in sites.items()
+        if not (not svc and name in GETATTR_ABSENT)
+        and not has(ws, svc, name) and not has(win, svc, name))
     assert not missing, (
         "these names are probed on the console and no longer exist on it -- "
         "the probes are silently taking their defaults: " + "; ".join(missing))
@@ -369,10 +368,161 @@ def test_the_absent_list_stays_absent_and_stays_used(tmp_path):
     nothing probes any more (drop it too)."""
     ws = build_ws(tmp_path / "fullscreen")
     ws.frame(1 / 30.0)
-    sites = _getattr_sites()
+    probed = {name for svc, name in _getattr_sites() if not svc}
     for name, why in GETATTR_ABSENT.items():
         assert why, name
         assert not hasattr(ws, name), (
             "%s exists on a host console now -- drop the exemption" % name)
-        assert name in sites, (
+        assert name in probed, (
             "nothing probes %s any more -- drop the exemption" % name)
+
+
+# -- Settings and the task manager are registered apps ---------------------------
+
+# The Editor's "settings" is its Cards workspace's key, another vocabulary
+# that shares the word.
+_KIND_OWNERS = {
+    "runtime/editors/editor_desk.py": "the Editor's workspace key",
+    "runtime/editors/editor_panes.py": "the Editor's workspace key",
+}
+_SHELL_KINDS = ("settings", "tasks")
+
+
+def _names_a_shell_kind(node):
+    if isinstance(node, ast.Constant):
+        return node.value in _SHELL_KINDS
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        return any(_names_a_shell_kind(e) for e in node.elts)
+    return False
+
+
+def test_no_module_compares_a_kind_to_settings_or_tasks():
+    found = []
+    for rel in _tracked("runtime", "device", "firmware"):
+        if rel in _KIND_OWNERS:
+            continue
+        tree = ast.parse((ROOT / rel).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Compare):
+                if any(_names_a_shell_kind(x) for x in [node.left] + node.comparators):
+                    found.append("%s:%d" % (rel, node.lineno))
+            elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                  and node.func.attr == "top_is"
+                  and any(_names_a_shell_kind(a) for a in node.args)):
+                found.append("%s:%d" % (rel, node.lineno))
+    assert not found, (
+        "a kind compared to Settings' or the task manager's id outside them: give "
+        "the surface a Layer hook, or name the registered object:\n  %s"
+        % "\n  ".join(found))
+
+
+def test_the_kind_owners_still_compare():
+    """Each exemption is still needed: a file that stopped comparing leaves the
+    list."""
+    for rel in _KIND_OWNERS:
+        tree = ast.parse((ROOT / rel).read_text(encoding="utf-8"))
+        assert any(isinstance(n, ast.Compare)
+                   and any(_names_a_shell_kind(x) for x in [n.left] + n.comparators)
+                   for n in ast.walk(tree)), rel
+
+
+# -- no app reaches the console -------------------------------------------------
+
+def _app_modules():
+    """The modules an app is built from: each declared app's module
+    (app_decls.APPS, which the console constructs every app from) and every
+    module of runtime/apps/."""
+    from runtime.app_decls import APPS
+    apps_dir = runtime_file("app_shell.py").parent
+    return sorted({str(d["entry"]).partition(":")[0] for d in APPS}
+                  | {p.stem for p in apps_dir.glob("*.py")})
+
+
+def test_no_app_module_names_the_console():
+    """Rule 6, the source half. An app's module neither names `ws` (a
+    parameter, a variable or an attribute) nor imports the console or one of
+    its services: what an app reaches of the shell is its AppContext's
+    roles."""
+    mods = _app_modules()
+    assert {"paint_app", "music_app", "artwork", "app_shell", "text_console"} <= set(mods), mods
+    found = []
+    for mod in mods:
+        tree = ast.parse(runtime_file(mod + ".py").read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            hit = ((isinstance(node, ast.Name) and node.id == "ws")
+                   or (isinstance(node, ast.arg) and node.arg == "ws")
+                   or (isinstance(node, ast.Attribute) and node.attr == "ws"))
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                names = ([a.name for a in node.names] if isinstance(node, ast.Import)
+                         else [node.module or ""])
+                hit = any(n.split(".")[-1] == "console"
+                          or n.split(".")[-1].startswith("console_") for n in names)
+            if hit:
+                found.append("%s:%d" % (mod, node.lineno))
+    assert not found, (
+        "an app module reaches the console: hand it a role instead:\n  %s"
+        % "\n  ".join(found))
+
+
+_LEAVES = (type, type(len), type(_app_modules), type(ROOT.is_file),
+           str, bytes, bytearray, int, float, bool, memoryview, type(None))
+
+
+def _path_to(root, target):
+    """The path of public names (attributes, items, elements) from `root` to
+    `target`, or None. A name with a leading underscore is the owner's
+    (an app's own state, a role object's link to the ABI), so the walk
+    follows only what an app is handed to name; it does not enter a bound
+    method or a function, since neither hands out its receiver on a board."""
+    seen = {id(root)}
+    queue = [(root, "")]
+    while queue:
+        obj, path = queue.pop(0)
+        if obj is target:
+            return path or "itself"
+        if isinstance(obj, _LEAVES):
+            continue
+        if isinstance(obj, dict):
+            kids = [("[%r]" % (k,), v) for k, v in obj.items()]
+        elif isinstance(obj, (list, tuple, set, frozenset)):
+            kids = [("[%d]" % i, v) for i, v in enumerate(obj)]
+        else:
+            kids = [("." + k, v) for k, v in (getattr(obj, "__dict__", None) or {}).items()
+                    if not k.startswith("_")]
+        for name, val in kids:
+            if id(val) not in seen:
+                seen.add(id(val))
+                queue.append((val, path + name))
+    return None
+
+
+def test_no_app_is_handed_the_console(tmp_path):
+    """Rule 6, the object half. From every declared app, as the console
+    built it, and from a cart app's namespace, as the Player hands it (the
+    shipped Notes, and make_system_api with every permission), no path of
+    public names leads to the Workstation."""
+    import moy_app
+    from runtime.app_decls import APPS
+    from runtime import system_api
+    ws = build_ws(tmp_path)
+    for d in APPS:
+        app = ws.app(d["id"])
+        assert app is not None, d["id"]
+        path = _path_to(app, ws)
+        assert path is None, "%s reaches the console at app%s" % (d["id"], path)
+    ns = system_api.make_system_api(
+        ws.app_context, {"id": "every.perm", "title": "Every",
+                         "permissions": [p for p, _r in moy_app.perms()]},
+        ws.run.canvas)
+    assert "files" in ns and "prefs" in ns, sorted(ns)
+    path = _path_to(ns, ws)
+    assert path is None, "a cart app's names reach the console at %s" % path
+    from ws_helpers import select_on_home
+    assert select_on_home(ws, "Notes") is not None
+    ws.open()
+    for _ in range(3):
+        ws.input.begin_frame()
+        ws.frame(1 / 30.0)
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    path = _path_to(ws.run.player.ns, ws)
+    assert path is None, "Notes' globals reach the console at %s" % path

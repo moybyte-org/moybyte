@@ -1,8 +1,6 @@
 // moy_screen_slot: a program's screen handed to the console (moy_screen_slot.h).
 
-#if defined(__has_include) && !__has_include("esp_heap_caps.h") && !defined(_POSIX_C_SOURCE)
-#define _POSIX_C_SOURCE 200809L     // clock_gettime under -std=c99 (moy_sync.h)
-#endif
+#include "moy_platform.h"
 
 #include "moy_screen_slot.h"
 
@@ -16,14 +14,7 @@
 #include "moy_sync.h"
 #include "moy_vmq.h"
 
-#ifdef MOY_SYNC_RTOS
-#include "esp_heap_caps.h"
-#include "esp_timer.h"
-#define SLOT_ALLOC(n) heap_caps_malloc_prefer((n), 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT)
-#else
-#include <time.h>
-#define SLOT_ALLOC(n) malloc(n)
-#endif
+#define SLOT_ALLOC(n) moy_kalloc((n), MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK)
 
 // A present waits in slices this long, so a closed slot answers it soon.
 #define SLICE_MS 20u
@@ -39,6 +30,7 @@ typedef struct {
     volatile uint32_t room;     // moved where the frame is let go or the slot closed
     volatile uint32_t shown;    // moved where a present made it READY, or a hop was queued
     volatile uint32_t hops;     // the program's hops queued (moy_screen_slot_kick)
+    volatile uint32_t told;     // the toolkit's answers the program told last (moy_screen_slot_tell)
     uint32_t served;            // `hops` when the console's frame call last served them
     moy_sync_who_t presenter;   // the program's task waiting on `room`
     moy_sync_who_t console;     // the console's task waiting on `shown`
@@ -47,15 +39,6 @@ typedef struct {
 static slot_t (*s_slots)[MOY_SCREEN_SLOTS];     // made at the first open (moy_sync.h's THE TABLE)
 static MOY_SYNC_LOCK_T s_lock = MOY_SYNC_LOCK_INIT;
 
-static int64_t now_us(void) {
-    #ifdef MOY_SYNC_RTOS
-    return esp_timer_get_time();
-    #else
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
-    #endif
-}
 
 static slot_t *slot_of(uint32_t pid) {
     slot_t (*t)[MOY_SCREEN_SLOTS] = MOY_SYNC_AT(s_slots);
@@ -195,7 +178,7 @@ int moy_screen_slot_frame(uint32_t pid, uint32_t held, uint32_t pressed, uint32_
             out |= MOY_SCREEN_SLOT_SENT;
         }
     }
-    int64_t end = now_us() + (int64_t)max_ms * 1000;
+    int64_t end = moy_now_us() + (int64_t)max_ms * 1000;
     for (;;) {
         uint32_t seen = __atomic_load_n(&s->shown, __ATOMIC_ACQUIRE);
         MOY_SYNC_LOCK(&s_lock);
@@ -212,8 +195,8 @@ int moy_screen_slot_frame(uint32_t pid, uint32_t held, uint32_t pressed, uint32_
             s->served = hops;
             moy_vmq_serve();            // the program's call waits on this task
         }
-        int64_t left = end - now_us();
-        #if !defined(MOY_SYNC_RTOS) && !defined(MOY_SYNC_THREADS)
+        int64_t left = end - moy_now_us();
+        #if !defined(MOY_ON_BOARD) && !defined(MOY_THREADS)
         left = 0;                       // nothing to wait on: the caller is stepped
         #endif
         if (left <= 0) {
@@ -244,4 +227,18 @@ const uint8_t *moy_screen_slot_pixels(uint32_t pid, int *w, int *h, int *depth) 
     *h = s->h;
     *depth = s->depth;
     return s->px;
+}
+
+int moy_screen_slot_tell(uint32_t pid, uint32_t answers) {
+    slot_t *s = slot_of(pid);
+    if (s == NULL) {
+        return -ENODEV;
+    }
+    __atomic_store_n(&s->told, answers, __ATOMIC_RELEASE);
+    return 0;
+}
+
+uint32_t moy_screen_slot_told(uint32_t pid) {
+    slot_t *s = slot_of(pid);
+    return s != NULL ? __atomic_load_n(&s->told, __ATOMIC_ACQUIRE) : 0u;
 }

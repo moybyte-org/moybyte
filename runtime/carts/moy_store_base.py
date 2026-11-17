@@ -4,9 +4,8 @@ store module shares.
 The directory and extension names, the sibling-path formula (system state
 lives BESIDE the carts dir), `ensure_dirs`, the cart NAME rule (`slug`), the
 manifest canvas-field codec, the rows of a sprite sheet a launcher icon is cut
-from (`icon_rows`, which the shelf's scan and the sheet codec both read) and
-the directory primitives `moy_fs` lacks: a folder's listing, what it proves
-absent, and a scan's walk into a folder (`_enter`/`_leave`).
+from (`icon_rows`, which the sheet codec and the shelf read) and the directory
+primitives `moy_fs` lacks: a folder's listing and what it proves absent.
 `moy_carts` (the store core) and `moy_seed` import from here and never from
 each other's callers, so either can be imported first. `moy_carts` re-exports
 every name under its old spelling.
@@ -17,13 +16,7 @@ try:
 except ImportError:  # pragma: no cover
     os = None
 
-try:
-    from moy_fs import (_exists, _mkdir, set_publish_root, _native as _store)
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_fs import (_exists, _mkdir, set_publish_root,
-                                _native as _store)
-if _store is not None and not hasattr(_store, "rmtree"):
-    _store = None
+from moy_fs import (_exists, _mkdir, set_publish_root, _native as _store)
 
 
 CARTS_DIR = "/sd/moybyte/carts"
@@ -195,6 +188,16 @@ def apps_root(root):
     return _sibling_path(root, APPS_DIR)
 
 
+def session_root(carts_root):
+    """The files tree a shell session sees: the folder whose `sd/moybyte/carts`
+    is the carts root, as on a board, else the carts root's own folder."""
+    r = (carts_root or "").rstrip("/")
+    if r.endswith(CARTS_DIR):
+        return r[:-len(CARTS_DIR)] or "/"
+    i = r.rfind("/")
+    return r[:i] if i > 0 else r
+
+
 # A cart is a folder whose name ends in CART_EXT. Its path is composed here and
 # nowhere else (native/moy_index/moy_index.h): a store that shards its
 # root or keeps a cart elsewhere changes these and no caller.
@@ -341,7 +344,7 @@ def builtin_name(path):
 def cart_folder(name, ns=None):
     """The folder a cart named `name` (a title, or a slug already) is stored
     in: `<ns>.<slug>` and the extension, or the bare slug with no `ns`."""
-    return (slug(ns) + "." if ns else "") + slug(name) + CART_EXT
+    return _store.folder(name, ns)
 
 
 def store_path(root, rel):
@@ -457,53 +460,7 @@ def _has(folder, path, name):
     return _exists(path + "/" + name)
 
 
-def _cwd():
-    try:
-        return os.getcwd()
-    except (OSError, AttributeError):
-        return None
-
-
-def _enter(path):
-    """Move the working directory into the folder at `path` and return its
-    listing, or None when either fails -- the caller then reads by full path.
-    On FAT a name opened from inside the folder is looked up in that folder
-    alone, where a full path walks every directory above it again. Nothing may
-    import while a scan is inside a folder: `""` on sys.path is the working
-    directory, so a cart's own files would be searched, and could shadow a
-    module."""
-    try:
-        os.chdir(path)
-    except (OSError, AttributeError):
-        return None
-    return _listing("")
-
-
-def _leave(here):
-    try:
-        os.chdir(here)
-    except (OSError, AttributeError):
-        pass
-
-
 def _rmtree(path):
-    if _store is not None:
-        _store.rmtree(path)
-        return
-    try:
-        names = os.listdir(path)
-    except OSError:
-        return
-    for n in names:
-        p = path + "/" + n
-        if _is_dir(p):
-            _rmtree(p)
-        else:
-            try:
-                os.remove(p)
-            except OSError:
-                pass
-    try:
-        os.rmdir(path)
-    except OSError:
-        pass
+    """The folder at `path` and everything in it removed (the store's
+    moy_cat_rmtree); a file or an absent path is left as it is."""
+    _store.rmtree(path)

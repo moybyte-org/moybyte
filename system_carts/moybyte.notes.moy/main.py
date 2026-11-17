@@ -84,7 +84,6 @@ def _layout(w, h, fs):
 
 def _init():
     _refresh()
-    textmode(True)
     # A note the console was already asked to open -- Files routed a `.md`, a
     # `.json` or a `.txt` here. `open_editor()` with no name is that request,
     # and None when there was none.
@@ -174,7 +173,6 @@ def _close():
         name = ed.name()
         ed.close()                      # saves on the way out: no Save button
         ed = None
-        textmode(True)
         _refresh(name)
 
 

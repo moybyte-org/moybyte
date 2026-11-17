@@ -118,13 +118,6 @@ int moy_font_info(uint32_t font, moy_font_info_t *out);
 uint32_t moy_text_print_font(void);
 int64_t moy_text_print_font_use(uint32_t font);
 
-// The byte order of every target's words, which the glyph lane blends in:
-// byte-swapped RGB565 (1, the default: the S3 panels, the host and the
-// browser) or canonical (0: the P4's DPI scan-out). The canvas sets it from
-// its wire palette (device_canvas.WIRE_SWAPPED).
-void moy_text_wire(int swapped);
-int moy_text_wire_swapped(void);
-
 // The version 2 glyphs drawn since boot: out[0] those that read nothing (from
 // a ramp, or 1 bpp opaque ink), out[1] those that read the target (the glyph
 // lane's op count, docs/history/look_2026-10.md step 4).

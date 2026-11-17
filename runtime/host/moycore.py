@@ -11,10 +11,7 @@ the native module has none.
 
 from __future__ import annotations
 
-try:
-    from runtime import lua_binding as _lb
-except ImportError:                      # loaded flat, runtime/ on sys.path
-    import lua_binding as _lb            # type: ignore[no-redef]
+import lua_binding as _lb            # type: ignore[no-redef]
 
 if not _lb.HostLuaRun.available():
     raise ImportError("moycore: no host Lua binding (a C compiler builds it)")
@@ -154,8 +151,8 @@ def svc_tasks():
     return bool(_lb.play_lib().moycore_svc_tasks())
 
 
-def svc_step(now_ms):
-    return _lb.play_lib().moycore_svc_step(now_ms & 0xFFFFFFFF)
+def svc_step():
+    return _lb.play_lib().moycore_svc_step()
 
 
 def svc_reset():
@@ -184,6 +181,14 @@ def layer_restore(state):
 
 def exec(src, name):  # noqa: A001 -- the module's verb is named exec on a board
     return _run().exec(src, name)
+
+
+def own(pid):
+    return _run().own(pid)
+
+
+def call(fn, args):
+    return _run().call(fn, args)
 
 
 def load(chunks, layout=None):

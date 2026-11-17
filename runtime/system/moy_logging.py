@@ -121,10 +121,7 @@ class Logger:
             return
         self._emit(ERROR, msg, args)
         if isinstance(exc_info, BaseException):
-            try:
-                import os_log
-            except ImportError:  # pragma: no cover - host fallback
-                from runtime import os_log
+            import os_log
             text = os_log.traceback_text(exc_info)
             if text and _L is not None:
                 _L.write(_syslog(ERROR), None, text)

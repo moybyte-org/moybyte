@@ -44,6 +44,13 @@ PNG, indexed or RGB, at most 64 KB (SPEC.md §3.6 has the profile). Paint opens 
 a cart without one shows its icon instead, and a file outside the profile is
 ignored, never refused.
 
+A manifest's `format` says the console a cart needs (SPEC.md §13): `"moy-"` and a
+level. This console runs level 1 (`runtime/run/player_fit.py`'s `FORMAT_LEVEL`), and a
+cart above it, in any language, is refused before any of its code runs, on the
+"Needs a newer console." notice a compiled cart missing an import gets. A `format`
+that names no level, such as the `"moybyte-cart-v1"` a cart made here carries, is a
+Moybyte cart and runs.
+
 Three more manifest fields say what the cart is in a list (SPEC.md §3.7), and
 none of them is ever a reason to refuse it: `description` (plain text, at most
 240 bytes), `genre` (one of twelve words; any other is no genre) and `tags` (at
@@ -901,6 +908,7 @@ same here as on any other console that implements the spec.
 | `cfg(key, default=None)` | read a value from the cart's `config.json` — the **"Make it mine"** tuning a kid edits (speed, counts, colors…) |
 | `col(name_or_index)` | resolve a color **name** (0–15) or int to a `0–63` palette index |
 | `rnd(n=1.0)` | random float in `[0, n)` |
+| `srand(seed=0)` | seed `rnd`: the same seed replays the same sequence on the same tier |
 | `flr(x)` | floor to int |
 | `W`, `H` | canvas size (320, 240) |
 | `wifi` | **only present** if the cart's manifest `moybyte.permissions` include `"network"` (capability-gated, `#38`), and `None` while that is turned off in Settings. A normal cart has no `wifi` name at all |

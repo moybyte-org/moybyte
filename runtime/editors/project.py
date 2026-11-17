@@ -21,17 +21,11 @@ properties, so every surface file + every test reaches them unmodified.
 Canonical home is runtime/; every board stages it.
 """
 
-try:
-    from project_store import ProjectStore
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.project_store import ProjectStore
+from project_store import ProjectStore
 # The #111 op-history core: CONFIG's fine-grained undo lives directly on Project
 # (there is no separate ConfigEditor class the way paint/map/scene/music have one --
 # see _ConfigOps below).
-try:
-    from op_history import History, OpCodec
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.op_history import History, OpCodec
+from op_history import History, OpCodec
 
 
 class _ConfigOps(OpCodec):

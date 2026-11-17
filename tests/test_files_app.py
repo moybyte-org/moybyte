@@ -36,7 +36,7 @@ def _files(ws):
     _open_app(ws, "Files")
     drv = host_app.ConsoleDriver(ws)
     _frames(drv)
-    return ws.files_app, drv
+    return ws.app("files"), drv
 
 
 def _frames(drv, n=3):
@@ -72,7 +72,7 @@ def _tap(drv, x, y):
 
 def _art(ws, drv):
     """The Pictures place's page, reached as a person does: down twice, Enter."""
-    app = ws.files_app
+    app = ws.app("files")
     _press(drv, "down", "down", "a")
     assert (app.place, app.level) == (files_app.PICTURES, "files")
     return app
@@ -331,11 +331,11 @@ def test_paints_open_is_my_art_and_its_pick_switches_documents(tmp_path):
     _seed_drawing(carts, "one", color=11)
     _seed_drawing(carts, "two", color=12)
     _open_app(ws, "Paint")
-    app = ws.artwork_app
+    app = ws.app("artwork")
     app._verb("open")                    # More's Open...: the drawings' page
     ws.frame(_DT)
     assert ws.wm.top_kind() == "myart"
-    art = ws._apps_by_id["myart"]
+    art = ws.app("myart")
     assert set(art.drawings) >= {"one", "two"}
     art._verb("open", "two")
     ws.frame(_DT)
@@ -348,7 +348,7 @@ def test_paint_autosaves_on_the_idle_debounce(tmp_path):
     carts = str(tmp_path / "carts")
     ws = _ws(tmp_path)
     _open_app(ws, "Paint")
-    app = ws.artwork_app
+    app = ws.app("artwork")
     assert ws.artwork.doc_name() is None       # nothing saved yet
     app.doc.snapshot()
     app.doc.put(5, 5, 14)
@@ -365,7 +365,7 @@ def test_new_drawing_keeps_the_old_file(tmp_path):
     carts = str(tmp_path / "carts")
     ws = _ws(tmp_path)
     _open_app(ws, "Paint")
-    app = ws.artwork_app
+    app = ws.app("artwork")
     app.doc.snapshot()
     app.doc.put(1, 1, 22)
     app.doc.finish()
@@ -381,13 +381,13 @@ def test_new_drawing_keeps_the_old_file(tmp_path):
 def test_files_is_app_rejects_lookalikes(tmp_path):
     ws = _ws(tmp_path)
     real = next(c for c in ws.carts.all if c.get("title") == "Files")
-    assert ws.files_app.is_app(real)
+    assert ws.app("files").is_app(real)
     fake = dict(real)
     fake["title"] = "files"
-    assert not ws.files_app.is_app(fake)
+    assert not ws.app("files").is_app(fake)
     fake2 = dict(real)
     fake2["permissions"] = ["graphics", "input"]
-    assert not ws.files_app.is_app(fake2)
+    assert not ws.app("files").is_app(fake2)
 
 
 # -- provenance: "used in:" + the one-tap UPDATE (#108 phase 2) -------------------
@@ -397,7 +397,7 @@ def test_usage_tracks_stale_copies_and_update_clears_them(tmp_path):
     ws = _ws(tmp_path)
     _seed_drawing(carts, "dragon", color=20)
     # Copy it into a project (with a provenance stamp) + set as wallpaper.
-    copies = ws.files_app._copies
+    copies = ws.app("files")._copies
     ti = copies.targets().index("Star Catcher")
     assert copies.attach(ti, "dragon")
     assert copies.set_wallpaper("dragon")
@@ -461,7 +461,7 @@ def test_send_sprites_to_files_producer(tmp_path):
     ws.carts.apply(shelf(carts))
     ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Doodle"))
     ws.run.project.sheet.pset(0, 0, 9)
-    name = ws.send_sprites_to_files()
+    name = ws.saves.send_sprites_to_files()
     assert name in moy_carts.list_files("sprites", carts)
     assert moy_carts.load_file("sprites", name, carts) == ws.run.project.sheet.to_hex()
 
@@ -497,11 +497,11 @@ def test_the_desk_shows_the_places_beside_the_files(tmp_path):
     _seed_drawing(carts, "dragon")
     ws = host_app.build_workstation(carts, sys_size=(1024, 600), panel_diagonal_in=7.0,
                                     font_scale=1, windowed=True)
-    ws.open_desk()
-    ws.open_app(ws._apps_by_id["files"])
+    ws.home.open_desk()
+    ws.spine.open_app(ws.app("files"))
     drv = host_app.ConsoleDriver(ws)
     _frames(drv, 4)
-    app = ws.files_app
+    app = ws.app("files")
     assert app.layout.two and app.layout.row_h == 28
     assert app._focused == "files", "the desk opens on the projects' rows"
     assert app._ui.box("Places") is not None and app._ui.box("files") is not None
@@ -549,11 +549,11 @@ def test_the_desks_cut_row_shows_under_the_fade(tmp_path, theme, mode):
     cfg = dict(g.CONFIGS["p4_1024x600_cs2_fs1_windowed"], variant=mode)
     cfg["theme"] = theme
     ws = g._build(cfg, Path(tmp_path) / "carts")
-    ws.open_desk()
-    ws.open_app(ws._apps_by_id["files"])
+    ws.home.open_desk()
+    ws.spine.open_app(ws.app("files"))
     el._frame(ws, 2)
     win = el._place(ws, "files", (112, 54, 548, 380))
-    ws.files_app.open_place("projects", keep="Harpoon Pop")
+    ws.app("files").open_place("projects", keep="Harpoon Pop")
     el._frame(ws, 6)
     cx, cy, _cw, _ch = win.content_rect()
     lay = win.ctx.app_layouts["files"]

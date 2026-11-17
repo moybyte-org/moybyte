@@ -39,19 +39,6 @@ int moy_url_parse(const char *url, int *tls, char *host, size_t host_cap,
                   uint16_t *port, const char **path);
 
 typedef struct {
-    int status;             // 0 when the status line does not parse
-    uint32_t clen;          // Content-Length, 0 when absent or unreadable
-    const char *loc;        // Location's value, trimmed; NULL when none
-    size_t loc_n;
-    size_t head_end;        // the byte past the blank line
-} moy_http_resp_t;
-
-// A response head off the first `n` bytes of `buf`: MOY_HTTP_OK with `r`
-// filled, or MOY_HTTP_PARTIAL until the "\r\n\r\n" arrives. Header names
-// match without regard to ASCII case.
-int moy_http_resp_parse(const char *buf, size_t n, moy_http_resp_t *r);
-
-typedef struct {
     uint32_t h[8];
     uint64_t len;
     uint8_t buf[64];
@@ -269,11 +256,11 @@ void moy_slot_abort(void);
 
 // The companion radio's sink and its version, where the image has one
 // (native/p4/moy_c6): 0, or an ESP error.
-int moy_c6_ota_begin(void) __attribute__((weak));
-int moy_c6_ota_write(const void *p, size_t n) __attribute__((weak));
-int moy_c6_ota_end(void) __attribute__((weak));
-int moy_c6_ota_activate(void) __attribute__((weak));
-int moy_c6_version(void) __attribute__((weak));     // -1 when it says nothing
+int moy_c6_ota_begin(void);
+int moy_c6_ota_write(const void *p, size_t n);
+int moy_c6_ota_end(void);
+int moy_c6_ota_activate(void);
+int moy_c6_version(void);     // -1 when it says nothing
 
 // The VM stopped: close the client's connections and drop an update that was
 // streaming (the kernel's teardown calls it).

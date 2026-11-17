@@ -94,30 +94,43 @@
 #include <strings.h>
 #include <time.h>
 
+#include "moy_sb.h"
+#include "moy_codec.h"
 #include "moy_fs.h"
 #include "moy_json.h"
 #include "moy_net.h"
+#pragma weak moy_gpio_pins
 #include "moy_vol.h"
 #include "moy_webauth.h"
 
-// The bundle is native/moy_web's, where the image takes it; a build without it
-// (the browser's own) serves the 404 that says how to get one.
+// The bundle is the add-on cart's pack (moy_page.h); the stamp of the one this
+// image names is native/moy_web's, where the image links it.
+#include "moy_page.h"
 #if __has_include("moy_web_blob.h")
 #include "moy_web_blob.h"
-#define HAVE_BUNDLE 1
-extern const moy_web_asset_t moy_web_assets[] __attribute__((weak));
-extern const unsigned int moy_web_asset_count __attribute__((weak));
-extern const char moy_web_stamp[] __attribute__((weak));
 #else
-#define HAVE_BUNDLE 0
+extern const char moy_web_stamp[];
 #endif
-extern bool moy_flush_drain(void) __attribute__((weak));
+#pragma weak moy_web_stamp
+#if __has_include("moy_flush.h")
+#include "moy_flush.h"
+#else
+bool moy_flush_drain(void);
+#endif
+#pragma weak moy_flush_drain
 // The web terminal's bridge (native/moy_tty/moy_tty_ws.c), where the image
 // takes it: 0 when it took the upgraded socket, else nonzero (busy, memory).
 // `seal` is the session's (its keys and the upgrade's sequence number), or
 // NULL on the open host.
-extern int moy_web_term(int fd, int cols, int rows, const moy_wa_seal_t *seal)
-    __attribute__((weak));
+#if __has_include("moy_tty.h")
+#include "moy_tty.h"
+#else
+int moy_web_term(int fd, int cols, int rows, const struct moy_wa_seal *seal);
+#endif
+
+// What a builder here grows in: the store's call scratch.
+static const moy_htab_mem_t STORE_MEM = { moy_store_alloc, moy_store_free };
+#pragma weak moy_web_term
 
 #define CHUNK_MIN 8192
 #define CHUNK_HEAD 8
@@ -127,6 +140,11 @@ extern int moy_web_term(int fd, int cols, int rows, const moy_wa_seal_t *seal)
 #define DOC_MAX 512
 #define READ_CHUNK 4096
 #define BIN_CHUNK 3072              // READ_CHUNK * 3 / 4: whole base64 quanta
+// A request's head, and a body that fits beside it, are read into these kept
+// bytes; a longer body gets a buffer sized to its request (cut at
+// MOY_HTTP_REQ_MAX) that goes back when the request ends, so an idle host
+// keeps no request-sized block (a board with no PSRAM has none to spare).
+#define HEAD_CAP 4096
 #define WALK_DEPTH 16
 #define MEDIA_DIR MOY_SYNC_MUSIC
 #define MEDIA_NAME_MAX 128
@@ -167,7 +185,9 @@ typedef struct {
     size_t pbn;                     // its body's length, opened
     moy_wa_seal_t pseal;            // its answer's seal
     moy_wa_seal_t hseal;            // moy_web_handle's parked request's
-    char *req;                      // MOY_HTTP_REQ_MAX + 1 bytes
+    char *req;                      // the request in hand: `head`, or `big` for a longer one
+    char *head;                     // HEAD_CAP + 1 bytes, kept
+    char *big;                      // a longer request's own, until it ends; NULL when none
     char *chunk;                    // CHUNK_HEAD + CHUNK_MIN + 2
     char *io;                       // READ_CHUNK + 4 (a UTF-8 carry)
     char *b64;                      // BIN_CHUNK / 3 * 4
@@ -188,6 +208,8 @@ typedef struct {
     const moy_wa_seal_t *seal;      // NULL: the answer goes in the clear
     moy_wa_seal_t sealed;           // what `seal` points at for a gated route
     size_t bn;                      // the request body's length, once opened
+    uint8_t paged;                  // the target came under the page's prefix
+    uint8_t lasting;                // ...and that prefix names this image's page
 } out_t;
 
 // -- the host's state -----------------------------------------------------------
@@ -200,12 +222,12 @@ static int ensure(void) {
     if (w == NULL) {
         return 0;
     }
-    w->req = moy_net_alloc(MOY_HTTP_REQ_MAX + 1u);
+    w->req = w->head = moy_net_alloc(HEAD_CAP + 1u);
     w->chunk = moy_net_alloc(CHUNK_ALLOC);
     w->io = moy_net_alloc(READ_CHUNK + 4u);
     w->b64 = moy_net_alloc(BIN_CHUNK / 3u * 4u + 4u);
-    if (w->req == NULL || w->chunk == NULL || w->io == NULL || w->b64 == NULL) {
-        moy_net_free(w->req);
+    if (w->head == NULL || w->chunk == NULL || w->io == NULL || w->b64 == NULL) {
+        moy_net_free(w->head);
         moy_net_free(w->chunk);
         moy_net_free(w->io);
         moy_net_free(w->b64);
@@ -252,6 +274,7 @@ static void config(const moy_web_cfg_t *cfg) {
     copy_list(W->kinds, sizeof(W->kinds), cfg->kinds);
     copy_list(W->defer, sizeof(W->defer), cfg->defer);
     moy_wa_config(cfg->system);
+    moy_page_at(W->carts);
 }
 
 static void close_conn(int *fd) {
@@ -259,6 +282,14 @@ static void close_conn(int *fd) {
         moy_http_close(*fd);
         *fd = -1;
     }
+}
+
+// The request in hand has ended (answered, handed on, or its park over): a
+// longer one's buffer goes back.
+static void req_done(void) {
+    moy_net_free(W->big);
+    W->big = NULL;
+    W->req = W->head;
 }
 
 int moy_web_start(const moy_web_cfg_t *cfg) {
@@ -321,6 +352,9 @@ static void stop_now(void) {
     close_conn(&W->lfd);
     close_conn(&W->pfd);
     close_conn(&W->afd);
+    if (W->cur < 0) {
+        req_done();                 // a stop from inside a route leaves serve() its request
+    }
     W->closing = 0;
     W->taken = 0;
     W->events |= MOY_WEB_EV_STOPPED;
@@ -410,13 +444,51 @@ size_t moy_web_shelf(char *out, size_t cap) {
 }
 
 const char *moy_web_stamp_text(void) {
-    #if HAVE_BUNDLE
-    if (moy_web_stamp != NULL && moy_web_assets != NULL
-        && moy_web_asset_count != 0) {
+    if (moy_web_stamp != NULL && moy_page_state() == MOY_PAGE_READY) {
         return moy_web_stamp;
     }
-    #endif
     return NULL;
+}
+
+// THE PAGE'S PREFIX. `/` answers a redirect to /p/<12 hex of the digest this
+// image names>/, and every request under it is routed with the prefix taken
+// off. The page asks for everything by a relative URL (its assets, /sync,
+// /auth, the pulls), so it needs no change, and an asset under the prefix is
+// the same bytes for as long as the digest is: a browser keeps it for good.
+#define PAGE_PREFIX 16              // "/p/" + 12 hex + "/"
+
+static void page_tag(char out[13]) {
+    uint8_t want[32];
+    static const char hex[] = "0123456789abcdef";
+    if (!moy_page_want(want)) {
+        memset(want, 0, sizeof(want));
+    }
+    for (int i = 0; i < 6; i++) {
+        out[2 * i] = hex[want[i] >> 4];
+        out[2 * i + 1] = hex[want[i] & 15];
+    }
+    out[12] = '\0';
+}
+
+// Take the page's prefix off `*t`; `o` says it was there and whether it
+// names this image's page.
+static void unprefix(out_t *o, const char **t, size_t *tn) {
+    const char *p = *t;
+    if (*tn < PAGE_PREFIX || memcmp(p, "/p/", 3) != 0 || p[PAGE_PREFIX - 1] != '/') {
+        return;
+    }
+    for (int i = 3; i < PAGE_PREFIX - 1; i++) {
+        char c = p[i];
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+            return;
+        }
+    }
+    char tag[13];
+    page_tag(tag);
+    o->paged = 1;
+    o->lasting = memcmp(p + 3, tag, 12) == 0;
+    *t = p + PAGE_PREFIX - 1;
+    *tn -= PAGE_PREFIX - 1;
 }
 
 // -- the response writer ---------------------------------------------------------
@@ -619,34 +691,20 @@ static void jstr(out_t *o, const char *s, size_t n) {
 // -- the pull -----------------------------------------------------------------------
 
 typedef struct {
-    char *names;            // each NUL-terminated, then its is_dir byte
-    size_t n, cap;
+    moy_sb_t b;             // each name NUL-terminated, then its is_dir byte
     size_t count;
-    int fail;
 } names_t;
 
 static int collect(void *ctx, const char *name, size_t len, int is_dir,
                    uint32_t size) {
     (void)size;
     names_t *l = ctx;
-    if (l->n + len + 2u > l->cap) {
-        size_t cap = (l->cap ? l->cap * 2u : 512u) + len + 2u;
-        char *p = moy_store_alloc(cap);
-        if (p == NULL) {
-            l->fail = 1;
-            return 1;
-        }
-        if (l->names != NULL) {
-            memcpy(p, l->names, l->n);
-            moy_store_free(l->names, l->cap);
-        }
-        l->names = p;
-        l->cap = cap;
+    moy_sb_put(&l->b, name, len);
+    moy_sb_byte(&l->b, '\0');
+    moy_sb_byte(&l->b, (char)(is_dir != 0));
+    if (l->b.failed) {
+        return 1;
     }
-    memcpy(l->names + l->n, name, len);
-    l->names[l->n + len] = '\0';
-    l->names[l->n + len + 1u] = (char)(is_dir != 0);
-    l->n += len + 2u;
     l->count++;
     return 0;
 }
@@ -656,24 +714,23 @@ static int by_name(const void *a, const void *b) {
 }
 
 // The folder's entries, sorted by name: `*index` (moy_store_alloc'd, `count`
-// pointers into l->names), or 0 when it cannot be listed after IO_TRIES.
+// pointers into l->b), or 0 when it cannot be listed after IO_TRIES.
 static int list_sorted(const char *path, names_t *l, const char ***index) {
     *index = NULL;
     for (int t = 0; t < IO_TRIES; t++) {
-        memset(l, 0, sizeof(*l));
+        l->b = moy_sb_grown(&STORE_MEM);
+        l->count = 0;
         moy_vol_t v;
         const char *rest;
         int rc = moy_vol_at(path, &v, &rest);
         if (rc == 0) {
             rc = moy_vol_list(&v, rest, collect, l);
         }
-        if (rc == 0 && !l->fail) {
+        if (rc == 0 && !l->b.failed) {
             break;
         }
-        if (l->names != NULL) {
-            moy_store_free(l->names, l->cap);
-        }
-        memset(l, 0, sizeof(*l));
+        moy_sb_free(&l->b);
+        l->count = 0;
         if (rc == 2 || t + 1 == IO_TRIES) {    // ENOENT: nothing to retry
             return 0;
         }
@@ -684,14 +741,14 @@ static int list_sorted(const char *path, names_t *l, const char ***index) {
     }
     const char **ix = moy_store_alloc(l->count * sizeof(char *));
     if (ix == NULL) {
-        moy_store_free(l->names, l->cap);
-        memset(l, 0, sizeof(*l));
+        moy_sb_free(&l->b);
+        l->count = 0;
         return 0;
     }
     size_t k = 0;
-    for (size_t i = 0; i < l->n; k++) {
-        ix[k] = l->names + i;
-        i += strlen(l->names + i) + 2u;
+    for (size_t i = 0; i < l->b.n; k++) {
+        ix[k] = l->b.p + i;
+        i += strlen(l->b.p + i) + 2u;
     }
     qsort(ix, l->count, sizeof(char *), by_name);
     *index = ix;
@@ -702,9 +759,7 @@ static void list_free(names_t *l, const char **ix) {
     if (ix != NULL) {
         moy_store_free((void *)ix, l->count * sizeof(char *));
     }
-    if (l->names != NULL) {
-        moy_store_free(l->names, l->cap);
-    }
+    moy_sb_free(&l->b);
 }
 
 static int is_dir_of(const char *name) {
@@ -716,25 +771,6 @@ static int open_read(const char *path, moy_vol_file_t **f) {
     const char *rest;
     int rc = moy_vol_at(path, &v, &rest);
     return rc ? rc : moy_vol_open(&v, rest, MOY_VOL_READ, f);
-}
-
-// The bytes of `s` up to its last whole UTF-8 sequence: `*whole` that length.
-// 0 when the bytes cannot be UTF-8 however they continue.
-static int utf8_whole(const char *s, size_t n, size_t *whole) {
-    size_t cut = n;
-    for (size_t back = 1; back <= 3 && back <= n; back++) {
-        unsigned char c = (unsigned char)s[n - back];
-        if ((c & 0xC0) == 0x80) {
-            continue;
-        }
-        size_t need = c >= 0xF0 ? 4u : c >= 0xE0 ? 3u : c >= 0xC0 ? 2u : 1u;
-        if (need > back) {
-            cut = n - back;
-        }
-        break;
-    }
-    *whole = cut;
-    return moy_utf8_valid(s, cut);
 }
 
 // Up to `cap` bytes of the file into buf, the carry first.
@@ -829,7 +865,8 @@ static void text_value(out_t *o, const char *path, const char *rel, int *first) 
     if (open_first(path, READ_CHUNK, &f, &got) != 0) {
         return;                     // the card gave up: skip, never fail the pull
     }
-    if (!utf8_whole(W->io, got, &whole)) {
+    whole = moy_utf8_whole(W->io, got);
+    if (!moy_utf8_valid(W->io, whole)) {
         moy_vol_close(f);
         return;                     // not text: absent, never present and empty
     }
@@ -853,7 +890,8 @@ static void text_value(out_t *o, const char *path, const char *rel, int *first) 
             break;                  // the card gave up, or the end
         }
         got = carry + k;
-        if (!utf8_whole(W->io, got, &whole)) {
+        whole = moy_utf8_whole(W->io, got);
+        if (!moy_utf8_valid(W->io, whole)) {
             break;                  // not text past here: end the value
         }
     }
@@ -861,27 +899,6 @@ static void text_value(out_t *o, const char *path, const char *rel, int *first) 
         moy_vol_close(f);
     }
     body(o, "\"", 1);
-}
-
-static const char B64[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-static size_t b64(const unsigned char *p, size_t n, char *out) {
-    size_t k = 0;
-    for (size_t i = 0; i < n; i += 3) {
-        uint32_t v = (uint32_t)p[i] << 16;
-        if (i + 1 < n) {
-            v |= (uint32_t)p[i + 1] << 8;
-        }
-        if (i + 2 < n) {
-            v |= p[i + 2];
-        }
-        out[k++] = B64[(v >> 18) & 63];
-        out[k++] = B64[(v >> 12) & 63];
-        out[k++] = i + 1 < n ? B64[(v >> 6) & 63] : '=';
-        out[k++] = i + 2 < n ? B64[v & 63] : '=';
-    }
-    return k;
 }
 
 static void binary_value(out_t *o, const char *path, const char *rel,
@@ -899,7 +916,7 @@ static void binary_value(out_t *o, const char *path, const char *rel,
     jstr(o, rel, strlen(rel));
     body(o, ":{\"b\":\"", 7);
     while (got > 0 && !o->err) {
-        body(o, W->b64, b64((const unsigned char *)W->io, got, W->b64));
+        body(o, W->b64, moy_b64_encode((const uint8_t *)W->io, got, W->b64, 0));
         pos += (uint32_t)got;
         if (got < BIN_CHUNK
             || read_next(path, &f, pos, 0, BIN_CHUNK, &got) != 0) {
@@ -983,6 +1000,16 @@ static int in_list(const char *list, const char *s, size_t n) {
     return 0;
 }
 
+// Whether the defer list is "*": the setup form's host (route, below).
+static int defers_all(void) {
+    for (const char *k = W->defer; *k; k += strlen(k) + 1u) {
+        if (k[0] == '*' && k[1] == '\0') {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void pack(out_t *o, const char *root, const char *kinds, int bytes) {
     body(o, "{", 1);
     int first = 1;
@@ -1028,35 +1055,34 @@ static int path_is(const char *p, size_t n, const char *want) {
 }
 
 static void asset(out_t *o, const char *name, const char *ctype) {
-    char gz[40];
+    char gz[48];
     snprintf(gz, sizeof(gz), "%s.gz", name);
-    const unsigned char *data = NULL;
-    unsigned len = 0;
+    uint32_t off = 0, len = 0;
     int zipped = 0;
-    #if HAVE_BUNDLE
-    const moy_web_asset_t *hit = NULL;
-    if (moy_web_assets != NULL && moy_web_asset_count != 0) {
-        for (unsigned i = 0; i < moy_web_asset_count && hit == NULL; i++) {
-            if (strcmp(moy_web_assets[i].name, gz) == 0) {
-                hit = &moy_web_assets[i];
-                zipped = 1;
-            }
-        }
-        for (unsigned i = 0; i < moy_web_asset_count && hit == NULL; i++) {
-            if (strcmp(moy_web_assets[i].name, name) == 0) {
-                hit = &moy_web_assets[i];
-            }
+    const char *why = moy_page_why();
+    if (why == NULL) {
+        if (moy_page_find(gz, &off, &len) == 0) {
+            zipped = 1;
+        } else if (moy_page_find(name, &off, &len) != 0) {
+            simple(o, 404, "text/plain; charset=utf-8", "not found");
+            return;
         }
     }
-    if (hit != NULL) {
-        data = hit->data;
-        len = hit->len;
+    if (why != NULL) {
+        simple(o, moy_page_state() == MOY_PAGE_STALE ? 503 : 404,
+               "text/plain; charset=utf-8", why);
+        return;
     }
-    #endif
-    if (data == NULL) {
-        simple(o, 404, "text/plain; charset=utf-8",
-               "this firmware has no web console baked in -- build "
-               "firmware/web_runner/dist and reflash");
+    moy_vol_file_t *f = NULL;
+    int gate = moy_vol_gate_enter(moy_page_path());
+    int rc = gate < 0 ? -1 : open_read(moy_page_path(), &f);
+    if (rc == 0 && moy_vol_seek(f, off) != 0) {
+        moy_vol_close(f);
+        rc = -1;
+    }
+    moy_vol_gate_leave(gate);
+    if (rc != 0) {
+        simple(o, 503, "text/plain; charset=utf-8", "the browser console could not be read");
         return;
     }
     char head[320];
@@ -1065,16 +1091,81 @@ static void asset(out_t *o, const char *name, const char *ctype) {
                      "Content-Type: %s\r\n"
                      "Content-Length: %u\r\n"
                      "%s"
-                     "Cache-Control: no-store\r\n"
+                     "Cache-Control: %s\r\n"
                      "Access-Control-Allow-Origin: *\r\n"
                      "Connection: close\r\n\r\n",
-                     ctype, len,
-                     zipped ? "Content-Encoding: gzip\r\n" : "");
+                     ctype, (unsigned)len,
+                     zipped ? "Content-Encoding: gzip\r\n" : "",
+                     o->lasting ? "public, max-age=31536000, immutable" : "no-cache");
     raw(o, head, (size_t)k);
-    for (unsigned i = 0; i < len && !o->err; i += 4096u) {
-        unsigned n = len - i < 4096u ? len - i : 4096u;
-        raw(o, data + i, n);
+    // A piece at a time, each read under the store's gate: a 1.4 MB wasm never
+    // sits in either heap, and the panel's flush waits only for one piece.
+    while (len > 0 && !o->err) {
+        size_t want = len < READ_CHUNK ? len : READ_CHUNK, got = 0;
+        gate = moy_vol_gate_enter(moy_page_path());
+        rc = gate < 0 ? -1 : read_some(f, W->io, want, &got);
+        moy_vol_gate_leave(gate);
+        if (rc != 0 || got != want) {
+            o->err = 1;
+            break;
+        }
+        raw(o, W->io, got);
+        len -= (uint32_t)got;
     }
+    gate = moy_vol_gate_enter(moy_page_path());
+    moy_vol_close(f);
+    moy_vol_gate_leave(gate);
+}
+
+// The root's answer where the page is ABSENT on a board that offers the way
+// back (moy_page.h): why, and the link that asks for the console again; the
+// link followed is counted and answered with what happens next.
+static void way_back(out_t *o, const char *why, const char *t, size_t tn) {
+    size_t an = sizeof(MOY_PAGE_ASK) - 1u;
+    int asked = tn == an && memcmp(t, MOY_PAGE_ASK, an) == 0;
+    if (asked) {
+        moy_page_ask();
+    }
+    char doc[512];
+    snprintf(doc, sizeof(doc),
+             "<!doctype html><meta charset=utf-8>"
+             "<meta name=viewport content=\"width=device-width\"><title>Moybyte</title>"
+             "<p>%s</p>%s", asked
+             ? "The browser console is being installed on this board. Reload this "
+               "page in a minute." : why,
+             asked ? "" : "<p><a href=\"" MOY_PAGE_ASK "\">Install the browser console "
+                          "again</a></p>");
+    simple(o, 404, "text/html; charset=utf-8", doc);
+}
+
+// `/` and `/index.html` with no prefix: the page's own address, or why there
+// is none.
+static void page_root(out_t *o, const char *t, size_t tn) {
+    moy_page_forget();
+    const char *why = moy_page_why();
+    if (why != NULL && moy_page_state() == MOY_PAGE_ABSENT && moy_page_offers()) {
+        way_back(o, why, t, tn);
+        return;
+    }
+    if (why != NULL) {
+        simple(o, moy_page_state() == MOY_PAGE_STALE ? 503 : 404,
+               "text/plain; charset=utf-8", why);
+        return;
+    }
+    const char *q = memchr(t, '?', tn);
+    size_t qn = q ? tn - (size_t)(q - t) : 0;
+    char tag[13];
+    page_tag(tag);
+    char head[384];
+    int k = snprintf(head, sizeof(head),
+                     "HTTP/1.1 302 Found\r\n"
+                     "Location: /p/%s/%.*s\r\n"
+                     "Content-Length: 0\r\n"
+                     "Cache-Control: no-store\r\n"
+                     "Connection: close\r\n\r\n",
+                     tag, (int)(qn < 256 ? qn : 0), q ? q : "");
+    raw(o, head, (size_t)k);
+    o->status = 302;
 }
 
 // THE SYSTEM ROOT IS THE VM'S. Which of a browser's Settings a board takes,
@@ -1334,6 +1425,16 @@ static int route(out_t *o, const char *m, size_t mn, const char *t, size_t tn,
         json(o, 503, doc);
         return ROUTE_DONE;
     }
+    // THE SETUP FORM'S HOST (device/zero_setup.py) defers every path ("*"),
+    // and no other host does: it is configured with no sign-in folder, on the
+    // setup network that is open by design (docs/os_2026-11/threat_model.md),
+    // and the form itself asks a board that has a password for it. Every
+    // request parks for the VM in the clear, and no built-in route -- the
+    // store's, /auth, /gpio -- is served.
+    if (defers_all()) {
+        o->bn = bn;
+        return ROUTE_PARKED;
+    }
     const char *q = memchr(t, '?', tn);
     size_t pn = q ? (size_t)(q - t) : tn;
     int post = path_is(m, mn, "POST"), get = path_is(m, mn, "GET");
@@ -1375,7 +1476,11 @@ static int route(out_t *o, const char *m, size_t mn, const char *t, size_t tn,
         return ROUTE_DONE;
     }
     if (path_is(t, pn, "/") || path_is(t, pn, "/index.html")) {
-        asset(o, "index.html", ASSETS[0].ctype);
+        if (o->paged) {
+            asset(o, "index.html", ASSETS[0].ctype);
+        } else {
+            page_root(o, t, tn);
+        }
         return ROUTE_DONE;
     }
     for (size_t i = 0; i < sizeof(ASSETS) / sizeof(ASSETS[0]); i++) {
@@ -1524,7 +1629,7 @@ static int term(out_t *o, const moy_http_req_t *r) {
     uint8_t dg[20];
     sha1(cat, kn + 36, dg);
     char acc[32];
-    size_t an = b64(dg, 20, acc);
+    size_t an = moy_b64_encode(dg, 20, acc, 0);
     const char *proto = header(W->req, r->head_end, "Sec-WebSocket-Protocol", &pn);
     int sh = proto != NULL && pn >= 6 && strstr(proto, "moy.sh") != NULL
              && (size_t)(strstr(proto, "moy.sh") - proto) + 6 <= pn;
@@ -1550,11 +1655,47 @@ static int term(out_t *o, const moy_http_req_t *r) {
 
 // -- the poll -------------------------------------------------------------------------
 
+// Read the request on `fd` into W->req (HEAD_CAP's comment): 1 when it is in
+// hand, 0 when no head arrived, -1 when a longer body found no memory, which
+// is answered 503 once its bytes are read off (a close with bytes unread is a
+// reset, and the page would see no answer at all). A longer request's buffer
+// still held here is one whose serve() an exception unwound (WEB_GUARD in
+// modmoy_net.c): no request is parked while serve() runs, so it goes back.
+static int read_req(int fd, moy_http_req_t *r, size_t *got) {
+    req_done();
+    if (moy_http_recv(fd, W->head, HEAD_CAP, r, got) != MOY_HTTP_OK) {
+        return 0;
+    }
+    size_t max = MOY_HTTP_REQ_MAX;
+    size_t want = r->clen < max - r->head_end ? r->head_end + r->clen : max;
+    if (*got >= want || *got < HEAD_CAP) {
+        return 1;                   // whole, or the peer stopped sending
+    }
+    char *big = moy_net_alloc(want + 1u);
+    if (big == NULL) {
+        for (size_t left = want - *got; left > 0;) {
+            size_t k = moy_http_recv_more(fd, W->io, 0, left < READ_CHUNK ? left : READ_CHUNK);
+            if (k == 0) {
+                break;
+            }
+            left -= k;
+        }
+        out_t o = {.fd = fd};
+        json(&o, 503, "{\"error\":\"busy\"}");
+        return -1;
+    }
+    memcpy(big, W->head, *got);
+    *got = moy_http_recv_more(fd, big, *got, want);
+    W->req = W->big = big;
+    moy_http_parse(big, *got, r);   // its spans, into the buffer that now holds them
+    return 1;
+}
+
 static void serve(int fd) {
     W->requests++;
     size_t got = 0;
     moy_http_req_t r;
-    if (moy_http_recv(fd, W->req, MOY_HTTP_REQ_MAX, &r, &got) != MOY_HTTP_OK) {
+    if (read_req(fd, &r, &got) != 1) {
         moy_http_close(fd);
         return;
     }
@@ -1563,12 +1704,14 @@ static void serve(int fd) {
         bn = r.clen;
     }
     out_t o = {.fd = fd};
+    unprefix(&o, &r.target, &r.target_n);
     const char *q = memchr(r.target, '?', r.target_n);
     size_t pn = q ? (size_t)(q - r.target) : r.target_n;
     if (!W->closing && path_is(r.method, r.method_n, "GET") && path_is(r.target, pn, "/term")) {
         W->cur = fd;
         int kept = term(&o, &r);
         W->cur = -1;
+        req_done();
         if (!kept) {
             moy_http_close(fd);
         }
@@ -1578,15 +1721,17 @@ static void serve(int fd) {
     int done = route(&o, r.method, r.method_n, r.target, r.target_n, W->req + r.head_end, bn);
     W->cur = -1;
     if (done == ROUTE_DONE) {
+        req_done();
         moy_http_close(fd);
         return;
     }
     if (done == ROUTE_LATER) {
+        req_done();
         close_conn(&W->afd);
         W->afd = fd;
         return;
     }
-    W->pfd = fd;
+    W->pfd = fd;                    // parked: its spans and body stay in W->req until it ends
     W->preq = r;
     W->pbn = o.bn;
     W->pseal = o.sealed;
@@ -1626,6 +1771,7 @@ int moy_web_poll(void) {
         out_t o = {.fd = W->pfd, .seal = W->pseal.on ? &W->pseal : NULL};
         json(&o, 503, "{\"error\":\"busy\"}");
         close_conn(&W->pfd);
+        req_done();
         W->taken = 0;
     }
     int did = 0;
@@ -1687,6 +1833,7 @@ void moy_web_answer(const void *resp, size_t n) {
     out_t o = {.fd = W->pfd, .seal = W->pseal.on ? &W->pseal : NULL};
     answer_vm(&o, resp, n);
     close_conn(&W->pfd);
+    req_done();
     moy_seal_wipe(&W->pseal, sizeof W->pseal);
     W->taken = 0;
 }
@@ -1702,6 +1849,7 @@ int moy_web_handle(const char *method, size_t method_n, const char *target,
     out_t o = {.fd = -1};
     W->peer = 0;
     moy_seal_wipe(&W->hseal, sizeof W->hseal);
+    unprefix(&o, &target, &target_n);
     int done = route(&o, method, method_n, target, target_n, b, body_n);
     if (done == ROUTE_PARKED) {
         moy_net_free(o.buf);

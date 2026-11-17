@@ -82,10 +82,13 @@ class SlotHealth:
         """Confirm the running image is healthy so the bootloader cancels its pending
         rollback. The raw verb -- callers want confirm_when_serving, which decides
         WHEN this is honest. No-op (swallowed) when the image was already marked
-        valid or this isn't an OTA build."""
+        valid or this isn't an OTA build; a factory image (the C3 Zero's one
+        slot) is not asked at all, since ESP-IDF logs an error for the asking."""
         try:
             import esp32
 
+            if self._running_label() not in ("ota_0", "ota_1"):
+                return False
             esp32.Partition.mark_app_valid_cancel_rollback()
             return True
         except Exception:

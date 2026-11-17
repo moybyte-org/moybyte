@@ -20,16 +20,14 @@
 // initialised once and kept: the host is shared with the C6's slot 1, so only
 // the card's slot is ever deinitialised, and only by a failed bring-up.
 
+#include "moy_kmem.h"
+
 #include <string.h>
 
 #include "py/mpconfig.h"         // mpconfigboard.h: MOY_SD_MMC_LDO_REG
 #include "moy_sd.h"
 
-#if __has_include("esp_idf_version.h")
-#include "esp_idf_version.h"
-#endif
-
-#ifdef ESP_IDF_VERSION
+#ifdef MOY_ON_BOARD
 #include "esp_heap_caps.h"
 #include "driver/gpio.h"
 #include "driver/sdspi_host.h"
@@ -121,11 +119,7 @@ static int failed(esp_err_t err, const char *step, const char **what) {
 // The card's state is no DMA buffer: PSRAM, so an idle card holds no internal
 // SRAM of its own.
 static sdmmc_card_t *card_state(void) {
-    sdmmc_card_t *c = heap_caps_malloc(sizeof(sdmmc_card_t), MALLOC_CAP_SPIRAM);
-    if (c == NULL) {
-        c = heap_caps_malloc(sizeof(sdmmc_card_t), MALLOC_CAP_8BIT);
-    }
-    return c;
+    return moy_kalloc(sizeof(sdmmc_card_t), MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK);
 }
 
 static int probe(sdmmc_host_t *host, const char **what) {

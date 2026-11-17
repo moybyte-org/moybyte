@@ -25,38 +25,20 @@ the cart. Two of the cards' helpers stay here for the page: `_validate_field`
 tile's picture). `NAMES` (the palette) and `_err_text` are injected at
 construction, the circular-import dodge the other extracted UIs use.
 
-draw() calls ws.bar_layer._draw_status_strip("menu") LAST (chrome over
+draw() calls ws.bar_layer.draw_status_strip("menu") LAST (chrome over
 content), so the Editor's lent top-bar zone (the tab ladder + PLAY,
 EditorApp.draw_zone) shows on this tab; handle_pointer routes a tap through
 ws.bar_layer.handle_bar_tap("menu", ...) FIRST.
 """
 
-try:
-    import ui as _ui
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-
-try:
-    import layout_base as _layout_base
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import layout_base as _layout_base
-
-try:
-    import text_modes as _modes
-except ImportError:  # pragma: no cover - host fallback
-    from runtime import text_modes as _modes
-
-try:
-    from layout_base import LayoutBase
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import LayoutBase
-
-try:
-    from widgets import arm_prompt as _arm_prompt
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import arm_prompt as _arm_prompt
+import ui as _ui
+import ui_draw as _ui_draw
+from bar_layer import glyph as _bar_glyph
+from layers import Layer
+import layout_base as _layout_base
+import text_modes as _modes
+from layout_base import LayoutBase
+from widgets import arm_prompt as _arm_prompt
 
 
 class _Prompt:
@@ -94,10 +76,9 @@ class _Prompt:
             self.msg = msg
             self.o["gen"] += 1
 
-    def open(self, texts, seed):
+    def open(self, texts):
         for i in range(len(self.texts)):
             self.texts[i] = str(texts[i])[:self.caps[i]]
-        self.host.key = seed           # the byte that opened it types nothing
 
     def key(self, ch):
         """One typed byte: Tab moves the focus, Enter commits, Esc cancels,
@@ -169,7 +150,7 @@ class CardsLayout(LayoutBase):
     font scale, the T-Deck's 320x240 by the same formulas as every canvas."""
 
 
-class CardsLayer:
+class CardsLayer(Layer):
     """The Config tab's content Layer (SYSTEM domain): its page fills the
     content rect under the bar on the reflowed system canvas, and
     handle_input/handle_pointer hand the frame's input to the page on show,
@@ -206,7 +187,7 @@ class CardsLayer:
         self.layout = CardsLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
     def relayout(self, w, h, fs, cs=None):
-        """Rebuild the geometry (#39 step 3) -- called by ws._relayout on a
+        """Rebuild the geometry (#39 step 3) -- called by ws.relayout on a
         font-scale change."""
         self.layout = CardsLayout(w, h, fs, chrome_scale=cs)
 
@@ -214,23 +195,20 @@ class CardsLayer:
         """Close the file list and any dialog (called by ws.open on a fresh
         cart)."""
         self.files = None
-        if self.prompt is not None:
-            # never leak an open dialog across a cart switch
-            self.prompt = None
-            self.ws._set_text_mode(False)
+        self.prompt = None            # never leak an open dialog across a cart switch
 
     # -- Layer facets --------------------------------------------------------
 
     def draw(self, dt):
         ws = self.ws
-        ws._reset_canvas_state()          # game-canvas hygiene (degradation shares it)
+        ws.reset_canvas_state()          # game-canvas hygiene (degradation shares it)
         p = self.prompt
         hold = self._hold
         if p is not None and self.prompt_rows(dt):
             return
         how = hold.under(ws, None if p is None else self._held_key(p), self._page_rect(), dt)
         if how == _ui_draw.HOLD_PUT:
-            ws.bar_layer._draw_status_strip("menu")
+            ws.bar_layer.draw_status_strip("menu")
             self._draw_prompt(True, dt)
             hold.note()
             return
@@ -249,7 +227,7 @@ class CardsLayer:
         # The Editor's lent top-bar zone (Stage 4, #46 zoned bar): the tab ladder +
         # PLAY, replacing the old pause-only tool switcher for this tab. Drawn LAST
         # (chrome over content), byte-identical cost to the #43 strip cache.
-        ws.bar_layer._draw_status_strip("menu")
+        ws.bar_layer.draw_status_strip("menu")
         # An open dialog draws OVER the bar too -- same order as the block
         # editor's blk_kbd prompt (chrome, then any modal on top).
         if self.prompt is not None:
@@ -274,7 +252,7 @@ class CardsLayer:
                 ws, self._held_key(p), p.o["gen"], p.host, self._page_rect(),
                 _layout_base.metric_class() == _layout_base.DESK, dt):
             return False
-        ws.bar_layer._draw_status_strip("menu")
+        ws.bar_layer.draw_status_strip("menu")
         self._draw_prompt(True, dt)
         self._hold.note()
         return True
@@ -318,15 +296,15 @@ class CardsLayer:
             return self._fix_input(i)
         page = self.page()
         if (i.pressed("run") or i.pressed("a")) and not page.on_door():
-            ws.defer(ws._leave_menu)   # Enter PLAYs (a device's Enter is "a")
+            ws.defer(ws.text.leave_menu)   # Enter PLAYs (a device's Enter is "a")
             return True
         if page.open_door(i):
             if self.prompt is not None:
                 self._hold.opened(ws)  # Cart info over the page as it was
             return True
         if page.keys(i):
-            ws._dirty = True
-        ws._leave_or_home(ws.exit)
+            ws.mark_dirty()
+        ws.home.leave_or_home(ws.spine.exit)
         return True
 
     def handle_pointer(self, px, py, click):
@@ -339,10 +317,10 @@ class CardsLayer:
             return self._files_pointer(px, py, click)
         if self._broken():
             if self._fix_host.point(px, py, click, ws.pointer.down):
-                ws._dirty = True
+                ws.mark_dirty()
             return True
         if self.page().point(px, py, click, ws.pointer.down):
-            ws._dirty = True
+            ws.mark_dirty()
         return True
 
     # -- the cards' helpers: a field's check, a picker's pictures -------------
@@ -411,10 +389,7 @@ class CardsLayer:
     def page(self):
         """The Settings page on the verbs, built at its first draw."""
         if self._page is None:
-            try:
-                from editor_settings import SettingsPage
-            except ImportError:  # pragma: no cover - host fallback
-                from runtime.editor_settings import SettingsPage
+            from editor_settings import SettingsPage
             self._page = SettingsPage(self.ws, _ui_draw.AppHost("editor_settings"),
                                       (self._open_meta, self._open_files))
         return self._page
@@ -470,8 +445,8 @@ class CardsLayer:
             self._open_files()
             return True
         if self._fix_host.keys(i):
-            ws._dirty = True
-        ws._leave_or_home(ws.exit)
+            ws.mark_dirty()
+        ws.home.leave_or_home(ws.spine.exit)
         return True
 
     def draw_choice(self, f, k, rect):
@@ -499,7 +474,7 @@ class CardsLayer:
         else:
             icons = f.get("icons") or []
             side = max(12, min(w, h) // 2)
-            ws._glyph(icons[k] if k < len(icons) else "dot",
+            _bar_glyph(icons[k] if k < len(icons) else "dot",
                       (x + (w - side) // 2, y + (h - side) // 2, side, side),
                       ws.theme_colors["ink"], cv)
 
@@ -547,7 +522,7 @@ class CardsLayer:
         rows, msg = (), None
         try:
             kind = ws.carts_store.project_kind(path)
-            rows = tuple(ws._with_sd(
+            rows = tuple(ws.with_sd(
                 lambda: ws.carts_store.list_files(kind, ws.carts_root)))
         except Exception as exc:  # noqa: BLE001 -- an unreadable folder lists none
             msg = self._err_text(exc)
@@ -555,7 +530,7 @@ class CardsLayer:
             rows = tuple(rows) + (_NEW_ROW,)
         self.files = self._listing(rows, msg)
         self._files_host.reset()
-        ws._dirty = True
+        ws.mark_dirty()
 
     def _listing(self, rows, msg):
         """The file list over the store's `rows`: `names` in the order the
@@ -601,7 +576,7 @@ class CardsLayer:
         self.files = None
         if self._page is not None:
             self._page.recount()
-        self.ws._dirty = True
+        self.ws.mark_dirty()
 
     def _files_open(self, name):
         """Route one project file. A script is the Code tab (that is where
@@ -620,7 +595,7 @@ class CardsLayer:
         if name in ws.carts_store.cart_sources(cart):
             self._close_files()
             ws.editor_app.set_tab("code")
-            ws.open_code_file(name)
+            ws.text.open_code_file(name)
             return
         tab = self._asset_tab(name)
         if tab is not None:
@@ -641,7 +616,7 @@ class CardsLayer:
             # Anything else in a subfolder no tab claims. Saying so beats
             # opening a blob as text.
             self.files["msg"] = "Nothing on this console opens that file."
-            ws._dirty = True
+            ws.mark_dirty()
             return
         mode = _modes.mode_for(name)
         self._close_files()
@@ -653,15 +628,15 @@ class CardsLayer:
         if i.pressed("b") or i.pressed("home"):
             self._close_files()
             if i.pressed("home"):
-                ws.home_key()
+                ws.home.home_key()
             return True
         if self._files_host.keys(i):
-            ws._dirty = True
+            ws.mark_dirty()
         return True
 
     def _files_pointer(self, px, py, click):
         if self._files_host.point(px, py, click, self.ws.pointer.down):
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         return True
 
     def _draw_files(self, rect, desk):
@@ -712,10 +687,10 @@ class CardsLayer:
     # that is one file should stay one file unless somebody went looking.
     #
     # Both are `ui.dialog` with captioned `ui.field`s (GAPS 52) over the page
-    # dimmed (D-01), on their own UI context: the keys type (text mode, which
-    # `widgets.arm_prompt` takes), up/down, Tab or the trackball move between
+    # dimmed (D-01), on their own UI context: the keys type (text mode, the
+    # layer's `typing` while a dialog shows), up/down, Tab or the trackball move between
     # fields, Enter is the last button and Esc or the T-Deck's Mic (a
-    # field's cancel, `Workstation.cancel_field`) closes it. The T-Deck's
+    # field's cancel, `CardsLayer.cancel`) closes it. The T-Deck's
     # dialog has no row of Cancel and OK -- its keys are the hint strip's --
     # where a touch glass and the desk add them.
 
@@ -723,9 +698,9 @@ class CardsLayer:
         ws = self.ws
         _arm_prompt(ws)
         self.prompt = _Prompt(kind, title, fields, sub, ok)
-        self.prompt.open(texts, getattr(ws.input, "last_key", 0) or 0)
+        self.prompt.open(texts)
         self.prompt.host.held = self._hold.ok
-        ws._dirty = True
+        ws.mark_dirty()
 
     def _open_meta(self):
         cart = self.ws.run.project.cart
@@ -745,8 +720,20 @@ class CardsLayer:
 
     def _close_prompt(self):
         self.prompt = None
-        self.ws._set_text_mode(False)
-        self.ws._dirty = True
+        self.ws.mark_dirty()
+
+    def typing(self):
+        """A dialog's fields type (Cart info, New script)."""
+        return self.prompt is not None
+
+    def cancel(self):
+        """Mic, Esc or B in a dialog: it closes, as its Cancel does."""
+        if self.prompt is None:
+            return False
+        self._close_prompt()
+        return True
+
+    back = cancel
 
     def _commit_prompt(self):
         p = self.prompt
@@ -763,11 +750,11 @@ class CardsLayer:
         author = p.texts[1].strip()
         if not title:
             p.say("Give it a title.")
-            ws._dirty = True
+            ws.mark_dirty()
             return                          # stay open: never persist a blank title
         if not ws.run.project.commit_manifest(title=title, author=author):
             p.say("It didn't save. Try again.")
-            ws._dirty = True
+            ws.mark_dirty()
             return
         self._close_prompt()
 
@@ -803,18 +790,18 @@ class CardsLayer:
         name = self._newf_filename(p.texts[0])
         if name is None:
             p.say("Start its name with a letter.")
-            ws._dirty = True
+            ws.mark_dirty()
             return
-        made = ws._with_sd(lambda: ws.carts_store.add_source(cart, name,
+        made = ws.with_sd(lambda: ws.carts_store.add_source(cart, name,
                                                              "-- " + name + "\n"))
         if made is None:
             p.say("There's a file with that name.")
-            ws._dirty = True
+            ws.mark_dirty()
             return
         self._close_prompt()
         self._close_files()
         ws.editor_app.set_tab("code")
-        ws.open_code_file(made)
+        ws.text.open_code_file(made)
 
     def _prompt_event(self, ev):
         if ev == "commit":
@@ -829,7 +816,7 @@ class CardsLayer:
     def _prompt_input(self, i):
         p = self.prompt
         if p.host.keys(i):
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         ch = p.host.inp[5]
         if ch == 27 or i.pressed("stop"):
             p.host.inp[5] = 0
@@ -840,7 +827,7 @@ class CardsLayer:
 
     def _prompt_pointer(self, px, py, click):
         if self.prompt.host.point(px, py, click, self.ws.pointer.down):
-            self.ws._dirty = True
+            self.ws.mark_dirty()
         return True
 
     def _draw_prompt(self, held, dt):

@@ -36,7 +36,7 @@ def _open_paint(ws):
     # Open the first cart that has a sheet, then the paint editor.
     ws.launcher.sel = 0
     ws.open()
-    ws._open_paint()
+    ws.text.open_paint()
     assert ws.menu_view == "paint"
 
 
@@ -242,7 +242,7 @@ def test_release_resets_stroke_so_taps_dont_connect(tmp_path):
 
 def test_save_persists_a_2x2_sprite(tmp_path):
     # Paint a 2x2 sprite, commit, reload from disk: all four constituent tiles
-    # survive. There's no SAVE button (#111) -- ws.save_sprites is the hard-commit
+    # survive. There's no SAVE button (#111) -- ws.saves.save_sprites is the hard-commit
     # verb every exit path (tab switch/PLAY/CLOSE/...) now dispatches automatically.
     from runtime import host_app, moy_carts
     from runtime.editors_sheet import SpriteSheet
@@ -255,7 +255,7 @@ def test_save_persists_a_2x2_sprite(tmp_path):
     ws.paint.color = 14
     for q in ((1, 1), (9, 1), (1, 9), (9, 9)):     # one pixel per quadrant tile
         ws.paint.paint(*q)
-    ws.save_sprites()
+    ws.saves.save_sprites()
 
     reloaded = SpriteSheet.from_hex(moy_carts.load(ws.cart["path"])["sprites"],
                                     cols=cols, rows=ws.sheet.rows)
@@ -279,7 +279,7 @@ def _open_map_cart(ws):
     if select_on_home(ws, _MAP_CART) is None:
         raise AssertionError("no seed cart titled " + _MAP_CART)
     ws.open_in_editor()
-    ws._open_map()
+    ws.text.open_map()
 
 
 def _map_cell_center(ws, cx, cy):
@@ -302,7 +302,7 @@ def test_map_tap_paints_one_cell(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     me = ws.map_ui.mapedit
     me.n = 4                                       # a recognizable brush tile id
-    cells_before = bytes(ws.tilemap.cells)
+    cells_before = bytes(ws.run.project.tilemap.cells)
 
     x0, y0 = _map_cell_center(ws, 2, 1)
     drv.touch(x0, y0)                              # press
@@ -311,11 +311,11 @@ def test_map_tap_paints_one_cell(tmp_path):
     drv.frame(1 / 30)
 
     cx, cy = me.cam_x + 2, me.cam_y + 1
-    assert ws.tilemap.mget(cx, cy) == 4           # the tapped cell got the brush
+    assert ws.run.project.tilemap.mget(cx, cy) == 4           # the tapped cell got the brush
     # Exactly one cell changed (the tap stamped a single cell, not a run).
     changed = [k for k in range(len(cells_before))
-               if cells_before[k] != ws.tilemap.cells[k]]
-    assert changed == [cy * ws.tilemap.w + cx]
+               if cells_before[k] != ws.run.project.tilemap.cells[k]]
+    assert changed == [cy * ws.run.project.tilemap.w + cx]
 
 
 # -- #37: touch-drag pans the map, tap still paints ---------------------------
@@ -338,9 +338,9 @@ def test_map_drag_pans_view_while_tap_still_paints(tmp_path):
     # move (the default fit-both zoom shows the whole shipped map -> nothing to pan).
     ws.map_ui.map_zoom = len(C._MV_ZOOMS) - 1
     x0m, y0m, cell, cols, rows = ws.map_ui._mv_metrics()
-    assert ws.tilemap.w > cols and ws.tilemap.h > rows
+    assert ws.run.project.tilemap.w > cols and ws.run.project.tilemap.h > rows
     cam0 = (me.cam_x, me.cam_y)
-    cells_before = bytes(ws.tilemap.cells)         # snapshot to prove a pan is no-paint
+    cells_before = bytes(ws.run.project.tilemap.cells)         # snapshot to prove a pan is no-paint
 
     # Drag left/up by several cells: press near the right, move far to the left.
     x0, y0 = _map_cell_center(ws, 4, 3)
@@ -356,8 +356,8 @@ def test_map_drag_pans_view_while_tap_still_paints(tmp_path):
     # The view scrolled (content followed the finger) and nothing was stamped.
     assert (me.cam_x, me.cam_y) != cam0
     assert me.cam_x > 0 and me.cam_y > 0
-    assert bytes(ws.tilemap.cells) == cells_before  # a pan must not paint any cell
-    assert not ws.tilemap.dirty                     # a pure pan leaves no edits
+    assert bytes(ws.run.project.tilemap.cells) == cells_before  # a pan must not paint any cell
+    assert not ws.run.project.tilemap.dirty                     # a pure pan leaves no edits
 
     # A plain tap still paints, even after panning.
     me = ws.map_ui.mapedit
@@ -366,7 +366,7 @@ def test_map_drag_pans_view_while_tap_still_paints(tmp_path):
     drv.frame(1 / 30)
     drv.touch_up()
     drv.frame(1 / 30)
-    assert ws.tilemap.mget(me.cam_x + 1, me.cam_y + 1) == 4
+    assert ws.run.project.tilemap.mget(me.cam_x + 1, me.cam_y + 1) == 4
 
 
 def test_map_drag_with_size_brush_reverts_the_whole_block(tmp_path):
@@ -385,9 +385,9 @@ def test_map_drag_with_size_brush_reverts_the_whole_block(tmp_path):
     me.size = 2
     ws.map_ui.map_zoom = len(C._MV_ZOOMS) - 1      # zoom in so a pan has room
     x0m, y0m, cell, cols, rows = ws.map_ui._mv_metrics()
-    assert ws.tilemap.w > cols and ws.tilemap.h > rows
-    cells_before = bytes(ws.tilemap.cells)
-    gen0 = ws.tilemap.gen
+    assert ws.run.project.tilemap.w > cols and ws.run.project.tilemap.h > rows
+    cells_before = bytes(ws.run.project.tilemap.cells)
+    gen0 = ws.run.project.tilemap.gen
 
     x0, y0 = _map_cell_center(ws, 4, 3)
     drv.touch(x0, y0)                              # press edge stamps 4 cells...
@@ -397,9 +397,9 @@ def test_map_drag_with_size_brush_reverts_the_whole_block(tmp_path):
     drv.touch_up()
     drv.frame(1 / 30)
 
-    assert bytes(ws.tilemap.cells) == cells_before  # every stamped cell reverted
-    assert not ws.tilemap.dirty
-    assert ws.tilemap.gen == gen0
+    assert bytes(ws.run.project.tilemap.cells) == cells_before  # every stamped cell reverted
+    assert not ws.run.project.tilemap.dirty
+    assert ws.run.project.tilemap.gen == gen0
 
 
 def test_map_empty_sky_tile_is_selectable_and_clears_a_cell(tmp_path):
@@ -420,10 +420,10 @@ def test_map_empty_sky_tile_is_selectable_and_clears_a_cell(tmp_path):
     drv.frame(1 / 30)
     drv.touch_up()
     drv.frame(1 / 30)
-    assert ws.tilemap.mget(0, 0) == 4
+    assert ws.run.project.tilemap.mget(0, 0) == 4
 
     # Hold an empty cell to pick the empty brush, then tap the filled cell.
-    ws.tilemap.mset(1, 1, -1)
+    ws.run.project.tilemap.mset(1, 1, -1)
     sx, sy = _map_cell_center(ws, 1, 1)
     drv.touch(sx, sy)
     for _ in range(ws.map_ui.HOLD_FRAMES + 2):
@@ -436,8 +436,8 @@ def test_map_empty_sky_tile_is_selectable_and_clears_a_cell(tmp_path):
     drv.frame(1 / 30)
     drv.touch_up()
     drv.frame(1 / 30)
-    assert ws.tilemap.mget(0, 0) == ws.tilemap.EMPTY   # cleared to transparent (-1)
-    assert ws.tilemap.cells[0] == 0                # stored as byte 0 == "no tile"
+    assert ws.run.project.tilemap.mget(0, 0) == ws.run.project.tilemap.EMPTY   # cleared to transparent (-1)
+    assert ws.run.project.tilemap.cells[0] == 0                # stored as byte 0 == "no tile"
 
 
 # -- #91: undo/redo + rect/flood tools + resize, driven through the shell ------
@@ -463,7 +463,7 @@ def _tap(drv, x, y):
 
 def _stop(ws, drv, stop):
     """The centre of the handheld Map page's stop `stop`, drawn afresh."""
-    ws._dirty = True
+    ws.mark_dirty()
     drv.frame(1 / 30)
     return _btn_center(ws.map_ui.page().host.box(stop))
 
@@ -471,7 +471,7 @@ def _stop(ws, drv, stop):
 def _blank_map(ws):
     # The seeded cart ships a map with content; start from a clean slate so a
     # stamp/undo lands on EMPTY (deterministic across whichever cart is sel=0).
-    cells = ws.tilemap.cells
+    cells = ws.run.project.tilemap.cells
     for i in range(len(cells)):
         cells[i] = 0
 
@@ -489,12 +489,12 @@ def test_map_undo_redo_walk_gestures(tmp_path):
     _tap(drv, *_map_cell_center(ws, 2, 1))         # gesture 2
     c1 = (me.cam_x + 1, me.cam_y + 1)
     c2 = (me.cam_x + 2, me.cam_y + 1)
-    assert ws.tilemap.mget(*c1) == 4 and ws.tilemap.mget(*c2) == 4
+    assert ws.run.project.tilemap.mget(*c1) == 4 and ws.run.project.tilemap.mget(*c2) == 4
 
     assert ws.history.undo() is True
-    assert ws.tilemap.mget(*c2) == ws.tilemap.EMPTY and ws.tilemap.mget(*c1) == 4
+    assert ws.run.project.tilemap.mget(*c2) == ws.run.project.tilemap.EMPTY and ws.run.project.tilemap.mget(*c1) == 4
     assert ws.history.redo() is True
-    assert ws.tilemap.mget(*c2) == 4               # the step came back
+    assert ws.run.project.tilemap.mget(*c2) == 4               # the step came back
 
 
 def test_map_ctrl_z_undoes_a_stamp(tmp_path):
@@ -504,13 +504,13 @@ def test_map_ctrl_z_undoes_a_stamp(tmp_path):
     me = ws.map_ui.mapedit
     me.n = 6
     cell = (me.cam_x + 3, me.cam_y + 2)
-    before = ws.tilemap.mget(*cell)
+    before = ws.run.project.tilemap.mget(*cell)
     _tap(drv, *_map_cell_center(ws, 3, 2))
-    assert ws.tilemap.mget(*cell) == 6
+    assert ws.run.project.tilemap.mget(*cell) == 6
 
     drv.type_char(0x1A)                            # Ctrl+Z
     drv.frame(1 / 30)
-    assert ws.tilemap.mget(*cell) == before        # reverted to its prior tile
+    assert ws.run.project.tilemap.mget(*cell) == before        # reverted to its prior tile
 
 
 def test_map_rect_tool_fills_dragged_rectangle_as_one_step(tmp_path):
@@ -535,12 +535,12 @@ def test_map_rect_tool_fills_dragged_rectangle_as_one_step(tmp_path):
     bx, by = me.cam_x, me.cam_y
     for dy in range(3):
         for dx in range(3):
-            assert ws.tilemap.mget(bx + 1 + dx, by + 1 + dy) == 5
+            assert ws.run.project.tilemap.mget(bx + 1 + dx, by + 1 + dy) == 5
     assert me.can_undo()
     assert me.undo() is True                        # one step reverts the whole box
     for dy in range(3):
         for dx in range(3):
-            assert ws.tilemap.mget(bx + 1 + dx, by + 1 + dy) == ws.tilemap.EMPTY
+            assert ws.run.project.tilemap.mget(bx + 1 + dx, by + 1 + dy) == ws.run.project.tilemap.EMPTY
 
 
 def test_map_flood_tool_taps_one_committed_step(tmp_path):
@@ -555,7 +555,7 @@ def test_map_flood_tool_taps_one_committed_step(tmp_path):
 
     cell = (me.cam_x + 2, me.cam_y + 2)
     _tap(drv, *_map_cell_center(ws, 2, 2))
-    assert ws.tilemap.mget(*cell) == 7
+    assert ws.run.project.tilemap.mget(*cell) == 7
     assert me.can_undo() and me.undo() is True
 
 
@@ -563,7 +563,7 @@ def test_map_resize_panel_grows_and_shrinks(tmp_path):
     # #91: Resize opens its popover; Wider, Taller and Narrower grow and shrink
     # the map on the right/bottom edge, content preserved, and B closes it.
     ws, drv = _open_map(tmp_path)
-    tm = ws.tilemap
+    tm = ws.run.project.tilemap
     tm.mset(0, 0, 3)                               # a top-left marker to preserve
     w0, h0 = tm.w, tm.h
 
@@ -574,12 +574,12 @@ def test_map_resize_panel_grows_and_shrinks(tmp_path):
 
     _tap(drv, *_stop(ws, drv, "Wider"))            # +1 column
     _tap(drv, *_stop(ws, drv, "Taller"))           # +1 row
-    assert ws.tilemap.w == w0 + 1 and ws.tilemap.h == h0 + 1
-    assert ws.tilemap.mget(0, 0) == 3             # content preserved through resize
+    assert ws.run.project.tilemap.w == w0 + 1 and ws.run.project.tilemap.h == h0 + 1
+    assert ws.run.project.tilemap.mget(0, 0) == 3             # content preserved through resize
 
     _tap(drv, *_stop(ws, drv, "Narrower"))         # -1 column
-    assert ws.tilemap.w == w0
-    assert ws.tilemap.mget(0, 0) == 3
+    assert ws.run.project.tilemap.w == w0
+    assert ws.run.project.tilemap.mget(0, 0) == 3
 
     drv.press("b")
     drv.frame(1 / 30)
@@ -588,7 +588,7 @@ def test_map_resize_panel_grows_and_shrinks(tmp_path):
     # The resized map serializes at the new dims and round-trips through map.moymap
     # (SAVE writes exactly this blob), so a cart reloads the grown grid + content.
     from runtime.editors_sheet import TileMap
-    reloaded = TileMap.from_hex(ws.tilemap.to_hex())
-    assert (reloaded.w, reloaded.h) == (ws.tilemap.w, ws.tilemap.h)
+    reloaded = TileMap.from_hex(ws.run.project.tilemap.to_hex())
+    assert (reloaded.w, reloaded.h) == (ws.run.project.tilemap.w, ws.run.project.tilemap.h)
     assert reloaded.mget(0, 0) == 3
-    ws.save_map()                                  # persists without error
+    ws.saves.save_map()                                  # persists without error

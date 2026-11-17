@@ -1,9 +1,10 @@
 // moy_elf_maps: the loaded modules' table a core dump carries (moy_elf_maps.h).
 
+#include "moy_platform.h"
+
 #include <string.h>
 
-// The board build has the IDF's headers on its path; the host's has not.
-#if defined(__has_include) && __has_include("esp_attr.h")
+#ifdef MOY_ON_BOARD
 #include "esp_attr.h"
 #define MOY_ELF_MAPS_ATTR COREDUMP_DRAM_ATTR
 #endif

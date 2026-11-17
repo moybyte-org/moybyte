@@ -228,7 +228,7 @@ def run(sp, ap, say, mi, root):
         [sorted(r.items()) for r in f.history("docs", "renamed")[0]], h,
         f.history_ops("docs", "renamed"), f.history_commit("docs", "renamed", []))
     say("trash", f.delete("docs", "renamed"), f.trash_list(), f.restore("docs", "renamed"),
-        f.empty_trash(), f.trash_list(), f.delete("docs", "nope")[1] is not None)
+        f.empty_trash(), f.trash_list(), f.delete("docs", "nope"))
     say("codecs", f.decode_image(f.encode_image(2, 1, b"\x01\x02")), f.sig("abc"),
         f.stamp('{"a": 1}', "docs", "n", 7), f.provenance(f.stamp("{}", "docs", "n", 9)),
         f.stamp("[1]", "docs", "n", 9), f.encode_text("t"), f.decode_text("a\nb"),

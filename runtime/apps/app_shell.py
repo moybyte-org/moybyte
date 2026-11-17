@@ -12,18 +12,12 @@
 #
 # MicroPython-safe; staged to both boards like every runtime/ module.
 
-try:
-    from moy_store_base import builtin_name
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_store_base import builtin_name
-
-try:
-    from app_context import NO_STORE
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.app_context import NO_STORE
+from layers import AppLayer
+from moy_store_base import builtin_name
+from app_context import NO_STORE
 
 
-class ListShellApp:
+class ListShellApp(AppLayer):
     """Mixin for the app layers. `_persist` expects the host class to provide
     `status` and `_save_failed`."""
 

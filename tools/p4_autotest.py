@@ -629,7 +629,7 @@ class P4Board:
 
     def leave_cart(self, settle=0.8):
         """End a running cart and leave the board where it was found. On the
-        windowed tier `ws.exit()` from a cart goes home, which in console mode
+        windowed tier `ws.spine.exit()` from a cart goes home, which in console mode
         is the bare launcher with the desk parked beneath it, so an attach-only
         board -- nothing resets it at open -- would read `desk` False on every
         test of its suite (six failures from one leftover on the Guition P4,
@@ -644,23 +644,23 @@ class P4Board:
             # A run the kernel drives (native/moy_play's front), or the panel
             # a run the VM stopped for left with the VM still down: its
             # `state` is the kernel's, which knows no desk, and the console's
-            # frame is not running to take `ws.exit()`. The kernel's `end`
+            # frame is not running to take `ws.spine.exit()`. The kernel's `end`
             # closes it the way the hold does; a windowed tier gets its desk
             # back.
             self.cmd("end", wait_for="REMOTE")
             st = self._settle(lambda s: not s.get("cart"), settle)
             if st.get("desk") is False:
-                self.pyexec("ws.open_desk()")
+                self.pyexec("ws.home.open_desk()")
                 self._settle(lambda s: s.get("desk"), settle)
             return
         had_desk = st.get("desk")
-        self.pyexec("ws.exit()")
+        self.pyexec("ws.spine.exit()")
         # The close lands over a few frames, so poll the stack rather than
         # sleep: a fixed wait once read the cart as still up, put no desk
         # back, and the desk went a frame later (2026-09-22).
         st = self._settle(lambda s: not s.get("cart"), settle)
         if had_desk and not st.get("desk"):
-            self.pyexec("ws.open_desk()")
+            self.pyexec("ws.home.open_desk()")
             self._settle(lambda s: s.get("desk"), settle)
 
     def _settle(self, done, settle, timeout=6.0):
