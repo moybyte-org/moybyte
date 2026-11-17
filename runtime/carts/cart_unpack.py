@@ -63,6 +63,18 @@ def _u32(b, i):
     return b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (b[i + 3] << 24)
 
 
+def _parents(base, name):
+    """The folders under `base` the file `name` (an official cart's
+    `scenes/level.json`) sits in, made."""
+    import os
+    segs = name.split("/")
+    for k in range(1, len(segs)):
+        try:
+            os.mkdir(base + "/" + "/".join(segs[:k]))
+        except OSError:
+            pass
+
+
 class _Sink:
     """The staging folder's writer. Network bytes are read straight into `buf`;
     a full buffer, or the end of a file, goes to the store in ONE session, and
@@ -116,6 +128,8 @@ class _Sink:
 
         def _io():
             if self.f is None:
+                if self.cart_file and "/" in self.name:
+                    _parents(self.job.stage, self.name)
                 self.f = open(path, "wb")
             if len(data):
                 self.f.write(data)

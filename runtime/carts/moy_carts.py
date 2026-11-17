@@ -1090,6 +1090,8 @@ from moy_seed import (
     RETIRED, RETIRED_GEN, STORE_FORMAT, FORMAT_STEPS, store_version_path,
     load_store_version, load_retired_version, prune_retired, step_store, sweep_store,
     BOARD_STAMP_NAME, board_id, stamp_board, forget_device, keep_record,
+    CORE, REMOVED_NAME, is_core, removable, load_removed, note_removed, unremove,
+    unremoved, put_back,
     seed_any,
     embedded_floor)
 

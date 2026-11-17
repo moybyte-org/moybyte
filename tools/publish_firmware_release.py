@@ -26,8 +26,11 @@ carries its own provenance beside it:
       latest-tdeck.json            <- the OTA manifest pointing at it
       moybyte_web-<digest>.moy.zip <- the browser console add-on cart an image
                                       names; every one ever published stays
-      carts-tdeck.json             <- the index listing every one of them for
-      moybyte_web-licence.md          that board (tools/web_pack.py)
+      moybyte.<cart>-<hex>.zip     <- each seed cart, an official cart, and
+      moybyte.<cart>-<hex>.png        its cover: one asset for every board
+      carts-tdeck.json             <- the index listing this build's official
+      moybyte_web-licence.md          carts and every add-on for that board
+                                      (tools/web_pack.py)
 
 The `<board>-` prefix is how flat release assets keep the per-board layout that
 tools/fetch_ci_firmware.py rebuilds on the way back down; board ids therefore
@@ -313,7 +316,8 @@ def stage_addon_only(artifacts, workdir, board, earlier=None):
         version = read_firmware_version()
     addon = web_pack.publish_addon(page, workdir, board, version,
                                    ota_sign.read_key(), earlier or b"")
-    print("%-6s staged %s and %s (no OTA)" % (board, addon["cart"], addon["index"]))
+    print("%-6s staged %s, %d official carts and %s (no OTA)"
+          % (board, addon["cart"], addon["official"], addon["index"]))
     return addon
 
 
@@ -355,7 +359,8 @@ def stage_ota(tag, channel, artifacts, workdir, repo=None, board="tdeck",
     addon = web_pack.publish_addon(page, workdir, board, manifest["version"],
                                    ota_sign.read_key(), earlier or b"")
     manifest["cart"] = addon["cart"]
-    print("%-6s staged %s and %s" % (board, addon["cart"], addon["index"]))
+    print("%-6s staged %s, %d official carts and %s"
+          % (board, addon["cart"], addon["official"], addon["index"]))
     stage_c6(manifest, folder, tag, workdir, repo)
 
     # Sign it, or say plainly that we did not. A device checking a BAKED channel

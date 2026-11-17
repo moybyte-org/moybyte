@@ -13,6 +13,7 @@ lines.
     tools/board_flash.py flash   <board_dir> --port /dev/ttyACM0
     tools/board_flash.py monitor <board_dir> --port /dev/ttyACM0
     tools/board_flash.py addon   <board_dir> --port /dev/ttyACM0   (a REPL board)
+    tools/board_flash.py carts   <board_dir> --port /dev/ttyACM0   (a REPL board)
 
 The flash ORDER is fixed here, once: erase otadata FIRST (with --after
 no_reset), then write the merged image, so the board leaves the flash running
@@ -59,6 +60,17 @@ images taken off. The C3 has no OTA, so a cable flash is the only way a new
 image arrives there and this is the only way its page follows; the XIAO
 installs it after an update by itself. The console boards install it through
 their dev channel (`tools/board.py BOARD addon`, which a board pass runs).
+
+THE OFFICIAL CARTS. On the same boards the image seeds only the core carts
+(moy_seed.CORE); the flash then installs the other official carts from this
+tree's system_carts/, the bytes its release publishes (`install_carts`): into
+a NEW store -- one holding nothing but core carts and add-ons -- the set
+board.toml's `[roster] install` names, and into any store every official cart
+it holds at an older version, replaced with the kid's saves and config kept
+(the seed's own rule, #47). Each is copied beside the carts folder and moved
+in by one rename, and the store's reserve (zero_host.SEED_RESERVE) is kept.
+The XIAO brings them to a new release by itself after an update
+(runtime/carts/web_addon.py); the C3, with no OTA, by this.
 
 esptool runs from THIS interpreter (`sys.executable -m esptool`) -- the venv's,
 via the Makefile. The fork-era esptool_no_modem wrapper is not needed on either
@@ -281,7 +293,7 @@ def flash(board_dir, port, verify=True):
              str(fl["offset"]), str(image)]
     rc = _esptool(chip, port, baud, *args, stub=stub)
     if rc == 0 and fl.get("addon"):
-        rc = install_addon(board_dir, port)
+        rc = install_addon(board_dir, port, reset=False) or install_carts(board_dir, port)
     return rc
 
 
@@ -307,24 +319,30 @@ def _mpremote(port, *args):
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
-def install_addon(board_dir, port):
+def _await_repl(board_dir, port, what):
+    import time
+    end = time.monotonic() + ADDON_BOOT_S
+    while _mpremote(port, "exec", "pass").returncode != 0:
+        if time.monotonic() > end:
+            print("!! %s: no REPL on %s to install %s" % (board_dir, port, what))
+            return False
+        time.sleep(1)
+    return True
+
+
+def install_addon(board_dir, port, reset=True):
     """The add-on that fits the built image into `[flash] addon`, the carts
     folder, over the board's REPL (mpremote's Ctrl-C stops what the board
     runs), the other add-on folders taken off, the pack's size checked; then
-    a reset, which starts the board again. 0, or 1 with what went wrong."""
-    import time
+    with `reset` a reset, which starts the board again. 0, or 1 with what
+    went wrong."""
     root = board_config.load(board_dir)["flash"]["addon"]
     with tempfile.TemporaryDirectory() as tmp:
         folder = addon_folder(board_dir, tmp)
         name = os.path.basename(folder)
         size = os.path.getsize(os.path.join(folder, "moybyte_web.pack"))
-        end = time.monotonic() + ADDON_BOOT_S
-        while _mpremote(port, "exec", "pass").returncode != 0:
-            if time.monotonic() > end:
-                print("!! %s: no REPL on %s to install the browser console add-on"
-                      % (board_dir, port))
-                return 1
-            time.sleep(1)
+        if not _await_repl(board_dir, port, "the browser console add-on"):
+            return 1
         clear = ("import os\n"
                  "p = ''\n"
                  "for d in %r.strip('/').split('/'):\n"
@@ -353,6 +371,138 @@ def install_addon(board_dir, port):
                 print("!! the browser console add-on did not install (%s):\n%s%s"
                       % (step[0], r.stdout, r.stderr))
                 return 1
+        if reset:
+            _mpremote(port, "reset")
+    return 0
+
+
+SEED_DIR = ROOT / "system_carts"
+CART_SKIP = ("thumbs", "__pycache__")
+KEPT = ("pmem.json", "config.json")      # moy_seed._RESEED_PRESERVE
+
+
+def offered_carts(seeds=SEED_DIR):
+    """{folder: manifest version} of every seed cart in `seeds`, in order."""
+    import json
+    out = {}
+    for d in sorted(Path(seeds).iterdir()):
+        man = d / "manifest.json"
+        if d.name.endswith(".moy") and man.is_file():
+            out[d.name] = int(json.loads(man.read_text()).get("version", 0))
+    return out
+
+
+def carts_plan(have, offered, install, core):
+    """The official carts to write into a store holding `have` ({folder:
+    manifest version}, every cart folder in it), of `offered` (offered_carts):
+    each one the store holds at an older version, and into a NEW store -- one
+    holding nothing but core carts (`core`, ids) and add-ons -- each of
+    `install` (ids) it lacks. In `offered`'s order."""
+    core = set(c + ".moy" for c in core)
+    want = set(c + ".moy" for c in install)
+    new = all(f in core or f.startswith("web_console_") for f in have)
+    return [f for f, v in offered.items()
+            if (f in have and have[f] < v) or (f not in have and new and f in want)]
+
+
+def _cart_bytes(src, block):
+    """The store blocks the cart folder `src` takes, in bytes."""
+    n = 2 * block
+    for base, dirs, names in os.walk(src):
+        dirs[:] = [d for d in dirs if d not in CART_SKIP]
+        n += block * len(dirs)
+        for f in names:
+            n += (os.path.getsize(os.path.join(base, f)) + block - 1) // block * block
+    return n
+
+
+def _reserve():
+    sys.path.insert(0, str(ROOT / "device"))
+    import zero_host
+    return zero_host.SEED_RESERVE
+
+
+def install_carts(board_dir, port, reset=True, seeds=SEED_DIR):
+    """The official carts this tree publishes into `[flash] addon`, the carts
+    folder, over the board's REPL (carts_plan: a new store's `[roster]
+    install`, and every one the store holds at an older version), each copied
+    beside the carts folder and moved in by one rename with its saves and
+    config kept, the store's reserve kept free; then with `reset` a reset. 0,
+    or 1 with what went wrong."""
+    import json
+    import shutil
+    root = board_config.load(board_dir)["flash"]["addon"]
+    stage = root.rsplit("/", 1)[0] + "/install"
+    if not _await_repl(board_dir, port, "the official carts"):
+        return 1
+    look = ("import os, json\n"
+            "h = {}\n"
+            "for n in os.listdir(%r):\n"
+            "    if n.endswith('.moy'):\n"
+            "        try:\n"
+            "            h[n] = int(json.load(open(%r + '/' + n + '/manifest.json')).get('version', 0))\n"
+            "        except Exception:\n"
+            "            h[n] = 0\n"
+            "s = os.statvfs(%r)\n"
+            "print('MOYCARTS', json.dumps({'have': h, 'block': s[0], 'free': s[0] * s[3]}))\n"
+            % (root, root, root))
+    r = _mpremote(port, "exec", look)
+    line = [ln for ln in r.stdout.splitlines() if ln.startswith("MOYCARTS ")]
+    if r.returncode != 0 or not line:
+        print("!! the official carts: the store did not answer:\n%s%s" % (r.stdout, r.stderr))
+        return 1
+    got = json.loads(line[-1].split(" ", 1)[1])
+    plan = carts_plan(got["have"], offered_carts(seeds), board_config.roster_install(board_dir),
+                      board_config.core_carts())
+    free, reserve = got["free"], _reserve()
+    rm = ("import os\n"
+          "def rm(p):\n"
+          "    try:\n"
+          "        for n in os.listdir(p): rm(p + '/' + n)\n"
+          "        os.rmdir(p)\n"
+          "    except OSError:\n"
+          "        try:\n"
+          "            os.remove(p)\n"
+          "        except OSError:\n"
+          "            pass\n")
+    swap = (rm + "st, d = %r, %r\n"
+            "for k in %r:\n"
+            "    try:\n"
+            "        os.stat(d + '/' + k)\n"
+            "        rm(st + '/' + k)\n"
+            "        os.rename(d + '/' + k, st + '/' + k)\n"
+            "    except OSError:\n"
+            "        pass\n"
+            "rm(d)\n"
+            "os.rename(st, d)\n"
+            "assert os.stat(d + '/manifest.json')[6] == %d\n"
+            "print('MOY' + 'OK')\n")
+    left = []
+    with tempfile.TemporaryDirectory() as tmp:
+        for folder in plan:
+            src = Path(seeds) / folder
+            need = _cart_bytes(str(src), got["block"])
+            if free - need < reserve:
+                left.append(folder)
+                continue
+            clean = os.path.join(tmp, folder)
+            shutil.copytree(str(src), clean, ignore=shutil.ignore_patterns(*CART_SKIP))
+            print("+ official cart %s -> %s" % (folder, root))
+            steps = (("exec", rm + "try:\n    os.mkdir(%r)\nexcept OSError:\n    pass\nrm(%r)\n"
+                      % (stage, stage + "/" + folder)),
+                     ("cp", "-r", clean, ":%s/" % stage),
+                     ("exec", swap % (stage + "/" + folder, root + "/" + folder, KEPT,
+                                      os.path.getsize(os.path.join(clean, "manifest.json")))))
+            for step in steps:
+                r = _mpremote(port, *step)
+                if r.returncode != 0 or (step[0] == "exec" and "Traceback" in r.stdout + r.stderr):
+                    print("!! %s did not install (%s):\n%s%s"
+                          % (folder, step[0], r.stdout, r.stderr))
+                    return 1
+            free -= need
+    if left:
+        print("!! left out, the store's reserve: %s" % ", ".join(left))
+    if reset:
         _mpremote(port, "reset")
     return 0
 
@@ -367,7 +517,7 @@ def monitor(board_dir, port):
 
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("verb", choices=("flash", "monitor", "addon"))
+    ap.add_argument("verb", choices=("flash", "monitor", "addon", "carts"))
     ap.add_argument("board_dir")
     ap.add_argument("--port", required=True)
     ap.add_argument("--no-verify", action="store_true",
@@ -377,6 +527,8 @@ def main(argv):
         return flash(a.board_dir, a.port, verify=not a.no_verify)
     if a.verb == "addon":
         return install_addon(a.board_dir, a.port)
+    if a.verb == "carts":
+        return install_carts(a.board_dir, a.port)
     return monitor(a.board_dir, a.port)
 
 

@@ -267,25 +267,23 @@ boot verdict and the rollback confirm the frame loop drives."""
 # ---------------------------------------------------------------------------
 
 [roster]
-# The system carts the image's seed roster leaves out (build.sh, and
-# provision.sh's --carts), cut to the 896 KiB store beside the seed's reserve
-# (zero_host.SEED_RESERVE; owner, 2026-11-07). The roster keeps every app and
-# service, one desktop (Ocean Desktop) beside the Wallpaper app, and five games:
-# Brick Siege, Letter Blitz, Tap Game, Harpoon Pop and Star Catcher. Out: the
-# other games, the other wallpapers, the Lua twins, the perf and test fixtures,
-# and Pin Light, a demo of the pins a browser cart drives (README.md's
-# checklist pushes it). A
-# new system cart joins the roster unless it is named here.
-#
-# `first`: the shell's own carts lead the roster, so a seed the reserve cuts
-# short leaves out a game or a wallpaper, never the Terminal or Files.
-first = ["service", "app"]
-skip = [
-  "moybyte.bench", "moybyte.bench_lua", "moybyte.coin_quest", "moybyte.tap_only_red",
-  "moybyte.brick_siege_lua", "moybyte.sakura_lua",
-  "moybyte.bullet_storm", "moybyte.hop_quest", "moybyte.pixel_pet", "moybyte.sky_run",
-  "moybyte.tiny_runner", "moybyte.pin_light",
-  "moybyte.space_desktop", "moybyte.sakura", "moybyte.moy_night", "moybyte.open_machine",
+# The image carries only the CORE carts (moy_seed.CORE: Get Carts, Files,
+# Appearance, Achievements, the Wallpaper slot and Moy Night, the default
+# backdrop), which zero_host.seed_carts inflates into an empty store. Every
+# other system cart is an official cart the release publishes in
+# carts-<board>.json. `install` is the set a cable flash or a provisioning
+# puts into a new store beside the core (tools/board_flash.py's
+# install_carts): every app, and the five games the store kept since
+# 2026-11-07 (Brick Siege, Letter Blitz, Tap Game, Harpoon Pop, Star
+# Catcher). A cable flash brings the official carts the store holds to the
+# image's release, and after an update the board does it itself
+# (runtime/carts/web_addon.py).
+image = "core"
+install = [
+  "moybyte.calc", "moybyte.music", "moybyte.my_art", "moybyte.notes",
+  "moybyte.paint", "moybyte.storybook", "moybyte.terminal",
+  "moybyte.brick_siege", "moybyte.letter_blitz", "moybyte.tap_game",
+  "moybyte.harpoon_pop", "moybyte.star_catcher",
 ]
 
 [flash]

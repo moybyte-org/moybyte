@@ -743,6 +743,16 @@ class Stage:
 
     # -- the whole stage ---------------------------------------------------
 
+    def put_back(self, roster):
+        """The roster's seed carts a removal took off this board's store put
+        back before anything is measured (CartManager.put_back), and said: a
+        dev board's removal record never costs a pass its fixtures."""
+        back = self.b.pyval("ws.carts.put_back(%r)" % list(roster), timeout=60)
+        if back:
+            self.log("put back %s: a removal record had taken %s off this board"
+                     % (", ".join(back), "it" if len(back) == 1 else "them"))
+            self.conditions["put_back"] = list(back)
+
     def run(self, roster, compiled=True):
         b = self.b
         st = b.state()
@@ -762,6 +772,7 @@ class Stage:
             self._phase("desk idle loop", self.desk_loop)
             if self.windowed:
                 self._phase("window drag", self.drag)
+            self.put_back(roster)
             # an image from before phase 9 has no ws.home: its console's own
             tiles = set(b.pyval("[c.get('title') for c in (getattr(getattr(ws, 'home', None), "
                                 "'runnable_items', None) or ws._runnable_items)()]",

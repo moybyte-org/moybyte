@@ -23,7 +23,8 @@ package.
                          download, and the permission prompt (-y answers
                          yes to both)
   pkg remove ID...       the store's delete: the folder, its record, the
-                         files it wrote, its consent
+                         files it wrote, its consent; an optional built-in's
+                         removal recorded (never a core one's)
   pkg upgrade [-y]       every installed cart the indexes list newer
   pkg sources            the sources, one a line
 
@@ -52,7 +53,8 @@ import json
 import os
 
 import cart_index as _ci
-from moy_store_base import _sibling_path
+import moy_carts as _store
+from moy_store_base import _sibling_path, cart_path as _cart_path
 from moy_fs import _exists, _mkdir, _read, _remove
 import app_keys as _keys
 import app_perms as _perms
@@ -162,7 +164,8 @@ def _command_name(cid):
 def install_check(inst, stage, folder, shelf):
     """The install prompt's check for the build at `stage` (cart_index.
     Install's `ask`), `shelf` the scanned carts: `(app id, permissions,
-    prompt lines or None)`. An InstallError when a permission it requires is
+    prompt lines or None; None for a built-in, which only the console's own
+    release index installs). An InstallError when a permission it requires is
     one this console lacks, or when it is a command whose name is taken."""
     try:
         man = json.loads(_read(stage + "/manifest.json"))
@@ -191,6 +194,8 @@ def install_check(inst, stage, folder, shelf):
             raise _ci.InstallError("Its command name is taken: " + why,
                                    "%s: %s" % (folder, why))
     aid = _perms.app_id(cart)
+    if _store.removable(folder):
+        return aid, list(cart["permissions"]), None    # a built-in asks nothing, as its seed
     return aid, list(cart["permissions"]), _perms.prompt(cart, consent.get(aid))
 
 
@@ -214,9 +219,12 @@ def removed(inst, folder):
     shelf with what it wrote (cart_index.remove_steps, a store op a step),
     the consent it was installed with forgotten, its keys deleted
     (app_keys.forget), and the shelf re-read
-    there. Get Carts' Remove and `pkg remove` both step it, through
-    `through`."""
+    there; an optional built-in's removal recorded first, so the seed never
+    writes it again (moy_seed.note_removed). Get Carts' Remove, `pkg remove`
+    and the shelf's Delete all step it, through `through`."""
     had = inst.find(folder)
+    if _store.removable(folder):
+        inst.op(lambda: _store.note_removed(inst.root(), folder))
     yield from _ci.stepped(inst.op, _ci.remove_steps(inst.root(), folder, inst.keep()))
     if had is not None:
         yield
@@ -241,13 +249,28 @@ def land_now(inst, job, consented):
 def landed(inst, path, consented):
     """`yield from` it once an install put its cart at `path`, a step a
     frame: the consent the install prompt was answered with (`(app id,
-    permissions)`, or None when it asked nothing) recorded, then the shelf
-    re-read there. Get Carts and `pkg install` both step it."""
+    permissions)`, or None when it asked nothing) recorded, a built-in's
+    removal record dropped (it is the seed's to keep current again), then
+    the shelf re-read there. Get Carts and `pkg install` both step it."""
     if consented is not None:
         yield
         yield from inst.consent().record_steps(consented[0], consented[1])
+    folder = path.rsplit("/", 1)[-1]
+    if _store.removable(folder):
+        yield
+        inst.op(lambda: _store.unremove(inst.root(), [folder]))
     yield
     inst.rescan(path)
+
+
+def _official_here(root, ident):
+    """The folder of the optional built-in `ident` names (its id or its
+    folder) where the store holds it, or None: a seed has no install record,
+    and `pkg remove` takes it as Get Carts does."""
+    folder = ident if ident.endswith(".moy") else ident + ".moy"
+    if _store.removable(folder) and _exists(_cart_path(root, folder)):
+        return folder
+    return None
 
 
 # -- the verbs ------------------------------------------------------------------------
@@ -370,7 +393,7 @@ class Pkg:
         yield from self._online()
         data = yield from self._wait(_ci.index_fetch(self._net(), url))
         yield
-        carts = _ci.fitting(_ci.parse_index(data, url))
+        carts = _ci.fitting(_ci.parse_index(data, url, self.inst.own()))
         yield from self._keep(url, data)
         return carts
 
@@ -384,7 +407,7 @@ class Pkg:
             yield
             try:
                 if data is not None:
-                    out.extend(_ci.fitting(_ci.parse_index(data, url)))
+                    out.extend(_ci.fitting(_ci.parse_index(data, url, self.inst.own())))
                 elif fetch:
                     out.extend((yield from self._fetch(url)))
             except _ci.InstallError as exc:
@@ -409,7 +432,8 @@ class Pkg:
                 present = _exists(folder)
                 entry = rec.get(c["folder"])
                 man = None
-                if present and (entry is None or entry.get("id") != c["id"]):
+                if present and (entry is None or entry.get("id") != c["id"]
+                                or _ci.is_official(c)):
                     try:
                         man = json.loads(_read(folder + "/manifest.json"))
                     except (OSError, ValueError):
@@ -563,9 +587,11 @@ class Pkg:
         inst = self.inst
         code = 0
         for ident in idents:
-            folder = inst.op(lambda: _ci.find_installed(inst.root(), ident))
+            folder = inst.op(lambda: _ci.find_installed(inst.root(), ident)
+                             or _official_here(inst.root(), ident))
             if folder is None:
-                self.err("%s: not installed by pkg" % ident)
+                self.err("%s: %s" % (ident, "a core cart, which a console keeps"
+                                     if _store.is_core(ident) else "not installed by pkg"))
                 code = 1
                 continue
             yield from through(removed(inst, folder))

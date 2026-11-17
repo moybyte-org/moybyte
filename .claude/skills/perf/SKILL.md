@@ -35,7 +35,9 @@ tools/board.py perf-baseline tdeck --image COMMIT    # the board pass's perf sta
 Every `tools/board.py pass` ends each board with that perf stage
 (`tools/perf_pass.py`, `--no-perf` skips it): the desk idle, the heap, a window
 drag where there are windows, this roster's drawn fps and frame ms, Jet
-Teapot uncapped. Its records stay on the machine
+Teapot uncapped. A roster cart a removal record took off the board (an
+optional built-in, `moy_seed.note_removed`) is put back first, and the stage
+says so (`CartManager.put_back`). Its records stay on the machine
 (`~/.cache/moybyte-perf/<board>.jsonl`) and its block marks a move past the
 noise band against the board's last run at another commit under the same
 protocol, so a drop shows in the pass that made it. Every record names its

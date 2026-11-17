@@ -261,7 +261,9 @@ def _drop(p):
 # Get Carts' Remove and `pkg remove` take -- the shelf record's entry, the
 # folder, the files the cart wrote (`apps/<id>`), its consent and its keys,
 # then the shelf re-read there. A folder that is no cart (the modules a suite
-# loads by path) goes the same way. `_folders(mark)` is the carts folder's
+# loads by path) goes the same way, and a built-in's removal record is not
+# left behind: a tool's cleanup is no kid's removal, so the seed brings the
+# cart back at the next boot. `_folders(mark)` is the carts folder's
 # names, each with whether it holds the file `mark`; `_mark(p)` writes one.
 STORE = """
 def _folders(mark=None):
@@ -278,13 +280,18 @@ def _mark(p):
     return _gated(go)
 def _remove(folders):
     try:
-        import pkg, shell_servers
+        import pkg, shell_servers, moy_carts
     except ImportError:
-        from runtime import pkg, shell_servers
+        from runtime import pkg, shell_servers, moy_carts
     inst = shell_servers.ShellInstall(ws)
+    r = str(ws.carts_root).rstrip('/')
+    rec = getattr(moy_carts, 'load_removed', None)
+    had = _gated(lambda: rec(r)) if rec else []
     for f in folders:
         for _ in pkg.through(pkg.removed(inst, f)):
             pass
+    if rec:
+        _gated(lambda: moy_carts.unremove(r, [f for f in folders if f not in had]))
     return 1
 """
 

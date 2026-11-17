@@ -526,7 +526,11 @@ server's certificate.
 **`system/sources`** names the repositories, one index URL a line (`#`
 comments); absent or empty, the console reads moybyte-org/carts. A legacy
 `indexes.json` reads as absent. A page served from a static host writes the
-host's `indexes.json` there at boot.
+host's `indexes.json` there at boot. A board reads its own release's index
+last (`carts-<board>.json` beside its update manifest): the browser console
+add-on and every seed cart of that build as an OFFICIAL cart, the one place
+an entry in the built-ins' namespace or a Python cart installs from, with
+the signature verified (`.claude/rules/carts.md`).
 
 **The verbs** (the shell's `pkg`, `runtime/shell/sh_roles.py`):
 
@@ -536,7 +540,7 @@ host's `indexes.json` there at boot.
 | `pkg list` | every cart the cached indexes list: id, version, where it stands here (`-`, `installed`, `update`, `taken`), name |
 | `pkg search WORD...` | those whose id, name, description or tags hold every word |
 | `pkg install [-y] ID...` | each with its `depends` first (`cart_index.needs`: one no index lists, or a cycle, refuses), the checks, an external file's licence, the download and the permission prompt (`processes.md` §2); `-y` answers yes, else each is asked on stdin |
-| `pkg remove ID...` | the store's delete: the folder, its record, the files it wrote, its consent |
+| `pkg remove ID...` | the store's delete: the folder, its record, the files it wrote, its consent; an optional built-in's removal recorded so the seed never writes it back, and a core one (`moy_seed.CORE`) refused |
 | `pkg list` with no VM | the carts the record holds, `installed` (the indexes need the console) |
 | `pkg upgrade [-y]` | every installed cart the indexes list newer |
 | `pkg sources` | the sources in use |

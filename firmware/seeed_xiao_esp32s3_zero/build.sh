@@ -182,27 +182,20 @@ moybyte_patch_pwm_ledc_book
 #    and nothing else) with the web blob generated INTO the staged copy, then
 #    the shared Python modules (board.toml [modules.*]).
 #
-#    ...then the seed roster, PACKED (2026-08-30). This board shipped with NO
-#    carts at all until then -- a flashed Zero came up an empty console and its
-#    roster arrived over a USB cable, or never -- and the arithmetic is why.
-#    BOTH FORMS WERE BUILT: with the plain `CARTS = [...]` the console boards
-#    freeze, this image is 2,830,672 B of the 2,883,584 B slot and leaves
-#    51 KB -- under the board's headroom floor, a failed build, in a
-#    slot this board pays for twice. With the same 35 carts as one raw deflate
-#    stream each it is 2,399,232 B and leaves 473 KB, and
-#    `zero_host.seed_carts()` inflates them into an EMPTY store on first boot.
-#    `--packed` is the only difference from the
-#    console boards' invocation: same generator, same manifests, same
-#    declarations.
+#    ...then the seed roster, PACKED (2026-08-30: one raw deflate stream a
+#    cart, `zero_host.seed_carts()` inflating them into an EMPTY store on
+#    first boot), and only the CORE carts (moy_seed.CORE, board.toml's
+#    `[roster] image`): the rest are official carts the release publishes,
+#    which a cable flash or provisioning installs and an update keeps current
+#    (`[roster] install`, runtime/carts/web_addon.py). `--packed` and `--only`
+#    are the differences from the console boards' invocation: same generator,
+#    same manifests, same declarations.
 # ---------------------------------------------------------------------------
 moybyte_stage_native
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" stage "${SCRIPT_DIR}"
-#    The roster is cut to this board's store and led by the shell's own carts:
-#    board.toml's `[roster]`.
-ZERO_SKIP="$("${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" roster-skip "${SCRIPT_DIR}")"
-ZERO_FIRST="$("${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" roster-first "${SCRIPT_DIR}")"
+ZERO_ONLY="$("${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" roster-only "${SCRIPT_DIR}")"
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_device_carts.py" --packed \
-  "${MODULES_DIR}/carts_data.py" --skip "${ZERO_SKIP}" --first "${ZERO_FIRST}"
+  "${MODULES_DIR}/carts_data.py" --only "${ZERO_ONLY}"
 
 #    The OTA identity stamp (#53). `xiao_zero` is the board id inside the signed
 #    manifest -- reserved in board.toml since this board's rebuild and wired for

@@ -37,6 +37,13 @@ file is what the chip changes.
   browser console: the add-on cart whose digest the image names
   (`native/moy_net/moy_page.h`), which the cable flash installs into it over
   the REPL (`[flash] addon`, `tools/board_flash.py`).
+- **The image carries the core carts alone** (owner, 2026-11-17;
+  `moy_seed.CORE`, board.toml's `[roster] image`), seeded into an empty store
+  on first boot. The other system carts are official carts the release
+  publishes in `carts-c3_zero.json`, and with no OTA the cable flash is how
+  they arrive and follow a new image (`tools/board_flash.py`'s
+  `install_carts`): board.toml's `[roster] install` into a new store, and
+  every official cart a store holds at an older version.
 - **SSH, without SFTP.** The server and the shell's face run in the same
   internal heap, so a build without PSRAM sizes them to what a session was
   measured to use there: the server's and the face's stacks and the session's

@@ -1,9 +1,11 @@
 # Map (grep -n a name to jump there):
 #   PREFIX                 the add-on's folder names: web_console_<12 hex>.moy
 #   installed              the add-on folders a carts root holds
-#   AddonStep              the add-on that fits this image, installed over the one that does not
+#   AddonStep              the add-on that fits this image, and on a Zero the official carts, brought to it
+#   official_behind        the official carts a store holds that its release has newer
 """The browser console add-on: a cart, one per page (tools/web_pack.py makes
-them), whose pack the webhost serves (native/moy_net/moy_page.h).
+them), whose pack the webhost serves (native/moy_net/moy_page.h); and on a
+Zero the official carts, which its release publishes in the same index.
 
 The firmware names the page it serves (moy_web.page_want), and its release
 publishes, beside its manifest, a signed index listing every add-on it ever
@@ -23,6 +25,17 @@ index, installs the entry that fits, and takes the add-on folders that no
 longer fit off the shelf. A step is one frame's share (`tick`); the radio is
 the caller's lease (`inst.hold`/`release`).
 
+WITH `carts` (the Zero, whose image carries only the core carts) the same
+step brings the OFFICIAL carts to the release too: every official entry of
+the index (cart_index.parse_index, the console's own index with its signature
+verified) whose cart the store holds at an older manifest version -- the
+seed's own rule (#47) -- is installed over it through the same Install, a cart at a time, its saves and
+an edited config carried; an unchanged cart is not fetched at all. The
+release it brought them to is the stamp `system/official` beside the carts
+folder (the page digest the image names), so a cut one resumes and a store
+already there asks nothing. A console board's image carries every seed cart
+and seeds them itself, so its step is the add-on's alone.
+
 `inst` is the install role's server as the shell drives it
 (runtime/shell/shell_servers.py's InstallServer, bound), or the Zero's
 stand-in: `net()`, `root()`, `op(fn)` (one store op), `chip()`, `hold()`,
@@ -30,7 +43,11 @@ stand-in: `net()`, `root()`, `op(fn)` (one store op), `chip()`, `hold()`,
 a callable answering it.
 """
 
+import json
+
 import cart_index as _ci
+from moy_fs import _exists, _read, _write_atomic, _mkdir
+from moy_store_base import _sibling_path, cart_path as _cart_path
 
 PREFIX = "web_console_"         # tools/web_pack.py's CART_ID, then 12 hex, then .moy
 STATE_STALE = 2                 # moy_page.h's MOY_PAGE_STALE
@@ -77,14 +94,53 @@ def _now():
     return _ci._ticks_ms()
 
 
-class AddonStep:
-    """The add-on that fits this image, installed over the one that does not
-    (the module's docstring). `phase` is None while idle; `error` the last
-    attempt's failure; `progress` (done, total) while it installs."""
+OFFICIAL_STAMP = "system/official"   # beside the carts folder: the page the official carts are at
 
-    def __init__(self, inst, index):
+
+def official_stamp(root):
+    try:
+        return _read(_sibling_path(root, OFFICIAL_STAMP)).strip() or None
+    except (OSError, ValueError):
+        return None
+
+
+def save_official_stamp(root, want):
+    _mkdir(_sibling_path(root, "system"))
+    _write_atomic(_sibling_path(root, OFFICIAL_STAMP), want + "\n")
+
+
+def official_behind(root, carts):
+    """The official entries of `carts` whose cart the store `root` holds at
+    an older manifest version (cart_index.cart_state's "update"). Call in a
+    store op."""
+    out = []
+    for c in carts:
+        if not _ci.is_official(c):
+            continue
+        folder = _cart_path(root, c["folder"])
+        if not _exists(folder):
+            continue
+        try:
+            man = json.loads(_read(folder + "/manifest.json"))
+        except (OSError, ValueError):
+            man = None
+        if _ci.cart_state(c, None, None, True, man) == "update":
+            out.append(c)
+    return out
+
+
+class AddonStep:
+    """The add-on that fits this image, installed over the one that does not,
+    and with `carts` the official carts the store holds brought to the
+    release (the module's docstring). `phase` is None while idle; `error` the
+    last attempt's failure; `progress` (done, total) while it installs."""
+
+    def __init__(self, inst, index, carts=False):
         self.inst = inst
         self.index = index
+        self.carts = carts
+        self._queue = []
+        self._addon = False
         self.phase = None
         self.error = None
         self.wake = None              # called when a step starts: tick me each frame
@@ -103,9 +159,17 @@ class AddonStep:
             point(self.inst.root())
 
     def wanted(self):
-        """An add-on is installed and none of them fits this image."""
+        """An add-on is installed and none of them fits this image; or with
+        `carts`, the official carts were last brought to another release."""
         self.point()
-        return page_state() == STATE_STALE
+        return page_state() == STATE_STALE or self._behind()
+
+    def _behind(self):
+        if not self.carts:
+            return False
+        want = _ci.page_want()
+        root = self.inst.root()
+        return bool(want) and self.inst.op(lambda: official_stamp(root)) != want
 
     def busy(self):
         return self.phase is not None
@@ -136,7 +200,9 @@ class AddonStep:
         if not self._held:
             self._held = True
             self.inst.hold()
-        _ci._log("browser console: the add-on fits another firmware; updating it")
+        self._addon = page_state() == STATE_STALE
+        _ci._log("release: bringing %s to this firmware"
+                 % ("the browser console add-on" if self._addon else "the official carts"))
         if self.wake is not None:
             self.wake()
         return True
@@ -154,6 +220,7 @@ class AddonStep:
             self._fetch.close()
             self._fetch = None
         self._gone = None
+        self._queue = []
         self.phase = None
         if self._held:
             self._held = False
@@ -187,17 +254,30 @@ class AddonStep:
         if self._fetch.step():
             return True
         data, self._fetch = self._fetch.data, None
-        fits = [c for c in _ci.fitting(_ci.parse_index(data, self._url))
-                if c.get("runtime") == "web"]
-        if not fits:
-            return self._end("no browser console for this firmware")
-        cart = fits[0]
+        carts = _ci.fitting(_ci.parse_index(data, self._url, self._url))
+        self._queue = []
+        if self._addon:
+            fits = [c for c in carts if c.get("runtime") == "web"]
+            if not fits:
+                return self._end("no browser console for this firmware")
+            self._keep = fits[0]["folder"]
+            self._queue.append(fits[0])
+        if self.carts:
+            root = self.inst.root()
+            self._queue += self.inst.op(lambda: official_behind(root, carts))
+        self.phase = "install"
+        return self._next_job()
+
+    def _next_job(self):
+        """The next cart of the queue's install started: False when none is
+        left, the step then ending."""
+        if not self._queue:
+            return self._done()
+        cart = self._queue.pop(0)
         chip, fmt = self.inst.chip()
         ranges = bool(getattr(self.inst.net(), "ranges", False))
-        self._keep = cart["folder"]
         self._job = _ci.Install(cart, _ci.plan(cart, chip, fmt, ranges), self.inst.net(),
                                 self.inst.root(), self.inst.op)
-        self.phase = "install"
         return True
 
     def _install(self, budget):
@@ -207,7 +287,20 @@ class AddonStep:
         self._job = None
         if not job.path:
             return self._end(job.error or "stopped")
+        if job.cart.get("runtime") != "web":
+            self.inst.rescan(job.path)
+        return self._next_job()
+
+    def _done(self):
+        """Every install landed: the official stamp, then the add-ons that no
+        longer fit taken away."""
         root = self.inst.root()
+        if self.carts:
+            want = _ci.page_want()
+            if want:
+                self.inst.op(lambda: save_official_stamp(root, want))
+        if not self._addon:
+            return self._end(None)
         old = [f for f in installed(root, self.inst.op) if f != self._keep]
         self._gone = self._removals(root, old)
         self.phase = "clean"
@@ -230,10 +323,11 @@ class AddonStep:
         self.error = error
         if error is None:
             self._ended = None
-            _ci._log("browser console: the add-on that fits this firmware is installed")
+            _ci._log("release: this firmware's browser console add-on and official "
+                     "carts are installed")
         else:
             self._ended = _now()
-            _ci._log("browser console: %s" % error)
+            _ci._log("release: %s" % error)
         if self._job is not None:
             self._job = None
         if self._held:

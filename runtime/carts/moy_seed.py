@@ -7,6 +7,8 @@
 #   prune_retired           the folders of seeds that no longer ship, once per store
 #   sweep_store             the store's format stamp (STORE_FORMAT) and its one door
 #   stamp_board             the board stamp, and the rows a foreign one drops
+#   is_core                 CORE, the official carts a console never removes; removable
+#   note_removed            a removed built-in's record, which the seed honours
 #   keep_record             installed.json held to the cart folders
 #   seed_any                the seed a board's boot runs
 """Seeding the `.moy` store: the built-in roster, its PACKED form, and the
@@ -664,6 +666,117 @@ def stamp_board(root, me):
     except OSError:
         pass                 # a read-only store: checked again next boot
     return line is not None
+
+
+# -- the official carts: core, optional, and a removal's record ---------------
+#
+# Every seed cart is an OFFICIAL cart: its release publishes it in the board's
+# own index (tools/web_pack.py), beside the browser console add-on. CORE is
+# what a console cannot work without and never offers to remove, by the ids
+# the shell opens or names: Get Carts (the way back to everything else),
+# Files, Appearance (Settings' APPEARANCE row and Files open it by id),
+# Achievements (the kernel's notify rows name it), the Wallpaper slot a
+# drawing is copied into (Files' and Paint's WALL), and Moy Night, the first
+# wallpaper and so the default backdrop (appearance.Appearance.
+# _default_wallpaper). Settings and the update screen are the shell's own and
+# no cart. tests/test_official_carts.py holds each reason to the code.
+#
+# Every other seed cart is OPTIONAL: a console removes it like any cart, and
+# the removal is RECORDED in `system/removed` beside the carts folder, one
+# folder a line, so the seed (moy_catalogue.seed) never writes it again, a
+# newer version's replacement included. Installing it from Get Carts drops its
+# line (pkg.landed), and from then on the seed keeps it current as it does
+# every built-in. The record is a sidecar whose absence means nothing was
+# removed, so a store from before it reads as it did and takes no format
+# step; a firmware that predates it seeds the cart back, which loses nothing.
+CORE = ("moybyte.achievements", "moybyte.appearance", "moybyte.files",
+        "moybyte.get_carts", "moybyte.moy_night", "moybyte.wallpaper")
+REMOVED_NAME = "system/removed"
+
+
+def _cart_id(name):
+    return name[:-len(CART_EXT)] if name.endswith(CART_EXT) else name
+
+
+def is_core(name):
+    """Whether the cart `name` (an id or a folder) is a core cart."""
+    return _cart_id(name) in CORE
+
+
+def removable(name):
+    """Whether the built-in `name` (an id or a folder) may be removed: one
+    of the built-ins' namespace that is not core."""
+    cid = _cart_id(name)
+    return cid.startswith(BUILTIN_NS + ".") and cid not in CORE
+
+
+def load_removed(root=CARTS_DIR):
+    """The folders of the built-ins removed from the store at `root`."""
+    try:
+        text = _read(_sibling_path(root, REMOVED_NAME))
+    except (OSError, ValueError):
+        return []
+    out = []
+    for line in text.split("\n"):
+        line = line.strip()
+        if line and removable(line) and line not in out:
+            out.append(line)
+    return out
+
+
+def _save_removed(root, folders):
+    _mkdir(_sibling_path(root, "system"))
+    _write_atomic(_sibling_path(root, REMOVED_NAME),
+                  "".join(f + "\n" for f in folders))
+
+
+def note_removed(root, folder):
+    """Record that the built-in `folder` was removed: the seed writes it no
+    more. A core cart, or a folder outside the built-ins, records nothing."""
+    if not removable(folder):
+        return False
+    had = load_removed(root)
+    if folder in had:
+        return False
+    _save_removed(root, had + [folder])
+    return True
+
+
+def unremove(root, folders):
+    """The built-ins `folders` taken off the removal record: those it held."""
+    had = load_removed(root)
+    gone = [f for f in had if f in folders]
+    if gone:
+        _save_removed(root, [f for f in had if f not in gone])
+    return gone
+
+
+def unremoved(seed, root):
+    """The roster `seed` less the built-ins removed from the store `root`."""
+    removed = load_removed(root)
+    if not removed:
+        return seed
+    packed = is_packed(seed)
+    return [e for e in seed if cart_folder(e[0] if packed else e["title"],
+                                           BUILTIN_NS) not in removed]
+
+
+def put_back(root, seed, titles):
+    """The built-ins of `seed` titled `titles` that a removal took off the
+    store `root`, taken off the record and seeded again: their titles. A
+    tool that measures a seed cart calls it first (tools/perf_pass.py)."""
+    removed = load_removed(root)
+    packed = is_packed(seed)
+    back, entries = [], []
+    for e in seed:
+        title = e[0] if packed else e["title"]
+        if title in titles and cart_folder(title, BUILTIN_NS) in removed:
+            back.append(title)
+            entries.append(e)
+    if back:
+        unremove(root, [cart_folder(t, BUILTIN_NS) for t in back])
+        seed_any(entries, root, {})
+    return back
 
 
 def keep_record(root, folders):

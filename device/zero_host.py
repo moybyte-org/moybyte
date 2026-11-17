@@ -117,38 +117,28 @@ def identity():
 
 # -- the seed roster, carried by the image (2026-08-30) ----------------------
 #
-# WHAT THIS REPLACED. Until this landed, a Zero got its carts from
-# `provision.sh` over a USB cable and from nowhere else -- the script's own
-# header called it "what an image cannot carry: a kid's carts". The plain roster
-# the console boards freeze very nearly could not be carried here, and both
-# forms were BUILT to find out: with it this image is 2,830,672 B of a
-# 2,883,584 B OTA slot and leaves 51 KB -- under the board's headroom floor, a
-# failed build, in a slot paid for twice. Compressed the image is
-# 2,399,232 B and leaves 473 KB. `carts_data.CARTS_Z` is the same 35 carts as
-# one raw-deflate stream each, and this function inflates them.
+# The image carries the CORE carts (moy_seed.CORE, board.toml's `[roster]
+# image`) as one raw-deflate stream each, `carts_data.CARTS_Z`, and this
+# function inflates them, so a Zero flashed from the website's flasher
+# (site/build.py's BOARDS) has a working console with no second, cabled step.
+# The other system carts are OFFICIAL carts its release publishes
+# (tools/web_pack.py): a cable flash or provisioning installs `[roster]
+# install` (tools/board_flash.py's install_carts), and after an update
+# web_addon.AddonStep brings every official cart the store holds to the new
+# release, a newer one replacing its folder with the kid's saves and edited
+# config carried, as a console's seed does (#47).
 #
-# It matters beyond the cable, because the website's flasher can write this
-# board (site/build.py's BOARDS): a person who flashed a Zero from a web page
-# got an empty console and no hint that a second, cabled step existed. There is
-# no second step now.
-#
-# AN EMPTY STORE, ONCE (owner, 2026-11-07). On a console board the store is a
-# CACHE of the image's built-ins, so #47 re-seeds a cart whose baked version is
-# newer. Here the store is the RECORD -- the only copy of a cart a kid made in
-# the browser, with a `moy_journal` history behind it -- so the image seeds a
-# store with no cart in it and leaves one with carts alone: a built-in the kid
-# deleted stays deleted, a kid's edited built-in is never rewritten, and a newer
-# image's new built-in does not reach a Zero already in use. A seed that did not
+# AN EMPTY STORE, ONCE (owner, 2026-11-07). The store is the RECORD -- the only
+# copy of a cart a kid made in the browser, with a `moy_journal` history
+# behind it -- so the image seeds a store with no cart in it and leaves one
+# with carts alone: a cart the kid deleted stays deleted. A seed that did not
 # finish (a power cut, provision.sh's Ctrl-C) leaves SEEDING behind, and the
 # next boot writes what is still missing; a store emptied by hand is a new one.
 #
 # SEED_RESERVE is the room a seed leaves: it stops while that much of the store
 # is still free, so the system folder (the password, the SSH host key, the
-# browsers' keys) and a kid's own carts always fit. The store is 896 KiB since
-# 2026-11-07, and the roster build.sh bakes is cut to fit it beside the reserve
-# (board.toml's [roster]). 96 KiB, not the 128 first set: the whole roster
-# leaves 28 of the store's 224 blocks (112 KiB) free (owner, 2026-11-07: all
-# five games, the reserve lowered as far as that takes, never below 64 KiB).
+# browsers' keys) and a kid's own carts always fit. The cable install of the
+# official carts keeps the same reserve.
 SEED_RESERVE = 96 * 1024
 # Beside it, a store with no browser console add-on keeps the room the add-on
 # that fits this image will take (its pack, as the image's stamp counts it,
@@ -246,14 +236,10 @@ def seed_carts(root=CARTS_DIR):
     tree may have none), a full filesystem, a corrupt blob: each prints one
     `ZERO seed:` line and returns, because serial is this board's only display.
 
-    A built-in that ships BROKEN cannot be fixed in place here: the console
-    boards take a #47 version bump, and this board never rewrites a cart. It
-    needs no cable: the sync protocol has a whole-cart delete, `{"v":1,"ops":
-    [{"p":"hop_quest.moy","dc":1}]}` POSTed to /sync from a paired page (the
-    browser console's own sync does it, and a script does it through
-    tests/seal_client.py's Browser, since every request is sealed), and the
-    browser pushes its own copy back. `./provision.sh --carts` forces the
-    image roster's push over USB.
+    A built-in that ships BROKEN is fixed by a #47 version bump in a
+    release: the update's step (web_addon.AddonStep) or a cable flash
+    (tools/board_flash.py's install_carts) brings the newer one, never this
+    seed.
     """
     mark = _seeding_mark(root)
     if not _exists(mark) and not store_is_empty(root):
@@ -835,17 +821,20 @@ class _ZeroInstall:
 
 
 def make_addon(ota):
-    """The step that installs the browser console add-on fitting this
-    image (the page this board exists to serve) once it has confirmed
-    itself, or None: on a board with no OTA slots (the C3) a new image comes
-    by cable, and the flash installs its add-on (tools/board_flash.py).
-    Provisioning installs the first one (provision.sh)."""
+    """The step that brings this image's release to the store once the
+    image has confirmed itself: the browser console add-on fitting it (the
+    page this board exists to serve) and the official carts the store holds
+    (web_addon.AddonStep's `carts`; the image seeds only the core ones). None
+    on a board with no OTA slots (the C3): a new image comes by cable, and the
+    flash installs both (tools/board_flash.py). Provisioning installs the
+    first ones (provision.sh)."""
     if ota is None or not ota.available():
         return None
     try:
         import web_addon
         from cart_net import CartNet
-        return web_addon.AddonStep(_ZeroInstall(CartNet(_ZeroWifi())), ota.own_index)
+        return web_addon.AddonStep(_ZeroInstall(CartNet(_ZeroWifi())), ota.own_index,
+                                   carts=True)
     except Exception as exc:             # noqa: BLE001 -- the store serves regardless
         print("ZERO addon: unavailable:", exc)
         return None

@@ -56,7 +56,9 @@ named, which the verbs below already read as "nothing to load".
 # entry's fields only a run reads, off the rehydrated cart: a "palette" is 64
 # "RRGGBB" strings, ~2.3KB of live heap a shelved PICO-8 import would hold.
 import moy_catalogue
+import moy_carts
 from moy_carts import PAYLOADS
+from moy_store_base import builtin_name
 import ui_draw as _ui_draw
 RUN_ONLY = ("palette",)
 _RESLIM_DROPS = PAYLOADS + RUN_ONLY
@@ -414,6 +416,37 @@ class CartManager:
         except Exception as exc:  # noqa: BLE001
             print("Moybyte delete failed:", exc)
             self.rescan([path])
+
+    def deletable(self, cart):
+        """Whether `cart` is a cart a Delete takes: the kid's or an installed
+        one, or an optional built-in where this console's own release index
+        can bring it back (`ws.cart_own`); a core cart never
+        (moy_seed.CORE)."""
+        path = cart.get("path") if cart else None
+        if not path:
+            return False
+        name = builtin_name(path)
+        if name is None:
+            return True
+        return moy_carts.removable(name) and bool(getattr(self.ws, "cart_own", None))
+
+    def put_back(self, titles):
+        """The seed carts titled `titles` that a removal took off this store,
+        seeded again from the image's roster with their removal records
+        dropped (moy_seed.put_back), and the shelf re-read: their titles. A
+        tool that measures a seed cart calls it first (tools/perf_pass.py);
+        a tier with no frozen roster (the host) puts nothing back."""
+        try:
+            from carts_data import CARTS_Z as seed
+        except ImportError:
+            return []
+        root = self.ws.carts_root
+        if not root or not self.store.writable():
+            return []
+        back = self.store.call(lambda: moy_carts.put_back(root, seed, list(titles)))
+        if back:
+            self.rescan()
+        return back
 
     # -- favorites + recents (#105) ------------------------------------------
 

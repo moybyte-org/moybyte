@@ -92,6 +92,7 @@ import cart_listing as _cl
 from moy_fs import _exists, _read
 from ticks import _ticks_ms, _ticks_diff
 import pkg as _pkg
+import moy_carts as _store
 
 
 # An index fetched this session is reused for this long before the app checks
@@ -654,7 +655,7 @@ class GetCartsAppLayer(ListShellApp):
                 data = self._fetched(lambda: _ci.index_fetch(net, url), ("index", i))
                 if data is None:
                     return
-                self._found.extend(_ci.fitting(_ci.parse_index(data, url)))
+                self._found.extend(_ci.fitting(_ci.parse_index(data, url, self._inst.own())))
             except _ci.InstallError as exc:
                 self.unreached += 1
                 self.starved = self.starved or exc.text == _ci.NET_MEMORY
@@ -757,7 +758,8 @@ class GetCartsAppLayer(ListShellApp):
                 present = root is not None and _exists(folder)
                 entry = rec.get(c["folder"])
                 man = None
-                if present and (entry is None or entry.get("id") != c["id"]):
+                if present and (entry is None or entry.get("id") != c["id"]
+                                or _ci.is_official(c)):
                     try:
                         man = json.loads(_read(folder + "/manifest.json"))
                     except (OSError, ValueError):
@@ -808,13 +810,15 @@ class GetCartsAppLayer(ListShellApp):
         return "USE" if cur is not None and cur["cart"]["runtime"] == "theme" else "PLAY"
 
     def _verbs(self):
+        """The cart page's verbs; a core cart (moy_seed.CORE) has no Remove."""
         st = self.cur["state"] if self.cur is not None else None
         if st == "get":
             return ("GET",)
+        rm = () if _store.is_core(self.cur["cart"]["folder"]) else ("REMOVE",)
         if st == "installed":
-            return ("REMOVE", self._go_verb())
+            return rm + (self._go_verb(),)
         if st == "update":
-            return ("REMOVE", self._go_verb(), "UPDATE")
+            return rm + (self._go_verb(), "UPDATE")
         return ()
 
     def blocker(self, row):

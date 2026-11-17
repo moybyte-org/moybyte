@@ -17,7 +17,6 @@ import ui_draw as _ui_draw
 import ui as _ui
 import layout_base as _lb
 import shell_layout as _shell_layout
-from moy_store_base import builtin_name as _builtin_name
 import app_perms as _perms
 import about_ui as _about_ui
 
@@ -919,10 +918,8 @@ class SystemMenuUI:
 
     def _deletable(self, cart):
         """Whether the open cart is the store's to delete: a store that
-        writes, and a cart of its own, not a built-in it seeds."""
-        path = cart.get("path")
-        return bool(path) and bool(getattr(self.ws, "can_manage", True)) \
-            and _builtin_name(path) is None
+        writes, and a cart a Delete takes (`CartManager.deletable`)."""
+        return bool(getattr(self.ws, "can_manage", True)) and self.ws.carts.deletable(cart)
 
     def _menu_delete_cart(self):
         # Ask before deleting the OPEN cart (None: carts.delete() targets

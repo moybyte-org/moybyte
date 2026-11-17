@@ -139,6 +139,7 @@ def seed(seed, root, shelf, progress=None):
     packed = moy_carts.is_packed(seed)
     seeded(root, [cart_folder(item[0] if packed else item["title"], BUILTIN_NS)
                   for item in seed])
+    seed = moy_carts.unremoved(seed, root)
     present = {}
     for e in shelf:
         present[e["path"][len(root) + 1:]] = e["version"]

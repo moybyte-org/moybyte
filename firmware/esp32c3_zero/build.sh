@@ -98,15 +98,14 @@ moybyte_patch_gc_split_reserve
 # ---------------------------------------------------------------------------
 # 3) Stage: the shared native modules (board.toml [native.shared]) with the web
 #    blob generated INTO the staged copy, the shared Python modules (board.toml
-#    [modules.*]), then the seed roster PACKED and cut by board.toml [roster],
-#    as on the XIAO.
+#    [modules.*]), then the seed roster PACKED and cut to the core carts by
+#    board.toml [roster], as on the XIAO.
 # ---------------------------------------------------------------------------
 moybyte_stage_native
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" stage "${SCRIPT_DIR}"
-ZERO_SKIP="$("${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" roster-skip "${SCRIPT_DIR}")"
-ZERO_FIRST="$("${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" roster-first "${SCRIPT_DIR}")"
+ZERO_ONLY="$("${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" roster-only "${SCRIPT_DIR}")"
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_device_carts.py" --packed \
-  "${MODULES_DIR}/carts_data.py" --skip "${ZERO_SKIP}" --first "${ZERO_FIRST}"
+  "${MODULES_DIR}/carts_data.py" --only "${ZERO_ONLY}"
 
 #    The version stamp (#53): `c3_zero` is the board id a manifest would name.
 #    With one app slot no manifest installs here; the stamp is the version the

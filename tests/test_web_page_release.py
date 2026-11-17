@@ -264,8 +264,11 @@ def test_an_earlier_signed_index_keeps_its_entries(tmp_path):
     web_pack.publish_addon((str(second / web_pack.PACK_FILE), other), str(second),
                            "p4", 8, earlier=signed)
     doc = json.loads((second / "carts-p4.json").read_text())
-    assert [c["moybyte"]["fits"] for c in doc["carts"]] == [other, digest]
-    assert [c["version"] for c in doc["carts"]] == [8, 7]
+    addons = [c for c in doc["carts"] if c["runtime"] == web_pack.CART_RUNTIME]
+    assert [c["moybyte"]["fits"] for c in addons] == [other, digest]
+    assert [c["version"] for c in addons] == [8, 7]
+    assert {c["moybyte"]["fits"] for c in doc["carts"] if c not in addons} == {other}, \
+        "the official entries are this build's alone"
 
 
 def test_a_signed_release_signs_the_index(tmp_path, monkeypatch):

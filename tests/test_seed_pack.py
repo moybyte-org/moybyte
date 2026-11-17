@@ -108,35 +108,28 @@ def test_the_packed_roster_is_much_smaller_than_the_plain_one():
         "plain one (%d B)" % (comp, plain))
 
 
-def test_the_zero_build_seeds_the_roster_its_board_toml_cuts():
-    """The Zero's roster is board.toml's `[roster] skip` (owner, 2026-11-07),
-    which its build passes to the generator; every app and service ships, and
-    of the games the five the owner kept."""
-    with open(os.path.join(ZERO, "build.sh")) as f:
-        build = f.read()
-    assert "roster-skip" in build and '--skip "${ZERO_SKIP}"' in build
-    assert "roster-first" in build and '--first "${ZERO_FIRST}"' in build
-    skip = board_config.roster_skip(ZERO)
-    order = [t for t, _v, _b in gen.build_packed(SYSTEM_CARTS, skip,
-                                                  board_config.roster_first(ZERO))]
-    zero = set(order)
-    kinds = {}
-    for name in os.listdir(SYSTEM_CARTS):
-        with open(os.path.join(SYSTEM_CARTS, name, "manifest.json")) as f:
-            m = json.load(f)
-        kinds[m["title"]] = m.get("moybyte", {}).get("type")
-    for title, kind in kinds.items():
-        if kind in ("app", "service"):
-            assert title in zero, title
-    assert {t for t in zero if kinds[t] == "game"} == {
-        "Brick Siege", "Letter Blitz", "Tap Game", "Harpoon Pop", "Star Catcher"}
-    assert {t for t in zero if kinds[t] == "wallpaper"} == {"Ocean Desktop", "Wallpaper"}
-    # the shell's own carts lead, so a seed the reserve cuts short keeps them
-    shell = [t for t in order if kinds[t] in ("app", "service")]
-    assert order[:len(shell)] == shell and kinds[order[0]] == "service"
+def test_the_zero_images_carry_the_core_carts_alone():
+    """A Zero's image carries the core carts (moy_seed.CORE, board.toml's
+    `[roster] image = "core"`), which its build passes to the generator; the
+    rest are official carts a cable flash or provisioning installs
+    (`[roster] install`)."""
+    from runtime import moy_seed
+    for zero in (ZERO, os.path.join(os.path.dirname(ZERO), "esp32c3_zero")):
+        with open(os.path.join(zero, "build.sh")) as f:
+            build = f.read()
+        assert "roster-only" in build and '--only "${ZERO_ONLY}"' in build
+        only = board_config.roster_only(zero)
+        assert only == moy_seed.CORE
+        packed = gen.build_packed(SYSTEM_CARTS, only)
+        folders = {moy_seed.cart_folder(t, moy_seed.BUILTIN_NS) for t, _v, _b in packed}
+        assert folders == {c + ".moy" for c in moy_seed.CORE}
+        install = board_config.roster_install(zero)
+        assert install and not set(install) & set(moy_seed.CORE)
+        for cid in install:
+            assert os.path.isdir(os.path.join(SYSTEM_CARTS, cid + ".moy")), cid
 
 
-def test_a_skip_that_names_no_cart_is_refused():
+def test_an_only_that_names_no_cart_is_refused():
     with pytest.raises(ValueError):
         gen.build_packed(SYSTEM_CARTS, ("moybyte.no_such_cart",))
 

@@ -64,7 +64,9 @@ a browser. **`.moy` is the only cart format** (the `.moyproj` SDK was deleted
   `esp32c3_zero/` (`c3_zero`), and `web_runner/`. The ids are
   each board.toml's `[board] ota`, the name every tool takes.
 - `device/`, `native/` — the device tier and the C modules every board stages.
-- `system_carts/*.moy` — the seed carts (manifest + main + config).
+- `system_carts/*.moy` — the seed carts (manifest + main + config), which each
+  release also publishes as its official carts; all but `moy_seed.CORE` are
+  removable (`.claude/rules/carts.md`).
 
 **Where a piece belongs (owner, 2026-09-26).** What a cart author needs to make
 a game for every moy host — the verb table, libmoy, the bindings, the CLI,

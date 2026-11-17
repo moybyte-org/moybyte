@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Provision a Moybyte Zero's STORE: the WiFi credentials and the board's
-# password, and with --carts the image's roster. Idempotent -- run it again
-# whenever the credentials change. A write the board refuses (a full store)
-# stops the script with what the board said, and a non-zero exit.
+# Provision a Moybyte Zero's STORE: the WiFi credentials, the board's
+# password, the browser console add-on and the official carts. Idempotent --
+# run it again whenever the credentials change. A write the board refuses (a
+# full store) stops the script with what the board said, and a non-zero exit.
 #
-#   ./provision.sh [--modules] [--carts] [--no-console] [--clean] [--password] [/dev/ttyACM0] [wifi.json]
+#   ./provision.sh [--modules] [--no-carts] [--no-console] [--clean] [--password] [/dev/ttyACM0] [wifi.json]
 #
 # THE BROWSER CONSOLE is an add-on cart (native/moy_net/moy_page.h), and this
 # board's whole product, so it is installed by default: the cart that fits the
@@ -23,25 +23,17 @@
 # and the board's own password, which a browser types once to pair (the Zero
 # has no screen for a pairing code; docs/os_2026-11/system.md section 3).
 #
-# AND NOT THE CARTS, since 2026-08-30 -- this header said "what an image cannot
-# carry: a kid's carts" and that stopped being true. The image carries the seed
-# roster COMPRESSED (`carts_data.CARTS_Z`, one raw-deflate stream a cart), and
-# `zero_host.seed_carts()` inflates it into an EMPTY store on first boot, up to
-# the store's reserve. That is what closed the real gap: the website's flasher
-# can write a Zero, and a person who used it got an empty console with no hint
-# that a second, cabled step existed. An empty store this script leaves is
-# seeded on the reboot it ends with.
+# THE CARTS. The image carries the CORE carts (moy_seed.CORE) compressed
+# (`carts_data.CARTS_Z`), and `zero_host.seed_carts()` inflates them into an
+# EMPTY store on first boot, so a Zero flashed from the website's flasher has
+# a working console with no cabled step. The other system carts are official
+# carts the release publishes: this script installs them by default
+# (tools/board_flash.py's install_carts, which a cable flash runs too) -- into
+# a new store board.toml's `[roster] install`, and into any store every
+# official cart it holds at an older version, the kid's saves and config
+# kept. `--no-carts` skips it.
 #
-# So the cart push became the SAME trade as `--modules`: a dev loop for a
-# roster that changed since the image was built, not the way carts arrive.
-# `--carts` pushes the image's roster (system_carts/ less board.toml's
-# `[roster] skip`), and it OVERWRITES the repo's copy of a cart over whatever
-# is on the board, which on the one board that is the store OF RECORD is a
-# thing to mean rather than to do idly. The pushed folder is the one
-# `seed_builtins` names (system_carts/ ships each built-in under its id,
-# `moybyte.<slug>.moy`).
-#
-# The push did not go away, it became OPT-IN (`--modules`): a sub-minute dev
+# The module push is OPT-IN (`--modules`): a sub-minute dev
 # loop for a module that changed since the image was built. The hazard is why
 # it is a flag -- MicroPython searches / before .frozen, so a pushed copy
 # shadows the image silently and forever. `--clean` undoes it, and
@@ -59,7 +51,7 @@
 set -euo pipefail
 
 PUSH_MODULES=0
-PUSH_CARTS=0
+PUSH_CARTS=1
 PUSH_CONSOLE=1
 CLEAN=0
 SET_PASSWORD=0
@@ -67,10 +59,10 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --modules) PUSH_MODULES=1; shift ;;
     --password) SET_PASSWORD=1; shift ;;
-    --carts)   PUSH_CARTS=1; shift ;;
+    --no-carts) PUSH_CARTS=0; shift ;;
     --no-console) PUSH_CONSOLE=0; shift ;;
     --clean)   CLEAN=1; shift ;;
-    -h|--help) sed -n '2,58p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,50p' "$0"; exit 0 ;;
     *) break ;;
   esac
 done
@@ -174,24 +166,14 @@ for d in /moy /moy/carts /moy/update; do
 done
 
 
-# THE CARTS. The image seeds an EMPTY store on its own (zero_host.seed_carts),
-# so nothing is pushed by default; `--carts` pushes the image's roster for one
-# that moved since the image was built, each cart's size checked on the board.
-if [ "${PUSH_CARTS}" = "1" ]; then
-  SKIP="$("${PY}" "${REPO}/tools/board_config.py" roster-skip "${HERE}")"
-  echo "== seed carts (the image's roster: system_carts/ less [roster] skip)"
-  for cart in "${REPO}"/system_carts/*.moy; do
-    id="$(basename "${cart}" .moy)"
-    case ",${SKIP}," in *",${id},"*) continue ;; esac
-    run cp -r "${cart}" :/moy/carts/ >/dev/null
-    board_write "${id}" "import os
-assert os.stat('/moy/carts/${id}.moy/manifest.json')[6] == $(wc -c < "${cart}/manifest.json")"
-  done
-fi
-
 if [ "${PUSH_CONSOLE}" = "1" ]; then
   echo "== the browser console add-on (the cart that fits dist/zero's image)"
   "${PY}" "${REPO}/tools/board_flash.py" addon "${HERE}" --port "${PORT}"
+fi
+
+if [ "${PUSH_CARTS}" = "1" ]; then
+  echo "== the official carts (board.toml [roster] install, and every older one)"
+  "${PY}" "${REPO}/tools/board_flash.py" carts "${HERE}" --port "${PORT}"
 fi
 
 if [ -n "${WIFI}" ]; then

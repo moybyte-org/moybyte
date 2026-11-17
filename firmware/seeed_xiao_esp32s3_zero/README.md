@@ -50,10 +50,11 @@ cannot have started to matter:
   net every console board rides.
 
 `provision.sh` survives and **changed jobs**: it provisions the credentials and,
-with `--password`, the password browsers pair with, and keeps the module push as an opt-in dev loop. The CARTS
-stopped being its job on 2026-08-30 — the image carries a compressed seed
-roster and inflates it on first boot — so what is left there is a safety net and
-a re-push flag. See "Provisioning" below.
+with `--password`, the password browsers pair with, installs the browser
+console add-on and the official carts, and keeps the module push as an opt-in
+dev loop. The image carries the core carts and inflates them on first boot;
+every other system cart is an official cart its release publishes, which
+provisioning and a cable flash install. See "Provisioning" below.
 
 ## Build, flash, look
 
@@ -86,8 +87,9 @@ the new image comes up on a freshly formatted store (`tools/board_flash.py`
 erases the moved store's first blocks and says so). A table change needs a USB
 flash, and an OTA'd Zero keeps the table it was last cabled with: OTA writes
 the app slot, never the table. Run
-`./provision.sh` afterwards to put the credentials and the password back; the seed
-roster the image carries seeds itself on the next boot. A kid's browser-made
+`./provision.sh` afterwards to put the credentials and the password back; the
+core carts the image carries seed themselves on the next boot, and the cable
+flash (or the script) installs the add-on and the other official carts. A kid's browser-made
 carts are not lost by this — the browser keeps its own copy in OPFS and syncs
 them back on the next visit — but anything that existed *only* here is.
 
@@ -138,7 +140,14 @@ them back on the next visit — but anything that existed *only* here is.
   On 2026-11-17 the browser console left the image for its add-on cart and
   the slots became **2 MiB** (`0x200000`, at `0x20000` and `0x220000`), the
   store the **3,968 KiB** `vfs` at `0x420000`, which holds the add-on (one
-  pack, about 1.9 MB) beside the roster; provisioning installs the add-on.
+  pack, about 1.9 MB) beside the carts; provisioning installs the add-on.
+  The same day (owner) the image's roster became the CORE carts alone
+  (`moy_seed.CORE`, board.toml's `[roster] image`): the other system carts are
+  official carts the release publishes in `carts-xiao_zero.json`, a cable
+  flash or provisioning installs `[roster] install` into a new store (every
+  app and the five games), and after an update the board brings every
+  official cart it holds to the new release (`runtime/carts/web_addon.py`).
+  The image's headroom is in `docs/perf/image.md`.
 - **The seed roster is in the image, COMPRESSED** (2026-08-30). This board
   carried no carts at all until then, and both forms were **built** to find out
   why. With the plain `carts_data.py` the console boards freeze, this image is
@@ -164,20 +173,20 @@ them back on the next visit — but anything that existed *only* here is.
 ## Provisioning (the store, not the modules)
 
 ```bash
-./provision.sh [--modules] [--carts] [--no-console] [--clean] [--password] [/dev/ttyACM0] [wifi.json]
+./provision.sh [--modules] [--no-carts] [--no-console] [--clean] [--password] [/dev/ttyACM0] [wifi.json]
 ```
 
 Default: make the directories, install the browser console add-on that fits
-the image this checkout built (`dist/zero`; `--no-console` skips it),
-optionally write the credentials and (`--password`) the board's password,
-reboot, and print where to pair. Every write is checked on
-the board: one it refuses (a full store) stops the script, non-zero, with what
-the board said. It pushes no carts by default, because the image seeds an
-empty store on the reboot it ends with; `--carts` pushes the image's roster
-(`system_carts/` less board.toml's `[roster] skip`), for a roster that moved
-since the image was built, and writes the repo's copy of a cart over whatever
-is on the board, which on the one board that is the store *of record* is a
-real thing to mean.
+the image this checkout built (`dist/zero`; `--no-console` skips it) and the
+official carts (`--no-carts` skips them), optionally write the credentials and
+(`--password`) the board's password, reboot, and print where to pair. Every
+write is checked on the board: one it refuses (a full store) stops the script,
+non-zero, with what the board said. The official carts are
+`tools/board_flash.py`'s `install_carts`, which a cable flash runs too: into a
+new store (one holding only core carts and add-ons) board.toml's `[roster]
+install`, and into any store every official cart it holds at an older
+version, the kid's saves and config kept; the store's reserve
+(`zero_host.SEED_RESERVE`) stays free, and a cart it does not fit is named.
 
 `wifi.json` is the console's own store shape
 (`{"networks": [{"ssid", "password"}]}`) and is a secret — never in the repo.
@@ -195,10 +204,9 @@ keeps it.
 
 ### The flags, and the one hazard they exist for
 
-`--modules` pushes the image's own module set as plain files and `--carts`
-re-pushes the seed roster. Both are **dev loops**: a push is a second, a
-reflash is minutes. The wasm bundle is not among them — it is served from the
-image and changes only when the board is reflashed.
+`--modules` pushes the image's own module set as plain files: a **dev loop**,
+a push is a second, a reflash is minutes. The browser console is not among
+them — it is the add-on cart that fits the image.
 
 The hazard is that MicroPython searches `/` before `.frozen`, so a pushed `.py`
 outranks the image's own copy **on every boot after it**, silently and forever,

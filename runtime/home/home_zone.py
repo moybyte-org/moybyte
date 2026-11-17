@@ -19,7 +19,6 @@ import ui as _ui
 import ui_draw as _ui_draw
 import layout_base as _lb
 from home_grid import HOME_TABS, NEW_TILE_TYPE, PSEUDO_TILE_TYPES, text_scale
-from moy_store_base import builtin_name as _builtin_name
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
@@ -30,8 +29,9 @@ class HomeZone:
         """The active tab's verbs on the selected card (§12's table): Games
         PLAY, CHANGE, SEARCH; Mine PLAY, CHANGE; Apps OPEN; Make NEW, CHANGE,
         COPY, DEL. CHANGE, COPY and DEL need a real cart and a store that
-        manages projects, and DEL one the kid's (a built-in is copied, never
-        deleted: `builtin_name`, the open-cart menu's own test); the "+ New"
+        manages projects, and DEL one a Delete takes (`CartManager.deletable`,
+        the open-cart menu's own test: a core built-in is copied, never
+        deleted); the "+ New"
         card's verb is NEW. SEARCH is the
         fullscreen home's alone."""
         ws = self.ws
@@ -48,7 +48,7 @@ class HomeZone:
                 return ()                        # a read-only store makes nothing
             if not change:
                 return ("new",)
-            if _builtin_name(sel["path"]) is not None:
+            if not ws.carts.deletable(sel):
                 return ("new", "change", "copy")
             return ("new", "change", "copy", "delete")
         if sel is not None and sel.get("type") == NEW_TILE_TYPE:

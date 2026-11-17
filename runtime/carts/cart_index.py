@@ -65,7 +65,10 @@ What it does differently, because a console is not a PC:
     a page and a console lists only the one that fits it (`fitting`). A
     board's TLS checks the server's certificate,
     but a server is not proof of what it serves; what lands is sandboxed,
-    signed or validated data.
+    signed or validated data. The one exception is the console's own
+    release: its index, signature verified, lists every seed cart of that
+    build as an OFFICIAL cart (`parse_index`'s `own`), which installs as the
+    image's seed would, Python included.
 
 The store layout sits BESIDE the carts folder (moy_store_base._sibling_path):
 `installed.json`, the record of what this store installed (index, id, version,
@@ -361,8 +364,27 @@ def module_parts(fn):
 
 # -- the index ------------------------------------------------------------------
 
-def check_cart(c):
-    """None when `c` is an index entry this console can install, else why not."""
+def plain_path(name):
+    """A file an OFFICIAL entry may make this console write: up to three
+    plain names joined by "/" (a seed cart's `scenes/` and `images/`)."""
+    if not isinstance(name, str):
+        return False
+    segs = name.split("/")
+    return len(segs) <= 3 and all(plain_name(n) for n in segs)
+
+
+def is_official(c):
+    """Whether index entry `c` is one of this console's release's own carts
+    (parse_index stamps it)."""
+    return c.get("official") is True
+
+
+def check_cart(c, official=False):
+    """None when `c` is an index entry this console can install, else why not.
+    An `official` entry (the console's own release index, its signature
+    verified: parse_index) is a built-in: its id and folder are in the
+    built-ins' namespace, its runtime may be "python" and its files may sit
+    in a cart's subfolders; any other entry naming that namespace is refused."""
     if not isinstance(c, dict):
         return "not an object"
     for key in ("id", "name", "folder", "runtime"):
@@ -377,10 +399,12 @@ def check_cart(c):
         if not isinstance(d, str) or not d:
             return "depends"
     folder = c["folder"]
-    if not plain_name(folder) or not folder.endswith(".moy") or builtin_ns(folder):
+    if not plain_name(folder) or not folder.endswith(".moy") \
+            or builtin_ns(folder) != official:
         return "folder %r" % folder
-    if builtin_ns(c["id"]) or folder != c["id"] + ".moy":
+    if builtin_ns(c["id"]) != official or folder != c["id"] + ".moy":
         return "id %r" % c["id"]
+    named = plain_path if official else plain_name
     lic = c.get("licence")
     if not _sized(lic) or not isinstance(lic.get("url"), str):
         return "licence"
@@ -393,7 +417,7 @@ def check_cart(c):
                 or not isinstance(a.get("files"), dict):
             return "asset"
         for fn, meta in a["files"].items():
-            if not plain_name(fn) or not _sized(meta) or fn in names:
+            if not named(fn) or not _sized(meta) or fn in names:
                 return "file %r" % fn
             names[fn] = True
     for e in c.get("external") or ():
@@ -435,15 +459,21 @@ def _read_listing(c):
             del c[key]
 
 
-def parse_index(data, url):
+def parse_index(data, url, own=None):
     """The carts in an index document, each stamped with the index it came
     from (`index`) and that index's name (`shelf`). An entry this console
     cannot read is left out and logged, and so is a `cover` it cannot (the
     cart stays); a document that is not an index, or whose signature does not
-    verify (`check_signature`), is an InstallError."""
+    verify (`check_signature`), is an InstallError.
+
+    `own` is the index this console's release publishes (load_indexes). Read
+    from there with its signature verified, an entry in the built-ins'
+    namespace is OFFICIAL (stamped `official`): a seed cart of this release
+    (tools/web_pack.py), which installs as the image's seed would."""
     if isinstance(data, str):
         data = data.encode()
     signed = check_signature(data, url)
+    trusted = own is not None and url == own and signed is True
     try:
         index = json.loads(data.decode())
     except (ValueError, UnicodeError) as exc:
@@ -456,7 +486,8 @@ def parse_index(data, url):
                            % url)
     out = []
     for c in index.get("carts") or ():
-        why = check_cart(c)
+        official = trusted and isinstance(c, dict) and builtin_ns(c.get("id"))
+        why = check_cart(c, official)
         if why is not None:
             _log("%s: left out %r (%s)" % (url, c.get("id") if isinstance(c, dict)
                                            else c, why))
@@ -487,6 +518,8 @@ def parse_index(data, url):
         c["index"] = url
         c["shelf"] = str(index.get("name") or "")
         c["signed"] = bool(signed)
+        if official:
+            c["official"] = True
         out.append(c)
     return out
 
@@ -535,12 +568,16 @@ def page_want():
 
 
 def fits_here(c, want=None):
-    """Whether this console can use index entry `c`: every cart but a "web"
-    one, and a web one only when it fits the page this image names."""
-    if c.get("runtime") != "web":
+    """Whether this console can use index entry `c`: one that names no page
+    (`moybyte.fits`) and is no "web" cart, else only where it fits the page
+    this image names -- the browser console add-on, and an official entry,
+    which is its release's and so its image's (the page digest names the
+    build that published it)."""
+    fits = (c.get("moybyte") or {}).get("fits")
+    if c.get("runtime") != "web" and not fits:
         return True
     want = page_want() if want is None else want
-    return bool(want) and (c.get("moybyte") or {}).get("fits") == want
+    return bool(want) and fits == want
 
 
 def fitting(carts, want=None):
@@ -551,8 +588,11 @@ def fitting(carts, want=None):
 
 def runs_on(c, have):
     """Whether a cart of index entry `c` runs on a console whose engines are
-    `have` (`ws.runtimes`' names)."""
+    `have` (`ws.runtimes`' names). An official Python cart runs on the
+    console's own interpreter, as its seed does."""
     rt = c["runtime"]
+    if rt == "python":
+        return is_official(c)
     return rt in RUNTIMES and (rt in have or rt in DATA_RUNTIMES)
 
 
@@ -804,9 +844,19 @@ def cart_state(cart, p, entry, present, manifest=None):
 
     `entry` is the record's entry for the cart's folder (or None), `present`
     whether that folder exists, `manifest` its parsed manifest.json when there
-    is no record to go by."""
+    is no record to go by, and always for an official cart: that one stands
+    by its manifest's version, as the seed that keeps it current does (#47),
+    whether the seed or an install wrote it."""
     if not present:
         return "get"
+    if is_official(cart):
+        if not isinstance(manifest, dict):
+            return "update"
+        try:
+            have = int(manifest.get("version", 0))
+        except (TypeError, ValueError):
+            have = 0
+        return "update" if have < cart["version"] else "installed"
     if entry is not None and entry.get("id") == cart["id"]:
         if int(entry.get("version") or 0) < cart["version"]:
             return "update"
@@ -1522,7 +1572,8 @@ class Install:
             while True:
                 if self._reader is None:
                     if self._opening is None and not self._next():
-                        if self.cart.get("runtime") == "python":
+                        if self.cart.get("runtime") == "python" \
+                                and not is_official(self.cart):
                             self.in_store(self._imports_check)
                         ask, self.ask = self.ask, None
                         if ask is not None:
