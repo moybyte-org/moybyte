@@ -21,7 +21,11 @@ WHAT IT MEASURES, with the meters the `perf` skill names and nothing new:
 
     desk idle       drawn fps off the kernel loop's drawn-frame counter
                     (`pump.drawn`, PERF DIAG off) and the collector's stops
-                    from `gc.pauses()` over the same windows; then, under
+                    from `gc.pauses()` over the same windows, which start
+                    from a collection: the reads allocate (about 450 bytes
+                    each), and the garbage the stage and the suite left would
+                    otherwise put the collection they tip into the window
+                    one run in a few; then, under
                     PERF DIAG, the mean work of a loop frame from the
                     kernel's LOOP line (`ms=`, the pacing sleep left out),
                     because an idle desk may draw no frame at all
@@ -599,6 +603,7 @@ class Stage:
 
     def desk_idle(self):
         b = self.b
+        b.pyexec("import gc\ngc.collect()", strict=True)
         b.drain(1.0)
         reads = [b.pyval(IDLE_READ, timeout=10.0, strict=True)]
         for _ in range(int(round(IDLE_SECS / 2.0))):
