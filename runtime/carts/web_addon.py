@@ -1,6 +1,5 @@
 # Map (grep -n a name to jump there):
-#   PREFIX                 the add-on's folder names: web_console_<12 hex>.moy
-#   installed              the add-on folders a carts root holds
+#   installed              the add-on folders (web_console_<12 hex>.moy) a carts root holds
 #   AddonStep              the add-on that fits this image, and on the XIAO Zero the official carts, brought to it
 #   official_behind        the official carts a store holds that its release has newer
 #   OfficialCarts          /official's backend: the official carts a page asks a headless board for
