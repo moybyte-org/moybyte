@@ -286,6 +286,9 @@ class SettingsLayer(Layer):
     secret door (#21)."""
 
     B_BACK = True
+    # Its keys move its page alone; whether a page still moves is its
+    # frames' word, never its handle_input's.
+    KEYS_IDLE = True
     # Its radios and the card lent over USB, through its context's roles: the
     # Wi-Fi station and lease, the Bluetooth keyboard, the USB drive.
     NEEDS = ("wifi", "bt", "usb")

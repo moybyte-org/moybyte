@@ -200,6 +200,8 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
                                       # rect, None (all of it) or False (nothing)
         self._restored_f = -1         # ...and the frame it was this frame's in
         self._laid = []               # the rects of it the desk was laid in
+        self._idle_keys = None        # the KEYS_IDLE content last handed a frame
+                                      # of no input (`_keys_idle`)
         self._fill = None             # (cache, outer, inner): a restore draw_unders
                                       # lays with the first shadow (`_fill_ok`)
         self._fill_on = None          # (canvas, cache, ok): `_fill_ok`'s answer

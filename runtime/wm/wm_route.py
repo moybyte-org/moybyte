@@ -9,8 +9,9 @@ raises and focuses a window, drags it by its strip, resizes it from an edge
 or a corner, presses its strip's buttons, or reaches its content in window
 coordinates under its layout context. A mixin over `WindowedWM`, after its
 paint, chrome and overlays among the bases: it runs on an input event,
-never on a still frame. It owns no state of its own: the drag, the resize
-and the focus it moves are the WM's.
+never on a still frame. It owns no state of its own: the drag, the resize,
+the focus it moves and the surface last handed a frame of no input are the
+WM's.
 """
 
 from widgets import _in
@@ -51,6 +52,8 @@ class WindowRoute:
                 return True           # the host Editor's chords reach past its game
         if (i.pressed("b") or i.pressed("stop")) and self._win_back(win):
             return True               # the window's back chevron (`_win_back`)
+        if getattr(content, "KEYS_IDLE", False) and self._keys_idle(i, content):
+            return True               # a second frame of no input: nothing to hand it
         if win.ctx is not None:
             self.install_window(win.ctx, win, draws=False)
             try:
@@ -58,6 +61,22 @@ class WindowRoute:
             finally:
                 self.install_window(self.root_ctx)
         return bool(content.handle_input(i))
+
+    def _keys_idle(self, i, content):
+        """Whether the frame's keys hold nothing -- no button held or
+        pressed, no key, repeat, wheel, pointer button or modifier -- and
+        `content` was handed such a frame the last time it was handed one: a
+        KEYS_IDLE surface does nothing with a second (`Layer.KEYS_IDLE`)."""
+        if (i.any_held() or i.any_pressed() or i.last_key or getattr(i, "typed", 0)
+                or getattr(i, "key_repeats", 0) or getattr(i, "rep_word", 0)
+                or getattr(i, "wheel_x", 0) or getattr(i, "wheel_y", 0)
+                or getattr(i, "pointer_buttons", 0) or getattr(i, "mods", 0)):
+            self._idle_keys = None
+            return False
+        if self._idle_keys is content:
+            return True
+        self._idle_keys = content
+        return False
 
     def _win_at(self, px, py):
         """The slot key of the topmost VISIBLE window under the pointer (incl.

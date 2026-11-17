@@ -51,7 +51,11 @@ class Layer:
     page step, after the toolkit's), `close` (leaving it, by any route),
     `page_title` and `ball_steps`. `B_BACK`: its B is the host's back, as
     every app's is; a surface whose B is a button of its own leaves it
-    False. `ESC_LEAVES`: Esc on its first page leaves it.
+    False. `ESC_LEAVES`: Esc on its first page leaves it. `KEYS_IDLE`: a
+    frame of no input after another does nothing in its `handle_input`
+    (which answers True to it), so a window's route hands it none
+    (`WindowRoute._keys_idle`); a surface whose `handle_input` also asks
+    whether its page is still moving leaves it False.
 
     The FRAME PROTOCOL is what the console's frame asks of a surface,
     whichever it is, so no surface is named there: `moved` (it changed on
@@ -66,6 +70,7 @@ class Layer:
     domain = "system"
     B_BACK = False
     ESC_LEAVES = True
+    KEYS_IDLE = False
     ON_WALLPAPER = False
     BAR = "app"
 
