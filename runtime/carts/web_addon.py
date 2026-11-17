@@ -27,6 +27,13 @@ index, installs the entry that fits, and takes the add-on folders that no
 longer fit off the shelf. A step is one frame's share (`tick`); the radio is
 the caller's lease (`inst.hold`/`release`).
 
+WHERE THE ONE THAT FITS IS THERE ALREADY (the website's install, a cable
+push, moy_seed.bring_addon's move to a card) the others are taken off at the
+confirm all the same (`tidy`, once a boot, before the step's start): the
+folders as the shelf lists them, or as the carts folder does where the board
+keeps no shelf (a Zero), so a console's warm boot lists nothing more. That is
+housekeeping, not an owner's removal: it writes no line to `system/removed`.
+
 WITH `absent` (every board) a store with NO add-on gets the one that fits
 too, unless its owner removed the console: a removal records it
 (moy_seed.ADDON_LINE in `system/removed`, which Get Carts' install of it
@@ -79,6 +86,7 @@ from moy_store_base import _sibling_path, cart_path as _cart_path
 PREFIX = "web_console_"         # tools/web_pack.py's CART_ID, then 12 hex, then .moy
 STATE_ABSENT = 1                # moy_page.h's MOY_PAGE_ABSENT
 STATE_STALE = 2                 # moy_page.h's MOY_PAGE_STALE
+STATE_READY = 3                 # moy_page.h's MOY_PAGE_READY
 STEP_MS = 8                     # an install's work in one frame
 RETRY_MS = 60000                # a failed attempt starts again no sooner
 RETRY_MAX_MS = 3600000          # and each failure doubles the wait, up to this
@@ -188,6 +196,8 @@ class AddonStep:
         self._pointed = False
         self._removed = None          # the record's console line, once read
         self._removed_at = None       # ...under this page state
+        self._tidied = False          # this boot's tidy has run
+        self._swept = None            # the folders a tidy takes, rescanned after
         self.due = None
         self._due_ms = 0
 
@@ -231,6 +241,47 @@ class AddonStep:
         `carts`, the official carts were last brought to another release."""
         self.point()
         return self._addon_wanted() or self._behind()
+
+    def tidy(self):
+        """The image has confirmed itself (call it no sooner): once a boot,
+        where the add-on that fits it is installed (the page READY), every
+        other add-on folder taken off the shelf by the step's own clean phase,
+        no removal recorded. True while that runs (`tick` it)."""
+        if self._tidied or self.phase is not None:
+            return self.phase is not None
+        self._tidied = True
+        want = _ci.page_want()
+        self.point()
+        if not want or page_state() != STATE_READY:
+            return False
+        keep = PREFIX + want[:12] + ".moy"
+        root = self.inst.root()
+        stale = [f for f in self._addons(root) if f != keep]
+        if not stale:
+            return False
+        _ci._log("release: taking %d browser console add-on(s) this firmware "
+                 "does not serve off the shelf" % len(stale))
+        self._swept = stale
+        self._gone = self._removals(root, stale)
+        self.error = None
+        self.phase = "clean"
+        if self.wake is not None:
+            self.wake()
+        return True
+
+    def _addons(self, root):
+        """The add-on folders under `root`: from the shelf the boot scanned
+        where the server keeps one (a console's `carts()`), else listed."""
+        shelf = getattr(self.inst, "carts", None)
+        if shelf is None:
+            return installed(root, self.inst.op)
+        out = []
+        for c in shelf() or ():
+            path = c.get("path") if type(c) is dict else None
+            name = path.replace("\\", "/").rsplit("/", 1)[-1] if path else ""
+            if name.startswith(PREFIX) and name.endswith(".moy"):
+                out.append(name)
+        return out
 
     def _ask(self, name):
         fn = getattr(self.inst, name, None)
@@ -324,6 +375,9 @@ class AddonStep:
             self._fetch.close()
             self._fetch = None
         self._gone = None
+        if self._swept is not None:
+            self._swept = None
+            self._tidied = False        # the next tidy takes the rest
         self._queue = []
         self.phase = None
         if self._held:
@@ -428,9 +482,15 @@ class AddonStep:
         if next(self._gone, _ci._DONE) is not _ci._DONE:
             return True
         self._gone = None
-        self.inst.rescan(None)
-        self.point(again=True)          # the webhost reads the new pack's head
-        return self._end(None)
+        swept, self._swept = self._swept, None
+        if swept is None:
+            self.inst.rescan(None)
+            self.point(again=True)      # the webhost reads the new pack's head
+            return self._end(None)
+        for f in swept:
+            self.inst.rescan(f)
+        self.phase = None
+        return False
 
     def _end(self, error):
         self.phase = None

@@ -815,7 +815,9 @@ def _copy_folder(src, dst):
 def bring_addon(src, root, want=None):
     """The add-on for the page `want` (64 hex; None for the one this image
     names) moved from the carts folder `src` (the internal store) to `root`
-    (the card's): True when there was one to move."""
+    (the card's), and the add-ons for other pages taken off both, no removal
+    recorded: True when there was one to move. With none to move it is one
+    look, a warm boot's."""
     if want is None:
         want = _page_want()
     if not want or src == root:
@@ -832,6 +834,10 @@ def bring_addon(src, root, want=None):
         _copy_folder(have, part)
         os.rename(part, dest)
     _rmtree(have)
+    for carts in (src, root):
+        for name in _listing(carts) or ():
+            if name.startswith(ADDON_PREFIX) and name.endswith(CART_EXT) and name != folder:
+                _rmtree(cart_path(carts, name))
     return True
 
 

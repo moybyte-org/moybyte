@@ -30,13 +30,16 @@ nor those docs will warn you about:
   (`.claude/rules/ota.md`). EVERY BOARD HAS IT BY DEFAULT (owner,
   2026-11-17): the website's install writes it into the board's internal
   store (`tools/store_image.py`; a board on a card moves it there on its
-  first boot, `moy_seed.bring_addon`), and `runtime/carts/web_addon.py`'s
+  first boot, `moy_seed.bring_addon`, which takes other pages' add-ons off
+  both stores), and `runtime/carts/web_addon.py`'s
   step installs the one that fits after an update and wherever there is
   none -- once a network is saved, never during a game, backing off on
   failure -- unless its owner removed it: any removal of it (Get Carts, the
   shelf, `pkg remove`, a page's delete) records the console as one line of
   `system/removed` (`moy_seed.ADDON_LINE`, `native/moy_store/moy_removed.c`),
-  which installing one from Get Carts drops. A Zero honours the record too,
+  which installing one from Get Carts drops. Where the one that fits is
+  there, the step takes every other add-on folder off once the image
+  confirms itself (`tidy`), housekeeping that records no removal. A Zero honours the record too,
   and its root links the way back (`device/zero_host.py`'s `way_back`). Any
   other pack is "needs its page updated", none is "install it from Get
   Carts", so "which console is this board serving?" is still answered by its

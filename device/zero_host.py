@@ -921,13 +921,17 @@ def tend_addon(addon, official):
     this board's whole use, so an add-on that does not fit, or is not there
     and was not removed, is asked for again while it serves (the step's
     back-off apart), and a removed one when the root's link asks for it
-    (`way_back`). True while the step runs."""
+    (`way_back`). The first turn takes the add-ons that do not fit off the
+    store where the one that fits is there (`AddonStep.tidy`). True while
+    the step runs."""
     if addon is None:
         return False
     if addon.phase is not None:
         return addon.tick(ADDON_SLICE_MS)
     if official is not None and official.busy():
         return False
+    if addon.tidy():
+        return True
     way_back(addon)
     return addon.start(retry=True)
 

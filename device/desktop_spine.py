@@ -244,7 +244,8 @@ def make_service(ws, loop):
     kernel's MOY_SVC_* bits): the webhost's routes while it joins, serves or
     says goodbye, the OTA confirm's pending marker, once, the browser
     console add-on's step (web_addon.AddonStep) from the confirm until the
-    add-on fits this image, the scheduler's
+    add-on fits this image and is the only one there (its `tidy`), the
+    scheduler's
     `woken` while a service's task wants the VM (MOY_SVC_TASKS, the loop's
     own bit), and the background scheduler while any wake is registered or a
     message queued, with the frame's slack. Answers the bits it still
@@ -278,6 +279,7 @@ def make_service(ws, loop):
                 try:
                     upd.confirmed_by_kernel()
                     if addon is not None:
+                        addon.tidy()
                         addon.start()
                 except Exception as exc:  # noqa: BLE001
                     print("Moybyte OTA: confirm failed: %s" % (exc,))

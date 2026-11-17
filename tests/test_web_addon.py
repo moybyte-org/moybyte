@@ -4,7 +4,9 @@ any cart, served by the webhost from its folder (native/moy_net/moy_page.h).
 
 What is pinned here: a console sees only the add-on that fits its image; the
 step that replaces the add-on after a firmware update installs the one that
-fits and takes the old one off the shelf; the pack never crosses the sync
+fits and takes the old one off the shelf, and where the one that fits is
+there already the confirm takes the others off, recording no removal; the
+pack never crosses the sync
 wire, never goes into a backup and is never read as a cart's text."""
 
 import os
@@ -362,17 +364,113 @@ def test_opening_the_add_on_never_reads_its_pack(tmp_path):
         == [str(folder)]
 
 
+def _shelved(tmp_path, monkeypatch, fit, *tags):
+    """A store holding the add-ons of pages `tags`, its image naming the
+    `fit`-th's (None: another page's): the pages, the routes, the root."""
+    import zipfile
+    pages, routes = _release(tmp_path, *(tags + (b"other",)))
+    root = str(tmp_path / "carts")
+    os.makedirs(root)
+    for _path, digest in pages[:len(tags)]:
+        with zipfile.ZipFile(tmp_path / "release" / (web_pack.CART_NAME % digest)) as z:
+            z.extractall(root)
+    _names(pages[-1 if fit is None else fit][1], monkeypatch)
+    nb.page_at(root)
+    return pages, routes, root
+
+
+def _folder(page):
+    return web_pack.cart_id(page[1]) + ".moy"
+
+
+def _zero_host():
+    sys.path.insert(0, str(ROOT / "device"))
+    try:
+        import zero_host
+    finally:
+        sys.path.pop(0)
+    return zero_host
+
+
+def test_the_confirm_takes_the_add_ons_that_do_not_fit_off_and_records_no_removal(
+        tmp_path, monkeypatch, board):
+    """The one that fits is there already (the website's install, a cable
+    push, the move to a card) beside add-ons of earlier builds: until the
+    image confirms itself they stay (an image rolled back serves its own);
+    the confirm's tidy takes them off, once a boot, without the removal
+    record that would stop the board fetching its console."""
+    pages, routes, root = _shelved(tmp_path, monkeypatch, 2, b"a", b"b", b"c")
+    assert nb.page_state() == web_addon.STATE_READY
+    net = MemNet(routes)
+    inst = Inst(root, net)
+    step = web_addon.AddonStep(inst, BASE + "carts-tdeck.json", absent=True)
+    assert not step.start() and not step.nudge(), "an add-on that fits wants nothing"
+    assert len(os.listdir(root)) == 3, "before the confirm every one stays"
+    assert step.tidy()
+    _run(step)
+    assert step.error is None and step.phase is None and inst.held == 0
+    assert os.listdir(root) == [_folder(pages[2])]
+    assert sorted(inst.rescans) == sorted(_folder(p) for p in pages[:2])
+    assert moy_carts.load_removed(root) == [] and not moy_carts.addon_removed(root)
+    assert net.opened == [] and nb.page_state() == web_addon.STATE_READY
+    assert not step.tidy(), "once a boot"
+
+
+def test_a_console_s_tidy_reads_its_shelf_and_lists_nothing(tmp_path, monkeypatch, board):
+    """A console keeps the shelf its boot scanned (the server's `carts()`):
+    the tidy finds the add-ons there, so a warm boot lists no folder."""
+    pages, _routes, root = _shelved(tmp_path, monkeypatch, 1, b"a", b"b")
+    shelf = moy_carts.catalogue(root)
+
+    class Shelf(Console):
+        def carts(self):
+            return shelf
+
+    def listed(*_a):
+        raise AssertionError("listed the carts folder")
+    monkeypatch.setattr(web_addon, "installed", listed)
+    step = web_addon.AddonStep(Shelf(root, MemNet({})), BASE + "carts-tdeck.json",
+                               absent=True)
+    assert step.tidy()
+    _run(step)
+    assert os.listdir(root) == [_folder(pages[1])]
+    shelf = [c for c in shelf if not c["path"].endswith(_folder(pages[0]))]
+    step = web_addon.AddonStep(Shelf(root, MemNet({})), BASE + "carts-tdeck.json")
+    assert not step.tidy(), "a warm boot: nothing to take"
+
+
+def test_a_store_without_the_one_that_fits_is_left_to_the_install(
+        tmp_path, monkeypatch, board):
+    """No add-on fits (an update's first boot): the tidy takes nothing, so
+    an install that fails leaves the old console's add-on where it was."""
+    _pages, _routes, root = _shelved(tmp_path, monkeypatch, None, b"a", b"b")
+    assert nb.page_state() == web_addon.STATE_STALE
+    before = sorted(os.listdir(root))
+    step = web_addon.AddonStep(Inst(root, MemNet({})), BASE + "carts-tdeck.json",
+                               absent=True)
+    assert not step.tidy() and step.phase is None
+    assert sorted(os.listdir(root)) == before
+
+
+def test_a_zero_s_first_turn_after_the_confirm_tidies(tmp_path, monkeypatch, board):
+    zero_host = _zero_host()
+    pages, routes, root = _shelved(tmp_path, monkeypatch, 0, b"a", b"b")
+    net = MemNet(routes)
+    step = web_addon.AddonStep(Inst(root, net), BASE + "carts-tdeck.json", absent=True)
+    assert zero_host.tend_addon(step, None)
+    while zero_host.tend_addon(step, None):
+        pass
+    assert os.listdir(root) == [_folder(pages[0])] and net.opened == []
+    assert moy_carts.load_removed(root) == []
+
+
 def test_a_zero_s_root_undoes_a_removal_when_its_link_is_followed(
         tmp_path, monkeypatch, board):
     """A Zero has no face but its page, so where its owner removed the
     console the root says so and links the way back (device/zero_host.
     way_back over moy_page_say); the link followed restores the record and
     the next turn installs the console. Unfollowed, a removal holds."""
-    sys.path.insert(0, str(ROOT / "device"))
-    try:
-        import zero_host
-    finally:
-        sys.path.pop(0)
+    zero_host = _zero_host()
     monkeypatch.setattr(zero_host, "_PAGE", [None, nb.page_asked()])
     pages, routes, root = _absent(tmp_path, monkeypatch, b"new")
     moy_carts.note_removed(root, web_pack.cart_id(pages[0][1]) + ".moy")

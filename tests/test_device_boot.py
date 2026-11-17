@@ -1060,11 +1060,16 @@ def test_bring_addon_moves_the_fitting_console_once(tmp_path):
     (folder / "manifest.json").write_text('{"moybyte": {"fits": "%s"}}' % want)
     other = flash / "web_console_000000000000.moy"
     other.mkdir()
+    (card / "web_console_111111111111.moy").mkdir()
+    (card / "moybyte.paint.moy").mkdir()
     assert moy_seed.bring_addon(str(flash), str(card), want)
     got = card / folder.name
     assert (got / "moybyte_web.pack").read_bytes() == pack
-    assert sorted(p.name for p in card.iterdir()) == [folder.name], "no .part left"
-    assert not folder.exists() and other.exists(), "only the one that fits moves"
+    assert sorted(p.name for p in card.iterdir()) == ["moybyte.paint.moy", folder.name], \
+        "no .part left, and no add-on of another page on the card"
+    assert not folder.exists() and not other.exists(), "none left on the internal store"
+    assert not (tmp_path / "moy" / "system" / "removed").exists() \
+        and not (tmp_path / "sd" / "system" / "removed").exists(), "housekeeping, no removal"
     assert not moy_seed.bring_addon(str(flash), str(card), want), "a warm boot: one look"
     # a card that holds it already: the internal copy just goes
     folder.mkdir()

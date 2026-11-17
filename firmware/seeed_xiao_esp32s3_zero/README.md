@@ -153,7 +153,9 @@ them back on the next visit — but anything that existed *only* here is.
   it holds to the new release (`runtime/carts/web_addon.py`). The website's
   install writes the store with the add-on in it (`tools/store_image.py`);
   a board with none (a wiped store) installs the one its image fits from its
-  release once the image confirms itself (`zero_host.make_addon`). A removal
+  release once the image confirms itself (`zero_host.make_addon`), and one
+  that holds add-ons of other builds beside the one that fits takes them off
+  then (`AddonStep.tidy`). A removal
   of it is recorded (`system/removed`'s console line) and holds; the root
   then says so and links `/?console=install`, which brings it back
   (`zero_host.way_back`). The image's headroom is in
