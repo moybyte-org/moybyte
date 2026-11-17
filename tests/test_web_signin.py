@@ -553,10 +553,14 @@ def test_a_request_with_no_session_and_an_old_pin_url_are_refused(tmp_path):
 
 
 def test_the_bundle_and_the_marker_stay_open(tmp_path):
-    nb._bake({"index.html.gz": b"\x1f\x8bpage"})
     try:
         h = _host(tmp_path)
-        assert status(h.handle_http("GET", "/", b"")) == 200
+        nb._bake({"index.html.gz": b"\x1f\x8bpage"}, carts=tmp_path / "carts")
+        r = h.handle_http("GET", "/", b"")      # the page's own address, then the page
+        if status(r) == 302:
+            loc = [l for l in split(r)[1].split("\r\n") if l.lower().startswith("location:")]
+            r = h.handle_http("GET", loc[0].split(":", 1)[1].strip(), b"")
+        assert status(r) == 200
         r = h.handle_http("GET", "/sync", b"")
         assert (status(r), doc(r)) == (200, {"sync": 1})
     finally:

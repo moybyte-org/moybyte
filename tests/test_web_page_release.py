@@ -12,6 +12,7 @@ import importlib.util
 import json
 import os
 import stat
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -292,6 +293,8 @@ def test_a_signed_release_signs_the_index(tmp_path, monkeypatch):
 def test_a_refused_page_fails_the_publish(tmp_path, monkeypatch):
     artifacts = tmp_path / "artifacts"
     _artifacts(artifacts, "tdeck", pack=False)
+    # nothing published to read back: the release is never asked
+    monkeypatch.setattr(publish, "gh", lambda *a, **k: subprocess.CompletedProcess(a, 1, "", ""))
     monkeypatch.setattr(sys, "argv", ["publish", "--artifacts", str(artifacts),
                                       "--channel", "unstable", "--dry-run"])
     assert publish.main() == 1
