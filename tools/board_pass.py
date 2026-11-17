@@ -35,7 +35,9 @@ commit, a move past its noise band marked (never beside a `perf-baseline`
 run, which measures a freshly booted board).
 It is a report: the pass's exit code stays its suites'. The pass then prints
 the command that writes the committed ledger (`docs/perf/ledger.md`,
-tools/perf_ledger.py) from these records; it never writes it itself. The boards take the
+tools/perf_ledger.py) from these records, and after a build the one that writes
+the image ledger (`docs/perf/image.md`, tools/image_ledger.py, from the record
+each build appends); it never writes either itself. The boards take the
 stage one at a time, because two consoles in the same two-player cart form a
 match and measure its shared tick.
 
@@ -603,6 +605,10 @@ def main(argv=None, run=run_logged, dirs=None, main_checkout=None):
         print("perf ledger: `%s` writes docs/perf/ledger.md from these "
               "records; commit it when you choose"
               % perf_ledger.regen_command(protocol=perf_pass.AFTER_SUITE))
+    if any(r.headroom != "-" for r in ordered):
+        print("image ledger: `python3 tools/image_ledger.py` writes "
+              "docs/perf/image.md from these builds' records; commit it when "
+              "you choose")
     print("board pass: wall %s%s" % (
         timings.dur(wall),
         "" if web is None else ", browser console build %s" % timings.dur(web)))

@@ -1150,6 +1150,12 @@ moybyte_build_and_collect() {
            headroom-floor "${SCRIPT_DIR}")"
   board_id="${floor#* }"
   floor="${floor%% *}"
+  # The image's bytes by part, from the link map, for docs/perf/image.md
+  # (tools/image_ledger.py); before the guard, so an image the guard refuses
+  # still says what it is made of.
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/image_ledger.py" record "${SCRIPT_DIR}" \
+    "${bout}" "${DIST_DIR}/${stem}_app.bin" \
+    || echo "!! image ledger: no record for this build" >&2
   moybyte_app_size_guard "${csv}" "${DIST_DIR}/${stem}_app.bin" \
     "${floor}" "${board_id}"
   # A core dump must carry the loaded modules' table (tools/coredump.py).
