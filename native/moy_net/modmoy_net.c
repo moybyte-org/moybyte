@@ -459,7 +459,8 @@ static mp_obj_t mod_wifi_mdns(mp_obj_t host) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_wifi_mdns_obj, mod_wifi_mdns);
 
-// (driver, on, connected, ssid or None, ip or None, last disconnect reason)
+// (driver, on, connected, ssid or None, ip or None, last disconnect reason,
+//  the station's interface made this boot)
 static mp_obj_t mod_wifi_status(void) {
     moy_wifi_state_t st;
     moy_wifi_state(&st);
@@ -471,11 +472,11 @@ static mp_obj_t mod_wifi_status(void) {
                          (unsigned)(st.ip >> 24));
         ip = mp_obj_new_str(b, (size_t)n);
     }
-    mp_obj_t t[6] = {mp_obj_new_bool(st.driver), mp_obj_new_bool(st.on),
+    mp_obj_t t[7] = {mp_obj_new_bool(st.driver), mp_obj_new_bool(st.on),
                      mp_obj_new_bool(st.connected),
                      st.ssid[0] ? mp_obj_new_str(st.ssid, strlen(st.ssid)) : mp_const_none,
-                     ip, MP_OBJ_NEW_SMALL_INT(st.reason)};
-    return mp_obj_new_tuple(6, t);
+                     ip, MP_OBJ_NEW_SMALL_INT(st.reason), mp_obj_new_bool(st.station)};
+    return mp_obj_new_tuple(7, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_wifi_status_obj, mod_wifi_status);
 

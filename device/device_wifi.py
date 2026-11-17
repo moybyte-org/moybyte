@@ -189,6 +189,22 @@ class DeviceWifi:
             pass
         return self._driver_ran
 
+    @property
+    def station_made(self):
+        """Whether the station's interface was made this boot: once a boot
+        brings WiFi up it keeps its internal RAM until the next boot, though
+        the driver under it ends with the stop (`driver_up` False again).
+        The port's network.WLAN keeps it from its first start, as its
+        driver."""
+        try:
+            import moy_net
+            if hasattr(moy_net, "wifi_on"):
+                st = moy_net.wifi_status()
+                return bool(st[6]) if len(st) > 6 else bool(st[0])
+        except ImportError:
+            pass
+        return self._driver_ran
+
     def _ensure_wlan(self):
         """Bring the radio up on demand (never at boot -- see __init__)."""
         if self.wlan is not None:

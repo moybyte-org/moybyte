@@ -773,6 +773,24 @@ def test_the_kernel_driver_says_whether_it_is_up(tmp_path, monkeypatch):
     assert dev.driver_up is False
 
 
+def test_the_station_made_this_boot_is_a_fact_of_its_own(tmp_path, monkeypatch):
+    """The station's interface keeps its internal RAM from the first start to
+    the next boot (moy_net.wifi_status()'s seventh field), while the driver
+    under it ends with the stop: `station_made` stays True where `driver_up`
+    reads False again, which is what an idle-desk measurement asks."""
+    import types
+    status = [False, False, False, None, None, 0, False]
+    stub = types.SimpleNamespace(wifi_on=lambda: None,
+                                 wifi_status=lambda: tuple(status))
+    monkeypatch.setitem(sys.modules, "moy_net", stub)
+    dev = _device_wifi_class()(None, str(tmp_path))
+    assert dev.station_made is False
+    status[0] = status[6] = True
+    assert dev.driver_up is True and dev.station_made is True
+    status[0] = False
+    assert dev.driver_up is False and dev.station_made is True
+
+
 # -- the radio's slow halves are polled, never waited on -----------------------
 #
 # Through the P4's C6 a scan, a join's poll and a stream's or a request's link

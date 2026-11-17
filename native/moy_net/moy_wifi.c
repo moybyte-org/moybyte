@@ -293,6 +293,7 @@ static int driver(void) {
         esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_wifi, NULL, NULL);
         esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_wifi, NULL, NULL);
         s_netif = esp_netif_create_default_wifi_sta();
+        s_st.station = s_netif != NULL;
         const esp_timer_create_args_t ta = {.callback = retry, .name = "moy_wifi"};
         esp_timer_create(&ta, &s_retry);
     }
