@@ -36,7 +36,7 @@ CONFIG_CACHE_L2_CACHE_256KB=y
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 
 # Custom partition table: the default 4MiBplus table caps the app at ~1.94MB
-# and the frozen console overflows it. OTA-shaped 2x7.8125 MiB app slots + the
+# and the frozen console overflows it. OTA-shaped 2x6.5 MiB app slots + the
 # coredump partition + auto-vfs tail; the CSV lives in boards/MOYBYTE_GUITION_P4/ and build.sh
 # copies it into ports/esp32/ (the filename resolves project-relative).
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-guition-p4.csv"
