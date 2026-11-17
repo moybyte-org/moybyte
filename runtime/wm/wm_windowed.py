@@ -345,6 +345,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         self.chrome_quiet = False
         self._chip_sig = None
         self._chip_streak = 0
+        self._chip_memo = None            # _chip_rects' inputs and answer
         # Dirty-union gesture restore (#58 "smooth like a real OS"): during a
         # drag/resize only the moving window's recent footprint needs the backdrop
         # re-stamped -- a full-screen 1.2MB restore per frame is the drag path's

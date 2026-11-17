@@ -694,8 +694,10 @@ class WindowChrome:
         Returns [(kind, rect, label)] in the order the windows opened (the
         back-stack's, never the z-order, so a chip never moves when the focus
         does), on the root canvas; deterministic, so draw + hit-test share it
-        without stored state."""
-        kinds = [k for k in self._kinds if k in self.windows]
+        without stored state. The answer is kept while the windows, their
+        titles, the cell and the scales stand (`_chip_memo`): the list is
+        shared, never changed."""
+        kinds = tuple(k for k in self._kinds if k in self.windows)
         if not kinds:
             return []
         got = self._chips_cell()
@@ -704,19 +706,28 @@ class WindowChrome:
         (edge, (bx, by, bw, bh), _dy, _cells), (_n, (cx, cy, cw, ch), _t, slot) = got
         lay = self.root_ctx.layout
         fs = lay.fs
+        side = edge in ("left", "right")
+        if side:
+            titles = tuple(self._win_title(self.windows[k]) for k in kinds)
+        else:
+            titles = tuple(self._chip_title(self.windows[k]) for k in kinds)
+        m = self._chip_memo
+        if (m is not None and m[0] == kinds and m[1] == titles and m[2] == got
+                and m[3] == fs and m[4] == lay.cs):
+            return m[5]
         out = []
-        if edge in ("left", "right"):
+        self._chip_memo = (kinds, titles, got, fs, lay.cs, out)
+        if side:
             side = 16 * lay.cs
             x = bx + (bw - side) // 2
             y = by + cy
             end = by + cy + ch - 4 * fs
-            for k in kinds:
+            for k, t in zip(kinds, titles):
                 if y + side > end:
                     break                              # out of bar space -- stop
-                out.append((k, (x, y, side, side), self._win_title(self.windows[k])[:1]))
+                out.append((k, (x, y, side, side), t[:1]))
                 y += side + 2 * fs
             return out
-        titles = [self._chip_title(self.windows[k]) for k in kinds]
         pad = _CHIP_PAD                    # the look's: icon slot and margins
         gap = 6
         room = cw - 4 * fs - (len(titles) - 1) * gap
