@@ -61,7 +61,9 @@ int moy_banded_last(const moy_banded_t *b);
 // moves to the next buffer, and a buffer still read by a queued op is fenced
 // before it is drawn into again. A show takes effect at the panel's next
 // refresh, so with three the buffer the next frame draws into is never the one
-// on glass: a queued window stamp that has landed is shown when the next frame
+// on glass: a queued window stamp that has landed is shown before the next
+// frame draws (the loop's `landed` stage), or after a drag frame's restore
+// (`show_landed`, asked by the WM), or, landing later still, when that frame
 // flushes, a whole frame before the buffer it leaves is drawn into; when every
 // other buffer still holds a queued show they are fenced and shown; and the
 // pre-frame hook waits out the refresh that takes the drawn-into buffer off

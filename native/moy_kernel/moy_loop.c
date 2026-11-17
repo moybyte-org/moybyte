@@ -888,6 +888,9 @@ int moy_loop_step(void) {
         if (!L.end) {
             up(MOY_UP_POINTER, 0, NULL, MOY_UPC_CONSOLE);
         }
+        if (!L.end && ops->landed != NULL) {
+            ops->landed();
+        }
         if (!L.end) {
             int r = up(MOY_UP_FRAME, dt * 1000u, NULL, MOY_UPC_CONSOLE);
             if (r >= 0) {

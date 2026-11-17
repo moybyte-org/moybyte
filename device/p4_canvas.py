@@ -97,6 +97,13 @@ class P4SystemCanvas(SystemCanvas):
         if ss is not None:
             self.set_strips = ss
             self.strip_moved = comp.strip_moved
+        # A compositor that queues a frame's show behind its stamp shows the
+        # landed ones when asked mid-draw: the WM asks once a drag's restore
+        # has run, so the refresh that takes a stamped frame on glass comes
+        # before the next frame claims the buffer it leaves.
+        sl = getattr(comp, "show_landed", None)
+        if sl is not None:
+            self.show_landed = sl
         # The quiet-frame snapshot (sync_back / _gates_unchanged): the two
         # native gate counters and this surface's clears, as three ints so a
         # play frame builds no tuple. -1 = no frame yet, never "unchanged".

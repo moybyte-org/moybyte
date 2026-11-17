@@ -74,12 +74,14 @@ void moy_tty_tail(void);
 #include "moy_glass_loop.h"
 #else
 void moy_glass_loop_present(void);
+void moy_glass_loop_landed(void);
 void moy_glass_loop_fence(void);
 void moy_glass_loop_idle(void);
 bool moy_glass_loop_light(int level);
 bool moy_glass_loop_overlap(uint32_t v[7], uint8_t *has);
 #endif
 #pragma weak moy_glass_loop_present
+#pragma weak moy_glass_loop_landed
 #pragma weak moy_glass_loop_fence
 #pragma weak moy_glass_loop_idle
 #pragma weak moy_glass_loop_light
@@ -222,6 +224,10 @@ static void b_pointer(uint32_t now, bool click, bool swallow) {
 
 static void b_present(void) {
     moy_glass_loop_present();
+}
+
+static void b_landed(void) {
+    moy_glass_loop_landed();
 }
 
 static bool b_light(int level) {
@@ -515,6 +521,7 @@ void moy_loop_board_vm_start(void) {
     #endif
     s_ops.pointer = moy_input_loop_pointer != NULL ? b_pointer : NULL;
     s_ops.present = moy_glass_loop_present != NULL ? b_present : NULL;
+    s_ops.landed = moy_glass_loop_landed != NULL ? b_landed : NULL;
     s_ops.backlight = moy_glass_loop_light != NULL ? b_light : NULL;
     s_ops.fence = moy_glass_loop_fence != NULL ? b_fence : NULL;
     s_ops.repaint = b_repaint;

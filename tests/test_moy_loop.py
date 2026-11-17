@@ -40,7 +40,7 @@ class Console:
             raise KeyboardInterrupt
 
     def handle_pointer(self):
-        pass
+        L.trace_note("hp")
 
     def frame(self, dt):
         L.trace_advance(self.cost_us)
@@ -83,7 +83,7 @@ def test_a_frame_is_the_invariant_order(loop):
     r, log = frame(1000, active=True)
     assert r == L.OK
     toks = log.split()
-    want = ["inputs", "pointer:click", "present", "frame:0", "fence", "light=255",
+    want = ["inputs", "pointer:click", "present", "hp", "landed", "frame:0", "fence", "light=255",
             "first_light", "tail:drew", "feed"]
     pos = [toks.index(t) for t in want]
     assert pos == sorted(pos), log

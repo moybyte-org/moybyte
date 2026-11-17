@@ -823,6 +823,22 @@ void moy_glass_loop_present(void) {
     #endif
 }
 
+// Before the console draws: a queued window stamp that has landed since
+// present_pending is shown now, a frame's work before the flush would show
+// it, so the refresh that takes it on glass comes before the next frame
+// claims the buffer it leaves.
+void moy_glass_loop_landed(void) {
+    mp_obj_t c = loop_comp();
+    if (c == MP_OBJ_NULL) {
+        return;
+    }
+    #if MOY_GLASS_PRESENT
+    if (mp_obj_is_type(c, &glass_dsi_type)) {
+        moy_dsi_show_landed(&((glass_dsi_obj_t *)MP_OBJ_TO_PTR(c))->d);
+    }
+    #endif
+}
+
 void moy_glass_loop_fence(void) {
     mp_obj_t c = loop_comp();
     if (c == MP_OBJ_NULL) {

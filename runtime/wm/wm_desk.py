@@ -191,6 +191,9 @@ class _BackdropLayer(Layer):
             union = wm._blit_backdrop_cache()
             if wm._restored is not False:
                 wm.draw_unders(wm._restored)
+            land = getattr(wm.root_canvas, "show_landed", None)
+            if land is not None:
+                land()                         # the last frame's stamp landed under it
             if _perf:
                 self.ws.pf_wm_restore = _ticks_ms() - _t0
             if union is not None:

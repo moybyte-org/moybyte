@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 void moy_glass_loop_present(void);
+void moy_glass_loop_landed(void);
 void moy_glass_loop_fence(void);
 void moy_glass_loop_idle(void);
 bool moy_glass_loop_light(int level);

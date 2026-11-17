@@ -213,6 +213,14 @@ static mp_obj_t dsi_present_pending(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(dsi_present_pending_obj, dsi_present_pending);
 
+// show_landed: the queued frames whose composites have landed shown now, from
+// inside a frame's draw (the loop's `landed` stage does it before the draw).
+static mp_obj_t dsi_show_landed(mp_obj_t self_in) {
+    moy_dsi_show_landed(&((glass_dsi_obj_t *)MP_OBJ_TO_PTR(self_in))->d);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(dsi_show_landed_obj, dsi_show_landed);
+
 static mp_obj_t dsi_sync(mp_obj_t self_in) {
     glass_dsi_obj_t *c = MP_OBJ_TO_PTR(self_in);
     glass_shift_fence(c->ppa, &c->shift_fly);
@@ -471,6 +479,7 @@ static const mp_rom_map_elem_t dsi_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_gfx), MP_ROM_PTR(&dsi_gfx_obj) },
     { MP_ROM_QSTR(MP_QSTR_flush), MP_ROM_PTR(&dsi_flush_obj) },
     { MP_ROM_QSTR(MP_QSTR_present_pending), MP_ROM_PTR(&dsi_present_pending_obj) },
+    { MP_ROM_QSTR(MP_QSTR_show_landed), MP_ROM_PTR(&dsi_show_landed_obj) },
     { MP_ROM_QSTR(MP_QSTR_sync), MP_ROM_PTR(&dsi_sync_obj) },
     { MP_ROM_QSTR(MP_QSTR_copy_last), MP_ROM_PTR(&dsi_copy_last_obj) },
     { MP_ROM_QSTR(MP_QSTR_shift_last), MP_ROM_PTR(&dsi_shift_last_obj) },

@@ -87,6 +87,10 @@ static void h_present(void) {
     cost(MOY_LOOP_HOST_PRESENT);
 }
 
+static void h_landed(void) {
+    tok("landed");
+}
+
 static bool h_backlight(int level) {
     char b[24];
     snprintf(b, sizeof(b), "light=%d", level);
@@ -147,6 +151,7 @@ static const moy_loop_ops_t HOST_OPS = {
     .getc = h_getc,
     .pointer = h_pointer,
     .present = h_present,
+    .landed = h_landed,
     .backlight = h_backlight,
     .fence = h_fence,
     .repaint = h_repaint,

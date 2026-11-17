@@ -9,7 +9,8 @@
 //   dev channel -> idle ladder (after every input, so the waking touch is
 //   swallowed) -> pointer (click latch + tick) -> present (pre-frame buffer
 //   work: the P4's present_pending) -> the three console upcalls
-//   (handle_input, handle_pointer, frame) -> the first-frame backlight gate ->
+//   (handle_input, handle_pointer, then `landed` -- the composites that landed
+//   meanwhile shown -- and frame) -> the first-frame backlight gate ->
 //   pump tail (first light's report, the OTA confirm) -> tail (the per-frame
 //   services) -> pace -> account (PERF, the stage meters' window) -> the
 //   watchdog feed -> the pacing sleep.
@@ -126,6 +127,9 @@ typedef struct {
     // the screen is dropped.
     void (*pointer)(uint32_t now, bool click, bool swallow);
     void (*present)(void);
+    // Before the console's frame upcall draws: show the frames whose
+    // composites landed since `present` (NULL: none).
+    void (*landed)(void);
     // The panel light, 0..255. Answers false where a level between off and
     // full is not possible (the dim rung is then absent).
     bool (*backlight)(int level);
