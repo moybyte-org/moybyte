@@ -253,6 +253,10 @@ nor those docs will warn you about:
   - **The site-mode sweep must pass a file it cannot carry by stat**
     (`moy_sync.StoreWatcher`, crc None): when it re-read every binary file on
     every sweep, an installed Doom drew a frame a second.
+  - **The sweep re-reads the files of its newest second only for
+    `moy_sync.HOT_MS`** after it first saw that second: a browser seeds every
+    file in one second, and a hot set with no end re-read and hashed the whole
+    store every sweep for as long as nothing wrote a newer file.
 - **The site's Terminal runs WASI commands on the BROWSER'S engine, through
   the boards' adapter**, compiled into the site's wasm alone; the README of
   `native/moy_wasm_web` says how ("A WASI command here"). What bites:

@@ -956,6 +956,34 @@ def test_same_second_second_write_is_caught_by_the_hot_set(tmp_path):
     assert {"p": "hop.moy/main.py", "t": "def _draw():\n    cls(2)\n"} in ops
 
 
+def test_the_hot_set_cools_once_the_newest_second_is_past(tmp_path, monkeypatch):
+    """A store nothing writes to stops re-reading its newest files: HOT_MS
+    after their second was first seen, a sweep reads no file at all (a
+    browser seeds every file in one second, and re-read them all each sweep
+    while nothing wrote a newer one). A write after that still shows."""
+    root = _store(tmp_path)
+    reads = []
+
+    def read(path):
+        reads.append(path)
+        return moy_sync._read_payload(path)
+    clock = [1000]
+    monkeypatch.setattr(moy_sync, "_ticks_ms", lambda: clock[0])
+    w = StoreWatcher(str(root), read=read)
+    w.sweep()
+    assert w._hot, "the newest second is hot when first seen"
+    clock[0] += moy_sync.HOT_MS
+    del reads[:]
+    w.sweep()
+    w.sweep()
+    assert w._hot == () and reads == [], reads
+    p = root / "hop.moy" / "main.py"
+    p.write_text("def _draw():\n    cls(3)\n")
+    _bump_mtime(p)
+    w.sweep()
+    assert {"p": "hop.moy/main.py", "t": "def _draw():\n    cls(3)\n"} in _drain(w)
+
+
 # -- a cart's cover crosses as bytes (SPEC.md 3.6) ------------------------------
 
 def _push_all(src, dst, journal=False):
