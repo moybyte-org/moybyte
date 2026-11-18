@@ -2154,7 +2154,7 @@ def test_the_frame_snapshot_fences_before_it_reuses_the_scratch():
     assert "snap_do(" in _ppa_verb_body("snap")
     assert body.index("snap_wait_inner();") < body.index("dst + off")
     assert "memcpy(dst + off" in body
-    assert "& ~(uintptr_t)63u" in body, "the 64-aligned span the GDMA takes"
+    assert "& ~MOY_CACHE_MASK" in body, "the line-aligned span the GDMA takes"
 
 
 def test_a_frames_view_and_patches_are_source_blocks_on_both_scalers():

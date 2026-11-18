@@ -7,6 +7,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "sdkconfig.h"
+
+// The PSRAM cache line (the L2's): what every DMA end, every strict
+// esp_cache_msync range and every PPA out picture is aligned to.
+#define MOY_CACHE_LINE CONFIG_CACHE_L2_CACHE_LINE_SIZE
+#define MOY_CACHE_MASK ((uintptr_t)MOY_CACHE_LINE - 1u)
+#define MOY_LINE_PX (MOY_CACHE_LINE / 2)   // the RGB565 pixels a line holds
+_Static_assert((MOY_CACHE_LINE & (MOY_CACHE_LINE - 1)) == 0, "a cache line is a power of two");
+
 // What a k entry answers before init(): no PPA to be had, which is not an
 // error (the driver's errors are ESP_FAIL, -1, and the positive ESP_ERR_*).
 #define MOY_PPA_K_OFF (-2)

@@ -19,6 +19,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#if __has_include("sdkconfig.h")
+#include "sdkconfig.h"
+#endif
 
 #define MOY_PRESENT_MAX_FBS 4
 
@@ -189,8 +192,14 @@ enum {
 #define MOY_ROT_RECTS 8                 // game + damage + strips, after coalescing
 #define MOY_ROT_BOUNCE_MIN_PX (384L * 1024L)
 // An RGB565 picture the PPA writes is this many pixels wide a row at least
-// as often: its rows start and end on the P4's 64-byte cache line.
+// as often: its rows start and end on the PSRAM cache line (moy_ppa.h's
+// MOY_CACHE_LINE, the same config value). A build with no L2 lays it out at
+// the P4's default 64-byte line.
+#ifdef CONFIG_CACHE_L2_CACHE_LINE_SIZE
+#define MOY_ROT_ALIGN_PX (CONFIG_CACHE_L2_CACHE_LINE_SIZE / 2)
+#else
 #define MOY_ROT_ALIGN_PX 32
+#endif
 
 typedef struct {
     void (*show)(void *ctx, int n);

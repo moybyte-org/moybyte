@@ -17,6 +17,7 @@
 #include "py/binary.h"
 
 #ifdef ESP_IDF_VERSION
+#include "sdkconfig.h"
 #include "esp_heap_caps.h"
 #define MOY_HAVE_HEAP_CAPS 1
 #else
@@ -89,8 +90,9 @@ static size_t moy_buf_bytes = 0;
 #endif
 
 // alloc(size, caps=SPIRAM) -> zeroed writable memoryview outside the gc heap.
-// Cache-line (64B) aligned like malloc_dma above, so a layer buffer from here
-// is a legal GDMA / PPA source or destination as well as a byte cache.
+// 64-byte aligned like malloc_dma above, and a P4's PSRAM buffer to its
+// cache line as well, so a layer buffer from here is a legal GDMA / PPA
+// source or destination as well as a byte cache.
 static mp_obj_t moy_alloc_alloc(size_t n_args, const mp_obj_t *args) {
     mp_int_t size = mp_obj_get_int(args[0]);
     if (size <= 0) {
@@ -100,6 +102,11 @@ static mp_obj_t moy_alloc_alloc(size_t n_args, const mp_obj_t *args) {
     uint32_t caps = (n_args > 1)
         ? (uint32_t)mp_obj_get_int(args[1])
         : MALLOC_CAP_SPIRAM;
+#if CONFIG_IDF_TARGET_ESP32P4
+    if (caps & MALLOC_CAP_SPIRAM) {
+        caps |= MALLOC_CAP_CACHE_ALIGNED;
+    }
+#endif
     void *buf = heap_caps_aligned_calloc(64, 1, (size_t)size, caps);
     if (buf == NULL) {
         mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("moy_alloc: out of memory"));
