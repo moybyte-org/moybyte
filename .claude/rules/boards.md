@@ -22,7 +22,9 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   console's pack and the digest the image names (generated into the STAGED
   copy and `dist/` — a build never writes into `native/`), the
   OTA identity stamp from `device/moy_ota.py`, the frozen manifest and its
-  fingerprint, the stale-sdkconfig guard, the #168 size guard and, outside
+  fingerprint, the stale-sdkconfig guard, the #168 size guard, the hot C's
+  64-bit helper guard (`tools/hot64.py`: a new `__divdi3` and kin in the
+  raster, presenters, audio or frame loop fails the build) and, outside
   CI, the one ccache every checkout and worktree shares (`moybyte_ccache`). What stays per
   board is its patch ladder and its sdkconfig facts. Builds clone mainline
   MicroPython and ESP-IDF at the releases `tools/upstream_pins.env` names

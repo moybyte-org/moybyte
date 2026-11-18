@@ -1210,6 +1210,8 @@ moybyte_build_and_collect() {
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/coredump.py" check-elf "${bout}/micropython.elf" \
     || exit 1
   moybyte_p4_clk_switch_guard "${bout}" || exit 1
+  # No new 64-bit helper call (__divdi3 and kin) in the hot C (tools/hot64.py).
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/hot64.py" check "${bout}" || exit 1
   echo "OK ->${DIST_DIR}/${stem}.bin (${flash_note})"
   echo "OK -> ${DIST_DIR}/${stem}_app.bin (OTA payload, app partition)"
 }
