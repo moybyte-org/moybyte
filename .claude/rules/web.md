@@ -200,9 +200,11 @@ nor those docs will warn you about:
   wire could not carry a module anyway. A Zero's page also gets `ws.cart_board`
   (`carts_link.BoardCarts`, which boot binds when the worker's probe of the
   sealed `/official` answered, `web_boot.official_enable`): Get Carts lists the
-  official carts of the board's own release and Get or Remove asks the board
+  carts of the board's indexes (its `system/sources`, else moybyte-org/carts,
+  and its own release's) and a licence, Get or Remove asks the board
   (`runtime/carts/web_addon.py`'s `OfficialCarts`, a slice per poll like
-  `/update`), which fetches from its release and writes its own store; once
+  `/update`), which fetches and writes its own store, the page answering the
+  install prompt over the manifest the board checked; once
   it has, the worker pulls the board's carts again and replaces the page's
   copy of that one folder in one turn of its thread, and the watcher adopts
   it, so nothing the board wrote travels back as an edit. A board with glass

@@ -57,7 +57,17 @@ five games and Pin Light) and seeds them as a console seeds its own; every other
 cart but a test fixture is an official cart its release publishes, which the browser console
 the board serves adds and removes: its Get Carts asks the board through the
 sealed `/official` (`zero_host.make_official`), and the board fetches the
-cart from its release and writes its own store. See "Provisioning" below.
+cart from its release and writes its own store. The same page lists and
+installs the carts of moybyte-org/carts beside them (owner, 2026-11-18), or
+of the indexes the board's `/moy/system/sources` names, through the same
+installer and checks a console's Get Carts makes (`docs/os_2026-11/system.md`
+§6): the licence of an external file, the install prompt, and room in this
+store. A cart that, with its external files, needs more room than the store
+has free is refused before anything is fetched, the page saying both sizes
+("Not enough room: needs …, … free."); Doom, with its WAD, does not fit.
+Those fetches are https, so the image carries ESP-IDF's common CA bundle as
+the consoles do (its `sdkconfig.board`): every https request but the
+updater's verifies the server's certificate. See "Provisioning" below.
 
 ## Build, flash, look
 
@@ -150,7 +160,7 @@ them back on the next visit — but anything that existed *only* here is.
   remove write), a newer one in a new image replacing the store's with its
   saves and config kept. The other system carts, but the test fixtures,
   are official carts the release publishes in `carts-xiao_zero.json`, which the page this board
-  serves installs (`/official`); after an update the board brings the ones
+  serves installs (`/official`, beside moybyte-org/carts'); after an update the board brings the ones
   it holds to the new release (`runtime/carts/web_addon.py`). The website's
   install writes the store with the add-on in it (`tools/store_image.py`);
   a board with none (a wiped store) installs the one its image fits from its

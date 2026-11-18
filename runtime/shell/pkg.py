@@ -1,5 +1,5 @@
 # Map (grep -n a name to jump there):
-#   -- the checks Get Carts shares   fit_why, depends_why, blocker, install_check
+#   -- the checks Get Carts shares   fit_why, depends_why, blocker, install_check, manifest_check
 #   -- the steps it shares           through, removed, landed, land_now: a store op a frame
 #   Pkg                              the shell's `pkg`: the verbs over one installer
 #   Pkg.update                       fetch every source's index into the cache
@@ -81,12 +81,7 @@ SHELL_NAMES = (
 )
 
 
-def size_text(n):
-    """A size the way the screens say it: whole KB below a megabyte, one
-    decimal above. Integer arithmetic, so every tier prints the same."""
-    if n < 1048576:
-        return "%d KB" % max(1, (n + 1023) // 1024)
-    return "%d.%d MB" % (n // 1048576, (n % 1048576) * 10 // 1048576)
+size_text = _ci.size_text
 
 
 # -- the checks Get Carts shares ------------------------------------------------------
@@ -140,10 +135,7 @@ def blocker(inst, cart, plan, free, runs, fit=None):
     if fit:
         return fit
     if free is not None:
-        need = _ci.need_bytes(plan, free[1])
-        if need > free[0]:
-            return "Not enough room: needs %s, %s free." % (size_text(need),
-                                                           size_text(free[0]))
+        return _ci.room_why(_ci.need_bytes(plan, free[1]), free[0])
     return None
 
 
@@ -171,6 +163,13 @@ def install_check(inst, stage, folder, shelf):
         man = json.loads(_read(stage + "/manifest.json"))
     except (OSError, ValueError):
         man = {}
+    return manifest_check(inst, man, folder, shelf)
+
+
+def manifest_check(inst, man, folder, shelf):
+    """`install_check` over the checked build's parsed manifest `man`: what
+    a page asks of a console with no screen, whose install is the board's
+    and whose manifest the board hands it (web_addon.OfficialCarts)."""
     man = man if isinstance(man, dict) else {}
     cart = _perms.manifest_cart(man, folder, inst.root())
     consent = inst.consent()
@@ -254,15 +253,21 @@ def landed(inst, path, consented):
     removal record dropped (it is the seed's to keep current again) and so is
     the browser console's, then the shelf re-read there. Get Carts and `pkg
     install` both step it."""
-    if consented is not None:
-        yield
-        yield from inst.consent().record_steps(consented[0], consented[1])
+    yield from consent_steps(inst, consented)
     folder = path.rsplit("/", 1)[-1]
     if _store.recorded(folder):
         yield
         inst.op(lambda: _store.unremove(inst.root(), [folder]))
     yield
     inst.rescan(path)
+
+
+def consent_steps(inst, consented):
+    """`yield from` it: the install prompt's answer (`(app id,
+    permissions)`, or None when it asked nothing) recorded."""
+    if consented is not None:
+        yield
+        yield from inst.consent().record_steps(consented[0], consented[1])
 
 
 def _official_here(root, ident):

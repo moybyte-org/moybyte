@@ -53,10 +53,16 @@ file is what the chip changes.
   cable flash brings every official cart a store holds to the image's
   release (`tools/board_flash.py`'s `install_carts`; the core carts are the
   image's seed's). The page this board
-  serves adds and removes the rest as the XIAO's does (its README), the
-  install's modules frozen here for it; each request's buffers (its release
-  index read whole, about 45 KB, and the cart's download) are made for it
-  and given back when it ends.
+  serves adds and removes the rest, and the carts of moybyte-org/carts (or
+  of its `system/sources`), as the XIAO's does (its README), the install's
+  modules frozen here for it; each request's buffers (each index read whole,
+  one at a time, and the cart's download) are made for it and given back
+  when it ends, and a cart its store has no room for is refused with the
+  sizes before anything is fetched. Its image carries no CA bundle (the
+  XIAO's `sdkconfig.board` does), so the kernel's client refuses every https
+  fetch but a signed one (`moy_conn_verifies`), and those fetches -- the
+  release's index on GitHub, moybyte-org/carts on GitHub Pages -- are
+  https: its page's Get Carts finds every shelf away.
 - **SSH, without SFTP.** The server and the shell's face run in the same
   internal heap, so a build without PSRAM sizes them to what a session was
   measured to use there: the server's and the face's stacks and the session's

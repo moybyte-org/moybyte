@@ -2,7 +2,7 @@
 #   installed              the add-on folders (web_console_<12 hex>.moy) a carts root holds
 #   AddonStep              the add-on that fits this image, and on the XIAO Zero the official carts, brought to it
 #   official_behind        the official carts a store holds that its release has newer
-#   OfficialCarts          /official's backend: the official carts a page asks a headless board for
+#   OfficialCarts          /official's backend: the carts of its shelves a page asks a headless board for
 """The browser console add-on: a cart, one per page (tools/web_pack.py makes
 them), whose pack the webhost serves (native/moy_net/moy_page.h); and on a
 Zero the official carts, which its release publishes in the same index.
@@ -62,10 +62,11 @@ already there asks nothing. A console board's image carries every seed cart
 and seeds them itself, so its step is the add-on's alone.
 
 A ZERO'S PAGE asks for the rest (`OfficialCarts`, the webhost's sealed
-`/official`): the browser console it serves lists the official carts of the
-board's own release and asks the board to install or remove one, and the
-board fetches from its release over its own network and writes its own
-store -- the board stays the one writer of its carts, as with `/update`.
+`/official`): the browser console it serves lists the carts of the indexes
+the board reads (its `system/sources`, else moybyte-org/carts, and its own
+release's) and asks the board to install or remove one, and the board
+fetches over its own network and writes its own store -- the board stays
+the one writer of its carts, as with `/update`.
 
 `inst` is the install role's server as the shell drives it
 (runtime/shell/shell_servers.py's InstallServer, bound), or the Zero's
@@ -514,17 +515,20 @@ class AddonStep:
         return False
 
 
-def listing(c):
-    """Official entry `c` as a page lists it: what its row and page show and
-    what its install takes in the store, without the urls and digests only
-    the board's install reads."""
+def listing(c, state=None, had=None):
+    """Index entry `c` as a page lists it: what its row and page show and
+    what its install takes in the store, without the asset urls and digests
+    only the board's install reads; with `state` (cart_index.cart_state's
+    word, as the board's own store has it) and `had` (the version its record
+    holds)."""
     out = {}
     for key in ("id", "name", "version", "folder", "runtime", "description", "genre",
-                "tags", "memory", "depends", "index", "shelf"):
+                "tags", "memory", "depends", "index", "shelf", "external"):
         if key in c:
             out[key] = c[key]
     lic = c.get("licence") or {}
     out["licence"] = dict((k, lic[k]) for k in ("spdx", "name") if k in lic)
+    out["official"] = _ci.is_official(c)
     out["core"] = bool((c.get("moybyte") or {}).get("core"))
     out["assets"] = [{"size": a["size"],
                       "files": dict((fn, {"size": m["size"]}) for fn, m in a["files"].items())}
@@ -532,64 +536,108 @@ def listing(c):
     cover = c.get("cover")
     if cover is not None:
         out["cover"] = {"size": cover["size"], "sha256": cover["sha256"]}
+    if state is not None:
+        out["state"] = state
+        out["had"] = had
     return out
 
 
-class OfficialCarts:
-    """`/official`'s backend on a board with no screen (the Zero): the
-    official carts of its own release index (`index`, a url or a callable
-    answering one), listed for the page it serves and installed or removed
-    when that page asks. The page asks and the board does the work, a slice
-    per poll (`step`), as zero_host.ZeroUpdate updates its firmware: a POST
-    queues and answers at once (`request`), a GET reads where it stands
-    (`answer`).
+ASK_MS = 600000                 # an install prompt no page answers is cancelled after this
 
-      check    the index fetched and its official entries that fit this
-               image listed (`listing`), with the store's room: "listed",
-               handed to the next GET once, then "idle"
-      install  the index fetched again and the entry `folder` names installed
-               through cart_index.Install (its saves and an edited config
-               carried), its removal record dropped: "done"
+
+class OfficialCarts:
+    """`/official`'s backend on a board with no screen (the Zero): the carts
+    of the indexes this board browses (cart_index.load_indexes: its
+    `system/sources`, else moybyte-org/carts, and its own release's index,
+    `index`, a url or a callable answering one), listed for the page it
+    serves and installed or removed when that page asks. The route keeps the
+    name it had when it listed the release's official carts alone. The page
+    asks and the board does the work, a slice per poll (`step`), as
+    zero_host.ZeroUpdate updates its firmware: a POST queues and answers at
+    once (`request`), a GET reads where it stands (`answer`).
+
+      check    every index fetched (its signature checked, as a console's
+               Get Carts reads it) and its entries that fit this image
+               listed (`listing`) but the browser console add-on, which
+               the board keeps itself (AddonStep), each with where it stands in this store,
+               with the store's room and the indexes not reached:
+               "listed", handed to the next GET once, then "idle"
+      licence  the licence of the external file `path` of the entry
+               `folder` (and `id`) of the index `index` fetched and checked:
+               "listed" with its `text`, likewise
+      install  that index fetched again and the entry installed through
+               cart_index.Install (its saves and an edited config carried,
+               the external files the page `accepted` the licence of), once
+               the store has room for it: the checked build's manifest is
+               handed to the page ("asking", `manifest`) for the install
+               prompt (pkg.manifest_check), and `agree` lands it: "done"
+      agree    the page's prompt answered yes
       remove   an optional built-in's removal recorded (moy_seed.note_removed,
-               as pkg.removed records it) and its folder taken off: "done";
-               a core cart is refused
+               as pkg.removed records it), or a cart the store's record
+               holds, and its folder taken off: "done"; a core cart, or one
+               nothing installed, is refused
       cancel   an install stopped while it can be
 
-    Everything a request makes -- the index, the list, the install's buffers
-    -- is made for it and let go when it ends, so an idle board holds none of
-    it. `busy()` (the release's own AddonStep) holds a request back: two
-    installs never write one store. `reserve` is the room the store keeps
-    free (zero_host.SEED_RESERVE)."""
+    `index` names one of the indexes the board browses; none is its own
+    release's. A Python cart installs only from that one (cart_index.
+    runs_on), and an install whose cart and external files need more room
+    than the store has free less `reserve` (zero_host.SEED_RESERVE) is
+    refused before anything is fetched, with the sizes
+    (cart_index.room_why).
 
-    def __init__(self, inst, index, busy=None, reserve=0):
+    Everything a request makes -- the indexes, the list, the install's
+    buffers -- is made for it and let go when it ends, so an idle board
+    holds none of it. `busy()` (the release's own AddonStep) holds a request
+    back: two installs never write one store. `sources(root, own)` answers
+    the indexes (cart_index.load_indexes)."""
+
+    def __init__(self, inst, index, busy=None, reserve=0, sources=None):
         self.inst = inst
         self.index = index
         self.other = busy
         self.reserve = reserve
+        self.sources = sources or _ci.load_indexes
         self.state = "idle"
         self.action = None
         self.folder = None
         self.error = None
         self._listed = None
         self._phase = None
-        self._url = None
+        self._urls = None
+        self._want = None
         self._fetch = None
+        self._found = None
+        self._unreached = 0
         self._job = None
         self._gone = None
+        self._asked_at = None
         self._held = False
         self._cancelled = False
 
     def busy(self):
         return self.state in ("checking", "installing", "removing")
 
+    def _own(self):
+        return self.index() if callable(self.index) else self.index
+
+    def _indexes(self):
+        root = self.inst.root()
+        own = self._own()
+        return self.inst.op(lambda: self.sources(root, own))
+
     # -- the request side -----------------------------------------------------
 
-    def request(self, action, folder=None):
-        """Queue `check`, `install`, `remove` or `cancel`: (ok, message)."""
+    def request(self, action, folder=None, doc=None):
+        """Queue `check`, `licence`, `install`, `agree`, `remove` or
+        `cancel` (`doc` the POST's other members: `index`, `id`,
+        `accepted`, `path`): (ok, message)."""
+        doc = doc if isinstance(doc, dict) else {}
         if action == "cancel":
             return self._cancel()
-        if action not in ("check", "install", "remove"):
-            return False, "action must be check, install, remove or cancel"
+        if action == "agree":
+            return self._agree()
+        if action not in ("check", "licence", "install", "remove"):
+            return False, "action must be check, licence, install, agree, remove or cancel"
         if self.busy():
             return False, "busy: " + self.state
         if self.other is not None and self.other():
@@ -602,21 +650,40 @@ class OfficialCarts:
         self.action = action
         self.folder = folder
         self._cancelled = False
+        root = self.inst.root()
         if action == "remove":
             import moy_carts
-            if not moy_carts.removable(folder):
+            if moy_carts.is_core(folder):
                 return False, "%s stays on this console" % folder
-            root = self.inst.root()
             if not self.inst.op(lambda: _exists(_cart_path(root, folder))):
                 return False, "%s isn't on this console" % folder
+            if not moy_carts.removable(folder) \
+                    and folder not in self.inst.op(lambda: _ci.load_record(root)):
+                return False, "%s wasn't installed from a shelf" % folder
             self.state = "removing"
             self._gone = self._removal(root, folder)
             return True, "queued"
-        url = self.index() if callable(self.index) else self.index
-        if not url:
-            return False, "no update address"
-        self._url = url
-        self.state = "checking" if action == "check" else "installing"
+        urls = self._indexes()
+        if action == "check":
+            self._urls = urls
+        else:
+            url = doc.get("index") or self._own()
+            if not url or url not in urls:
+                return False, "it isn't on a shelf this console reads"
+            accepted = doc.get("accepted") or ()
+            if not isinstance(accepted, (list, tuple)) \
+                    or not all(isinstance(a, str) for a in accepted):
+                return False, "accepted must be a list of paths"
+            path = doc.get("path")
+            if action == "licence" and not isinstance(path, str):
+                return False, "no external file named"
+            self._urls = [url]
+            self._want = (doc.get("id"), tuple(accepted), path,
+                          "It isn't in this console's release." if url == self._own()
+                          else "It isn't on that shelf.")
+        self._found = []
+        self._unreached = 0
+        self.state = "checking" if action != "install" else "installing"
         self._phase = "online"
         if not self._held:
             self._held = True
@@ -634,17 +701,29 @@ class OfficialCarts:
             self._end(None)             # nothing written yet: stopped now
         return True, "cancelled"
 
+    def _agree(self):
+        job = self._job
+        if self.state != "installing" or job is None or job.asking is None:
+            return False, "nothing is asking"
+        job.agree()
+        self._asked_at = None
+        return True, "agreed"
+
     # -- what a GET reads ------------------------------------------------------
 
     def answer(self, ok=None, message=None):
-        """The /official document as JSON text: the state, the request it
-        is about, the install's progress, the error; a check's list and the
-        store's room the once a GET reads them."""
-        doc = {"state": self.state, "action": self.action, "folder": self.folder,
-               "error": self.error, "progress": None}
+        """The /official document as JSON text: the state ("asking" while an
+        install waits on the page's prompt, its `manifest` beside it), the
+        request it is about, the install's progress, the error; a check's
+        list or a licence's text the once a GET reads them."""
         job = self._job
+        asking = job is not None and job.asking is not None
+        doc = {"state": "asking" if asking else self.state, "action": self.action,
+               "folder": self.folder, "error": self.error, "progress": None}
         if job is not None:
             doc["progress"] = [job.done, job.total]
+        if asking:
+            doc["manifest"] = job.asking
         if ok is not None:
             doc["ok"] = ok
             doc["message"] = message
@@ -659,7 +738,9 @@ class OfficialCarts:
     # -- the pumped side -------------------------------------------------------
 
     def step(self, budget_ms=STEP_MS):
-        """One slice of the request in hand: True while it wants the next."""
+        """One slice of the request in hand: True while it wants the next
+        (False while an install waits on the page's prompt, which the poll
+        still steps while `busy()`)."""
         try:
             if self.state == "removing":
                 if next(self._gone, _ci._DONE) is not _ci._DONE:
@@ -684,48 +765,143 @@ class OfficialCarts:
             return True
         if not up:
             return self._end("WiFi isn't connected.")
-        self._fetch = _ci.index_fetch(net, self._url)
         self._phase = "index"
         return True
 
     def _index(self, _budget):
-        if self._fetch.step():
+        """The next index fetched and read, a fetch's step a poll."""
+        if self._fetch is None:
+            if not self._urls:
+                return self._indexed()
+            self._fetch = _ci.index_fetch(self.inst.net(), self._urls[0])
+        url = self._urls[0]
+        try:
+            if self._fetch.step():
+                return True
+            data = self._fetch.data
+            self._fetch = None
+            self._urls.pop(0)
+            got = [c for c in _ci.fitting(_ci.parse_index(data, url, self._own()))
+                   if c["runtime"] != "web"]
+        except _ci.InstallError as exc:
+            self._fetch = None
+            if self.action != "check":
+                raise
+            self._urls.pop(0)
+            self._unreached += 1
+            _ci._log(exc.detail)
             return True
-        data, self._fetch = self._fetch.data, None
-        carts = [c for c in _ci.fitting(_ci.parse_index(data, self._url, self._url))
-                 if _ci.is_official(c)]
         data = None
+        if self.action == "check":
+            self._found.append(self._listings(got))
+            return True
+        want = self._want[0]
+        for c in got:
+            if c["folder"] == self.folder and (want is None or c["id"] == want):
+                self._found.append(c)
+        return True
+
+    def _listings(self, carts):
+        """`carts` as the page lists them (`listing`), each with where it
+        stands in this store: one JSON text, so the index's entries go."""
+        root = self.inst.root()
+        chip, fmt = self.inst.chip()
+        ranges = bool(getattr(self.inst.net(), "ranges", False))
+
+        def _scan():
+            rec = _ci.load_record(root)
+            out = []
+            for c in carts:
+                p = _ci.plan(c, chip, fmt, ranges)
+                folder = _cart_path(root, c["folder"])
+                present = _exists(folder)
+                entry = rec.get(c["folder"])
+                man = None
+                if present and (entry is None or entry.get("id") != c["id"]
+                                or _ci.is_official(c)):
+                    try:
+                        man = json.loads(_read(folder + "/manifest.json"))
+                    except (OSError, ValueError):
+                        man = None
+                out.append(json.dumps(listing(c, _ci.cart_state(c, p, entry, present, man),
+                                              entry.get("version") if entry else None)))
+            return out
+        return ", ".join(self.inst.op(_scan))
+
+    def _indexed(self):
+        """Every index read: a check's list handed over, else the one
+        entry asked for licensed or installed."""
+        found, self._found = self._found, None
         root = self.inst.root()
         room = self.inst.op(lambda: _room(root, self.reserve))
         if self.action == "check":
-            listed = json.dumps({"carts": [listing(c) for c in carts], "free": room})
-            carts = None
+            if found == [] and self._unreached:
+                return self._end(_ci.UNREACHABLE)
+            parts = [f for f in found if f]
+            listed = '{"carts": [%s], "free": %s, "unreached": %d}' % (
+                ", ".join(parts), json.dumps(room), self._unreached)
             self._release()
             self._phase = None
             self._listed = listed
             self.state = "listed"
             _ci._log("official: %d bytes listed" % len(listed))
             return False
-        cart = None
-        for c in carts:
-            if c["folder"] == self.folder:
-                cart = c
-        carts = None
+        cart = found[0] if found else None
+        found = None
+        _id, accepted, path, missing = self._want
         if cart is None:
-            return self._end("It isn't in this console's release.")
+            return self._end(missing)
+        if not _ci.runs_on(cart, _ci.RUNTIMES):
+            return self._end("This console can't play this kind of cart.")
+        if self.action == "licence":
+            ext = None
+            for e in cart.get("external") or ():
+                if e["path"] == path:
+                    ext = e
+            if ext is None:
+                return self._end("It needs no file of that name.")
+            self._fetch = _ci.licence_fetch(self.inst.net(), cart, ext["licence"])
+            self._phase = "licence"
+            return True
         chip, fmt = self.inst.chip()
         ranges = bool(getattr(self.inst.net(), "ranges", False))
         p = _ci.plan(cart, chip, fmt, ranges)
-        if room is not None and _ci.need_bytes(p, room[1]) > room[0]:
-            return self._end(_ci.FULL)
-        self._job = _ci.Install(cart, p, self.inst.net(), root, self.inst.op)
+        keep, arc = _archive_keep(p)
+        if room is not None:
+            why = _ci.room_why(_ci.need_bytes(p, room[1]) + (arc if keep == "store" else 0),
+                               room[0])
+            if why is not None:
+                return self._end(why)
+        self._job = _ci.Install(cart, p, self.inst.net(), root, self.inst.op, accepted,
+                                archive=keep, ask=_manifest_of)
         self._phase = "install"
         return True
+
+    def _licence(self, _budget):
+        if self._fetch.step():
+            return True
+        text = _ci.as_text(self._fetch.data)
+        self._fetch = None
+        self._listed = json.dumps({"text": text})
+        self._release()
+        self._phase = None
+        self.state = "listed"
+        return False
 
     def _install(self, budget):
         job = self._job
         if job.step(budget):
-            return True
+            if job.asking is None:
+                return True
+            if self._asked_at is None:          # the page's turn: nothing to do here
+                self._asked_at = _now()
+                self._release()
+            elif _ci._ticks_diff(_now(), self._asked_at) > ASK_MS:
+                self._asked_at = None
+                job.cancel()
+                return True
+            return False
+        self._asked_at = None
         if not job.path:
             return self._end(None if self._cancelled else (job.error or _ci.STOPPED))
         import moy_carts
@@ -750,6 +926,8 @@ class OfficialCarts:
     def _end(self, error):
         self._phase = None
         self._fetch = None
+        self._found = None
+        self._urls = None
         self._job = None
         self._release()
         self.error = error
@@ -760,6 +938,38 @@ class OfficialCarts:
         _ci._log("official: %s %s %s" % (self.action, self.folder or "",
                                          error or self.state))
         return False
+
+
+ARCHIVE_RAM_SHARE = 4           # an external archive kept in RAM below this share of the free heap
+
+
+def _archive_keep(p):
+    """("ram" or "store", the external archives' bytes) for plan `p`: an
+    archive goes through the store where the heap has less than
+    ARCHIVE_RAM_SHARE times it free, and the room check counts it."""
+    arc = 0
+    for e in p["external"]:
+        if _ci.external_mirror(e) is None:
+            arc += e["archive"]["size"]
+    if not arc:
+        return "ram", 0
+    try:
+        import gc
+        free = gc.mem_free()
+    except (ImportError, AttributeError):
+        return "ram", arc
+    return ("store" if free < ARCHIVE_RAM_SHARE * arc else "ram"), arc
+
+
+def _manifest_of(stage):
+    """The install's `ask`: the checked build's manifest, which the page's
+    install prompt reads (pkg.manifest_check); never None, so the install
+    waits for the page."""
+    try:
+        man = json.loads(_read(stage + "/manifest.json"))
+    except (OSError, ValueError):
+        man = None
+    return man if isinstance(man, dict) else {}
 
 
 def _room(root, reserve):

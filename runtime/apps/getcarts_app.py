@@ -68,11 +68,15 @@ The screens, in the order a kid meets them:
   ON THE CONSOLE  a page a board serves: the carts it shows are the board's,
              and the board gets its own, so this one fetches nothing.
   A ZERO'S PAGE  a page a console with no screen serves (`install.board()`,
-             its sealed /official): the shelf is that console's official
-             carts, from its own release, and Get and Remove ASK it -- it
-             fetches and writes its own store, the page waiting with its
-             progress, then brings its copy of the cart over this page's.
-             A cover shows for a cart the console holds.
+             its sealed /official): the shelf is the carts of that
+             console's shelves (its sources and its own release), each
+             where it stands in that console's store, its room the
+             console's, and a licence, Get and Remove ASK it -- it fetches
+             and checks, the page shows the licence and the install prompt
+             (`pkg.manifest_check` over the manifest it checked), and it
+             writes its own store, the page waiting with its progress,
+             then brings its copy of the cart over this page's. A cover
+             shows for a cart the console holds.
 
 The installing is cart_index's; this module is the screens and the lease. The
 radio is held while something is fetched -- the indexes, a licence and the
@@ -721,8 +725,9 @@ class GetCartsAppLayer(ListShellApp):
         self._board_free = (free[0], free[1]) if isinstance(free, list) and len(free) == 2 \
             else None
         self.indexes = ()
-        self.carts = [dict(c, official=True) for c in doc.get("carts") or ()
+        self.carts = [c for c in doc.get("carts") or ()
                       if isinstance(c, dict) and isinstance(c.get("assets"), list)]
+        self.unreached = doc.get("unreached") or 0
         self.fetched_at = _ticks_ms()
         self._covers = self._covers_to_fetch(self.carts)
         self._build_rows()
@@ -834,6 +839,11 @@ class GetCartsAppLayer(ListShellApp):
             out = []
             for c in carts:
                 p = _ci.plan(c, chip, fmt, ranges)
+                if board is not None:       # where it stands is the board's store's
+                    out.append({"cart": c, "plan": p, "state": c.get("state") or "get",
+                                "had": c.get("had"), "runs": _ci.runs_on(c, have),
+                                "fit": None})
+                    continue
                 folder = "%s/%s" % (root, c["folder"])
                 present = root is not None and _exists(folder)
                 entry = rec.get(c["folder"])
@@ -966,6 +976,10 @@ class GetCartsAppLayer(ListShellApp):
             self._go("connecting")
 
     def _pump_licence(self):
+        board = self._inst.board()
+        if board is not None:
+            self._pump_board_licence(board)
+            return
         up = self._online()
         if up is None:
             return
@@ -984,6 +998,29 @@ class GetCartsAppLayer(ListShellApp):
         self.lic[2] = 0
         self._go("licence")
         self._focus = vid("NO")             # No has the focus
+
+    def _pump_board_licence(self, board):
+        """The licence asked of the console with no screen, which fetches
+        and checks it as this console would."""
+        ext = self.lic[0]
+        what = ("licence", ext["path"])
+        if self._fetching != what:
+            self._drop_fetch()
+            self._fetch = board.licence(self.cur["cart"], ext["path"])
+            self._fetching = what
+        job = self._fetch
+        if job.step():
+            return
+        self._fetch = None
+        self._fetching = None
+        if job.error is not None:
+            self._fail(job.error)
+            return
+        self._lic_text = str(job.doc.get("text") or "")
+        self.lic[1] = self._wrap(self._lic_text)
+        self.lic[2] = 0
+        self._go("licence")
+        self._focus = vid("NO")
 
     # -- YOUR COPY: an external file this console cannot fetch -----------------
 
@@ -1108,7 +1145,7 @@ class GetCartsAppLayer(ListShellApp):
     def _pump_connect(self):
         board = self._inst.board()
         if board is not None:
-            self.job = board.install(self.cur["cart"]["folder"])
+            self.job = board.install(self.cur["cart"], self.accepted, self._ask_board)
             self._go("getting")
             self.armed = True
             return
@@ -1142,6 +1179,14 @@ class GetCartsAppLayer(ListShellApp):
         self._consented = (aid, perms)
         return lines
 
+    def _ask_board(self, man):
+        """`_ask` over the manifest of the build a console with no screen
+        checked (carts_link.BoardAsk's `ask`)."""
+        aid, perms, lines = _pkg.manifest_check(self._inst, man, self.cur["cart"]["folder"],
+                                                self._carts_role.all())
+        self._consented = (aid, perms)
+        return lines
+
     def _pump_get(self):
         job = self.job
         if job.step():
@@ -1153,7 +1198,11 @@ class GetCartsAppLayer(ListShellApp):
         self._release()
         self._unpick()
         if job.path and self._inst.board() is not None:
-            self._got()                 # the console landed it, its copy is here
+            consented, self._consented = self._consented, None   # the console landed it
+            self.cur["cart"]["state"] = "installed"
+            self.cur["cart"]["had"] = self.cur["cart"]["version"]
+            self._run(_pkg.consent_steps(self._inst, consented), self._got,
+                      lambda exc: self._fail(_ci.STOPPED))
         elif job.path:
             consented, self._consented = self._consented, None
             self._run(_pkg.landed(self._inst, job.path, consented), self._got,
@@ -1236,9 +1285,19 @@ class GetCartsAppLayer(ListShellApp):
         self.asking = False
         row = self.cur
         board = self._inst.board()
-        steps = _asked(board.remove(row["cart"]["folder"])) if board is not None \
+        steps = self._board_removed(board, row) if board is not None \
             else _pkg.removed(self._inst, row["cart"]["folder"])
         self._run(steps, lambda: self._removed(row), self._not_removed)
+
+    def _board_removed(self, board, row):
+        """`yield from` it: the console with no screen takes the cart off its
+        store, and the consent it was installed with is forgotten here."""
+        had = self._inst.find(row["cart"]["folder"])
+        yield from _asked(board.remove(row["cart"]["folder"]))
+        row["cart"]["state"] = "get"
+        row["cart"]["had"] = None
+        if had is not None:
+            yield from self._inst.consent().forget_steps(_perms.app_id(had))
 
     def _removed(self, row):
         self._build_rows()

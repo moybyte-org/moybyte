@@ -511,7 +511,22 @@ holds the verbs and the checks over `runtime/carts/cart_index.py` (with the
 (`runtime/apps/getcarts_app.py`) is its GUI face, making the same checks
 (`pkg.blocker`, `pkg.install_check`) and the same removal (`pkg.removed`).
 
-**The index** is moy-spec's (`cartindex.py`, version 1), read as it is, with
+**A Zero installs too** (owner, 2026-11-18). A board with no screen is its
+store's one writer, so the page it serves asks it (the sealed `/official`,
+`runtime/carts/web_addon.py`'s `OfficialCarts`): the board reads the indexes
+`cart_index.load_indexes` gives it (its `system/sources`, else
+moybyte-org/carts, and its own release's), signatures checked, and lists
+each entry with where it stands in its store and the store's room. The page
+makes the checks of the console it is (`pkg.blocker`, whose room is the
+board's), shows an external file's licence, which the board fetches, and the
+install prompt over the manifest of the build the board checked
+(`pkg.manifest_check`), and records the consent; the board installs through
+the same `cart_index.Install`, refusing before any download a cart and
+external files its store has no room for, with the sizes ("Not enough room:
+needs …, … free.", `cart_index.room_why`), and a Python cart from
+any index but its release's (`cart_index.runs_on`).
+
+**The index** is moy-spec's (its `cartindex` module, version 1), read as it is, with
 two additions read here: an entry's `depends`, a list of cart ids, and the
 signature. **An index is signed as OTA manifests are** (the same keys,
 RSA-2048 PKCS#1 v1.5 over SHA-256): `tools/ota_sign.py sign-index` appends

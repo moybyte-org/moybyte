@@ -1,13 +1,17 @@
-"""A Zero's official carts, asked for by the page it serves (`/official`).
+"""A Zero's carts, asked for by the page it serves (`/official`).
 
 A Zero's image carries the seed carts its board.toml's `[roster] image`
 names; the rest are official carts its release publishes (tools/web_pack.py). The browser console the board serves
-lists them in Get Carts and asks the BOARD to install or remove one: the board
-fetches from its own release and writes its own store, the one writer, the
-way it installs its firmware (`/update`, tests/test_zero_update.py). What is
-pinned here is the board's half over the real webhost, signed in as a page:
-the POST queues and answers, the work is the poll's, the list is handed over
-once, and a removal leaves the same record `pkg remove` leaves.
+lists them, beside the carts of moybyte-org/carts (or the board's
+system/sources), in Get Carts and asks the BOARD to install or remove one:
+the board fetches and writes its own store, the one writer, the way it
+installs its firmware (`/update`, tests/test_zero_update.py). What is pinned
+here is the board's half over the real webhost, signed in as a page: the
+POST queues and answers, the work is the poll's, the list is handed over
+once, an install waits for the page's prompt, one the store has no room for
+is refused with the sizes, an external file's licence is the page's to
+accept, and a removal leaves the same record `pkg remove` leaves; and the
+page's half, over the real carts_link and Get Carts.
 """
 
 import json
@@ -115,6 +119,11 @@ def test_an_install_fetches_from_the_release_and_lands_on_the_board(zero):
     assert ("installing", None) in seen
     assert any(p and p[1] > 0 for _s, p in seen), "the download's progress is readable"
     code, doc = _call(zero, "GET")
+    assert doc["state"] == "asking" and doc["manifest"]["title"] == "Harpoon Pop"
+    assert not os.path.exists(zero.root + "/" + HARPOON), "the page's prompt comes first"
+    assert _call(zero, "POST", {"action": "agree"})[0] == 200
+    _run(zero)
+    code, doc = _call(zero, "GET")
     assert doc == dict(doc, state="done", folder=HARPOON, error=None)
     assert os.path.exists(zero.root + "/" + HARPOON + "/manifest.json")
     assert moy_carts.load_removed(zero.root) == [], "its removal record is dropped"
@@ -136,8 +145,10 @@ def test_a_full_store_refuses_before_it_fetches_a_cart(zero):
     _call(zero, "POST", {"action": "install", "folder": HARPOON})
     _run(zero)
     code, doc = _call(zero, "GET")
-    assert doc["state"] == "error" and doc["error"] == ci.FULL
-    assert len(zero.net.opened) == 1, "only the index"
+    assert doc["state"] == "error"
+    assert doc["error"].startswith("Not enough room: needs ") and doc["error"].endswith(
+        ", nothing free."), "the sizes, before anything is fetched"
+    assert len(zero.net.opened) == 1, "only its index"
 
 
 def test_a_removal_leaves_pkg_s_record_and_a_core_cart_stays(zero):
@@ -414,7 +425,10 @@ def test_get_on_a_zero_s_page_asks_the_board_and_brings_its_copy_over(page, zero
     assert landed == [HARPOON]
     assert app.cur["state"] == "installed"
     assert any(c.get("path", "").endswith(HARPOON) for c in ws.carts.all)
-    assert ("POST", json.dumps({"action": "install", "folder": HARPOON})) in worker.asked
+    posts = [json.loads(b) for m, b in worker.asked if m == "POST"]
+    assert {"action": "install", "folder": HARPOON, "index": OWN, "id": "moybyte.harpoon_pop",
+            "accepted": []} in posts
+    assert {"action": "agree"} in posts, "a built-in's prompt asks nothing"
 
 
 def test_remove_on_a_zero_s_page_is_the_board_s_and_a_core_cart_offers_none(page, zero):
@@ -445,5 +459,195 @@ def test_a_board_that_will_not_install_says_why_and_changes_nothing(page, zero):
     app.free = None
     app._press("GET")
     _frames(ws, worker, lambda: app.phase == "failed")
-    assert app.why == ci.FULL
+    assert app.why.startswith("Not enough room: needs ")
     assert not os.path.exists(proot + "/" + HARPOON)
+
+
+# -- the shelves beyond the release: moybyte-org/carts and system/sources ------
+
+SHELF = "https://moybyte-org.github.io/carts"
+
+
+def _shelf(zero, **kw):
+    """moybyte-org/carts (cart_index.DEFAULT_INDEXES) as the board's network
+    serves it: a Lua cart, a compiled one, a Python one and one with an
+    external file the store has no room for."""
+    from cart_store_fixtures import Repo
+    repo = Repo(SHELF, "Moybyte carts")
+    repo.add("moymesh", name="Moymesh", runtime="lua", modules=(),
+             moybyte=kw.get("perms", {"permissions": ["graphics", "input"]}))
+    repo.add("teapot", name="Jet Teapot")
+    repo.add("snake_py", name="Snake Py", runtime="python", modules=())
+    repo.add("doom", name="Doom",
+             external=[("doom1.wad", b"WAD!" * 4000, "pkg/doom1.wad", True)])
+    zero.net.routes.update(repo.routes())
+    return repo
+
+
+def _post_run(zero, body):
+    code, doc = _call(zero, "POST", body)
+    assert code == 200, doc
+    _run(zero)
+    return _call(zero, "GET")[1]
+
+
+def _install(zero, repo, cid, **more):
+    folder = cid + ".moy"
+    body = dict({"action": "install", "folder": folder, "index": repo.url("index.json"),
+                 "id": cid}, **more)
+    return _post_run(zero, body)
+
+
+def test_a_check_lists_moybyte_org_carts_beside_the_release(zero):
+    _shelf(zero)
+    doc = _post_run(zero, {"action": "check"})
+    assert doc["state"] == "listed" and doc["unreached"] == 0
+    by = dict((c["folder"], c) for c in doc["carts"])
+    assert set(c + ".moy" for c in SOME) < set(by)
+    assert by["moymesh.moy"]["official"] is False and by["moymesh.moy"]["state"] == "get"
+    assert by["moybyte.files.moy"]["official"] is True
+    assert by["moybyte.files.moy"]["state"] == "installed"
+    assert by["moymesh.moy"]["index"] == SHELF + "/index.json"
+    wad, = by["doom.moy"]["external"]
+    assert wad["path"] == "doom1.wad" and wad["size"] == 16000
+    assert by["snake_py.moy"]["runtime"] == "python", "listed; the page says it can't play it"
+
+
+def test_system_sources_replace_moybyte_org_and_an_unreached_shelf_is_counted(zero):
+    from cart_store_fixtures import Repo
+    other = Repo("https://friend.example/carts", "A friend's carts")
+    other.add("kite", name="Kite", runtime="lua", modules=())
+    zero.net.routes.update(other.routes())
+    (Path(zero.root).parent / "system" / "sources").write_text(
+        other.url("index.json") + "\nhttps://gone.example/index.json\n")
+    _shelf(zero)
+    doc = _post_run(zero, {"action": "check"})
+    folders = [c["folder"] for c in doc["carts"]]
+    assert "kite.moy" in folders and "moymesh.moy" not in folders
+    assert HARPOON in folders, "its own release is always read"
+    assert doc["unreached"] == 1
+
+
+def test_a_cart_from_moybyte_org_installs_once_the_page_agrees(zero):
+    repo = _shelf(zero, perms={"permissions": ["pins"]})
+    doc = _install(zero, repo, "moymesh")
+    assert doc["state"] == "asking" and doc["manifest"]["moybyte"] == {"permissions": ["pins"]}
+    assert not os.path.exists(zero.root + "/moymesh.moy"), "nothing lands before the prompt"
+    doc = _post_run(zero, {"action": "agree"})
+    assert doc == dict(doc, state="done", folder="moymesh.moy", error=None)
+    assert os.path.exists(zero.root + "/moymesh.moy/manifest.json")
+    assert ci.load_record(zero.root)["moymesh.moy"]["index"] == repo.url("index.json")
+    doc = _post_run(zero, {"action": "check"})
+    by = dict((c["folder"], c) for c in doc["carts"])
+    assert by["moymesh.moy"]["state"] == "installed" and by["moymesh.moy"]["had"] == 1
+
+
+def test_a_page_that_says_no_leaves_the_store_as_it_was(zero):
+    repo = _shelf(zero)
+    assert _install(zero, repo, "moymesh")["state"] == "asking"
+    doc = _post_run(zero, {"action": "cancel"})
+    assert doc["state"] == "idle"
+    assert not os.path.exists(zero.root + "/moymesh.moy")
+    assert not os.listdir(ci.stage_root(zero.root))
+
+
+def test_a_cart_the_store_has_no_room_for_is_refused_with_the_sizes(zero):
+    repo = _shelf(zero)
+    free = web_addon._room(zero.root, 0)
+    zero.official.reserve = free[0] - free[1]
+    doc = _install(zero, repo, "doom", accepted=["doom1.wad"])
+    assert doc["state"] == "error"
+    assert doc["error"].startswith("Not enough room: needs ") and doc["error"].endswith(" free.")
+    assert zero.net.opened == [repo.url("index.json")], "refused before any download"
+    assert not os.path.exists(zero.root + "/doom.moy")
+    assert not os.listdir(ci.stage_root(zero.root)) if os.path.exists(
+        ci.stage_root(zero.root)) else True
+
+
+def test_an_external_file_installs_only_with_its_licence_accepted(zero):
+    repo = _shelf(zero)
+    doc = _post_run(zero, {"action": "licence", "folder": "doom.moy",
+                           "index": repo.url("index.json"), "id": "doom",
+                           "path": "doom1.wad"})
+    assert doc["state"] == "listed" and doc["text"].startswith("The licence for doom1.wad")
+    assert _call(zero, "GET")[1]["state"] == "idle"
+    doc = _install(zero, repo, "doom")
+    assert doc["state"] == "error" and doc["error"] == ci.NO_LICENCE
+    doc = _install(zero, repo, "doom", accepted=["doom1.wad"])
+    assert doc["state"] == "asking"
+    doc = _post_run(zero, {"action": "agree"})
+    assert doc["state"] == "done"
+    assert os.path.getsize(zero.root + "/doom.moy/doom1.wad") == 16000
+
+
+def test_a_python_cart_installs_only_from_the_release(zero):
+    repo = _shelf(zero)
+    doc = _install(zero, repo, "snake_py")
+    assert doc["state"] == "error" and "can't play" in doc["error"]
+    assert not os.path.exists(zero.root + "/snake_py.moy")
+
+
+def test_an_index_the_board_does_not_read_is_refused(zero):
+    _shelf(zero)
+    code, doc = _call(zero, "POST", {"action": "install", "folder": "moymesh.moy",
+                                     "index": "https://evil.example/index.json"})
+    assert code == 409 and "shelf" in doc["message"]
+    assert zero.official.state == "idle"
+
+
+def test_a_shelf_cart_is_removed_and_a_kid_s_own_cart_is_not(zero):
+    repo = _shelf(zero)
+    _install(zero, repo, "moymesh")
+    _post_run(zero, {"action": "agree"})
+    doc = _post_run(zero, {"action": "remove", "folder": "moymesh.moy"})
+    assert doc["state"] == "done"
+    assert not os.path.exists(zero.root + "/moymesh.moy")
+    assert "moymesh.moy" not in ci.load_record(zero.root)
+    assert moy_carts.load_removed(zero.root) == [], "only a built-in's removal is recorded"
+    os.makedirs(zero.root + "/my_game.moy")
+    code, doc = _call(zero, "POST", {"action": "remove", "folder": "my_game.moy"})
+    assert code == 409
+    assert os.path.exists(zero.root + "/my_game.moy")
+
+
+def test_get_carts_on_a_zero_s_page_installs_from_moybyte_org(page, zero):
+    """The page lists moybyte-org/carts beside the release, asks the board
+    for a cart there, shows the install prompt the board's checked manifest
+    asks, and records the consent; a cart the board has no room for says so
+    with its sizes before anything is asked."""
+    ws, app, worker, proot, landed = page
+    _shelf(zero, perms={"permissions": ["pins"]})
+    ws.spine.open_app(app)
+    _frames(ws, worker, lambda: app.phase == "list")
+    folders = [r["cart"]["folder"] for r in app.rows]
+    assert "moymesh.moy" in folders and HARPOON in folders
+    board_free, app.free = app.free, (16384, 4096)
+    app._tap_row(folders.index("doom.moy"))
+    why = app.blocker(app.cur)
+    assert why == "Not enough room: needs 40 KB, 16 KB free."
+    app.free = board_free
+    app._tap_row(folders.index("moymesh.moy"))
+    app._press("GET")
+    _frames(ws, worker, lambda: app.phase in ("consent", "failed"))
+    assert app.phase == "consent" and app.question == ["Switch the console's pins"]
+    assert not os.path.exists(zero.root + "/moymesh.moy")
+    app._answer(True)
+    _frames(ws, worker, lambda: app.phase in ("done", "failed"))
+    assert app.phase == "done", app.why
+    assert os.path.exists(zero.root + "/moymesh.moy/manifest.json")
+    assert os.path.exists(proot + "/moymesh.moy/manifest.json")
+    assert landed == ["moymesh.moy"]
+    assert app.cur["state"] == "installed"
+    assert ws.consent.get("moymesh")["perms"] == ["pins"]
+
+
+def test_a_licence_on_a_zero_s_page_is_the_board_s_fetch(page, zero):
+    ws, app, worker, proot, _landed = page
+    _shelf(zero)
+    ws.spine.open_app(app)
+    _frames(ws, worker, lambda: app.phase == "list")
+    app._tap_row([r["cart"]["folder"] for r in app.rows].index("doom.moy"))
+    app._start()
+    _frames(ws, worker, lambda: app.phase in ("licence", "failed"))
+    assert app.phase == "licence" and app._lic_text.startswith("The licence for doom1.wad")
+    assert any('"licence"' in (b or "") for _m, b in worker.asked)

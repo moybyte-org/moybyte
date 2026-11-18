@@ -417,7 +417,9 @@ stages 1–6 all absent. Its README is the authority; what bites:
   2026-11-17): a removal recorded in `system/removed` holds, a newer version
   replaces, `SEED_RESERVE` stays free. Everything else is an official cart
   of the release, which the page asks the board for over `/official` (the
-  board is its store's one writer). Its README says which carts each Zero
+  board is its store's one writer), beside the carts of moybyte-org/carts
+  (or its `system/sources`), each refused with the sizes where its store
+  has no room. Its README says which carts each Zero
   carries and how a cable flash, provisioning and an update bring the rest.
 - With no browser console add-on in its store a Zero fetches the one that
   fits from its release (`zero_host.make_addon`, `tend_addon`), unless its

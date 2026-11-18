@@ -1584,8 +1584,8 @@ async function probeUpdate() {
     }
 }
 
-// Does the console that served this page install its official carts when
-// the page asks (a console with no screen)? One GET, before the console
+// Does the console that served this page install carts when the page asks
+// (a console with no screen)? One GET, before the console
 // exists, so Get Carts either asks it or says the console gets its own.
 async function probeOfficial() {
     try {

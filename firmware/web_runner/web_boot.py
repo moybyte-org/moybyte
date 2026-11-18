@@ -511,7 +511,7 @@ def _cart_seams(ws, mode, root):
     by side. The page fetches nothing and the app says where carts come from
     ("board"; `update_enable` learns whether that console has a screen); one
     with no screen that answered the /official probe (`official_enable`)
-    installs its official carts when this page asks (`carts_link.BoardCarts`).
+    installs carts when this page asks (`carts_link.BoardCarts`).
     SITE: the page's own store, so the page's fetch is the network and OPFS
     keeps what lands (`carts_link`). NONE (no OPFS): the same network, and an
     install lives in this tab like every other edit here, which the page
@@ -1407,7 +1407,7 @@ def update_enable(status_json):
 
 def official_enable():
     """The serving console answered the /official probe: it has no screen
-    and installs its official carts when this page asks. Called before
+    and installs carts when this page asks. Called before
     `boot`, which hands Get Carts the asking (`_cart_seams`), so the app
     never opens on a page that says the console gets its own."""
     _S["official"] = True

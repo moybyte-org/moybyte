@@ -82,9 +82,10 @@ why = "The SSH server's Python side, which zero_shell hands its console, as on t
 files = ["web_addon.py", "cart_index.py", "cart_unpack.py", "cart_files.py",
          "app_imports.py"]
 why = """
-The install the browser console's Get Carts asks this board for: the official
-carts of its release, fetched over its own network and checked file by file
-before they land (web_addon.OfficialCarts over cart_index, as on the XIAO).
+The install the browser console's Get Carts asks this board for: the carts of
+its release and of moybyte-org/carts (or its system/sources), fetched over its
+own network and checked file by file before they land (web_addon.OfficialCarts
+over cart_index, as on the XIAO).
 With no OTA slot the image never runs the add-on's step, which the cable flash
 does for it."""
 
@@ -137,10 +138,10 @@ updater's available() is False, and /update says so."""
 # room above zero_host.SEED_RESERVE, and that room is the kid's. Every other
 # system cart but a test fixture is an official cart the release publishes in
 # carts-<board>.json, which the page this board serves adds and removes
-# (`/official`). With no OTA, a cable flash brings the official carts the
-# store holds to the image's release. A cable flash or a provisioning installs
-# Pin Light into a new store (2026-11-18), the cart that drives this board's
-# pins from a browser.
+# (`/official`, beside moybyte-org/carts'). With no OTA, a cable flash brings
+# the official carts the store holds to the image's release. A cable flash or
+# a provisioning installs Pin Light into a new store (2026-11-18), the cart
+# that drives this board's pins from a browser.
 image = "core"
 install = ["moybyte.pin_light"]
 

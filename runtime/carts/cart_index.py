@@ -778,6 +778,23 @@ def plan(cart, chip=None, fmt=None, ranges=False):
             "store_bytes": store, "download_bytes": down}
 
 
+def size_text(n):
+    """A size the way the screens say it: whole KB below a megabyte, one
+    decimal above. Integer arithmetic, so every tier prints the same."""
+    if n < 1048576:
+        return "%d KB" % max(1, (n + 1023) // 1024)
+    return "%d.%d MB" % (n // 1048576, (n % 1048576) * 10 // 1048576)
+
+
+def room_why(need, free):
+    """What an install that needs `need` bytes says where `free` are free:
+    None when it fits."""
+    if need <= free:
+        return None
+    return "Not enough room: needs %s, %s free." % (size_text(need),
+                                                   size_text(free) if free > 0 else "nothing")
+
+
 def need_bytes(p, block):
     """Store space `p` takes, each file rounded up to the store's block (a FAT
     cluster on a card, a littlefs block on flash), plus the folder itself."""
