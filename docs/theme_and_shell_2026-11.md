@@ -1131,11 +1131,27 @@ host runs instead).
   `system_api.py` never grants (`carts`, "the single most important entry"). A
   theme that names a cart does not install it: the cart comes from the store
   like any other, and an absent one falls back to the theme's image.
-- **The default is static.** An animated wallpaper defeats the redraw gate and
-  the home's retained stamp (`launcher_layer._try_stamp_retained` is skipped
-  while `ws.animating(dt)`). That is the open live-wallpaper defect (#66, #73). So
-  the default is a theme's backdrop or fill, a still image, and a wallpaper
-  cart runs only where a theme or a kid names one.
+- **The default is static.** A live wallpaper (a cart with `_update`) keeps
+  the redraw gate open and every frame of the surface behind it a full paint:
+  the home's band frame, its retained stamp and the desk's drag cache all
+  stand aside while `ws.animating(dt)` (#66, #73). So the default is a theme's
+  backdrop or fill, a still image, and a wallpaper cart runs only where a
+  theme or a kid names one.
+- **A gesture holds a live wallpaper still** (owner, 2026-11-18). While the
+  home's cards are dragged or flung, a desk window is dragged or resized, a
+  window's content is scrolled or flung, or a verbs page coasts
+  (`Wallpaper.held`), its `_update` does not run and it is a still picture:
+  the cheap paths take the gesture's frames, a paint of the backdrop draws
+  the same frame again, and the frame the gesture ends it animates again. At
+  rest a live wallpaper runs at the console's full rate; a lower rate was
+  tried and refused ("looks bad").
+- **A wallpaper cart runs on its own runtime.** A Python cart's code runs in
+  the namespace `make_api` builds for it; a Lua or compiled (`"runtime":
+  "wasm"`) cart, or a native one, is started by the factory `ws.runtimes`
+  maps it to, the Player's, over that namespace and a run of its own
+  (`wallpaper._Hosted`), with the same per-frame contract and the same
+  cover-scale. Such a run takes one of moycore's run rows (`MOYCORE_RUNS`)
+  while it is the wallpaper. Only a Python cart may draw per glass.
 - **A wallpaper per glass** (docs/history/look_2026-10.md step 28, GAPS 23). A
   wallpaper cart whose manifest says `"moybyte": {"glass": true}` draws on
   the system canvas itself, so `W` and `H` are the glass's, and lays out

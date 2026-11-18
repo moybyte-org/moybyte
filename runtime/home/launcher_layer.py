@@ -527,10 +527,16 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
         one full-screen copy (~26ms on P4) charged only when the key CHANGED --
         once per settled state, not per frame. Skipped mid-drag/fling (the key
         carries the scroll offset, so every frame would re-capture) and while
-        anything animates (those pixels are not a pure function of the key)."""
+        anything animates (those pixels are not a pure function of the key),
+        which also forfeits the frame it holds: a live wallpaper has moved
+        under it, and a gesture holding the wallpaper still must not stamp
+        the frame of another moment (`Wallpaper.held`)."""
         ws = self.ws
-        if (self._lib_unsupported or self.grid.dragging
-                or self.grid.flinging or ws.animating(dt)):
+        if self._lib_unsupported or self.grid.dragging or self.grid.flinging:
+            return
+        if ws.animating(dt):
+            if ws.wallpaper.is_animating(dt):
+                self._lib_key = None
             return
         if getattr(cv, "RETAINED_FRAMES", 0) < 1:
             return              # a canvas that retains nothing has no frame to copy

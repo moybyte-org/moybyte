@@ -138,17 +138,21 @@ class _BackdropLayer(Layer):
             wm._desk_painted = False
             wm._damage_rects = ()
             return
-        if (stale or wm.backdrop_disabled or wm._backdrop_unsupported
-                or wm.desk_moves(dt)):        # its pixels move on their own
+        moves = wm.desk_moves(dt)             # its pixels move on their own
+        if stale or wm.backdrop_disabled or wm._backdrop_unsupported or moves:
             wm._desk_sig = sig
-            wm._backdrop_valid = False        # live: re-render, then re-snapshot
+            wm._backdrop_valid = False        # live: re-render (a still one re-snapshots)
             wm._desk_streak = 0
             wm._desk_painted = True           # wiped the buffer -> windows repaint
             if wm._gesture_hist and not gesture:
                 wm._gesture_hist = []         # gesture over: drop the damage trail
             wm._rest = None                   # a live desk lays every buffer whole
             self._draw_desktop(dt)
-            wm._capture_backdrop()
+            if not moves:
+                # (a desk that moves renders live again next frame: its
+                # snapshot would be thrown away unread; a gesture's first
+                # frame, over a held wallpaper, takes it below)
+                wm._capture_backdrop()
             wm.draw_unders()
             # This buffer holds the cache it just took, and the clock: one of the N.
             wm._desk_streak = 1 if wm._backdrop_valid else 0

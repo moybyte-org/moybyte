@@ -167,6 +167,13 @@ An animating surface needs no bumps and is never skipped; the by-name lists
 are the declaration (no Surface object holds a flag, §16). A verbs page
 moving on its own -- a fling's coast, a glide to a step's target -- declares
 itself through the engine (`moy_ui_api_moving`, `ws.ui_moving` for the gate).
+The live wallpaper declares itself only while no gesture is live: under a
+drag or fling of the home's cards, a window's drag, move or resize, a
+window's content scrolled or flung, or a coasting page, it holds its frame
+(`Wallpaper.held`) and is a still picture to every cache, the desk's drag
+cache included; a desk that renders live because it moves takes no
+snapshot of itself (`wm._capture_backdrop`), which its next frame would
+render over (owner, 2026-11-18).
 
 **Class C — pointer-armed mutators (the pre-#44 debt).** Paint strokes, map
 pans, block drags and kinetic scrolls mutate content **without marking

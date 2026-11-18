@@ -2,7 +2,10 @@
 #   Wallpaper                 the desktop backdrop: the desk's fill, the theme's picture or live
 #   Wallpaper.draw_picture    the theme's picture, one screen-sized bitmap
 #   Wallpaper._draw_backdrop  the theme's backdrop, rastered once into the bake
+#   Wallpaper.held            a gesture holds a live wallpaper's frame still
 #   Wallpaper.is_animating    a live wallpaper is running
+#   Wallpaper._load           a cart's namespace: its Python run there, else its runtime started
+#   _Hosted                   a wallpaper cart on another runtime (Lua, wasm, native)
 #   Wallpaper.bars            the bars' quiet rectangles, for a per-glass wallpaper
 #   Wallpaper._glass_paint    a per-glass wallpaper's frame: QUIET in, SUBJECT out
 #   Wallpaper.draw_preview    the Appearance monitor's screen
@@ -16,7 +19,9 @@ and both draw paths call ws.wallpaper.draw(dt).
 
 Boundary (single source of truth): this component owns only the RENDERING + the
 COMPILED cache -- a chosen wallpaper-type cart compiled into its OWN namespace and run
-(_draw, optionally _update) as the backdrop, the theme's picture (its `images`
+(_draw, optionally _update) as the backdrop -- a Python cart's code in that
+namespace, a Lua, compiled or native cart started over it by the Player's
+`ws.runtimes` factory (`_Hosted`), with the same frame and cover-scale -- the theme's picture (its `images`
 file, docs/theme_and_shell_2026-11.md §3.9) or a picture cart's read to the glass's
 size and drawn 1:1, or the theme's `desktop` fill.
 The CHOICE + the picker/query API are the LOOK's (appearance.py, #209 landing
@@ -38,6 +43,12 @@ game canvas and is cover-cropped onto a bigger glass. A PICTURE cart
 (`"moybyte": {"pictures": {"WxH": image}}`) runs none of its code here: the
 desk draws the image listed for its glass's size, else the smallest larger
 one shrunk, else the largest, read and kept like the theme's picture.
+
+A LIVE wallpaper (one with `_update`) advances every frame at the console's
+rate, and holds its frame still while a gesture is live (`held`): it is then
+a still picture to the home's band frame and retained stamp and to the
+desk's drag cache, and animates again the frame the gesture ends (owner,
+2026-11-18).
 
 The compile is crash-guarded (#160): `ws.wallpaper_guard` arms before the cart's
 code runs and heals once the backdrop has painted, so a wallpaper that hangs or
@@ -146,6 +157,117 @@ class _Strip:
     h = 0
 
 
+def _runtime_of(cart):
+    """The runtime a cart runs on, as the Player routes it: "elf" for a
+    native cart, else its `runtime` field ("python" when it names none)."""
+    return "elf" if cart.get("native") else cart.get("runtime", "python")
+
+
+class _Project:
+    """What a runtime reads of the run it starts on (`ws.run.project`), for
+    a wallpaper: its cart, sheet, map, flags, pmem and config."""
+
+    def __init__(self, cart, sheet, tilemap, flags, pmem, config):
+        self.cart = cart
+        self.sheet = sheet
+        self.tilemap = self.play_map = tilemap
+        self.flags = self.play_flags = flags
+        self.pmem = pmem
+        self.config = config
+        self.images = cart.get("images") or {}
+
+
+class _Hosted:
+    """A wallpaper cart on a runtime other than the console's Python: the
+    handle the factory `ws.runtimes` maps its runtime to hands back -- the
+    Player's own, over the same namespace -- with a run of its own (a
+    `procs.Run`, of `ws.run`'s class: the wallpaper's canvas, the cart's
+    world, no audio, no Player), which is `ws.run` while its code runs,
+    as a running set's is while it steps. A runtime's tick runs `_update`
+    and `_draw` together: `update(dt)` keeps the step and `draw()` takes
+    it, so a paint the wallpaper is `held` for runs `draw()` alone, a tick
+    of 0 that draws the same frame again; a second `update` with no draw
+    between (the preview's warm-up) runs the first logic-only. A quit() it
+    calls quits nothing."""
+
+    def __init__(self, ws, run, h):
+        self.ws = ws
+        self.run = run
+        self.h = h
+        self._dt = -1.0             # the step `update` kept, -1: none
+
+    @staticmethod
+    def start(ws, rt, ns, cart, canvas, project):
+        make = (getattr(ws, "runtimes", None) or {}).get(rt)
+        if make is None:
+            raise RuntimeError("needs the %s runtime (not in this build)" % rt)
+        from ticks import _ticks_ms
+        run = type(ws.run)(canvas)    # a run of the shell's kind (procs.Run)
+        run.project = project
+        run.cart_start_ms = _ticks_ms()
+        pre = cart.get("src_before")
+        if pre:
+            ns["_moy_pre"] = pre
+        post = cart.get("src_after")
+        if post:
+            ns["_moy_post"] = post
+        back = ws.run
+        out = getattr(ws, "audio_out", None)
+        stream = getattr(out, "stream", None)
+        ws.run = run
+        try:
+            _was = _cart_text(True)
+            try:
+                h = make(ns, cart.get("src"))
+                if getattr(h, "init", None) is not None:
+                    h.init()
+                if getattr(h, "frame", None) is not None:
+                    # a compiled run that would leave its frames in its own
+                    # memory for the glass draws them on its canvas instead
+                    h.mute(True)
+            finally:
+                _cart_text(_was)
+        finally:
+            ws.run = back
+            if out is not None and getattr(out, "stream", None) is not stream:
+                out.stream = stream       # a wallpaper is silent
+        return _Hosted(ws, run, h)
+
+    def update(self, dt):
+        if self._dt >= 0:
+            self._tick(self._dt, False)
+        self._dt = dt
+
+    def draw(self):
+        dt = self._dt
+        self._dt = -1.0
+        self._tick(dt if dt > 0 else 0.0, True)
+
+    def _tick(self, dt, draw):
+        ws = self.ws
+        h = self.h
+        inp = ws.input
+        q = getattr(inp, "cart_quit", False)
+        back = ws.run
+        ws.run = self.run
+        try:
+            h.draw_next = draw
+            h.update(dt)
+        finally:
+            ws.run = back
+            if q is not getattr(inp, "cart_quit", False):
+                inp.cart_quit = q
+
+    def close(self):
+        ws = self.ws
+        back = ws.run
+        ws.run = self.run
+        try:
+            self.h.close()
+        finally:
+            ws.run = back
+
+
 class Wallpaper:
     """The wallpaper backdrop component (#28). Owns the RENDERING (draw) + the compiled
     wallpaper-cart cache; ws.look.wallpaper_id + the picker API are the look's."""
@@ -160,6 +282,7 @@ class Wallpaper:
         # None for a solid-fill backdrop. `_wp_live` runs the wallpaper's _update too
         # (set False to save cost: a _draw-only static backdrop).
         self._wp_ns = None
+        self._wp_run = None           # a cart on another runtime: its _Hosted
         self._wp_update = None
         self._wp_draw = None
         self._wp_cart = None
@@ -185,6 +308,7 @@ class Wallpaper:
         # readable framebuffer -- the web tier records the blit as one spr).
         self._pv_canvas = None
         self._pv_ns = None
+        self._pv_run = None
         self._pv_update = None
         self._pv_draw = None
         self._pv_restore = None
@@ -222,6 +346,7 @@ class Wallpaper:
     def clear(self):
         """Drop the compiled wallpaper (back to the fill). Called by the look
         (`Appearance._show_wallpaper`) before it shows the next one."""
+        self._end_hosted()
         self._wp_ns = self._wp_update = self._wp_draw = None
         self._wp_cart = None
         self._wp_pics = None
@@ -456,39 +581,81 @@ class Wallpaper:
             self._refused = cart.get("title") or "Wallpaper"
             return
         try:
-            glass = bool(cart.get("glass"))
-            sheet = ws.build_sheet(cart)
-            tilemap = ws.build_tilemap(cart)
-            ns = ws.make_api(ws.sys_canvas if glass else ws.run.canvas, ws.input,
-                             dict(cart.get("cfg", {})),
-                             # A wallpaper is silent: it holds no audio session.
-                             sheet, None,
-                             tilemap, Pmem(), None, cart.get("images") or {},
-                             # A wallpaper is a cart, so it gets the fourth asset
-                             # type too: sakura sheds its petals from a scene.
-                             ws.build_scenes(cart),
-                             flags=ws.build_flags(cart),   # SPEC.md 3.5 tile flags
-                             owner="wallpaper")   # #63: layer loans reclaimed on clear()
-            exec(compile(cart["src"], "<wallpaper>", "exec"), ns)
-            if glass:               # after the module's own default, before _init
-                ns["QUIET"] = self._quiet.get(False) or self.bars()
-            if ns.get("_init"):
-                ns["_init"]()
+            # (a per-glass wallpaper is a Python cart's: its QUIET and SUBJECT
+            # are names in its namespace)
+            glass = bool(cart.get("glass")) and _runtime_of(cart) == "python"
+            ns, hosted = self._load(cart, ws.sys_canvas if glass else ws.run.canvas,
+                                    # #63: layer loans reclaimed on clear()
+                                    "wallpaper", "<wallpaper>",
+                                    self._quiet.get(False) or self.bars() if glass else None)
             self._wp_glass = glass
             if glass:
                 self.subject = _rect(ns.get("SUBJECT"))
             self._wp_ns = ns
             self._wp_cart = cart
-            self._wp_update = ns.get("_update")
-            self._wp_draw = ns.get("_draw")
-            self._wp_restore_bg = ns.get("_moy_restore_bg")   # #63 declared background
+            self._wp_run = hosted
+            if hosted is not None:
+                self._wp_update = hosted.update
+                self._wp_draw = hosted.draw
+                self._wp_restore_bg = None
+            else:
+                self._wp_update = ns.get("_update")
+                self._wp_draw = ns.get("_draw")
+                self._wp_restore_bg = ns.get("_moy_restore_bg")   # #63 declared background
             if self._wp_draw is None and guard is not None:
                 guard.heal()    # nothing runs per frame: the compile was all of it
         except Exception as exc:  # noqa: BLE001
             print("Moybyte wallpaper error:", _err_text(exc))
+            self._end_hosted()
             self._wp_ns = self._wp_update = self._wp_draw = None
             if guard is not None:
                 guard.release()
+
+    def _load(self, cart, canvas, owner, name, quiet=None):
+        """(namespace, hosted) of wallpaper `cart` loaded to draw on
+        `canvas`, its `_init` run: the namespace make_api builds over the
+        cart's own sheet, map, flags, images and scenes (silent: no audio
+        session), with a Python cart's code run in it and `hosted` None, or
+        for a cart on another runtime (`"runtime": "lua"` or `"wasm"`, a
+        native cart) that namespace handed to the same `ws.runtimes` factory
+        the Player starts it through, and `hosted` its `_Hosted`. `quiet`:
+        a per-glass cart's QUIET, set before its `_init`."""
+        ws = self.ws
+        rt = _runtime_of(cart)
+        sheet = ws.build_sheet(cart)
+        tilemap = ws.build_tilemap(cart)
+        flags = ws.build_flags(cart)        # SPEC.md 3.5 tile flags
+        pmem = Pmem()
+        cfg = dict(cart.get("cfg", {}))
+        ns = ws.make_api(canvas, ws.input, cfg,
+                         # A wallpaper is silent: it holds no audio session.
+                         sheet, None,
+                         tilemap, pmem, None, cart.get("images") or {},
+                         # A wallpaper is a cart, so it gets the fourth asset
+                         # type too: sakura sheds its petals from a scene.
+                         ws.build_scenes(cart),
+                         flags=flags, owner=owner)
+        if rt != "python":
+            return ns, _Hosted.start(ws, rt, ns, cart, canvas,
+                                     _Project(cart, sheet, tilemap, flags, pmem, cfg))
+        exec(compile(cart["src"], name, "exec"), ns)
+        if quiet is not None:       # after the module's own default, before _init
+            ns["QUIET"] = quiet
+        if ns.get("_init"):
+            ns["_init"]()
+        return ns, None
+
+    def _end_hosted(self):
+        """Close the runs a cart on another runtime holds: the backdrop's
+        and the preview's."""
+        for attr in ("_wp_run", "_pv_run"):
+            h = getattr(self, attr, None)
+            if h is not None:
+                setattr(self, attr, None)
+                try:
+                    h.close()
+                except Exception as exc:  # noqa: BLE001 -- a close never stops the desk
+                    print("Moybyte wallpaper close:", _err_text(exc))
 
     def _proof(self, cart):
         """What is about to run, for the crash guard: the source's length and a
@@ -512,12 +679,36 @@ class Wallpaper:
             else:
                 guard.heal()
 
+    def held(self):
+        """True while a gesture is live -- the home's cards dragged or
+        flung, a window dragged, moved or resized, a window's content
+        scrolled or flung, a verbs page coasting (`ws.ui_moving`). A live
+        wallpaper holds its frame still for it: its `_update` does not run,
+        so it is a still picture the cheap paths can keep (the home's band
+        frame and retained stamp, the desk's drag cache), and it animates
+        again the frame the gesture ends (owner, 2026-11-18)."""
+        ws = self.ws
+        if ws.ui_moving:
+            return True
+        wm = ws.wm
+        if wm.gesture_live():
+            return True
+        g = ws.launcher
+        return g is not None and g.moving and wm.top_is("launcher")
+
     def is_animating(self, dt):
-        """True when a LIVE wallpaper (its own _update advancing it) is loaded, so the
-        home/settings backdrop must keep redrawing without input (the #44 gate reads
-        this after checking screen in launcher/settings)."""
+        """True when a LIVE wallpaper (its own _update advancing it) is loaded
+        and no gesture holds it (`held`), so the home/settings backdrop must
+        keep redrawing without input (the #44 gate reads this after checking
+        screen in launcher/settings)."""
         return (self._wp_live and self._wp_update is not None
-                and self._wp_draw is not None and dt > 0)
+                and self._wp_draw is not None and dt > 0 and not self.held())
+
+    def _advances(self, dt):
+        """Whether this paint runs the wallpaper's `_update`: a live one
+        that no gesture holds (`held`)."""
+        return (self._wp_live and self._wp_update is not None and dt > 0
+                and not self.held())
 
     def draw(self, dt, home=False, quiet=None):
         """Paint the backdrop of the desk, or with `home` of the home (the
@@ -676,7 +867,7 @@ class Wallpaper:
         ns["QUIET"] = self._quiet.get(home) or self.bars()
         gp = self._enter_pointer(ws, True, glass=True)
         try:
-            if self._wp_live and self._wp_update is not None and dt > 0:
+            if self._advances(dt):
                 self._wp_update(dt)
             self._wp_draw()
         finally:
@@ -786,7 +977,7 @@ class Wallpaper:
                     self._glass_paint(dt, home)
                     self._painted(self._wp_live and self._wp_update is not None)
                     return
-                if self._wp_live and self._wp_update is not None and dt > 0:
+                if self._advances(dt):
                     self._wp_update(dt)
                 # The safe area is the layout's content rect: the wallpaper
                 # cart draws its world there, clear of the bar.
@@ -840,6 +1031,7 @@ class Wallpaper:
             except Exception as exc:  # noqa: BLE001 -- drop a broken wallpaper to the fill
                 print("Moybyte wallpaper draw error:", _err_text(exc))
                 ws.reset_canvas_state()
+                self._end_hosted()
                 self._wp_ns = self._wp_update = self._wp_draw = None
                 guard = getattr(ws, "wallpaper_guard", None)
                 if guard is not None:
@@ -1038,27 +1230,27 @@ class Wallpaper:
             # (src/sheet bake into the preview ns), then re-slims -- the same
             # dance the look's `_show_wallpaper` does for the backdrop compile.
             ws.carts.rehydrate(cart)
+            pv_run = self._pv_run
+            if pv_run is not None:
+                self._pv_run = None
+                pv_run.close()
             try:
-                sheet = ws.build_sheet(cart)
-                tilemap = ws.build_tilemap(cart)
-                ns = ws.make_api(pv, ws.input, dict(cart.get("cfg", {})),
-                                 sheet, None,
-                                 tilemap, Pmem(), None, cart.get("images") or {},
-                                 ws.build_scenes(cart),
-                                 flags=ws.build_flags(cart),
-                                 owner="wallpaper_pv")
-                exec(compile(cart["src"], "<wallpaper-preview>", "exec"), ns)
-                if cart.get("glass"):
-                    ns["QUIET"] = self._preview_quiet()
+                glass = cart.get("glass") and _runtime_of(cart) == "python"
+                ns, hosted = self._load(cart, pv, "wallpaper_pv", "<wallpaper-preview>",
+                                        self._preview_quiet() if glass else None)
             finally:
                 if cart is not ws.run.fat_cart:
                     ws.carts.reslim(cart)
-            if ns.get("_init"):
-                ns["_init"]()
             self._pv_ns = ns
-            self._pv_update = ns.get("_update")
-            self._pv_draw = ns.get("_draw")
-            self._pv_restore = ns.get("_moy_restore_bg")
+            self._pv_run = hosted
+            if hosted is not None:
+                self._pv_update = hosted.update
+                self._pv_draw = hosted.draw
+                self._pv_restore = None
+            else:
+                self._pv_update = ns.get("_update")
+                self._pv_draw = ns.get("_draw")
+                self._pv_restore = ns.get("_moy_restore_bg")
             self._pv_for = cart
             return self._pv_draw is not None
         except Exception as exc:  # noqa: BLE001 -- a broken cart keeps a dark screen
@@ -1179,6 +1371,14 @@ class Wallpaper:
             return None
         finally:
             self._drop_glass_runner()
+            # A cart on another runtime gives its run back too: a VM's row
+            # and heap for a still the memo and the sidecar keep.
+            h = self._pv_run
+            if h is not None:
+                self._pv_run = None
+                self._pv_ns = self._pv_update = self._pv_draw = None
+                self._pv_for = None
+                h.close()
 
     def _drop_glass_runner(self):
         """Give back a per-glass preview runner: its canvas is the glass's

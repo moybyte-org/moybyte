@@ -1733,6 +1733,16 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             return True
         return ws.notices.notice_active()
 
+    def gesture_live(self):
+        """True while a window is dragged, moved or resized, or, on the desk,
+        a finger scrolls or flings a window's content: the frames the desk's
+        cache serves, over which a live wallpaper holds still
+        (`Wallpaper.held`)."""
+        if self._drag is not None or self._resize is not None:
+            return True
+        return self.mode == "desktop" and (self._content_gesture
+                                           or self._content_flinging())
+
     def keeps_animating(self, dt, pages=True):
         """Console hook (the #44 redraw gate): keep frames flowing while a RUNNING
         cart's window is open anywhere on the desktop -- not just while it's the
