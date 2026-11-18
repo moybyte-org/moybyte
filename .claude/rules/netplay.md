@@ -69,6 +69,11 @@ belongs here is only what a coder must not undo:
   `tests/test_espnow_link.py`'s two-console lossy match is the net.
 - **Every input packet carries the frame its sender is WAITING FOR.** A fixed
   redundancy window deadlocks two stalled consoles permanently.
+- **A beamed cart (`docs/netplay_v1.md` §7) is receiver-driven and taken only
+  when asked for**: the receiver reports what it lacks (the ack lies), the
+  whole is hash-checked before anything is written, an offer is heard only in
+  the receive state a person opened, and what lands is a cart that arrived as
+  files, asked on its first run. Do not let a beam start beside a match.
 - **Nothing waits forever.** An unanswered invite and a match that falls too far
   behind both give up and re-run the cart solo; a frozen screen with no
   explanation is the one outcome designed out.

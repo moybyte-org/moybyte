@@ -290,6 +290,20 @@ class moy_match_t(_c.Structure):
         ("probe", _c.c_uint8),
         ("probe_at", _c.c_uint8),
         ("ports_budget", moy_match_budget_t),
+        ("beam", _c.c_void_p),
+    ]
+
+
+class moy_match_beam_info_t(_c.Structure):
+    _fields_ = [
+        ("role", _c.c_uint8),
+        ("state", _c.c_uint8),
+        ("why", _c.c_uint8),
+        ("size", _c.c_uint32),
+        ("chunks", _c.c_uint16),
+        ("done", _c.c_uint16),
+        ("title", _c.c_char * 121),
+        ("peer", _c.c_char * 24),
     ]
 
 

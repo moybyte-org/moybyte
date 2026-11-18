@@ -49,7 +49,7 @@ import host_native
 import native_build
 from moy_play_face import (
     moy_chrome_list_t as _ChList, moy_front_ops_t as _FrontOps, moy_match_io_t as _Io,
-    moy_match_peer_t as _Peer, moy_match_t as _MatchS,
+    moy_match_peer_t as _Peer, moy_match_t as _MatchS, moy_match_beam_info_t as _BeamInfo,
     moy_proc_row_t as _ProcRow, moy_tick_t)
 
 _PLAY = os.path.join(native_build.ROOT, "native", "moy_play")
@@ -812,6 +812,16 @@ _MSIGS = (
     ("moy_lockstep_expand", [ctypes.c_void_p, _U32], _I32),
     ("moy_match_size", [], ctypes.c_size_t),
     ("moy_match_offset_s", [], ctypes.c_size_t),
+    ("moy_match_beam_send", [ctypes.c_void_p, ctypes.c_char_p, _U32], ctypes.c_int),
+    ("moy_match_beam_put", [ctypes.c_void_p, _U32, ctypes.c_char_p, ctypes.c_size_t],
+     ctypes.c_int),
+    ("moy_match_beam_offer", [ctypes.c_void_p, _U32], ctypes.c_int),
+    ("moy_match_beam_listen", [ctypes.c_void_p, _U32], ctypes.c_int),
+    ("moy_match_beam_accept", [ctypes.c_void_p, _U32], ctypes.c_int),
+    ("moy_match_beam_end", [ctypes.c_void_p], None),
+    ("moy_match_beam_take", [ctypes.c_void_p, _U32, ctypes.c_void_p, ctypes.c_size_t],
+     ctypes.c_size_t),
+    ("moy_match_beam_info", [ctypes.c_void_p, ctypes.c_void_p], _B),
 )
 _MREADY = [False]
 
@@ -1063,6 +1073,40 @@ class Match:
         msg = bytes(msg)
         self._d.moy_match_dispatch(self._p, bytes(mac)[:6], msg, len(msg),
                                    int(now) & 0xFFFFFFFF)
+
+    # -- beaming a cart (moy_match.h, BEAMING A CART) --
+    def beam_send(self, title, size):
+        return self._d.moy_match_beam_send(self._p, str(title).encode(), int(size))
+
+    def beam_put(self, off, data):
+        data = bytes(data)
+        return self._d.moy_match_beam_put(self._p, int(off), data, len(data))
+
+    def beam_offer(self, now):
+        return self._d.moy_match_beam_offer(self._p, int(now) & 0xFFFFFFFF)
+
+    def beam_listen(self, now):
+        return self._d.moy_match_beam_listen(self._p, int(now) & 0xFFFFFFFF)
+
+    def beam_accept(self, now):
+        return self._d.moy_match_beam_accept(self._p, int(now) & 0xFFFFFFFF)
+
+    def beam_end(self):
+        self._d.moy_match_beam_end(self._p)
+
+    def beam_take(self, off, n):
+        """A received beam's bytes from `off`, at most `n`: b"" with none."""
+        buf = ctypes.create_string_buffer(max(0, int(n)))
+        got = self._d.moy_match_beam_take(self._p, int(off), buf, int(n))
+        return buf.raw[:got]
+
+    def beam_info(self):
+        """(role, state, why, title, peer, size, done, chunks), None with no beam."""
+        i = _BeamInfo()
+        if not self._d.moy_match_beam_info(self._p, ctypes.byref(i)):
+            return None
+        return (i.role, i.state, i.why, i.title.decode("utf-8", "replace"),
+                i.peer.decode("utf-8", "replace"), i.size, i.done, i.chunks)
 
     def peers(self):
         """[(mac, name, board, cart, state, seen)] of every peer row."""

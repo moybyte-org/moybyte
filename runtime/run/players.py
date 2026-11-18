@@ -335,7 +335,7 @@ import json
 import moy_play as _mp
 
 PROTO = 3
-T_BEACON, T_JOIN, T_START, T_INPUT, T_MSG, T_BYE, T_PORT = 1, 2, 3, 4, 5, 6, 7
+T_BEACON, T_JOIN, T_START, T_INPUT, T_MSG, T_BYE, T_PORT, T_BEAM = 1, 2, 3, 4, 5, 6, 7, 8
 # A process's port (moy_match.h, PORTS): the sender rule it opens with, and
 # what the port calls answer where they fail.
 FROM_ANY, FROM_MATCH = 0, 1
@@ -699,12 +699,14 @@ class EspNowLink:
     """The console's half of the radio link: the radio's bring-up and
     teardown, the session's slots and the actions the C link leaves.
 
-    Two kinds of holder keep the radio up: the game in front (`start` and
-    `stop`, the Player's, around a run with the "multiplayer" permission)
-    and a process's open port (`open_port` and `close_port`, its `net`
-    handle's: runtime/system/dev_handles.py). The radio stops when the last
+    Three kinds of holder keep the radio up: the game in front (`start` and
+    `stop`, the Player's, around a run with the "multiplayer" permission),
+    a process's open port (`open_port` and `close_port`, its `net`
+    handle's: runtime/system/dev_handles.py) and a beam (`beam_send`,
+    `beam_receive`: runtime/run/link_beam.py). The radio stops when the last
     of them lets go; a game's stop with a port open ends the match and
-    leaves the radio up, its beacon at the launcher's.
+    leaves the radio up, its beacon at the launcher's. A game's start ends
+    a beam.
 
     `radio`, `wlan` and `launch(ws, title) -> bool` are injectable; left None
     on a board, the radio is the kernel's (`moy_net.Link`'s ring) and the link
@@ -779,12 +781,17 @@ class EspNowLink:
         raise AttributeError(name)
 
     _game = False                       # the game in front holds the radio
+    _beaming = False                    # ...and a beam (link_beam.Beam)
+    _beam = None
 
     # -- lifecycle --
     def start(self):
         """The game's radio up with the measured recipe. Idempotent; a board
-        with no ESP-NOW degrades to an inactive link, never a crash."""
+        with no ESP-NOW degrades to an inactive link, never a crash. A beam
+        under way ends: a game outranks it."""
         self._game = True
+        if self._beaming and self._m is not None:
+            self._m.beam_end()
         return self._up()
 
     def _up(self):
@@ -851,10 +858,13 @@ class EspNowLink:
         unless a process's port holds it."""
         self._game = False
         self.end_match(ws)
-        if self._m is not None and self._m.ports_open():
+        if self._m is not None:
+            # The beacon names no cart once its run stops: a radio a beam or
+            # a port brings up later must not invite a peer to the last game.
             self._m.announce("", 0)
-            self._m.action()            # the stopped run's request, as stop() drops it
-            return
+            if self._m.ports_open() or self._beaming:
+                self._m.action()        # the stopped run's request, as stop() drops it
+                return
         self._down()
 
     def _down(self):
@@ -892,7 +902,7 @@ class EspNowLink:
         if self._m is None:
             return PORT_ABSENT
         rc = self._m.port_close(port)
-        if not self._game and not self._m.ports_open():
+        if not self._game and not self._beaming and not self._m.ports_open():
             self._down()
         return rc
 
@@ -925,6 +935,31 @@ class EspNowLink:
     def ports_open(self):
         return 0 if self._m is None else self._m.ports_open()
 
+    # -- beaming a cart (runtime/run/link_beam.py) --
+    def beamer(self):
+        b = self._beam
+        if b is None:
+            from link_beam import Beam
+            b = self._beam = Beam(self)
+        return b
+
+    def beam_send(self, ws, cart):
+        """Offer `cart` to a console nearby that is receiving."""
+        return self.beamer().send(ws, cart)
+
+    def beam_receive(self, ws):
+        """Open the receive state."""
+        return self.beamer().receive(ws)
+
+    def beam_stop(self, ws):
+        """End the beam under way, the other console told."""
+        if self._beam is not None:
+            self._beam.stop(ws)
+
+    def beam_role(self):
+        """link_beam.SEND or RECEIVE while a beam is under way, else None."""
+        return None if self._beam is None else self._beam.role()
+
     # -- the frame --
     def drain_input(self, budget=DRAIN_MAX):
         """Input-priority drain, safe mid-frame: inputs to the session, every
@@ -951,6 +986,8 @@ class EspNowLink:
             return
         if getattr(ws, "input", None) is not None:
             self._router = getattr(ws.input, "players", None)
+        if self._beam is not None:
+            self._beam.tend(ws)
         s = self.session
         if s is not None:
             if ws.netplay is not s:

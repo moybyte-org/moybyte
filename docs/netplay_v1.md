@@ -1,6 +1,6 @@
 # Netplay v1 — the two-console lockstep contract
 
-**Status: SHIPPED and BINDING (last amended 2026-08-27).** Two kids open the
+**Status: SHIPPED and BINDING (last amended 2026-11-18).** Two kids open the
 same cart on their own consoles; the boards hear each other over ESP-NOW inside
 a second and simulate one game on two screens from a shared 30 or 60 Hz tape of button
 masks. Being in the same room is the pairing ceremony.
@@ -23,7 +23,9 @@ by frame type and is polled from the loop's tail with no crossing into Python.
 `runtime/run/players.py` is the console's view of it: the radio's bring-up, the
 session's player slots, the cart it asks the console to open.
 `runtime/run/player.py` adopts a session, feeds it and lets go; a Lua run's
-lockstep frame is the kernel Player's (`moy_play_lockstep`).
+lockstep frame is the kernel Player's (`moy_play_lockstep`). The same link
+beams a cart from one console to another (§7); `runtime/run/link_beam.py` is
+the console's half of that.
 
 ## 2. Lockstep: what crosses the air, and when a console may simulate
 
@@ -224,10 +226,11 @@ link's cadence (`moy_match.h`, THE SEND BUDGET, has them and the
 arithmetic): lockstep sends at most one frame per `MOY_MATCH_LOCK_MS`, and
 the P4's transport clears one per ~10 ms in one queue with the inputs, so a
 live match lets at most one port frame sit ahead of an input. Port 0 has no
-budget. The radio is up while the game holds it or any port is open
-(`EspNowLink`'s two holders, the process's radio lease `net`); a game's end
-with a port open ends the match and leaves the radio beaconing the
-launcher's state, and the last port's close takes it down. A process holds
+budget. The radio is up while the game holds it, any port is open or a beam is under
+way (`EspNowLink`'s three holders; a process's radio lease is `net`, a
+beam's `link`); a game's end with a port open ends the match and leaves the
+radio beaconing the launcher's state, and the last holder's let-go takes it
+down. A process holds
 four ports and the console `MOY_MATCH_PORTS` (8); the process's end closes
 what it left open.
 
@@ -288,7 +291,7 @@ either field, and the kernel's loop writes both from its own match
 
 - **A restart must not stop the link.** `Player.release_world` stops it only
   when `ws.netplay` is None, and the stop leaves the radio up while a
-  process's port holds it (§2, Ports). A match forms by a peer's invite reaching a console
+  process's port or a beam holds it (§2, Ports; §7). A match forms by a peer's invite reaching a console
   already playing, which re-runs the cart from frame zero; the dying run used to
   tear down the session that caused the restart, presenting as a host frozen at
   frame 0 showing a tank nobody drove.
@@ -365,9 +368,70 @@ can move. **Dividing the T-Deck's built-in keyboard between two kids shipped and
 was pulled inside a day** (owner, 2026-08-22): it worked, and that thumb
 keyboard is five centimetres wide.
 
-## 7. Where the numbers live
+## 7. Beaming a cart (2026-11-18, #7)
+
+A person on one console sends a cart from its shelf to a console nearby
+that does not have it, and the two then meet on it as any two consoles do.
+The C carries it (`native/moy_play/moy_match.h`, BEAMING A CART, which has
+the frames and every number), the console packs, asks and installs
+(`runtime/run/link_beam.py`).
+
+**What crosses is the cart's `.moy` archive**, as the browser exports it
+(`moy_carts.pack`), at most `MOY_MATCH_BEAM_MAX` bytes, in chunks that fill
+a frame. One frame type, `T_BEAM` (8), carries the beam's five kinds; like
+`T_PORT` it left `MOY_MATCH_PROTO` at 3, and a console without it drops the
+frames as an unknown type. Every frame is broadcast, and every one but the
+offer names its destination in the payload, as the handshake does (§2).
+
+**The receiver drives completion, because the ack lies** (§4). The sender
+offers on the air until a console answers; the receiver's yes binds the two
+by address and beam id, and from then on it reports, every
+`MOY_MATCH_BEAM_NEED_MS`, the lowest chunk it lacks, the top of what it
+holds and which of the next `MOY_MATCH_BEAM_WINDOW` it lacks. The sender
+sends every chunk once, in order, then the ones a report names lost below
+its top, at `MOY_MATCH_BEAM_RATE` frames a second (the Waveshare P4's send
+queue, §5, is the bound). The whole is checked against the offer's FNV-1a
+hash before the receiver says DONE; a copy that fails is dropped whole and
+both consoles say it arrived damaged.
+
+**A beam is taken only by a person who asked for one.** Frames are neither
+signed nor encrypted (§2), so an offer is heard only while a person on the
+receiving console has opened the receive state (the system menu's RECEIVE
+CART), and is asked about in the console's one dialog ("Receive <title>?",
+the console it comes from, No and Receive) before a byte is written. What
+arrives lands on the shelf as a dropped `.moy` does
+(`moy_carts.import_archive`): a cart that arrived as files, whose first run
+asks with the install prompt's lines (`docs/os_2026-11/processes.md` §2), so
+a received cart never runs before its person says yes. The sender's SEND is
+a verb of the cart's card (its menu: a long press, a pad's X, the system
+menu's card group) wherever the console has a link.
+
+**Nothing waits forever, and a match outranks a beam.** An offer nobody takes
+and a receive state nothing reaches end after `MOY_MATCH_BEAM_WAIT_MS`; a
+bound side that hears nothing from its peer for `MOY_MATCH_BEAM_SILENT_MS`
+ends; a no, a stop on either side and a damaged copy each end both, and
+every end is said on whatever screen is up. A no is said as often as a DONE
+(`MOY_MATCH_BEAM_DONES`), and the console keeps its radio up
+`link_beam.PART_MS` after a beam ends, because the Waveshare P4's sends are
+queued (§5) and a radio stopped in the same call never sends them. No beam
+starts while a match is live or a game holds the radio, a beam under way
+ends when a match goes live (in C) or a game takes the radio
+(`EspNowLink.start`), and a beam holds the channel while it is bound, as a
+peer on the cart does (§2's probes): a free station stays on the channel its
+beam's peer was last heard on (`MOY_MATCH_BEAM_HERE_MS`), which is where an
+offer taken on a probe tick came from. A game's stop takes its cart out of
+the beacon (`EspNowLink.stop`), so the radio a beam brings up at the home
+invites nobody to the last game.
+
+`tests/test_link_beam.py` is the net: two consoles over a lossy, reordering
+air, a damaged chunk, a console not receiving, a decline, a sender gone
+mid-transfer, the receive state's give-up, the game's precedence, and the
+shell's half (the system menu's row, the dialog's keys, the shelf, the
+first-run ask).
+
+## 8. Where the numbers live
 
 Per-cart fps and frame ms in `docs/perf/ledger.md` (generated; the stories in
 **#66**), P4 figures in **#58**; both win over any number here. The full ledgers — latency tables, phase-by-phase P4 verdicts,
-refuted avenues, the unbuilt levers (beaming a cart, more players, range, power)
+refuted avenues, the unbuilt levers (more players, range, power)
 — stay in the campaigns above.

@@ -41,7 +41,12 @@ _LOOK_ICON = {"menu.delete_cart": "trash", "menu.home": "home",
 # The selected card's verbs (LauncherHomeLayer.card_verbs) as menu rows:
 # (the chrome's label, icon, the look's text); the star's are the string ids'.
 _CARD_ROW = {"change": ("CHANGE", "pencil", "Change"), "copy": ("DUPLICATE", "dup", "Duplicate"),
-             "delete": ("DELETE", "trash", "Delete")}
+             "send": ("SEND", "export", "Send"), "delete": ("DELETE", "trash", "Delete")}
+# The system group's beam row (runtime/run/link_beam.py), by the beam under
+# way: none, a send, a receive.
+_BEAM_ROW = {None: ("RECEIVE CART", "wifi", "Receive a cart"),
+             1: ("STOP SENDING", "stop", "Stop sending"),
+             2: ("STOP RECEIVING", "stop", "Stop receiving")}
 
 
 def _row(kind, sid, action=None):
@@ -607,6 +612,11 @@ class DeleteConfirm:
     a compiled game the VM must stop for while the music holds the Wi-Fi,
     Cancel and Stop & play. Its line wraps, the card growing to fit.
 
+    And a cart beamed from a console nearby (`ask_close` with `kind` and
+    `no`, runtime/run/link_beam.py): "Receive <title>?", the console it
+    comes from, No and Receive; every way the dialog closes but Receive
+    answers no.
+
     And the first run of a cart that arrived as files (`ask_lines`,
     `Notices.ask_first`): "Open <title>?" over the install prompt's
     lines, as Get Carts draws them (`app_perms.show`), No and Open.
@@ -634,6 +644,8 @@ class DeleteConfirm:
         self.icons = ()
         self._choice = None          # fn(i) told the row picked, None on a cancel
         self.lines = ()              # a first-run prompt's lines (`ask_lines`), else ()
+        self.kind = "danger"         # the verb button's kind
+        self._no = None              # what a cancel answers (`ask_close`'s `no`)
 
     UNDONE = "This can't be undone."
     CLOSE = ("Cancel", "Close")
@@ -654,6 +666,7 @@ class DeleteConfirm:
         `then(i)` with the row picked, at the frame's tail, or `then(None)`
         where the menu was cancelled."""
         self._drop_choice()
+        self._no = None
         self.cart = None
         self.title = title
         self.line = label
@@ -672,11 +685,14 @@ class DeleteConfirm:
         if fn is not None:
             fn(None)
 
-    def ask_close(self, title, line, then, buttons=None):
+    def ask_close(self, title, line, then, buttons=None, kind="danger", no=None):
         """Ask to close what `title` names so that what `line` says can
         open; `then()` closes it and opens that. `buttons` (Cancel, then
-        the verb) name the answers where Close does not."""
+        the verb) name the answers where Close does not, `kind` is the
+        verb's button, and `no()` runs at the tail on every other answer."""
         self._drop_choice()
+        self._no = no
+        self.kind = kind
         self.cart = None
         self.title = title
         self.line = line
@@ -704,6 +720,8 @@ class DeleteConfirm:
             return False
         name = str(target.get("title") or "").strip()
         self._drop_choice()
+        self._no = None
+        self.kind = "danger"
         self.cart = cart
         self.title = "Delete %s?" % name if name else "Delete this cart?"
         self.line = self.UNDONE
@@ -721,6 +739,9 @@ class DeleteConfirm:
         self.open = False
         self.cart = self._then = self._act = None
         self._drop_choice()
+        no, self._no = self._no, None
+        if no is not None:
+            self.ws.defer(no, toast=False)
         self.ws.mark_dirty()
 
     def _delete(self):
@@ -791,7 +812,7 @@ class DeleteConfirm:
             pick = _ui.dialog(self.title, self.buttons, "primary")
             _perms.show(_ui, self.lines)
         else:
-            pick = _ui.dialog(self.title, self.buttons, "danger")
+            pick = _ui.dialog(self.title, self.buttons, self.kind)
             _ui.label(self.line, _WRAP)
         _ui.dialog()
         self._unwash_strip(cv)
@@ -807,6 +828,7 @@ class DeleteConfirm:
         elif pick == 1:
             self.open = False         # the answer is in: the tail acts
             act, self._act = self._act, None
+            self._no = None
             if act is not None:
                 ws.defer(act, toast=False)
         elif self._host.due():
@@ -898,6 +920,13 @@ class SystemMenuUI:
             rows.append(_row("item", sid, self.ws.home.toggle_search))
         if not ws.wm.top_is(ws.tasks_layer.id):
             rows.append(_row("item", "menu.tasks", ws.open_tasks))
+        # Beaming a cart where the console has a radio link: the receive
+        # state opened, or the beam under way stopped.
+        link = getattr(ws, "link", None)
+        if link is not None and ws.netplay is None:
+            role = link.beam_role()
+            label, icon, text = _BEAM_ROW.get(role, _BEAM_ROW[None])
+            rows.append(("item", label, self._menu_beam, icon, text))
         rows.append(_row("item", "menu.settings", self.ws.open_settings))
         rows.append(_row("item", "menu.about", self._menu_about))
         # Sleep where the board's idle ladder can blank its light (absent on
@@ -968,6 +997,14 @@ class SystemMenuUI:
         # ws.cart, which need not be the home's selection); a delete that
         # removed it goes home. carts.delete() guards read-only / last-cart.
         self.ws.confirm.ask(None, self.ws.home.go_home)
+
+    def _menu_beam(self):
+        ws = self.ws
+        if ws.link.beam_role() is None:
+            ws.link.beam_receive(ws)
+        else:
+            ws.link.beam_stop(ws)
+        ws.mark_dirty()
 
     def _menu_about(self):
         # About's card over the washed content (AboutCard).

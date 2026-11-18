@@ -1467,6 +1467,8 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
             ws.confirm.ask(self.grid.selected())   # never on one press: it asks
         elif verb == "favourite":
             self.toggle_favourite()
+        elif verb == "send":
+            ws.link.beam_send(ws, self.grid.selected())
         elif verb == "options":
             self.open_card_menu()
         elif verb == "window":

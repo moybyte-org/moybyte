@@ -67,6 +67,26 @@
 // sends only while it is open and within its SEND BUDGET (below); port 0 has
 // none, its sends being the game's.
 //
+// BEAMING A CART. A console sends one cart's `.moy` archive, as bytes, to one
+// console nearby that is not playing a match (T_BEAM, BEAM_* below). The
+// sender OFFERS it on the air (its id, size, hash, its console's name and the
+// cart's title) every BEAM_OFFER_MS; a console takes an offer only while a
+// person on it has opened the receive state (moy_match_beam_listen), holds
+// the first one it hears and asks its person. Its accept is a NEED, which
+// binds the two by MAC and beam id. The receiver drives completion, because
+// the ack lies: every BEAM_NEED_MS it sends the lowest chunk it lacks, the
+// top of what it holds and a bitmap of the BEAM_WINDOW chunks from that one,
+// and the sender sends its pending chunks (all at first, then the ones a
+// NEED reports lost below the top) at BEAM_RATE. Once every chunk is in, the
+// receiver checks the whole against the offer's FNV-1a hash and answers DONE
+// (good or damaged); a damaged copy is dropped whole. A decline or either
+// side's stop is NO. Nothing waits forever: an offer or a receive state that
+// nobody answers ends after BEAM_WAIT_MS, and a bound side that hears nothing
+// from its peer for BEAM_SILENT_MS ends with GONE. A match outranks a beam:
+// none starts while a match is live, and one going on ends when one begins.
+// The bytes live in one block the beam allocates and its end frees; the
+// console fills it (send) or takes it (receive) and installs it.
+//
 // THE CONSOLE'S HALF. What the link cannot do itself -- open the cart a host
 // named, re-run the cart from frame zero -- it leaves as one ACTION the
 // console takes (moy_match_action): a VM's console on its frame, the kernel's
@@ -89,6 +109,7 @@ enum {
     MOY_MATCH_T_BEACON = 1, MOY_MATCH_T_JOIN = 2, MOY_MATCH_T_START = 3,
     MOY_MATCH_T_INPUT = 4, MOY_MATCH_T_MSG = 5, MOY_MATCH_T_BYE = 6,
     MOY_MATCH_T_PORT = 7,               // [proto, 7, port lo, port hi, body]
+    MOY_MATCH_T_BEAM = 8,               // [proto, 8, kind, id (4), ...] BEAMING A CART
 };
 
 // The lockstep clock and its levers (configuration; docs/netplay_v1.md has
@@ -138,10 +159,10 @@ enum {
 #define MOY_MATCH_BEACON_MS 400
 // THE CHANNEL: ESP-NOW is heard only on the channel it is sent on, and a
 // station associated to an AP is pinned to the AP's. A console whose station
-// is free sits on HOME_CH; with no peer on its cart heard, every PROBE_EVERY-th
-// beacon tick it visits the next channel of the probe list for one tick, and a
-// pinned peer heard there is followed to its channel for as long as it is
-// heard. A pinned console never moves; a live match never tunes.
+// is free sits on HOME_CH; with no peer on its cart heard and no beam bound,
+// every PROBE_EVERY-th beacon tick it visits the next channel of the probe
+// list for one tick, and a pinned peer heard there is followed to its
+// channel for as long as it is heard. A pinned console never moves; a live match never tunes.
 #define MOY_MATCH_HOME_CH 1
 #define MOY_MATCH_PROBE_EVERY 3
 #define MOY_MATCH_PEER_TTL_MS 2000
@@ -187,6 +208,66 @@ enum {
 #define MOY_MATCH_LIVE_RATE 10          // ...while a match is live
 #define MOY_MATCH_LIVE_BURST 1
 enum { MOY_MATCH_FROM_ANY = 0, MOY_MATCH_FROM_MATCH = 1 };
+// BEAMING A CART. A chunk fills a frame after its header (kind, id, the
+// destination, its index); a NEED's bitmap covers BEAM_WINDOW chunks. The
+// rate keeps the Waveshare P4's 12-deep send queue (THE SEND BUDGET) at most
+// half full with beacons beside it.
+#define MOY_MATCH_BEAM_MAX 131072       // the biggest archive a beam carries
+#define MOY_MATCH_BEAM_HDR 15
+#define MOY_MATCH_BEAM_CHUNK (MOY_MATCH_FRAME - MOY_MATCH_BEAM_HDR)
+#define MOY_MATCH_BEAM_CHUNKS ((MOY_MATCH_BEAM_MAX + MOY_MATCH_BEAM_CHUNK - 1) / MOY_MATCH_BEAM_CHUNK)
+#define MOY_MATCH_BEAM_WINDOW 128
+#define MOY_MATCH_BEAM_OFFER_MS 500     // an offer's resend
+#define MOY_MATCH_BEAM_NEED_MS 200      // a receiver's report
+#define MOY_MATCH_BEAM_WAIT_MS 60000    // an offer or a receive state nobody answers
+#define MOY_MATCH_BEAM_SILENT_MS 3000   // a bound peer heard from
+#define MOY_MATCH_BEAM_HERE_MS 1500     // a free station stays where its beam's peer was heard
+#define MOY_MATCH_BEAM_RATE 60          // chunks/s
+#define MOY_MATCH_BEAM_BURST 6
+#define MOY_MATCH_BEAM_DONES 3          // a receiver's DONE and either side's NO, sent this many times
+enum { MOY_MATCH_BEAM_OFFER = 1, MOY_MATCH_BEAM_NEED = 2, MOY_MATCH_BEAM_DATA = 3,
+       MOY_MATCH_BEAM_NO = 4, MOY_MATCH_BEAM_DONE = 5 };
+// A beam's role, state and why it failed (moy_match_beam_info).
+enum { MOY_BEAM_SEND = 1, MOY_BEAM_RECEIVE = 2 };
+enum {
+    MOY_BEAM_NONE = 0,
+    MOY_BEAM_LOADING = 1,               // send: the console fills the block
+    MOY_BEAM_OFFERING = 2,              // send: the offer on the air, nobody bound
+    MOY_BEAM_LISTENING = 3,             // receive: waiting for an offer
+    MOY_BEAM_OFFERED = 4,               // receive: an offer held, its person asked
+    MOY_BEAM_MOVING = 5,                // bound: chunks crossing
+    MOY_BEAM_DONE = 6,                  // send: the receiver has it; receive: whole and checked
+    MOY_BEAM_FAILED = 7,
+};
+enum {
+    MOY_BEAM_WHY_NOBODY = 1,            // BEAM_WAIT_MS passed unanswered
+    MOY_BEAM_WHY_GONE = 2,              // the peer fell silent
+    MOY_BEAM_WHY_DECLINED = 3,          // the receiver said no
+    MOY_BEAM_WHY_STOPPED = 4,           // the peer stopped
+    MOY_BEAM_WHY_DAMAGED = 5,           // the whole failed its hash
+    MOY_BEAM_WHY_MATCH = 6,             // a match began
+    MOY_BEAM_WHY_ROOM = 7,              // no block for the bytes
+};
+// What the beam calls answer where they fail.
+enum {
+    MOY_BEAM_E_SIZE = -1,               // 0 bytes, or more than BEAM_MAX
+    MOY_BEAM_E_LIVE = -2,               // a match is live
+    MOY_BEAM_E_ROOM = -3,               // no block for the bytes
+    MOY_BEAM_E_DOWN = -4,               // the link is down
+    MOY_BEAM_E_STATE = -5,              // not in the state the call needs
+};
+
+// A beam as the console reads it: the peer's console name is the offer's
+// (receive) or the binding NEED's sender's beacon name (send).
+typedef struct {
+    uint8_t role, state, why;
+    uint32_t size;
+    uint16_t chunks, done;              // chunks in all, and the ones across
+    char title[MOY_MATCH_CART + 1];
+    char peer[24];
+} moy_match_beam_info_t;
+
+struct moy_beam;
 // What the port calls answer where they fail.
 enum {
     MOY_MATCH_PORT_BAD = -1,            // port 0 or out of range, a body too big
@@ -373,6 +454,7 @@ typedef struct {
     uint8_t probe;                      // beacon ticks since the last probe, and its place
     uint8_t probe_at;
     moy_match_budget_t ports_budget;    // every port's sends together
+    struct moy_beam *beam;              // the beam under way, NULL none (BEAMING A CART)
 } moy_match_t;
 
 extern const uint8_t MOY_MATCH_BROADCAST[6];
@@ -452,6 +534,24 @@ void moy_match_dispatch(moy_match_t *m, const uint8_t mac[6], const uint8_t *msg
 // The peer standing by on `cart`, or NULL.
 const moy_match_peer_t *moy_match_candidate(const moy_match_t *m, const char *cart,
                                             uint32_t now);
+
+// BEAMING A CART. Each starting call ends a beam already there first. The
+// sender's three: a block of `size` bytes for the cart titled `title`
+// (LOADING), filled by `put`, then offered. 0, or MOY_BEAM_E_*.
+int moy_match_beam_send(moy_match_t *m, const char *title, uint32_t size);
+int moy_match_beam_put(moy_match_t *m, uint32_t off, const uint8_t *p, size_t n);
+int moy_match_beam_offer(moy_match_t *m, uint32_t now);
+// The receiver's: the receive state opened (LISTENING), and its person's yes
+// to the offer it holds (OFFERED -> MOVING). 0, or MOY_BEAM_E_*.
+int moy_match_beam_listen(moy_match_t *m, uint32_t now);
+int moy_match_beam_accept(moy_match_t *m, uint32_t now);
+// The beam ended, its block freed: a bound peer, or a held offer's sender,
+// is told NO (a decline, or a stop).
+void moy_match_beam_end(moy_match_t *m);
+// A DONE receiver's bytes from `off`: the count copied, 0 with none.
+size_t moy_match_beam_take(const moy_match_t *m, uint32_t off, uint8_t *out, size_t n);
+// The beam as it stands: false with none.
+bool moy_match_beam_info(const moy_match_t *m, moy_match_beam_info_t *out);
 
 // -- the lockstep session ------------------------------------------------------
 
