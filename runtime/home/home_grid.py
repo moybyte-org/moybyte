@@ -70,6 +70,7 @@ _FACE_GEN = [0]                         # the faces' keys (`ui.slots`), one per 
 _FACE_SLOTS = 128                       # the slots the engine keeps at most (`ui.slots`)
 _FACES_BYTES = 192 << 10                # the faces' layer at most: the slots a board's cards fit
 _NO_KEYS = array("i", [-1, -1])         # a band paint that keeps nothing (`band_pass`)
+_C_PASS = [None, None]                  # the grid a band pass runs on and its cells (`_cells`)
 
 
 def _cover_scale(side, w, h):
@@ -398,7 +399,10 @@ class Launcher:
 
     def _cells(self):
         """The cells on the class in force (`_Cells`), laid out once per
-        layout, theme depth and input."""
+        layout, theme depth and input. Inside a band pass, the cells it
+        began in (`band_pass`)."""
+        if _C_PASS[0] is self:
+            return _C_PASS[1]
         lay = self.layout
         keys = _ui_draw.hint_kind() != "touch"     # touch alone shows no hint strip
         depth = _ui_draw.depth()
@@ -892,116 +896,121 @@ class Launcher:
         floor's end is read. `note`: the home put the band there whole by
         other means (the retained frame's stamp), so nothing draws and the
         record says the buffer holds it. Answers the floor's end, or None
-        where `need` and the buffer does not hold the band under `key`."""
-        c = self._cells()
-        b = c.band
-        held = self._begin_band(cv, b, c.desk, key, need, over)
-        if held is None:
-            return None
-        _ui.at(b[0], b[1], b[2], b[3])
-        n = len(self.items)
-        per = c.rows if self.horizontal else c.cols
-        o = self._bo
-        p = o["part"]
-        if self.horizontal:
-            p[0] = c.px
-            p[1] = 0
-            o["offset"] = self.scroll - (c.x0 - b[0])
-        else:
-            p[0] = 0
-            p[1] = c.py
-            o["offset"] = self.scroll - (c.y0 - b[1])
-        o["axis"] = "x" if self.horizontal else "y"
-        sp = o["spill"] = c.grow + _ui_draw.mark_reach("card") + 2
-        sel = self.sel
-        # the cards across a row: the first's offset into the band, the pitch
-        a = o.get("across")
-        if a is None:
-            a = o["across"] = [0, 0]
-        a[0] = c.y0 - b[1] if self.horizontal else c.x0 - b[0]
-        a[1] = c.py if self.horizontal else c.px
-        o["at"] = sel % per
-        o["gen"] = 1 if self._focused(True) else 0
-        o["keep"] = key[1]
-        o["whole"] = whole or not held
-        o["over"] = over
-        hz = self.horizontal
-        # (a band frame over one colour may move the band out of the last
-        # frame's buffer; the handheld icons' fade blends the band's end)
-        o["shift"] = self.flat and not whole
-        o["fade"] = (0 if hz or c.desk or c.hints[3] <= 0 or self.wall_ink is not None
-                     else _FADE * self.layout.fs)
-        rows = self._band_keys((n + per - 1) // per, per)
-        _ui.table("", self._kcols, rows, sel // per, o)
-        sh = self.shifted
-        del sh[:]
-        r = _FLOOR
-        d = _ui.table_shift(r)
-        if d is not None:
-            # the view moved out of the last frame's buffer by the scroll's
-            # difference (`shift_last`, fenced before the floor draws over
-            # it); a canvas that cannot draws the view whole
-            if cv is not self._scv:
-                self._scv = cv
-                self._shift = getattr(cv, "shift_last", None)
-                self._fence = getattr(cv, "shift_fence", None)
-            sl = self._shift
-            if sl is None or not (sl(r[0], r[1], r[2], r[3], d, 0) if hz
-                                  else sl(r[0], r[1], r[2], r[3], 0, d)):
-                _ui.table_shift(r, True)
+        where `need` and the buffer does not hold the band under `key`. The
+        pass draws in the cells it begins in (`_cells`)."""
+        c = _C_PASS[1] = self._cells()
+        _C_PASS[0] = self
+        try:
+            b = c.band
+            held = self._begin_band(cv, b, c.desk, key, need, over)
+            if held is None:
+                return None
+            _ui.at(b[0], b[1], b[2], b[3])
+            n = len(self.items)
+            per = c.rows if self.horizontal else c.cols
+            o = self._bo
+            p = o["part"]
+            if self.horizontal:
+                p[0] = c.px
+                p[1] = 0
+                o["offset"] = self.scroll - (c.x0 - b[0])
             else:
-                sh.append((r[0], r[1], r[2], r[3]))
-                if self._fence is not None:
-                    self._fence()
-        faces = self.face_key is not None and self._faces_for(cv, c.side, c.r, self._face_cap(c))
-        if beside is not None:
-            beside(cv, whole or not held)
-        end = self.band_floor(cv, fill, not note)
-        if note:
-            del self.floor[:]
-        r = _PART
-        items = self.items
-        on = None
-        i = _ui.table_part(r)
-        side = c.side
-        while i >= 0:
-            # the part is a column of the shelf (a row of the icons): its
-            # cards lie along it, a pitch apart, from where the engine put
-            # it, drawn in its reach inside the floor rect it meets
-            x = r[0] if hz else c.x0
-            y = c.y0 if hz else r[1]
-            q = self._in_floor(r[0] - sp, r[1] - sp, r[0] + r[2] + sp, r[1] + r[3] + sp)
-            for k in range(i * per, min(n, (i + 1) * per)):
-                t = (x, y, side, side)
-                if hz:
-                    y += c.py
+                p[0] = 0
+                p[1] = c.py
+                o["offset"] = self.scroll - (c.y0 - b[1])
+            o["axis"] = "x" if self.horizontal else "y"
+            sp = o["spill"] = c.grow + _ui_draw.mark_reach("card") + 2
+            sel = self.sel
+            # the cards across a row: the first's offset into the band, the pitch
+            a = o.get("across")
+            if a is None:
+                a = o["across"] = [0, 0]
+            a[0] = c.y0 - b[1] if self.horizontal else c.x0 - b[0]
+            a[1] = c.py if self.horizontal else c.px
+            o["at"] = sel % per
+            o["gen"] = 1 if self._focused(True) else 0
+            o["keep"] = key[1]
+            o["whole"] = whole or not held
+            o["over"] = over
+            hz = self.horizontal
+            # (a band frame over one colour may move the band out of the last
+            # frame's buffer; the handheld icons' fade blends the band's end)
+            o["shift"] = self.flat and not whole
+            o["fade"] = (0 if hz or c.desk or c.hints[3] <= 0 or self.wall_ink is not None
+                         else _FADE * self.layout.fs)
+            rows = self._band_keys((n + per - 1) // per, per)
+            _ui.table("", self._kcols, rows, sel // per, o)
+            sh = self.shifted
+            del sh[:]
+            r = _FLOOR
+            d = _ui.table_shift(r)
+            if d is not None:
+                # the view moved out of the last frame's buffer by the scroll's
+                # difference (`shift_last`, fenced before the floor draws over
+                # it); a canvas that cannot draws the view whole
+                if cv is not self._scv:
+                    self._scv = cv
+                    self._shift = getattr(cv, "shift_last", None)
+                    self._fence = getattr(cv, "shift_fence", None)
+                sl = self._shift
+                if sl is None or not (sl(r[0], r[1], r[2], r[3], d, 0) if hz
+                                      else sl(r[0], r[1], r[2], r[3], 0, d)):
+                    _ui.table_shift(r, True)
                 else:
-                    x += c.px
-                if k == sel:
-                    on = q
-                    continue
-                if (q is None or t[0] - sp >= q[0] + q[2] or t[0] + c.px + sp <= q[0]
-                        or t[1] - sp >= q[1] + q[3] or t[1] + c.py + sp <= q[1]):
-                    continue               # (its reach lies outside the floor)
-                if faces:
-                    self._stamp_cell(cv, items[k], k, t, c, q)
-                else:
-                    self._draw_cell(cv, items[k], t, False, c)
+                    sh.append((r[0], r[1], r[2], r[3]))
+                    if self._fence is not None:
+                        self._fence()
+            faces = self.face_key is not None and self._faces_for(cv, c.side, c.r, self._face_cap(c))
+            if beside is not None:
+                beside(cv, whole or not held)
+            end = self.band_floor(cv, fill, not note)
+            if note:
+                del self.floor[:]
+            r = _PART
+            items = self.items
+            on = None
             i = _ui.table_part(r)
-        if on is not None:
-            # the focused card last, over its neighbours' reach
-            cv.clip(on[0], on[1], on[2], on[3])
-            if not faces or self._focused(True):
-                self._draw_cell(cv, items[sel], self._cell_rect(c, sel), True, c)
-            else:
-                self._stamp_cell(cv, items[sel], sel, self._cell_rect(c, sel), c, on)
+            side = c.side
+            while i >= 0:
+                # the part is a column of the shelf (a row of the icons): its
+                # cards lie along it, a pitch apart, from where the engine put
+                # it, drawn in its reach inside the floor rect it meets
+                x = r[0] if hz else c.x0
+                y = c.y0 if hz else r[1]
+                q = self._in_floor(r[0] - sp, r[1] - sp, r[0] + r[2] + sp, r[1] + r[3] + sp)
+                for k in range(i * per, min(n, (i + 1) * per)):
+                    t = (x, y, side, side)
+                    if hz:
+                        y += c.py
+                    else:
+                        x += c.px
+                    if k == sel:
+                        on = q
+                        continue
+                    if (q is None or t[0] - sp >= q[0] + q[2] or t[0] + c.px + sp <= q[0]
+                            or t[1] - sp >= q[1] + q[3] or t[1] + c.py + sp <= q[1]):
+                        continue               # (its reach lies outside the floor)
+                    if faces:
+                        self._stamp_cell(cv, items[k], k, t, c, q)
+                    else:
+                        self._draw_cell(cv, items[k], t, False, c)
+                i = _ui.table_part(r)
+            if on is not None:
+                # the focused card last, over its neighbours' reach
+                cv.clip(on[0], on[1], on[2], on[3])
+                if not faces or self._focused(True):
+                    self._draw_cell(cv, items[sel], self._cell_rect(c, sel), True, c)
+                else:
+                    self._stamp_cell(cv, items[sel], sel, self._cell_rect(c, sel), c, on)
+                cv.clip()
+            for q in self.floor:
+                cv.clip(q[0], q[1], q[2], q[3])
+                self._fade(cv, c)
             cv.clip()
-        for q in self.floor:
-            cv.clip(q[0], q[1], q[2], q[3])
-            self._fade(cv, c)
-        cv.clip()
-        _ui.end()
-        return end
+            _ui.end()
+            return end
+        finally:
+            _C_PASS[0] = _C_PASS[1] = None
 
     def _cell_rect(self, c, i):
         """Cell `i`'s card rect at the current scroll (`cell_of`'s)."""

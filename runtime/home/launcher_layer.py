@@ -126,7 +126,8 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
         self._ck = _Keyed()
         self._beside_drew = []
         # what the hint strip's key was made of, and the key (`_outside_key`)
-        self._ok = [None, None, None, None, None, None, None, None]
+        self._ok = [None, None, None, None, None, None, None, None, None]
+        self._st_parts = [None] * 16  # the statics key's parts (`_statics_key`)
         self._zone_bump = 0           # the tab row's focus moved (the bar's zone shows it)
         # Retained WHOLE-frame cache (2026-07-27, the damage-model doctrine at
         # shelf granularity): the last full home frame, captured at the END of
@@ -347,14 +348,36 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
         streak re-arms. Where the keys are -- the tab row, the bar, a card --
         is not in it: the tabs are the bar's, which a band frame draws, the
         hint strip names the tab row's keys under its own key (`_outside_key`)
-        and the selected card wears the focus as its part's gen."""
+        and the selected card wears the focus as its part's gen. The base's
+        six (`_statics_base`) then these, read into a kept list and made a
+        tuple only where one moved from the key the band last keyed on
+        (`_band_key`): that tuple while they stand."""
         ws = self.ws
-        return _statics_base(ws, cv, self.grid) + (
-            ws.look.wallpaper_id, modal_keys(ws),
-            getattr(ws, "search_query", ""), getattr(ws, "search_typing", False),
-            getattr(ws, "search_typing", False) and ws.text.can_type(),
-            self.grid.tab, self._button_focus, self.grid.arrangement,
-            self.grid.statics_sel(), self._back_tip)
+        g = self.grid
+        look = ws.look
+        v = self._st_parts
+        v[0] = cv.w
+        v[1] = cv.h
+        v[2] = ws.layout.fs
+        v[3] = look.look_gen
+        v[4] = g.band_rect()
+        v[5] = len(g.items)
+        v[6] = look.wallpaper_id
+        v[7] = modal_keys(ws)
+        v[8] = getattr(ws, "search_query", "")
+        typing = v[9] = getattr(ws, "search_typing", False)
+        v[10] = typing and ws.text.can_type()
+        v[11] = g.tab
+        v[12] = self._button_focus
+        v[13] = g.arrangement
+        v[14] = g.statics_sel()
+        v[15] = self._back_tip
+        k = self._sk.v
+        i = 0
+        if k is not None:
+            while i < 16 and v[i] == k[i]:
+                i += 1
+        return k if i == 16 else tuple(v)
 
     def _retained_key(self, cv, statics=None):
         """Everything the WHOLE home frame's pixels are a pure function of: the
@@ -635,9 +658,16 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
             m[5] = cm
             m[6] = g.favorite_for
         hint = m[7]
+        now = m[8]
         if isinstance(g, IconHome) and g._cells().caption is not None:
-            return (hint, (g.sel, g.today()))
-        return (hint, None)
+            sel = g.sel
+            day = g.today()
+            if now is None or now[0] is not hint or now[1] is None or now[1][0] != sel \
+                    or now[1][1] != day:
+                now = m[8] = (hint, (sel, day))
+        elif now is None or now[0] is not hint or now[1] is not None:
+            now = m[8] = (hint, None)
+        return now
 
     def _beside(self, cv, whole, draw=True):
         """The parts outside the band a selection changes (the hint strip,

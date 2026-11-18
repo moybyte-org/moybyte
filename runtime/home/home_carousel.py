@@ -25,6 +25,9 @@ from home_grid import (_clean_side, _COVER_BASE, _COVER_SIDE, desk_button_span,
                        HOME_SCALE_HH, _in, Launcher, NEW_TILE_TYPE, _NO_KEYS, _PART,
                        _PART_COL, PSEUDO_TILE_TYPES, SHELF_GAP, _TAB_NAME, text_scale)
 
+_G_PASS = [None, None]   # the row a band pass runs on and its geometry (`_geom`)
+_PK = [None, None]       # the row whose paint key was answered last, and the key (`paint_key`)
+
 
 class Carousel(Launcher):
     """The home's carousel (docs/theme_and_shell_2026-11.md §8.10, the 2026-10
@@ -77,7 +80,10 @@ class Carousel(Launcher):
         """(tabs, band, card, pitch, ring, gap, plate_h, centre_y, foot,
         desk): the handheld's (`_geom_hh`) or the desk's (`_geom_desk`) on
         the class in force. A card is square (a cover is, SPEC.md 3.6) and
-        shows its whole cover at a clean scale (`_clean_side`)."""
+        shows its whole cover at a clean scale (`_clean_side`). Inside a
+        band pass, the one it began under (`band_pass`)."""
+        if _G_PASS[0] is self:
+            return _G_PASS[1]
         lay = self.layout
         reach = _ui_draw.mark_reach("card")    # the centre card's focus mark
         keys = _ui_draw.hint_kind() != "touch"    # touch alone shows no hint strip
@@ -364,10 +370,14 @@ class Carousel(Launcher):
         n = len(self.items)
         if not n:
             return 0
-        if self.desk():
+        g = self._geom()
+        if g[9] is not None:
             return max(0, min(n - 1, self._sel))
-        p = self.pitch()
-        return max(0, min(n - 1, (self.scroll + p // 2) // p))
+        g = g[3]
+        n -= 1
+        # (`scroll`, clamped to the handheld's `max_scroll`, in pitches)
+        g = (min(self._scroll, n * g) + g // 2) // g
+        return 0 if g < 0 else n if g > n else g
 
     def set_items(self, items):
         self._region.stop()
@@ -523,7 +533,7 @@ class Carousel(Launcher):
             r = self._rect_of(i, moving, g, s, big)
             if r[0] + r[2] > bx and r[0] < bx + bw:
                 out.append((i, r))
-        out.sort(key=lambda e: (e[1][2], e[0] == c))
+        out.sort(key=lambda e: 2 * e[1][2] + (e[0] == c))
         self._vis_g, self._vis_key, self._vis = g, key, out
         return out
 
@@ -567,11 +577,19 @@ class Carousel(Launcher):
         statics: the selection, the motion (a card at rest wears its mark),
         whether the tabs or the bar hold the focus (the mark goes), the
         centre card's title and star (its caption's line is laid out once a
-        card and a play record, `_draw_caption`)."""
+        card and a play record, `_draw_caption`). The same tuple while
+        they stand."""
         it = self.items[self.nearest()] if self.items else None
         f = self.favorite_for
-        return (self._sel, self.moving, self.tab_focus, it and it.get("title"),
-                it is not None and f is not None and bool(f(it)), self.broken_key())
+        title = it and it.get("title")
+        star = it is not None and f is not None and bool(f(it))
+        broken = self.broken_key()
+        k = _PK[1] if _PK[0] is self else None
+        if (k is None or k[0] != self._sel or k[1] != self.moving or k[2] != self.tab_focus
+                or k[3] != title or k[4] != star or k[5] != broken):
+            k = _PK[1] = (self._sel, self.moving, self.tab_focus, title, star, broken)
+            _PK[0] = self
+        return k
 
     def favorite_rect(self, i):
         """The centre card's favorite-star badge, at rest."""
@@ -626,53 +644,58 @@ class Carousel(Launcher):
         or nothing. In each floor rect the ground goes back round the
         cards (`fill`; None: a full paint drew it) and the cards the engine
         says show draw in the order the row paints them (`_paint`).
-        `beside`, `note` and the answer are `Launcher.band_pass`'s."""
-        band = self.band_rect()
-        g = self._geom()
-        n = len(self.items)
-        held = self._begin_band(cv, band, g[9] is not None, key, need, over)
-        if held is None:
-            return None
-        _ui.at(band[0], band[1], band[2], band[3])
-        o = self._bo
-        p = o["part"]
-        p[0] = g[3]
-        p[1] = 0
-        o["axis"] = "x"
-        if g[9] is None:
-            o["snap"] = True
-            o["offset"] = self.scroll
-            o["spill"] = self._big()
-        else:
-            o["snap"] = False
-            o["offset"] = self.scroll - g[9][4]
-            o["spill"] = g[3]
-        o["keep"] = key[1]
-        o["whole"] = whole or not held
-        o["over"] = over
-        _ui.table("", _PART_COL, self._band_rows(n), self.nearest(), o)
-        if beside is not None:
-            beside(cv, whole or not held)
-        end = self.band_floor(cv, None, not note)
-        if note:
-            del self.floor[:]
-        shows = self._shows
-        if len(shows) != n:
-            shows = self._shows = bytearray(n)
-        else:
-            for k in range(n):
-                shows[k] = 0
-        r = _PART
-        i = _ui.table_part(r)
-        while i >= 0:
-            shows[i] = 1
+        `beside`, `note` and the answer are `Launcher.band_pass`'s. The
+        pass draws under the geometry it begins with (`_geom`)."""
+        g = _G_PASS[1] = self._geom()
+        _G_PASS[0] = self
+        try:
+            band = g[1]
+            n = len(self.items)
+            held = self._begin_band(cv, band, g[9] is not None, key, need, over)
+            if held is None:
+                return None
+            _ui.at(band[0], band[1], band[2], band[3])
+            o = self._bo
+            p = o["part"]
+            p[0] = g[3]
+            p[1] = 0
+            o["axis"] = "x"
+            if g[9] is None:
+                o["snap"] = True
+                o["offset"] = self.scroll
+                o["spill"] = self._big()
+            else:
+                o["snap"] = False
+                o["offset"] = self.scroll - g[9][4]
+                o["spill"] = g[3]
+            o["keep"] = key[1]
+            o["whole"] = whole or not held
+            o["over"] = over
+            _ui.table("", _PART_COL, self._band_rows(n), self.nearest(), o)
+            if beside is not None:
+                beside(cv, whole or not held)
+            end = self.band_floor(cv, None, not note)
+            if note:
+                del self.floor[:]
+            shows = self._shows
+            if len(shows) != n:
+                shows = self._shows = bytearray(n)
+            else:
+                for k in range(n):
+                    shows[k] = 0
+            r = _PART
             i = _ui.table_part(r)
-        for q in self.floor:
-            if fill is not None:
-                self._fill_around_cards(cv, fill, q, marks)
-            self._paint(cv, sheet_for, q)
-        _ui.end()
-        return end
+            while i >= 0:
+                shows[i] = 1
+                i = _ui.table_part(r)
+            for q in self.floor:
+                if fill is not None:
+                    self._fill_around_cards(cv, fill, q, marks)
+                self._paint(cv, sheet_for, q)
+            _ui.end()
+            return end
+        finally:
+            _G_PASS[0] = _G_PASS[1] = None
 
     def _fill_around_cards(self, cv, fill, r, marks=False):
         """Restore rect `r`'s backdrop except where a card lies: every card
@@ -895,17 +918,21 @@ class Carousel(Launcher):
         cv.print_scaled(name, tx, ty, ink, tsc)
         if swap is not None:
             _ui_draw.print_font(was)
-        x0 = x = bx + (bw - mw) // 2
+        x0 = bx + (bw - mw) // 2
         d = 2 * fs if _ui_draw.font_v2(_ui_draw.font()[0]) else fs
         dy = _dot_top(my, fs, d)
-        for pas in ((1, wall[1]), (0, dim)) if wall is not None else ((0, dim),):
-            o, c = pas
-            x = x0
-            for k, t in enumerate(parts):
-                if k:
-                    cv.rect(x - (sep + d) // 2 + o, dy + o, d, d, c)
-                cv.print(t, x + o, my + o, c, 1)
-                x += ws_[k] + sep
+        if wall is not None:
+            self._meta_line(cv, parts, ws_, x0 + 1, my + 1, dy + 1, d, sep, wall[1])
+        self._meta_line(cv, parts, ws_, x0, my, dy, d, sep, dim)
+
+    def _meta_line(self, cv, parts, ws_, x, y, dy, d, sep, c):
+        """The caption's metadata `parts` (widths `ws_`) from (x, y) in
+        ink `c`, apart by a dot `d` across at row `dy`."""
+        for k in range(len(parts)):
+            if k:
+                cv.rect(x - (sep + d) // 2, dy, d, d, c)
+            cv.print(parts[k], x, y, c, 1)
+            x += ws_[k] + sep
 
     def _dims(self, centre):
         """A handheld neighbour's dimming (step 15), off the centre."""

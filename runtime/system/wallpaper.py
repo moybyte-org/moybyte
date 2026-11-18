@@ -214,6 +214,10 @@ class Wallpaper:
         self._fill_did = None
         self._bd_src = _Strip()
         self.rasters = 0
+        # The key `restore_key` answered last and the fill `restorer` made
+        # for it, with the picture it was made over: the same objects while
+        # the backdrop stands.
+        self._rk = [None, None, None]
 
     def clear(self):
         """Drop the compiled wallpaper (back to the fill). Called by the look
@@ -543,7 +547,7 @@ class Wallpaper:
             if (self._pic_data is not None and self._pic_bitmap is not None
                     and k is not None and k[1] == cv.w and k[2] == cv.h
                     and k[0] == self._pic_id()):
-                return ("pic", k)
+                return self._kept("pic", k)
         if self._wp_draw is not None:
             return None
         did = self._fill_did
@@ -552,27 +556,49 @@ class Wallpaper:
         bg = ws.theme_colors["desktop"]
         k = did[1]
         if k is None:
-            return ("bg", bg)
+            return self._kept("bg", bg)
         img = self._bd_img
         if (k is not self._bd_key or img is None or getattr(img, "_rgb_i", None) is None
                 or k[1] != bg or k[2] != cv.w or k[3] != cv.h or k[4] != self._bg_word(bg)):
             return None
-        return ("bd", k)
+        return self._kept("bd", k)
+
+    def _kept(self, kind, v):
+        """(kind, v): the tuple answered last where it is that one."""
+        m = self._rk
+        k = m[0]
+        if k is None or k[0] != kind or k[1] is not v and k[1] != v:
+            k = m[0] = (kind, v)
+            m[1] = None
+        return k
 
     def restorer(self, cv, key):
         """fill(cv, rect): put back a rect of the backdrop `restore_key`
-        answered `key` for, on canvas `cv`."""
-        kind = key[0]
-        if kind == "bg":
-            c = key[1]
-            return lambda cv, r: cv.rect(r[0], r[1], r[2], r[3], c)
-        if kind == "bd":
+        answered `key` for, on canvas `cv`; the one made for the key it
+        answered last while that stands."""
+        m = self._rk
+        f = m[1]
+        if f is None or key is not m[0] or m[2] is not self._pic_bitmap:
+            f = self._restorer(key)
+            if key is m[0]:
+                m[1] = f
+                m[2] = self._pic_bitmap
+        if key[0] == "bd":
             src = self._bd_src
             img = self._bd_img
             if src._buf is not img._rgb_i:
                 src._buf = img._rgb_i
                 src.w = img.w
                 src.h = img.h
+        return f
+
+    def _restorer(self, key):
+        kind = key[0]
+        if kind == "bg":
+            c = key[1]
+            return lambda cv, r: cv.rect(r[0], r[1], r[2], r[3], c)
+        if kind == "bd":
+            src = self._bd_src
             return lambda cv, r: cv.blit_strip_rect(src, 0, 0, r[0], r[1], r[2], r[3])
         pic = self._pic_bitmap
 

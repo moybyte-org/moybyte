@@ -119,6 +119,14 @@ class _Keyed:
             self.n = (self.n + 1) & 0x3fffffff
         return self.n
 
+    def of3(self, a, b, c):
+        """`of((a, b, c))`, the tuple made only where one of them moved."""
+        v = self.v
+        if v is None or v[0] != a or v[1] != b or v[2] != c:
+            self.v = (a, b, c)
+            self.n = (self.n + 1) & 0x3fffffff
+        return self.n
+
 
 def _band_key(layer, cv, dt, grid, vouch, calm=False):
     """The band's keys (`band_pass`'s `key`): what the frame round the band
@@ -136,7 +144,7 @@ def _band_key(layer, cv, dt, grid, vouch, calm=False):
         k[0] = k[1] = -1
         return k
     k[0] = layer._sk.of(layer._statics_key(cv))
-    k[1] = layer._bk.of((k[0], gen, grid.band_key()))
+    k[1] = layer._bk.of3(k[0], gen, grid.band_key())
     return k
 
 
