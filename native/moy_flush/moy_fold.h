@@ -54,13 +54,13 @@
 // snapshot was the whole of `cmp`: a 153,600 B PSRAM->PSRAM copy costs the
 // VM core ~5.1 ms on either S3 through the write-allocate cache (a 32 KB p8
 // canvas ~1.1 ms), the fence beside it 0.03 ms. The GDMA engine moves the same
-// bytes in ~3.4 ms with the CPU free, and started at `blit_game` it has ALWAYS
-// landed before the cart's next tick (residual wait 0.02 ms, every frame,
-// both boards) -- the bar, the stack walk, the kick and the loop head are
-// longer than the copy. So `moy_fold_arm_snap` takes the LIVE canvas and the
-// scratch, starts the copy, and arms over the scratch; the copy is a plain
-// memcpy when the engine declines (alignment, size, a refusal), so the arm's
-// caller never sees the difference. Folding the live canvas instead, with a
+// bytes in ~3.4 ms with the CPU free, and started at `blit_game` it runs
+// under the bar, the stack walk, the kick and the loop head, so the fence
+// before the cart's next tick waits out only what is left of it. So
+// `moy_fold_arm_snap` takes the LIVE canvas and the scratch, starts the copy,
+// and arms over the scratch; the copy is a plain memcpy when the engine
+// declines (alignment, size, a refusal), so the arm's caller never sees the
+// difference. Folding the live canvas instead, with a
 // fence before the cart's first write, was measured and DECLINED: that wait is
 // bounded by the FEED (8.1 ms after kick on the Guition's game window, 13.1 ms
 // on the T-Deck's full frame) where the DMA's is bounded by 3.4 ms, and it
@@ -254,8 +254,9 @@ void moy_fold_fence(void);
 
 // VM side. Block until the snapshot in flight has finished reading the live
 // canvas -- the fence the cart's next canvas write takes. GIL released, the
-// task parked on the copy's landing (the feeder's band waits park the same
-// way), bounded; one compare when nothing is in flight.
+// task polling the copy's latch (the feeder's band waits park on its landing;
+// moy_fold.c says why the VM's does not), bounded; one compare when nothing
+// is in flight.
 void moy_fold_snap_fence(void);
 
 // VM side, at a run's end (the system canvas's release_fold): the snapshot

@@ -38,19 +38,24 @@ static bool moy_fold_snap_done(async_memcpy_handle_t h, async_memcpy_event_t *e,
     return hp == pdTRUE;
 }
 
-// Both sides wait the same way: parked on the landing's wake, bounded by the
-// flush deadline. A waiter counts itself parked BEFORE it checks the latch
-// and the ISR clears the latch before it reads the count, so one of the two
-// always sees the other; a binary give that two waiters share is passed on,
-// and a tick bounds a wake lost anyway. The feeder has no GIL to release; the
-// VM side wraps this in an exit/enter pair.
-static void moy_fold_snap_wait(void) {
+// The FEEDER parks on the landing's wake. A waiter counts itself parked
+// BEFORE it checks the latch and the ISR clears the latch before it reads the
+// count, so one of the two always sees the other; a binary give that two
+// waiters share is passed on, and a tick bounds a wake lost anyway. The VM
+// side POLLS the latch instead: a copy in flight while the VM task was parked
+// here, with the feeder parked on the same copy and both cores idle, landed
+// on the next FreeRTOS tick rather than after its residue, so on the Guition
+// S3 a frame of 17.5 ms or more of work took exactly 20 ms; with the VM core
+// polling it lands on time (#249). Both are bounded by the flush deadline.
+// The feeder has no GIL to release; the VM's fence wraps this in an
+// exit/enter pair.
+static void moy_fold_snap_wait(bool park) {
     if (!moy_fold.copying) {
         return;
     }
     int64_t deadline = esp_timer_get_time() + MOY_FLUSH_TIMEOUT_US;
     while (moy_fold.copying && esp_timer_get_time() < deadline) {
-        if (s_snap_sem == NULL) {
+        if (!park || s_snap_sem == NULL) {
             esp_rom_delay_us(20);
             continue;
         }
@@ -300,7 +305,7 @@ void moy_fold_snap_fence(void) {
     }
     int64_t t0 = esp_timer_get_time();
     MP_THREAD_GIL_EXIT();
-    moy_fold_snap_wait();
+    moy_fold_snap_wait(false);
     MP_THREAD_GIL_ENTER();
     moy_fold.snap_wait_us = (uint32_t)(esp_timer_get_time() - t0);
 }
@@ -467,7 +472,7 @@ void moy_fold_composite(uint8_t *fb, int fb_w, int fb_h) {
             || f->ox + f->vw * sc > fb_w || f->oy + f->vh * sc > fb_h) {
         return;
     }
-    moy_fold_snap_wait();                // reads the snapshot, like a band
+    moy_fold_snap_wait(false);           // reads the snapshot, like a band
     uint16_t *dst = (uint16_t *)fb;
     memset(dst, 0, (size_t)fb_w * (size_t)fb_h * 2u);
     for (int gy = 0; gy < f->vh; gy++) {
@@ -486,7 +491,7 @@ void moy_fold_band(uint8_t *slot, int dst_w, int y, int rows) {
     const int rw = f->vw * sc, rh = f->vh * sc;
     const size_t row_bytes = (size_t)dst_w * 2u;
     uint16_t *dst = (uint16_t *)slot;
-    moy_fold_snap_wait();                // the first band pays the residue
+    moy_fold_snap_wait(true);            // the first band pays the residue
     // At scale > 1 consecutive destination rows share a source row, so the
     // gather runs once and the duplicates are a memcpy inside the slot --
     // internal SRAM, and it halves the PSRAM reads at scale 2.
@@ -559,7 +564,7 @@ void moy_fold_band_rot(uint8_t *slot, const moy_fold_rot_t *geom, int py0,
     if (rows > MOY_FOLD_MAX_BAND_ROWS) {
         rows = MOY_FOLD_MAX_BAND_ROWS;   // the board's _Static_assert prevents this
     }
-    moy_fold_snap_wait();                // the first band pays the residue
+    moy_fold_snap_wait(true);            // the first band pays the residue
     // The band's rows walk a LOGICAL COLUMN, so the source column is the same
     // for every px in the loop below: resolve it once per band into a map
     // rather than dividing per pixel. -1 is a bezel column.
