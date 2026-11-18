@@ -227,7 +227,8 @@ to whoever called it.
     POINTER** — `spr(0,0,0)` in an empty cart used to segfault libmoy's binding: a
     board reset with no message.
 - **A play frame allocates NOTHING** -- the frame path here and in `device/`,
-  pinned by `tests/test_frame_alloc.py`; a board pays for garbage in
+  pinned by `tests/test_frame_alloc.py`, which also holds a desk window's
+  drag frame to the answers the drag moved; a board pays for garbage in
   whole-heap collections that stop the frame. Reuse what a per-frame call
   returns, bind probes once, and read the `perf` skill's list of the idioms
   that allocate on a board before adding one.

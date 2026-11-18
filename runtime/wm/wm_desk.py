@@ -67,8 +67,10 @@ class _BackdropLayer(Layer):
     def __init__(self, wm):
         self.wm = wm
         self.ws = wm.ws
-        self._cat_at = None           # what `_cat_sig` was made at (`_column_sig`)
+        self._cat_at = [None, None, None]  # what `_cat_sig` was made at (`_column_sig`)
         self._cat_sig = None
+        self._sig_keys = [None] * 11  # `_desk_sig`'s values, compared in place
+        self._sig_gen = 0             # ...and the count that moves with them
 
     def draw(self, dt):
         wm = self.wm
@@ -121,8 +123,9 @@ class _BackdropLayer(Layer):
         # is deliberately NOT in this sig: focus moves no desk pixels.
         s = wm._shape_sig()
         # order + geometry; focus too under the depth, whose shadows and
-        # outline fringes (drawn here, draw_unders) follow it
-        wsig = (s[0], s[2], s[1]) if _ui_draw.depth()[12] else (s[0], s[2])
+        # outline fringes (drawn here, draw_unders) follow it (odd: the
+        # shape's count, even: the places', so the two never meet)
+        wsig = 2 * s + 1 if _ui_draw.depth()[12] else 2 * wm._place_gen
         if wsig != wm._desk_win_sig:
             wm._desk_win_sig = wsig
             if wm._drag is None and wm._resize is None:
@@ -133,7 +136,7 @@ class _BackdropLayer(Layer):
             # cast on it: nothing here shows, so nothing is drawn. Leaving
             # full screen is a shape change, which renders the desk again.
             wm._desk_painted = False
-            wm._damage_rects = []
+            wm._damage_rects = ()
             return
         if (stale or wm.backdrop_disabled or wm._backdrop_unsupported
                 or wm.desk_moves(dt)):        # its pixels move on their own
@@ -181,7 +184,7 @@ class _BackdropLayer(Layer):
                 if not (cursor_live and ptr != last) \
                         and wm._desk_streak >= wm.retained_n() and not wm._scrim_up():
                     wm._desk_painted = False   # untouched: windows may skip too
-                    wm._damage_rects = []      # the desk changed nowhere
+                    wm._damage_rects = ()      # the desk changed nowhere
                     wm._desk_clock()
                     return
                 wm._desk_streak += 1
@@ -197,7 +200,9 @@ class _BackdropLayer(Layer):
             if _perf:
                 self.ws.pf_wm_restore = _ticks_ms() - _t0
             if union is not None:
-                wm._damage_rects = [union]     # the desk changed inside the gesture
+                one = wm._damage_one             # the desk changed inside the gesture
+                one[0] = union
+                wm._damage_rects = one
             bar = self.ws.bar_layer
             wm._desk_clock()
             if bar.tile_on() != wm._desk_tile:
@@ -215,7 +220,8 @@ class _BackdropLayer(Layer):
 
     def _desk_sig(self):
         """Everything the desk's wallpaper + icon column depends on, the
-        layout's content rect among it (the bars a mode switch moves).
+        layout's content rect among it (the bars a mode switch moves): a count
+        that moves whenever any of it does.
 
         The apps' status items are in its bar (their `gen`).
 
@@ -226,9 +232,27 @@ class _BackdropLayer(Layer):
         ws = self.ws
         cv = ws.sys_canvas
         lay = ws.layout
-        return (cv.w, cv.h, ws.look.look_gen, ws.look.effective_font_scale(),
-                ws.look.wallpaper_id, self._column_sig(),
-                lay.cx, lay.cy, lay.cw, lay.ch, _ITEMS.gen)
+        look = ws.look
+        k = self._sig_keys
+        if (k[0] != cv.w or k[1] != cv.h or k[2] != look.look_gen
+                or k[3] != look.effective_font_scale() or k[4] != look.wallpaper_id
+                or k[5] != self._column_sig() or k[6] != lay.cx or k[7] != lay.cy
+                or k[8] != lay.cw or k[9] != lay.ch or k[10] != _ITEMS.gen):
+            k[0] = cv.w
+            k[1] = cv.h
+            k[2] = look.look_gen
+            k[3] = look.effective_font_scale()
+            k[4] = look.wallpaper_id
+            k[5] = self._column_sig()
+            k[6] = lay.cx
+            k[7] = lay.cy
+            k[8] = lay.cw
+            k[9] = lay.ch
+            k[10] = _ITEMS.gen
+            # the WM's one count: a new layer never repeats an old one's
+            self.wm._desk_count += 1
+            self._sig_gen = self.wm._desk_count
+        return self._sig_gen
 
     def _column_sig(self):
         """What the icon column takes from the apps and the roster: each
@@ -238,9 +262,12 @@ class _BackdropLayer(Layer):
         column leaves the desk's cache whole: a live desk is a full repaint."""
         ws = self.ws
         carts = ws.carts
-        at = (carts.gen, carts.titled, len(getattr(ws, "app_layers", ())))
-        if at != self._cat_at:
-            self._cat_at = at
+        at = self._cat_at
+        n = len(getattr(ws, "app_layers", ()))
+        if at[0] != carts.gen or at[1] != carts.titled or at[2] != n:
+            at[0] = carts.gen
+            at[1] = carts.titled
+            at[2] = n
             self._cat_sig = tuple((key, label, c.get("path") if c else None)
                                   for key, label, c in self._icon_catalog())
         return self._cat_sig

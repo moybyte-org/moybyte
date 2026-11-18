@@ -423,10 +423,33 @@ static mp_obj_t apps_app_id(mp_obj_t self, mp_obj_t h) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(apps_app_id_obj, apps_app_id);
 
+// The qstr each app title was last made into: the WM reads a window's title
+// every frame it draws its strip, and a title is found in the qstr pools once,
+// not made again as a str each read. Checked against the pools before use,
+// as `kind_obj`'s are.
+#define TITLE_QS 16
+static qstr s_tq[TITLE_QS];
+static uint8_t s_tq_next;
+
 static mp_obj_t apps_title(mp_obj_t self, mp_obj_t h) {
     const moy_app_t *app = app_row(self, h);
-    return mp_obj_new_str_copy(&mp_type_str, (const byte *)app->title,
-                               app->title_len);
+    if (app->title_len > 64u) {
+        return mp_obj_new_str_copy(&mp_type_str, (const byte *)app->title, app->title_len);
+    }
+    const qstr_pool_t *pool = MP_STATE_VM(last_pool);
+    size_t total = pool->total_prev_len + pool->len;
+    for (int i = 0; i < TITLE_QS; i++) {
+        if (s_tq[i] != MP_QSTRnull && s_tq[i] < total) {
+            size_t n;
+            const byte *d = qstr_data(s_tq[i], &n);
+            if (n == app->title_len && memcmp(d, app->title, n) == 0) {
+                return MP_OBJ_NEW_QSTR(s_tq[i]);
+            }
+        }
+    }
+    qstr q = qstr_from_strn(app->title, app->title_len);
+    s_tq[s_tq_next++ % TITLE_QS] = q;
+    return MP_OBJ_NEW_QSTR(q);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(apps_title_obj, apps_title);
 

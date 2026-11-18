@@ -1361,11 +1361,14 @@ def frame_buttons(rect, title_h, title, btns, fs):
             for b in _C.frame_buttons(rect, title_h, title, int(btns), fs)]
 
 
-def frame_icon(rect, title_h, btns=0):
+def frame_icon(rect, title_h, btns=0, out=None):
     """The slot (x, y, w, h) the frame leaves for the window's line icon left
     of its title, past a back chevron `btns` asks for, or None where it draws
-    none (a frame style's frame, `win.icon` off)."""
-    return _C.frame_icon(rect, title_h, int(btns))
+    none (a frame style's frame, `win.icon` off). With `out`, a list of four,
+    the slot is written into it and it is the answer."""
+    if out is None:
+        return _C.frame_icon(rect, title_h, int(btns))
+    return _C.frame_icon(rect, title_h, int(btns), out)
 
 
 # --- depth: the theme's radii, shadow and edges (docs/history/look_2026-10.md step 6) ---

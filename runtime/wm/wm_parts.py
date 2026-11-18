@@ -125,6 +125,14 @@ class _Win:
         # look gen, font scale (`_row_note`)
         self._row_sig = [None, None, None, None, None, None]
         self._row_moved = False       # ...and it differs from the one before
+        # the strip's chrome last painted: x, y, w, h, title_h, focused,
+        # title, buttons, look gen, font scale (`_win_chrome`), compared in
+        # place; `_chrome_sig` is the count that moves with it
+        self._chrome_keys = [None] * 10
+        self._chrome_gen = 0
+        self._frame_rect = [0, 0, 0, 0]   # (x, y, w, h) handed to the frame's draw
+        self._shown = [0, 0, 0, 0]        # `_shown_rect`'s answer, kept
+        self._icon_rect = [0, 0, 0, 0]    # the strip's icon slot, kept
 
     def full(self):
         """Whether the window is full screen (maximised, docs/media/look_2026-10/
@@ -309,6 +317,16 @@ class _PlayerWindowLayer(Layer):
                 wm.ws.bar_layer.redraw_tile("desk")
             elif up:
                 wm._scrim_game(win)
+
+
+def _set_rect(r, x, y, w, h):
+    """List `r` made (x, y, w, h), and answered: a kept rect, written in
+    place, where a frame would otherwise make a tuple."""
+    r[0] = x
+    r[1] = y
+    r[2] = w
+    r[3] = h
+    return r
 
 
 def _overlap(a, b):

@@ -140,6 +140,10 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
     top_is = FullscreenStackWM.top_is
     top_is_player = FullscreenStackWM.top_is_player
 
+    _desk_r = None                    # desk_rect's answer
+    _edge = 0                         # _frame_edge's answer...
+    _edge_gen = -1                    # ...and the look it was read under
+
     def __init__(self, ws):
         FullscreenStackWM.__init__(self, ws)
         if ws.bound_sys_canvas is None:
@@ -200,10 +204,16 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
                                       # rect, None (all of it) or False (nothing)
         self._restored_f = -1         # ...and the frame it was this frame's in
         self._laid = []               # the rects of it the desk was laid in
+        self._touched = []            # _draw_windows' rects of the windows it drew
+        self._laid_rects = [[0, 0, 0, 0] for _ in range(4)]  # ..._laid's, kept
+        self._ext_now = [0, 0, 0, 0]  # the gesture's extent this frame
+        self._restored_rect = [0, 0, 0, 0]  # what `_restored` names, kept
+        self._damage_one = [None]     # _damage_rects of a gesture frame, kept
         self._idle_keys = None        # the KEYS_IDLE content last handed a frame
                                       # of no input (`_keys_idle`)
-        self._fill = None             # (cache, outer, inner): a restore draw_unders
+        self._fill = None             # [cache, outer, inner]: a restore draw_unders
                                       # lays with the first shadow (`_fill_ok`)
+        self._fill_rec = [None, [0, 0, 0, 0], [0, 0, 0, 0]]  # ..._fill's, kept
         self._fill_on = None          # (canvas, cache, ok): `_fill_ok`'s answer
         self._clock_held = [None, -1, 0]  # the desk clock: text, frame, in a row
         self._foot_gen = None         # the look the windows' feet were sized under
@@ -337,6 +347,9 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
                                           # earlier in the frame than _win_sig)
         self._win_sig = None              # window-shape signature; a change voids
                                           # every retained window stamp
+        self._shape_keys = [None]         # _shape_sig's values, compared in place
+        self._shape_gen = 0               # moves with the shape, focus included
+        self._place_gen = 0               # moves with the windows' order and places
         self._scrim_was = False           # a modal's scrim was up last frame
         self._sig_stable = False          # ...was it unchanged THIS frame?
         # Chrome freeze (#155): a window strip/border and the taskbar chips are
@@ -346,6 +359,11 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         self._chip_sig = None
         self._chip_streak = 0
         self._chip_memo = None            # _chip_rects' inputs and answer
+        self._cell_memo = None            # _chips_cell's packing and answer
+        self._chip_keys = []              # _chips_gen's values, compared in place
+        self._chip_gen = 0
+        self._chrome_count = 0            # the windows' `_chrome_gen`s are drawn from it
+        self._desk_count = 0              # ...and the desk layer's `_desk_sig`s
         # Dirty-union gesture restore (#58 "smooth like a real OS"): during a
         # drag/resize only the moving window's recent footprint needs the backdrop
         # re-stamped -- a full-screen 1.2MB restore per frame is the drag path's
@@ -508,9 +526,13 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
     def desk_rect(self):
         """The desk's content rect, (x, y, w, h) on the root canvas: the glass
         less the OS bar. Windows size, cascade, maximise and move inside it and
-        never overlap the bar (the taskbar row is OS-owned, chips included)."""
+        never overlap the bar (the taskbar row is OS-owned, chips included).
+        The same tuple while the layout's rect stands."""
         lay = self.root_ctx.layout
-        return (lay.cx, lay.cy, lay.cw, lay.ch)
+        r = self._desk_r
+        if r is None or r[0] != lay.cx or r[1] != lay.cy or r[2] != lay.cw or r[3] != lay.ch:
+            r = self._desk_r = (lay.cx, lay.cy, lay.cw, lay.ch)
+        return r
 
     def _work_rect(self, fs):
         """The desk rect right of its icon column, 8 pixels clear at the font

@@ -334,10 +334,13 @@ def install(m, lib, tokens):
         n = lib.moy_ui_frame_buttons(box_of(rect), int(title_h), sp, int(btns), int(fs), out)
         return tuple((b.id, b.box.x, b.box.y, b.box.w, b.box.h, b.right) for b in out[:n])
 
-    def frame_icon(rect, title_h, btns):
+    def frame_icon(rect, title_h, btns, into=None):
         out = _Box()
         if not lib.moy_ui_frame_icon(box_of(rect), int(title_h), int(btns), c.byref(out)):
             return None
+        if into is not None:
+            into[0], into[1], into[2], into[3] = out.x, out.y, out.w, out.h
+            return into
         return (out.x, out.y, out.w, out.h)
 
     def bar_part(cv, look, part, rect, on, fill=None):

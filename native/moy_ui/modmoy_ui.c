@@ -1800,17 +1800,25 @@ static mp_obj_t ui_frame_buttons(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_frame_buttons_obj, 5, 5, ui_frame_buttons);
 
-// frame_icon(rect, title_h, btns) -> the line icon's slot (x, y, w, h), or None
-static mp_obj_t ui_frame_icon(mp_obj_t rect, mp_obj_t th, mp_obj_t btns) {
+// frame_icon(rect, title_h, btns[, out]) -> the line icon's slot (x, y, w, h),
+// or None; with `out`, a list of four, the slot is written into it and it is
+// the answer (a moving window's strip asks every frame)
+static mp_obj_t ui_frame_icon(size_t n_args, const mp_obj_t *a) {
     moy_ui_box_t b;
-    if (!moy_ui_frame_icon(box_of(rect), mp_obj_get_int(th), mp_obj_get_int(btns), &b)) {
+    if (!moy_ui_frame_icon(box_of(a[0]), mp_obj_get_int(a[1]), mp_obj_get_int(a[2]), &b)) {
         return mp_const_none;
     }
     mp_obj_t t[4] = {MP_OBJ_NEW_SMALL_INT(b.x), MP_OBJ_NEW_SMALL_INT(b.y),
                      MP_OBJ_NEW_SMALL_INT(b.w), MP_OBJ_NEW_SMALL_INT(b.h)};
+    if (n_args > 3 && a[3] != mp_const_none) {
+        for (int i = 0; i < 4; i++) {
+            mp_obj_subscr(a[3], MP_OBJ_NEW_SMALL_INT(i), t[i]);
+        }
+        return a[3];
+    }
     return mp_obj_new_tuple(4, t);
 }
-static MP_DEFINE_CONST_FUN_OBJ_3(ui_frame_icon_obj, ui_frame_icon);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_frame_icon_obj, 3, 4, ui_frame_icon);
 
 // bar_part(cv, look, part, rect, on[, fill]) -> whether the depth drew the
 // bar part; `fill`, a look colour, fills a desk icon's tile (BARP_TILE)
@@ -2002,7 +2010,7 @@ static mp_obj_t ui_frame_geom(size_t n_args, const mp_obj_t *a) {
     for (int i = 0; i < MOY_UI_GEOM; i++) {
         t[i] = MP_OBJ_NEW_SMALL_INT(g[i]);
     }
-    return mp_obj_new_tuple(MOY_UI_GEOM, t);
+    return ret_tuple(MOY_UI_GEOM, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_frame_geom_obj, 5, 5, ui_frame_geom);
 
