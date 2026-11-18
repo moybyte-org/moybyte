@@ -129,6 +129,7 @@ class WindowChrome:
         sig = win._chrome_gen
         if sig != getattr(win, "_chrome_sig", None):
             self._win_touched = True      # the chrome's pixels differ from last frame's
+            self._outside_f = self.ws.frame_state.frames_drawn
         if not quiet or sig != getattr(win, "_chrome_sig", None):
             win._chrome_sig = sig
             win._chrome_streak = 0
@@ -168,6 +169,7 @@ class WindowChrome:
                self.ws.look.look_gen, self._fs())
         if sig != getattr(win, "_chrome_sig", None):
             self._win_touched = True
+            self._outside_f = self.ws.frame_state.frames_drawn
         if not quiet or sig != getattr(win, "_chrome_sig", None):
             win._chrome_sig = sig
             win._chrome_streak = 0

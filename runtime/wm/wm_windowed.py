@@ -399,7 +399,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         # the debt a buffer owes is then the rows those frames changed.
         self._shown = [[-1, None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
                        for _i in range(_SHOWN + 1)]
-        self._outside_f = -1          # the frame that drew outside the focused window
+        self._outside_f = -1          # the frame that drew outside the focused window's page
         self._rows = [0, 0, 0]        # the debt's rows [y0, y1, whole]
         self._refills = 0             # window buffers refilled from the glass
         self._debt_px = 0             # pixels the debt frames copied

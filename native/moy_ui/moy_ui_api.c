@@ -1179,7 +1179,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->tip_shown = 0;
     c->bar.seen = 0;
     c->page_title[0] = 0;
-    int settled = !c->owe;
+    int settled = 1;
     int owed_last = c->owe;
     int over_last = c->fl.dirty;
     int moved = 0;
