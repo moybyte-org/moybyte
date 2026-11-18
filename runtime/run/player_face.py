@@ -30,6 +30,7 @@ _FACE_WINDOW, _FACE_DESK, _FACE_LOOK, _FACE_TAP, _FACE_FS_SHIFT = 1, 2, 4, 8, 8
 
 _UI_MASKS = [0, 0]                      # reused: the frame's button masks
 _P_LIVE = 1                             # moy_ui_api.h's MOY_UI_P_LIVE: a pointer over the page
+_P_DOWN = 2 | 4                         # moy_input.h's MOY_INPUT_P_HELD | MOY_INPUT_P_CLICK
 _UI_POINTER = [0, 0, 0, 0]              # reused: moy_input.pointer_state's answer
 
 
@@ -67,6 +68,11 @@ class AppFace:
         # reads.
         self.change = _array("i", [0] * 9)
         self.change_f = -1
+        # What the last drawn pass drew from (`still`): the pointer's x, y
+        # and flags, whether the run was deaf, the look's generation; and
+        # whether a pass has drawn since the run's frame of verbs began.
+        self._saw = _array("i", [0] * 5)
+        self._drew = False
         self._cls = None
         self._bg = None
         self._bg_on = False
@@ -77,6 +83,7 @@ class AppFace:
         self._uh = None
         self.on_change = False
         self._pass = False
+        self._drew = False
 
     def bind(self, ns, cart):
         """Give a Python app whose namespace has the `ui` verbs its frame of
@@ -96,6 +103,7 @@ class AppFace:
                           and cart.get("animates") is not True
                           and "audio" not in (cart.get("permissions") or ()))
         self._owe = 2
+        self._drew = False
         self._bg_on = False
         if self.on_change and "cls" in ns:
             # a clear lands under any floor: the frame draws whole;
@@ -216,6 +224,13 @@ class AppFace:
             a[4] |= _P_MIDDLE
         fed = pl.focus_editor
         deaf = pl.deaf or pl.detached
+        if render:
+            saw = self._saw
+            saw[0] = st[0]
+            saw[1] = st[1]
+            saw[2] = st[2]
+            saw[3] = 1 if deaf else 0
+            saw[4] = ws.look.look_gen
         if deaf:
             a[0] = a[1] = a[5] = a[6] = 0   # the keys are another window's
             a[_UI_IN_REP] = a[_UI_IN_KEYREP] = 0
@@ -275,6 +290,7 @@ class AppFace:
         as it drew (`cls`); the frame's change is the engine's, and
         what it changed of the canvas (`change`) its plan's."""
         self._pass = False
+        self._drew = True
         ch = self.change
         self.change_f = _ui_draw.painted()
         if self._broke:
@@ -282,6 +298,50 @@ class AppFace:
             ch[8] = 0
         else:
             ch[8] = 1 if self._uh.change_box(ch) else 0
+
+    def still(self):
+        """Whether this painted frame may leave the app's page as its last
+        pass drew it, without a pass: a Python app drawn on change whose
+        canvas only the run draws (`holds`), with no frame of its own to draw
+        (`animates`), nothing marked dirty, no key, step or modifier it
+        reads, the pointer up and where the last pass saw it, its focus,
+        look and layout as they were, and nothing drawn over its page since
+        (the FPS chip, `overdrew`). The frames a desk paints for another
+        part of it -- a live wallpaper, a game's window -- then cost the app
+        nothing (`unchanged`)."""
+        pl = self.pl
+        ui = pl.ui
+        if (not self.on_change or not self._drew or ui is None or pl.lua is not None
+                or pl.netplay is not None):
+            return False
+        ws = pl.ws
+        if (ws.frame_state.dirty or self._over[2] or not self.holds(ui[2])
+                or self.animates()):
+            return False
+        deaf = pl.deaf or pl.detached
+        i = ws.input
+        if not deaf and (getattr(i, "typed", 0) or getattr(i, "key_repeats", 0)
+                         or getattr(i, "rep_word", 0) or getattr(i, "mods", 0)):
+            return False
+        st = _pointer_state(i, _UI_POINTER)
+        saw = self._saw
+        if (st[2] & _P_DOWN or st[0] != saw[0] or st[1] != saw[1] or st[2] != saw[2]
+                or saw[3] != (1 if deaf else 0) or saw[4] != ws.look.look_gen):
+            return False
+        return not (pl._app_layout is not None and pl._layout_moved(False))
+
+    def unchanged(self):
+        """This painted frame changed nothing of the run's canvas (`still`):
+        an empty change inside a region of the whole canvas, which the
+        window's composite reads as nothing to copy but what the buffer it
+        paints lags."""
+        ch = self.change
+        cv = self.pl.ui[2]
+        ch[0] = ch[1] = ch[2] = ch[3] = ch[4] = ch[5] = 0
+        ch[6] = cv.w
+        ch[7] = cv.h
+        ch[8] = 1
+        self.change_f = _ui_draw.painted()
 
     def ui_host(self, cv):
         """The run's app host whose pass draws on `cv` now, else None: an

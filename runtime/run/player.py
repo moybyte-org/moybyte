@@ -316,12 +316,14 @@ class Player(PlayerDiag):
         self.editors = []
         self.focus_editor = None     # the handle holding the keyboard, if any
         # Its two parts: the app-cart face and the pacing half with the
-        # front hand-off. A frame calls no method through either: the four
+        # front hand-off. A frame calls no method through either: the six
         # a frame runs are bound here, once.
         self.face = face = AppFace(self)
         self.pace = pace = Pace(self)
         self._ui_begin = face.begin
         self._ui_close = face.close
+        self._ui_still = face.still
+        self._ui_unchanged = face.unchanged
         self._resume_from_front = pace.resume_from_front
         self._front_again = pace.front_again
 
@@ -511,10 +513,10 @@ class Player(PlayerDiag):
         w, h = ws.app_window_size() if self.run.app_window_canvas else (cv.w, cv.h)
         return (w, h, ws.look.effective_font_scale() if self.run.app_full_canvas else 1)
 
-    def _layout_moved(self):
+    def _layout_moved(self, tell=True):
         """Whether `_layout_args` moved from what `_layout` was told, told
-        into `_app_wh` when it did -- read field by field, so a steady frame
-        builds no tuple."""
+        into `_app_wh` when it did (and `tell`) -- read field by field, so a
+        steady frame builds no tuple."""
         ws = self.ws
         if self.run.app_window_canvas:
             wh = ws.app_window_size()
@@ -528,7 +530,8 @@ class Player(PlayerDiag):
         a = self._app_wh
         if a is not None and a[0] == w and a[1] == h and a[2] == fs:
             return False
-        self._app_wh = (w, h, fs)
+        if tell:
+            self._app_wh = (w, h, fs)
         return True
 
     def _map_crash_line(self, line):
@@ -1677,6 +1680,11 @@ class Player(PlayerDiag):
             gp = getattr(ws.input, "game_pointer", None) if fed is not None else None
             if gp is not None:
                 fed.mouse_frame(ws.input, gp[0], gp[1], dt)   # its wheel and autoscroll
+            if render and self.ui is not None and self._ui_still():
+                self._ui_unchanged()    # its canvas holds the page: no pass
+                if _perf:
+                    ws.pf_upd = ws.pf_cart = ws.pf_audio = ws.pf_bg = 0
+                return
             # The cart's code prints and measures in petme128, whatever the
             # theme names (docs/theme_and_shell_2026-11.md §3.7).
             _was = _cart_text(self._boundary)

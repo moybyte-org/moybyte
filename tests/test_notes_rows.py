@@ -125,7 +125,7 @@ class Pair:
             self.frame(check=False)
         del self.kinds[:]
 
-    def frame(self, idle=False, check=True):
+    def frame(self, idle=False, check=True, gates=True):
         _NOW[0] += 33
         for ws, drv in ((self.a, self.da), (self.b, self.db)):
             if not idle:
@@ -135,7 +135,7 @@ class Pair:
             drv.frame(_DT)
             ws.painted = ws.frame_state.frames_drawn != k
         a, b = self.a, self.b
-        assert a.painted == b.painted, "the two consoles' gates parted"
+        assert a.painted == b.painted or not gates, "the two consoles' gates parted"
         if not a.painted:
             return
         self.kinds.append(a.frame_change)
@@ -324,6 +324,36 @@ def _passes(ws):
         draw()
     pl.draw = counted
     return n
+
+
+@pytest.mark.parametrize("note", (True, False))
+@pytest.mark.parametrize("bufs", (1, 2, 3))
+def test_desk_frames_painted_for_the_wallpaper_run_no_pass(tmp_path, bufs, note):
+    """The desk paints every frame under a live wallpaper; an idle Notes
+    window, a note open or the list, has nothing to draw in them and runs no
+    pass: its canvas holds its page and the window's composite copies only
+    what the buffer it paints lags (`AppFace.still`). Every frame is held to
+    the bytes of a console whose run draws its page every frame, and a key
+    after them is a pass again."""
+    p = Pair(tmp_path, bufs, desk=True)
+    p.b.run.player._ui_still = lambda: False
+    if not note:
+        for ws in (p.a, p.b):
+            ws.run.player.ns["_close"]()
+    p.keys("down", 2)
+    for _ in range(6):
+        p.frame(idle=True, gates=False)  # the debt a planned frame leaves is the first's alone
+    for ws in (p.a, p.b):
+        ws.wallpaper.is_animating = lambda dt: True
+    n, m = _passes(p.a), _passes(p.b)
+    k = len(p.kinds)
+    for _ in range(4 * bufs + 4):
+        p.frame(idle=True)
+    assert len(p.kinds) - k == 4 * bufs + 4, "the wallpaper painted no frame"
+    assert n[0] == 0, "an idle Notes ran %d passes in %d painted frames" % (n[0], 4 * bufs + 4)
+    assert m[0] == 4 * bufs + 4
+    p.keys("up", 1)
+    assert n[0] >= 1, "a key reached no pass"
 
 
 @pytest.mark.parametrize("closed", (False, True))
