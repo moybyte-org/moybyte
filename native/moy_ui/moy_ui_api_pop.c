@@ -101,40 +101,42 @@ static moy_ui_box_t pop_place(moy_ui_ctx_t *c, const moy_ui_keep_t *kb, int body
     return (moy_ui_box_t){(int16_t)x, (int16_t)y, (int16_t)w, (int16_t)(2 * pad + bh)};
 }
 
-// A popover's first frame (moy_ui_inst_t's `pop_lent`): its card drawn `tall`
-// (as high as the surface lets it), what that covered kept in `px` (rect
-// `sr` on the canvas, in pixels), the clip it drew under, the pointer word
-// it set aside (no row hovers on the tall card) and the first stop it
-// recorded; `c` the context drawing it, `depth` its nests outside it.
-struct moy_ui_pop_lent {
+// A card's first frame (moy_ui_inst_t's `lent`: a popover's or a dialog's):
+// its card drawn `tall` (as high as the surface lets it), what that covered
+// kept in `px` (rect `sr` on the canvas, in pixels), the clip it drew under,
+// the pointer word it set aside (no row hovers on the tall card) and the
+// first stop it recorded; `c` the context drawing it, `kind` the nest it
+// opens (2 a dialog, 3 a popover) at `depth`, its nests outside it.
+struct moy_ui_lent {
     const moy_ui_ctx_t *c;
     moy_ui_box_t tall, sr;
     int32_t clip[4];
     int32_t ptr;
     int16_t s0, depth;
+    uint8_t kind;
     uint16_t px[];
 };
 
-struct moy_ui_pop_lent *mua_pop_lent(const moy_ui_ctx_t *c) {
-    struct moy_ui_pop_lent *l = c->inst != NULL ? c->inst->pop_lent : NULL;
+struct moy_ui_lent *mua_lent(const moy_ui_ctx_t *c) {
+    struct moy_ui_lent *l = c->inst != NULL ? c->inst->lent : NULL;
     return l != NULL && l->c == c ? l : NULL;
 }
 
-void mua_pop_drop(moy_ui_ctx_t *c) {
-    if (mua_pop_lent(c) != NULL) {
-        moy_kfree(c->inst->pop_lent);
-        c->inst->pop_lent = NULL;
+struct moy_ui_lent *mua_lent_of(const moy_ui_ctx_t *c, int kind) {
+    struct moy_ui_lent *l = mua_lent(c);
+    return l != NULL && l->kind == kind && l->depth == c->n_nest ? l : NULL;
+}
+
+void mua_lent_drop(moy_ui_ctx_t *c) {
+    if (mua_lent(c) != NULL) {
+        moy_kfree(c->inst->lent);
+        c->inst->lent = NULL;
     }
 }
 
-// A popover's first frame draws its card `t` as tall as the surface lets it
-// over what lies there, which it keeps (pop_keep) to put back once the body
-// has closed and the card moved to its place (pop_land). Answers whether
-// the canvas lends that: `t` whole on it and inside its clip, so all its
-// body draws lands, and the memory to keep what it covers.
-static int pop_lend(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t t) {
+int mua_lend(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t t, int kind) {
     moy_canvas_row_t *row = (moy_canvas_row_t *)s->dst;
-    if (c->inst->pop_lent != NULL || row == NULL || row->px == NULL) {
+    if (c->inst->lent != NULL || row == NULL || row->px == NULL) {
         return 0;
     }
     const int32_t *st = row->st;
@@ -151,7 +153,7 @@ static int pop_lend(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t t) {
     if (y + h > H) {
         h = H - y;
     }
-    struct moy_ui_pop_lent *l = (struct moy_ui_pop_lent *)moy_kalloc(
+    struct moy_ui_lent *l = (struct moy_ui_lent *)moy_kalloc(
         sizeof(*l) + (size_t)t.w * (size_t)h * sizeof(uint16_t),
         MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK);
     if (l == NULL) {
@@ -161,27 +163,31 @@ static int pop_lend(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t t) {
     l->tall = t;
     memcpy(l->clip, &st[MOY_ST_CX0], sizeof(l->clip));
     l->c = c;
-    c->inst->pop_lent = l;
+    l->kind = (uint8_t)kind;
+    l->depth = (int16_t)c->n_nest;
+    c->inst->lent = l;
     return 1;
 }
 
-// What the tall card covers, kept.
-static void pop_keep(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
+void mua_lend_keep(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
     moy_canvas_row_t *row = (moy_canvas_row_t *)s->dst;
     int W = (int)row->st[MOY_ST_W];
-    struct moy_ui_pop_lent *l = c->inst->pop_lent;
+    struct moy_ui_lent *l = c->inst->lent;
     moy_ui_box_t r = l->sr;
     for (int i = 0; i < r.h; i++) {
         memcpy(l->px + (size_t)i * r.w, row->px + (size_t)(r.y + i) * W + r.x,
                (size_t)r.w * sizeof(uint16_t));
     }
+    l->ptr = c->in[MOY_UI_IN_PTR];
+    c->in[MOY_UI_IN_PTR] &= ~MOY_UI_P_LIVE;
+    l->s0 = (int16_t)c->n_cur;
 }
 
 // The columns [*a0, *a1) of row `o` of a card `w` wide and `h` high that
-// its body draws, as a card of any height draws them: all but the rows its
-// rounding blends over what is under it (the corners, r square) and the
-// `e` rows at its foot under its body.
-static void pop_span(int o, int w, int h, int r, int e, int *a0, int *a1) {
+// what it holds draws, as a card of any height draws them: all but the rows
+// its rounding blends over what is under it (the corners, r square) and the
+// `e` rows at its foot it shows none of.
+static void lent_span(int o, int w, int h, int r, int e, int *a0, int *a1) {
     *a0 = *a1 = 0;
     if (o >= h - e) {
         return;
@@ -196,6 +202,72 @@ static void pop_span(int o, int w, int h, int r, int e, int *a0, int *a1) {
     *a1 = w;
 }
 
+void mua_lend_put(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t card, int split, int e,
+                  int ok) {
+    moy_canvas_row_t *row = (moy_canvas_row_t *)s->dst;
+    int32_t *st = row->st;
+    int W = (int)st[MOY_ST_W], H = (int)st[MOY_ST_H];
+    struct moy_ui_lent *l = c->inst->lent;
+    uint16_t *px = row->px, *sv = l->px;
+    moy_ui_box_t t = l->tall, r = l->sr;
+    for (int o = 0; o < r.h; o++) {
+        uint16_t *cp = px + (size_t)(r.y + o) * W + r.x, *bp = sv + (size_t)o * r.w;
+        for (int i = 0; i < r.w; i++) {
+            uint16_t v = cp[i];
+            cp[i] = bp[i];
+            bp[i] = v;
+        }
+    }
+    if (!ok) {
+        return;
+    }
+    int fs = c->fs, rr = moy_ui_modal_round(fs, c->cls);
+    int32_t saved[4];
+    memcpy(saved, &st[MOY_ST_CX0], sizeof(saved));
+    memcpy(&st[MOY_ST_CX0], l->clip, sizeof(saved));
+    static const uint8_t none[1] = {0};
+    moy_ui_modal(s, card, (moy_ui_span_t){none, 0}, fs, c->cls, mua_row_h(c));
+    int cx0 = st[MOY_ST_CX0] > 0 ? st[MOY_ST_CX0] : 0;
+    int cx1 = st[MOY_ST_CX1] < W ? st[MOY_ST_CX1] : W;
+    int cy0 = st[MOY_ST_CY0] > 0 ? st[MOY_ST_CY0] : 0;
+    int cy1 = st[MOY_ST_CY1] < H ? st[MOY_ST_CY1] : H;
+    int x = card.x - (int)st[MOY_ST_CAM_X], y = card.y - (int)st[MOY_ST_CAM_Y];
+    memcpy(&st[MOY_ST_CX0], saved, sizeof(saved));
+    for (int o = 0; o < card.h; o++) {
+        int a0, a1, so = o < split ? o : o + t.h - card.h;
+        lent_span(o, r.w, card.h, rr, e, &a0, &a1);
+        if (y + o < cy0 || y + o >= cy1 || so >= r.h) {
+            continue;
+        }
+        a0 = x + a0 < cx0 ? cx0 - x : a0;
+        a1 = x + a1 > cx1 ? cx1 - x : a1;
+        if (a1 > a0) {
+            memcpy(px + (size_t)(y + o) * W + x + a0, sv + (size_t)so * r.w + a0,
+                   (size_t)(a1 - a0) * sizeof(uint16_t));
+        }
+    }
+}
+
+void mua_lend_stops(moy_ui_ctx_t *c, int dy, int dy_btn) {
+    struct moy_ui_lent *l = c->inst->lent;
+    for (int i = l->s0; i < c->n_cur; i++) {
+        moy_ui_stop_t *p = &c->cur[i];
+        int d = (p->flags & STOP_DLG_BTN) ? dy_btn : dy;
+        p->b.y = (int16_t)(p->b.y + d);
+        if (p->row >= 0 && p->top != INT16_MIN) {
+            p->top = (int16_t)(p->top + d);
+        }
+        if (p->id == c->focus) {
+            c->focus_box = p->b;
+        }
+    }
+}
+
+void mua_lend_end(moy_ui_ctx_t *c) {
+    c->in[MOY_UI_IN_PTR] = c->inst->lent->ptr;
+    mua_lent_drop(c);
+}
+
 // The left inset of a popover's body inside its card's band.
 static int pop_lp(const moy_ui_ctx_t *c) {
     return c->cls ? mua_kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_PAD) * c->fs
@@ -203,20 +275,14 @@ static int pop_lp(const moy_ui_ctx_t *c) {
 }
 
 // The body has closed, `took` high, its keep `kb` (its peek set): the tall
-// card moves to its place. What its body drew on it changes places with
-// what it covered, which goes back whole; the card is drawn at its place
-// over it, the body put on it as far as it shows there, the fades of a cut
-// body drawn, and the stops it recorded move with it. Where `ok` is 0 (its
-// button row laid out for other widths) only what it covered goes back,
-// and the card shows on the next frame.
+// card moves to its place (mua_lend_put, its rows where they stand in it),
+// the fades of a cut body drawn, and the stops it recorded move with it.
+// Where `ok` is 0 (its button row laid out for other widths) only what it
+// covered goes back, and the card shows on the next frame.
 static void pop_land(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const moy_ui_keep_t *kb,
                      int took, int ok) {
-    moy_canvas_row_t *row = (moy_canvas_row_t *)s->dst;
-    int32_t *st = row->st;
-    int W = (int)st[MOY_ST_W], H = (int)st[MOY_ST_H];
-    struct moy_ui_pop_lent *l = c->inst->pop_lent;
-    uint16_t *px = row->px, *sv = l->px;
-    moy_ui_box_t t = l->tall, r = l->sr;
+    struct moy_ui_lent *l = c->inst->lent;
+    moy_ui_box_t t = l->tall;
     int fs = c->fs, rh = mua_row_h(c), pad = moy_ui_modal_band(fs, c->cls);
     int body = took > 0 ? took : rh, bh;
     moy_ui_box_t card = pop_place(c, kb, body, t.w, &bh);
@@ -224,69 +290,25 @@ static void pop_land(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const moy_ui_keep_
     c->pop.inside = 0;
     ok = ok && card.h <= t.h;
     // the rows the body shows in: under them the card's own
-    int rr = moy_ui_modal_round(fs, c->cls), e = card.h - pad - bh;
-    for (int o = 0; o < r.h; o++) {
-        uint16_t *cp = px + (size_t)(r.y + o) * W + r.x, *bp = sv + (size_t)o * r.w;
-        int a0 = 0, a1 = 0;
-        if (ok) {
-            pop_span(o, r.w, card.h, rr, e, &a0, &a1);
-        }
-        for (int i = a0; i < a1; i++) {
-            uint16_t v = cp[i];
-            cp[i] = bp[i];
-            bp[i] = v;
-        }
-        memcpy(cp, bp, (size_t)a0 * sizeof(uint16_t));
-        memcpy(cp + a1, bp + a1, (size_t)(r.w - a1) * sizeof(uint16_t));
-    }
+    mua_lend_put(c, s, card, card.h, card.h - pad - bh, ok);
     c->pop.card = card;
     if (ok) {
-        int32_t saved[4];
-        memcpy(saved, &st[MOY_ST_CX0], sizeof(saved));
-        memcpy(&st[MOY_ST_CX0], l->clip, sizeof(saved));
-        static const uint8_t none[1] = {0};
-        moy_ui_modal(s, card, (moy_ui_span_t){none, 0}, fs, c->cls, rh);
-        int cx0 = st[MOY_ST_CX0] > 0 ? st[MOY_ST_CX0] : 0;
-        int cx1 = st[MOY_ST_CX1] < W ? st[MOY_ST_CX1] : W;
-        int cy0 = st[MOY_ST_CY0] > 0 ? st[MOY_ST_CY0] : 0;
-        int cy1 = st[MOY_ST_CY1] < H ? st[MOY_ST_CY1] : H;
-        int x = card.x - (int)st[MOY_ST_CAM_X], y = card.y - (int)st[MOY_ST_CAM_Y];
-        memcpy(&st[MOY_ST_CX0], saved, sizeof(saved));
-        for (int o = 0; o < card.h; o++) {
-            int a0, a1;
-            pop_span(o, r.w, card.h, rr, e, &a0, &a1);
-            if (y + o < cy0 || y + o >= cy1) {
-                continue;
-            }
-            a0 = x + a0 < cx0 ? cx0 - x : a0;
-            a1 = x + a1 > cx1 ? cx1 - x : a1;
-            if (a1 > a0) {
-                memcpy(px + (size_t)(y + o) * W + x + a0, sv + (size_t)o * r.w + a0,
-                       (size_t)(a1 - a0) * sizeof(uint16_t));
-            }
-        }
         if (bh < took) {
             // a cut body: a fade toward the card at its foot
+            moy_canvas_row_t *row = (moy_canvas_row_t *)s->dst;
+            int32_t saved[4];
+            memcpy(saved, &row->st[MOY_ST_CX0], sizeof(saved));
             int lp = pop_lp(c);
             moy_ui_box_t in = {(int16_t)(card.x + pad - lp), (int16_t)(card.y + pad),
                                (int16_t)(card.w - 2 * (pad - lp)), (int16_t)bh};
-            memcpy(&st[MOY_ST_CX0], l->clip, sizeof(saved));
+            memcpy(&row->st[MOY_ST_CX0], l->clip, sizeof(saved));
             c->fl.susp++;
             mua_edge_fades(c, s, in, took, 0, MOY_UI_FADE_CARD, 1, FADE_H * fs);
             c->fl.susp--;
-            memcpy(&st[MOY_ST_CX0], saved, sizeof(saved));
+            memcpy(&row->st[MOY_ST_CX0], saved, sizeof(saved));
         }
         int dy = card.y - t.y;
-        for (int i = l->s0; i < c->n_cur; i++) {
-            moy_ui_stop_t *p = &c->cur[i];
-            p->b.y = (int16_t)(p->b.y + dy);
-            if (p->row >= 0 && p->top != INT16_MIN) {
-                p->top = (int16_t)(p->top + dy);
-            }
-            if (p->id == c->focus) {
-                c->focus_box = p->b;
-            }
-        }
+        mua_lend_stops(c, dy, dy);
         if (l->s0 < c->n_cur && c->cur[l->s0].id == c->pop.id
             && (c->cur[l->s0].flags & STOP_PAGE)) {
             c->cur[l->s0].b.h = (int16_t)bh;        // the body as it shows
@@ -295,8 +317,7 @@ static void pop_land(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const moy_ui_keep_
         c->owe = 1;
         c->inst->owed++;
     }
-    c->in[MOY_UI_IN_PTR] = l->ptr;
-    mua_pop_drop(c);
+    mua_lend_end(c);
 }
 
 int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, int w,
@@ -313,8 +334,7 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
             // deepest row middle plus half the fade above it, so the top
             // of a row's words shows over the fade
             int peek = c->pop.cut > 0 && took > c->pop.cut && !c->pop.inside ? c->pop.peek : 0;
-            struct moy_ui_pop_lent *l = mua_pop_lent(c);
-            if (l != NULL && l->depth == c->n_nest) {
+            if (mua_lent_of(c, 3) != NULL) {
                 if (pk != NULL) {
                     pk->peek = (int16_t)peek;   // its first frame lands cut there
                 }
@@ -395,12 +415,11 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
     // that, its body lays out to size it and nothing draws, the next frame
     // showing it at that size
     c->pop.hide = 0;
-    struct moy_ui_pop_lent *l = NULL;
+    int lent = 0;
     if (kb == NULL) {
         moy_ui_box_t t = {card.x, (int16_t)(sf.y + gap), (int16_t)w, (int16_t)(sf.h - 2 * gap)};
-        if (t.h >= 2 * pad + rh && pop_lend(c, s, t)) {
-            l = c->inst->pop_lent;
-            l->depth = (int16_t)c->n_nest;
+        if (t.h >= 2 * pad + rh && mua_lend(c, s, t, 3)) {
+            lent = 1;
             card = t;
             bh = t.h - 2 * pad;
             // the cut its body takes where the room it hangs in cuts it:
@@ -429,12 +448,8 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
     } else if (o->wash == 2) {
         wash_view(c, s, a);
     }
-    if (l != NULL) {
-        // what it covers kept; no row of it hovers or presses where the
-        // tall card puts it
-        pop_keep(c, s);
-        l->ptr = c->in[MOY_UI_IN_PTR];
-        c->in[MOY_UI_IN_PTR] &= ~MOY_UI_P_LIVE;
+    if (lent) {
+        mua_lend_keep(c, s);
     }
     if (!c->pop.hide) {
         moy_ui_modal(s, card, (moy_ui_span_t){none, 0}, fs, c->cls, rh);
@@ -442,9 +457,6 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
     int lp = pop_lp(c);
     moy_ui_box_t inner = {(int16_t)(card.x + pad - lp), (int16_t)(card.y + pad),
                           (int16_t)(w - 2 * (pad - lp)), (int16_t)bh};
-    if (l != NULL) {
-        l->s0 = (int16_t)c->n_cur;
-    }
     c->pop.id = pid;
     mua_nest_open(c, 3, pid, inner, body, 0, NULL);
     c->pop.card = card;

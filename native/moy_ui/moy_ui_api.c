@@ -80,7 +80,7 @@ void moy_ui_inst_free(moy_ui_inst_t *I) {
     KEPT_FREE(I->text);
     KEPT_FREE(I->blocks);
     KEPT_FREE(I->edits);
-    KEPT_FREE(I->pop_lent);
+    KEPT_FREE(I->lent);
     moy_ui_inst_init(I);
 }
 
@@ -1151,7 +1151,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->pop.gone = 0;
     c->pop.id = 0;
     c->pop.hide = 0;
-    mua_pop_drop(c);                    // a first frame's popover its pass never closed
+    mua_lent_drop(c);                   // a first frame's card its pass never closed
     c->pa_box.w = 0;
     c->pa_st = 0;
     c->sp_n = 0;
@@ -2456,9 +2456,9 @@ int mua_stop(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t b, int flags, moy_ui_spa
         if (c->focus_name[0] == 0) {
             name_copy(c->focus_name, name);
         }
-        // a popover's first frame shows no focus in it: the surface the
-        // keys were on still shows its own this frame
-        if (mua_pop_lent(c) == NULL) {
+        // a popover's or a dialog's first frame shows no focus in it: the
+        // surface the keys were on still shows its own this frame
+        if (mua_lent(c) == NULL) {
             st |= MOY_UI_ST_FOCUS;
         }
     }

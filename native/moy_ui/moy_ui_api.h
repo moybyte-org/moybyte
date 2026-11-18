@@ -386,9 +386,10 @@ struct moy_ui_inst {               // moy_ui_inst_t (moy_ui_text.h)
     struct mua_edit *edits;
     uint32_t edit_seq;
     uint32_t owed;                  // moy_ui_api_owed's count
-    // A popover's first frame drawn tall over what it covers, kept until
-    // its body closes (moy_ui_api_pop.c), for the one context drawing it.
-    struct moy_ui_pop_lent *pop_lent;
+    // A popover's or a dialog's first frame drawn tall over what it
+    // covers, kept until its body closes (moy_ui_api_pop.c), for the one
+    // context drawing it.
+    struct moy_ui_lent *lent;
 };
 
 // The main instance; an instance's size, for a face that owns it as bytes; a
@@ -520,7 +521,7 @@ typedef struct {
     int16_t cut, peek;
     uint8_t inside;
     // its first frame where the canvas cannot lend it the room to draw at
-    // once (the instance's `pop_lent`): laid out to size it, drawn the next
+    // once (the instance's `lent`): laid out to size it, drawn the next
     uint8_t hide;
 } moy_ui_pop_t;
 
@@ -996,7 +997,10 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
 // `buttons` (NUL-separated, the last of `kind`, the others normal) at its
 // foot, its body the rows stacked until a title of length 0 ends it. Answers
 // the button activated this frame (from 0), -1 none, or MOY_UI_API_DEEP; the
-// end answers -1.
+// end answers -1. Its first frame shows it at the size it rests at: drawn as
+// tall as the surface lets it, its body laid out in that room, and moved to
+// its place when the end closes it (as a popover's first frame, the
+// instance's `lent`).
 // Its wash is the surface, less the page's hint band at its foot; with the
 // override `wash` false it draws none, where the page under it was washed
 // already (`moy_ui_api_wash`, the page an app holds under its dialog).
