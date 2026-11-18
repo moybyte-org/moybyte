@@ -27,7 +27,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
-from ws_helpers import build_desktop_ws, select_on_home, use_theme, settle_badges
+from ws_helpers import build_desktop_ws, install_shape, select_on_home, use_theme, settle_badges
 
 
 def _ws(tmp_path, **kw):
@@ -84,6 +84,8 @@ def test_a_game_window_does_not_black_out_the_desk(tmp_path):
     the canvas which meaning it serves.
     """
     ws = _ws(tmp_path)
+    install_shape(ws, "night_glass")
+    ws.look.select_wallpaper("night_glass", persist=False)
     drv = _drv(ws)
     _quiesce(ws)
     ws.home.open_desk()
@@ -100,7 +102,7 @@ def test_a_game_window_does_not_black_out_the_desk(tmp_path):
 
     # Sample the desk WELL clear of the window, along a row and a column the
     # bands would cross whole: the wallpaper and the icon column there are as
-    # the desk drew them before the game opened (Moy's night is a black sky,
+    # the desk drew them before the game opened (Night Glass is a black sky,
     # so a lone pixel's colour would not tell a band from the night).
     outside = [(x, win.y + win.h // 2) for x in range(0, sc.w, 3)] + \
               [(x, sc.h - 3) for x in range(0, sc.w, 3)] + \
@@ -2500,8 +2502,8 @@ def test_a_dead_window_releases_its_buffer_and_the_backdrop_survives_a_relayout(
 # installs each window's layout context: a row the console shared, or one read
 # from the last window installed, lays an app out at the other window's size.
 TWO_WINDOWS = (
-    "fd8a04d3c4b63764f651cb99e1bd9bec24b5b85d98e2f4019fb1f56bc3536022",
-    "3dfb32cc11c88cd31bd08da6a8ed2f37b5346038a73421577495771f1e0061c4",
+    "a8a1d5808a69e769474f0ba2a37e8d8ab2ae9ef665cef91c57c67bdeab654312",
+    "0daec5937bb89a2dcc930bb1db6da9a75391c4cc4111aac29907ad836e79a48e",
 )
 
 
@@ -3947,12 +3949,13 @@ def _overlaps(a, b):
             and a[1] < b[1] + b[3] and b[1] < a[1] + a[3])
 
 
-def test_moys_night_sleeps_clear_of_the_icon_column(tmp_path):
+def test_a_per_glass_wallpaper_sleeps_clear_of_the_icon_column(tmp_path):
     """The desk hands its wallpaper the bars and the icon column as quiet
-    rectangles; Moy's night, drawing per glass, puts Moy where neither is,
-    and its subject is where Moy sleeps."""
+    rectangles; a wallpaper drawing per glass (the Night Glass shape cart)
+    puts Moy where neither is, and its subject is where Moy sleeps."""
     ws = _moy_desk(tmp_path)
-    ws.look.select_wallpaper("moybyte.moy_night", persist=False)
+    install_shape(ws, "night_glass")
+    ws.look.select_wallpaper("night_glass", persist=False)
     ws.wm._backdrop_layer._draw_desktop(1 / 30)
     quiet = ws.wm._backdrop_layer.quiet()
     assert quiet[:len(ws.wallpaper.bars())] == ws.wallpaper.bars()

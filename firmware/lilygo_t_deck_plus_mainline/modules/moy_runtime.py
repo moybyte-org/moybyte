@@ -52,8 +52,7 @@ ASYNC_FLUSH = True
 # FIFO into garbage bands while the panel DMA read PSRAM (2026-07-03); since
 # the SRAM-bounce flush (#66) moy_lcd's DMA reads only the internal bounce
 # slots, so the copy is safe here. It arms only for a screen-wide layer
-# restored at (0, 0) -- sakura, letter_blitz and hop_quest on the shipped
-# roster. TO REVERT: False, one reflash; independent of ASYNC_FLUSH, so a
+# restored at (0, 0) -- letter_blitz and sakura_lua on the shipped roster. TO REVERT: False, one reflash; independent of ASYNC_FLUSH, so a
 # torn or stale frame can be pinned on one by flipping it alone.
 LAYER_COPY_ASYNC = True
 

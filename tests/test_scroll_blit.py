@@ -22,7 +22,16 @@ import random
 from pathlib import Path
 from ws_helpers import build_ws_with_shelf as _ws_with_carts
 import pytest
-from ws_helpers import boot_on_fixture
+from ws_helpers import boot_on_fixture, install_shape
+
+
+def _on_a_static_wallpaper(ws):
+    """`ws` over Night Glass, a static wallpaper cart: the night fixture names
+    none and has no backdrop, so the band's restore is the wallpaper's only
+    where one is picked."""
+    install_shape(ws, "night_glass")
+    ws.look.select_wallpaper("night_glass", persist=False)
+    return ws
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
@@ -319,7 +328,7 @@ def test_carousel_moving_frame_restores_the_band_in_one_copy(tmp_path, monkeypat
     more in calls than the bytes it saved (`restore_whole`)."""
     from runtime import host_app
 
-    ws = _ws_with_carts(tmp_path, 14)
+    ws = _on_a_static_wallpaper(_ws_with_carts(tmp_path, 14))
     drv = host_app.ConsoleDriver(ws)
     for _ in range(80):
         drv.frame(1 / 30)
@@ -388,7 +397,7 @@ def test_set_layout_keeps_the_bands_record(tmp_path):
     grid rect."""
     from runtime import host_app
 
-    ws = _ws_with_carts(tmp_path, 14)
+    ws = _on_a_static_wallpaper(_ws_with_carts(tmp_path, 14))
     drv = host_app.ConsoleDriver(ws)
     ws.home.set_home_arrangement("grid")
     for _ in range(60):

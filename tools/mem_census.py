@@ -50,8 +50,8 @@ M = "__import__('mem_census')"
 # `ws.home.go_home()`. Titles a store lacks are skipped and the reading says so.
 SESSION = (
     ("cart", "Star Catcher", 6),
-    ("cart", "Sky Run", 6),
-    ("cart", "Hop Quest", 6),
+    ("cart", "Letter Blitz", 6),
+    ("cart", "Harpoon Pop", 6),
     ("lua", None, 6),
     ("app", "artwork", 4),
     ("app", "files", 4),

@@ -183,8 +183,8 @@ Without one, a Lua cart opens the "needs the Lua runtime" panel.)*
 ## Frame pacing
 
 A **game** cart's `_update` runs at its declared rate: **30 ticks a second**, or
-60 when `manifest.json` says `"fps": 60` (Hop Quest and Sky Run do — declare it
-only if your cart genuinely holds 60, and measure). The console never lowers
+60 when `manifest.json` says `"fps": 60` (declare it only if your cart
+genuinely holds 60, and measure). The console never lowers
 that rate: a cart that counts frames (`x += 1`) plays at the same speed on every
 board. When a board cannot also draw that often it draws every second (or
 third) tick instead, so motion coarsens evenly rather than the game slowing;
@@ -200,8 +200,8 @@ the game rather than teleporting it), and it draws as often as the board can
 (a P4 desk ~60, the 10.1" one ~45, a browser whatever its display does).
 Declare it only if nothing in the cart counts frames: a `x += 1` runs at a
 different speed on every board the moment it is free. Most seed games
-declare it; the two that hold a real 60 (Hop Quest, Sky Run) stay at 60, and
-an imported PICO-8 cart always carries its own 30 or 60.
+declare it; a cart that holds a real 60 declares 60, and an imported PICO-8
+cart always carries its own 30 or 60.
 
 ## The canvas
 
@@ -507,8 +507,8 @@ it's painting **more pixels than the frame needs**. Five habits keep any cart sm
    with `draw_layer(lay, 0, 0)`. One flat copy replaces `cls` + a full `map()`
    re-render, and it erases last frame's sprites for free. For scrolling worlds make
    the layer wider than the screen and pan with `draw_layer(lay, cam_x, 0)`.
-   (Hop Quest and Sky Run both do exactly this — read their `_build_layer` /
-   `_build_world`.)
+   (Letter Blitz draws its floor and arena into one layer this way — read where it
+   builds `_bg`.)
 4. **Lots of sprites? Just call `spr()` in a loop.** The engine coalesces consecutive
    `spr()` calls into one native batch automatically — there is no manual form and you
    do not need one. Likewise one `map()` call always beats drawing tiles one by one.
@@ -954,4 +954,4 @@ feature, add it to the ONE canvas class (`device_canvas.DeviceCanvas`) and keep 
 identical.
 
 **Fuller example:** `system_carts/moybyte.star_catcher.moy/main.py` (a complete game — sprites,
-particles, `cfg` tuning, `pmem`, hearts/score UI).
+particles, `cfg` tuning with a sprite-tile picker, autoplay, hearts/score UI).

@@ -73,8 +73,6 @@ ICON_SET = os.path.join(ROOT, "native", "moy_ui", "icons", "smooth", "default")
 #    cover is the 240 x 240 battlefield.
 #  - Letter Blitz's HUD is a band across rows 20..48 (the wanted letter, the
 #    streak); its cover is the maze below it.
-#  - Pixel Pet's FOOD and JOY meters are `_bar`; without them the room is
-#    empty purple, so its cover is the pet on its ground, pixel for pixel.
 #  - Tap The Red's miss pips sit in the top-right corner; its cover starts
 #    below them.
 PICKS = {
@@ -83,7 +81,6 @@ PICKS = {
     "moybyte.brick_siege": {"crop": (0, 0, 240)},
     "moybyte.brick_siege_lua": {"crop": (0, 0, 240)},
     "moybyte.letter_blitz": {"crop": (64, 48, 192)},
-    "moybyte.pixel_pet": {"mute": ("_bar",), "crop": (96, 104, 128)},
     "moybyte.tap_only_red": {"crop": (50, 20, 220)},
 }
 # Cart globals every capture silences: the HUD's text.

@@ -604,10 +604,11 @@ def test_seed_carts_model_the_fast_draw_habits():
     assert 'cls(' not in battle.split("def _draw()")[1].split("def ")[0], (
         "the play frame must not clear -- the engine restores the declared backdrop")
     assert 'rect(0, 0, FIELD, FIELD' not in battle      # no double-paint backdrop
-    hop = (Path("system_carts") / "moybyte.hop_quest.moy" / "main.py").read_text(encoding="utf-8")
-    assert "def _build_layer():" in hop
-    assert "lay.map(0, 0, MW, MH" in hop                # terrain rendered once
-    assert "draw_layer(lay, 0, 0)" in hop               # stamped per frame
+    blitz = (Path("system_carts") / "moybyte.letter_blitz.moy" / "main.py").read_text(
+        encoding="utf-8")
+    assert "def _redraw_bg():" in blitz
+    assert "_bg.map(0, 0, GRID_COLS, GRID_ROWS" in blitz    # the arena rendered once
+    assert "draw_layer(_bg, 0, 0)" in blitz             # stamped per frame
     api_doc = (Path("docs") / "moy_cart_api.md").read_text(encoding="utf-8")
     assert "## Make it fast" in api_doc                 # the habits are documented
 

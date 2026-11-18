@@ -123,5 +123,5 @@ def test_the_clip_rect_cuts_both_the_same_way():
 
 
 def test_a_second_cart_with_different_art_agrees_too():
-    ref, new = _pair(8, cart="moybyte.hop_quest")
+    ref, new = _pair(8, cart="moybyte.harpoon_pop")
     assert ref == new

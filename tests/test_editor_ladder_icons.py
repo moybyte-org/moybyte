@@ -77,7 +77,7 @@ def _ladder(tmp_path, variant):
     ws = build_ws(tmp_path)
     ws.look.set_theme("moy", persist=False, variant=variant)
     drawn = ns["ladder_probe"](ws)
-    cart = next(c for c in ws.carts.all if c.get("title") == "Sky Run")
+    cart = next(c for c in ws.carts.all if c.get("title") == "Star Catcher")
     ws.open_in_editor(cart)
     ws.text.set_menu_view("cards")
     ws.bar_layer.invalidate()
@@ -123,7 +123,7 @@ def test_the_browsers_ladder_draws_every_icon(variant):
     setup = PROBE + (
         "_ws.look.set_theme('moy', persist=False, variant=%r)\n"
         "_drawn = ladder_probe(_ws)\n"
-        "_ws.open_in_editor([c for c in _ws.carts.all if c.get('title') == 'Sky Run'][0])\n"
+        "_ws.open_in_editor([c for c in _ws.carts.all if c.get('title') == 'Star Catcher'][0])\n"
         "_ws.text.set_menu_view('cards')\n"
         "_ws.bar_layer.invalidate()\n" % variant)
     report = ("import json\n"

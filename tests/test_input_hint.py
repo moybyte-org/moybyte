@@ -101,7 +101,7 @@ def test_gen_device_carts_carries_the_input_hint_from_manifest():
     import sys
     sys.path.insert(0, os.path.join(os.path.dirname(SYSTEM_CARTS), "tools"))
     import gen_device_carts
-    carts = {c["title"]: c for c in gen_device_carts.build_carts(SYSTEM_CARTS)}
+    carts = {c["title"]: c for c in gen_device_carts.build_carts(SYSTEM_CARTS, fixtures=True)}
     assert carts["Tap Only Red"]["input"] == ["touch"]
     assert carts["Brick Siege"]["input"] == ["buttons"]
     assert carts["Letter Blitz"]["input"] == ["keyboard", "touch"]

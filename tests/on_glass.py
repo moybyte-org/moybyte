@@ -1667,10 +1667,9 @@ def a_lua_app_s_every_runs_beside_a_python_app_s(board, title="Brick Siege Lua",
     Lua run's `moybyte.every` (native/moycore/moycore_moybyte.h, served as
     each of the run's frames starts, wherever the frame runs) and a Python
     process's `every` are both rows of the kernel's table, and both go off
-    while the run plays."""
-    titles = board.pyval("[c['title'] for c in ws.carts.all]", strict=True)
-    if title not in titles:
-        pytest.skip("%s is not in this board's store" % title)
+    while the run plays. Brick Siege Lua is a test fixture, pushed for the
+    check (`push_fixture`)."""
+    push_fixture(board, title)
     with radio_room(title):
         _lua_every_beside_python(board, title, seconds)
 
@@ -2416,17 +2415,20 @@ def cart_runs_and_exits(board, spec, title=None, door="quit", clear=0):
 # census gives that verdict: Bullet Storm asks for a colour by name and
 # composites a layer every frame (col, draw_layer), Sakura Lua composites the
 # static layer whose restore rides the DMA engine, Brick Siege Lua arms the
-# radio link (multiplayer), Bench Lua draws every verb family.
+# radio link (multiplayer), Bench Lua draws every verb family. Brick Siege Lua
+# and Bench Lua are test fixtures, which `_in_the_room` pushes for the check.
 VM_FREE_SEEDS = (("bullet", "Bullet Storm"), ("sakura lua", "Sakura Lua"),
                  ("brick siege lua", "Brick Siege Lua"), ("bench lua", "Bench Lua"))
 
 
 def _in_the_room(check):
-    """`check(board, spec, title, ...)` run inside `radio_room(title)`."""
+    """`check(board, spec, title, ...)` run inside `radio_room(title)`, the
+    cart pushed first where it is a test fixture (`push_fixture`)."""
     import functools
 
     @functools.wraps(check)
     def run(board, spec, title, *args, **kw):
+        push_fixture(board, title)
         with radio_room(title):
             return check(board, spec, title, *args, **kw)
     return run
@@ -3784,6 +3786,23 @@ def _push_folder(board, board_dir, local, dest):
                   dest, link)
     if fresh:
         mark_pushed(board, dest)
+
+
+def push_fixture(board, title):
+    """The seed cart `title` on the board's store for a check, where it is a
+    test fixture (tools/gen_device_carts.is_fixture), which no image carries:
+    pushed from system_carts/ under its seed folder (`_push_folder`, which
+    marks it, so the session's `give_store_back` removes it) and rescanned. A
+    cart that is no fixture is the image's own, and nothing is pushed."""
+    from tools import gen_device_carts as gen
+    mans = dict(gen.read_manifests(str(ROOT / "system_carts")))
+    folder = gen.title_to_folder(str(ROOT / "system_carts")).get(title)
+    if folder is None or not gen.is_fixture(mans[folder]):
+        return
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
+    _push_folder(board, board.board_dir, str(ROOT / "system_carts" / (folder + ".moy")),
+                 root.rstrip("/") + "/" + folder + ".moy")
+    board.pyval(RESCAN, timeout=60)
 
 
 def wasm_carts_push(board, board_dir):
@@ -5569,7 +5588,9 @@ def _front_proof(shift):
 def a_lua_run_folds_to_the_glass_in_front(board, title="Brick Siege Lua", seconds=4.0):
     """`title` runs in the kernel's front, its frames folded through the
     flush (the fold's count climbs), and the proof above reads 0 -- and not 0
-    for the composite one pixel off. Returns the folds counted."""
+    for the composite one pixel off. Returns the folds counted. A test
+    fixture is pushed for the check (`push_fixture`)."""
+    push_fixture(board, title)
     line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=60)
     assert line is not None and "no cart match" not in line, line
     try:

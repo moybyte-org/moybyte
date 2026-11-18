@@ -364,11 +364,10 @@ echo "== packing carts"
 # ships everywhere unless its own manifest.json says otherwise, so this build
 # asks tools/gen_device_carts.py which folders declare a "web" target instead
 # of carrying a hand-written list that nothing compared against system_carts/.
-# (The WALLPAPER carts -- moy_night + ocean_desktop/open_machine/space_desktop --
-# ride along even though they never appear on the run-grid: they are the
-# Appearance app's CARTS catalog, and shipping only moy_night left that tab
-# with one choice, owner report 2026-07-31. Excluded here are the dev/test
-# carts, each by a `"targets"` line in its OWN manifest.)
+# (The WALLPAPER carts ride along even though they never appear on the
+# run-grid: they are the Appearance app's CARTS catalog, owner report
+# 2026-07-31. Excluded here are the test fixtures, each by `"fixture": true` in
+# its OWN manifest, and any cart whose `"targets"` line leaves out "web".)
 ROSTER="${MOYBYTE_WEB_CARTS:-$("${PY}" "${REPO_ROOT}/tools/gen_device_carts.py" --roster web)}"
 "${PY}" - "${REPO_ROOT}/system_carts" "${STAGE_DIR}/carts.json" ${ROSTER} <<'PYEOF'
 import base64, json, os, sys

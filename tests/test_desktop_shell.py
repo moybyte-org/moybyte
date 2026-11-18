@@ -90,6 +90,7 @@ def test_wallpaper_backdrop_is_drawn_behind_icons(tmp_path):
     """With a wallpaper cart selected the backdrop animates; the home frame is not a
     single flat color (it has the wallpaper, the icon tiles, and the strip)."""
     ws = _ws(tmp_path)
+    ws.look.select_wallpaper("moybyte.space_desktop", persist=False)
     assert ws.look.wallpaper_id is not None
     from runtime import host_app
     drv = host_app.ConsoleDriver(ws)
@@ -191,6 +192,8 @@ def test_settings_appearance_row_opens_the_one_picker(tmp_path):
     from runtime import host_app, moy_carts
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)
+    # the first wallpaper cart shown, so the next card is another cart's
+    ws.look.select_wallpaper(ws.look.wallpaper_options()[0], persist=False)
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
     rows = [r[0] for r in ws.settings_layer._SETTINGS_ROWS]

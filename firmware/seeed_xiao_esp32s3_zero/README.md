@@ -52,8 +52,8 @@ cannot have started to matter:
 `provision.sh` survives and **changed jobs**: it provisions the credentials and,
 with `--password`, the password browsers pair with, installs the browser
 console add-on and the official carts, and keeps the module push as an opt-in
-dev loop. The image carries its seed carts (the core carts, every app and
-five games) and seeds them as a console seeds its own; every other system
+dev loop. The image carries its seed carts (the core carts, every app,
+five games and Pin Light) and seeds them as a console seeds its own; every other system
 cart but a test fixture is an official cart its release publishes, which the browser console
 the board serves adds and removes: its Get Carts asks the board through the
 sealed `/official` (`zero_host.make_official`), and the board fetches the
@@ -142,8 +142,9 @@ them back on the next visit — but anything that existed *only* here is.
   the slots became **2 MiB** (`0x200000`, at `0x20000` and `0x220000`), the
   store the **3,968 KiB** `vfs` at `0x420000`, which holds the add-on (one
   pack, about 1.9 MB) beside the carts; provisioning installs the add-on.
-  The image's roster is the core carts (`moy_seed.CORE`), every app and the
-  five games (board.toml's `[roster] image`; owner, 2026-11-17), seeded as a
+  The image's roster is the core carts (`moy_seed.CORE`), every app, the
+  five games (board.toml's `[roster] image`; owner, 2026-11-17) and Pin Light
+  (2026-11-18), seeded as a
   console seeds its own (`zero_host.seed_carts`): present unless the kid
   removed one (`system/removed`, which the page's delete and Get Carts'
   remove write), a newer one in a new image replacing the store's with its
@@ -719,9 +720,8 @@ measured on and the allowlist's note about pin 21 needs correcting. Note
 a read never reconfigures a pin.
 
 **5. A cart in a browser drives a pin.** `Pin Light` is the cart for exactly
-this, left out of this board's roster (board.toml's `[roster]`): push it with
-`mpremote cp -r system_carts/moybyte.pin_light.moy :/moy/carts/`, open the
-paired url, open it from the launcher, tap the button.
+this, in this board's roster (board.toml's `[roster] image`) since
+2026-11-18: open the paired url, open it from the launcher, tap the button.
 (Or write your own calling `pin_write(21, 0)` / `pin_write(21, 1)` on a timer.) *Pass:* the LED blinks in step with the cart, and the network tab shows
 sealed `POST /gpio` batches. *Fail:* 401 `{"error":"session"}` → the page is
 not signed in; batches leaving with no LED → step 4's polarity;

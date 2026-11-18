@@ -186,7 +186,7 @@ advertisement.
 | running game (Player) | Class B while running; gen moves on frames it renders (L9) |
 | app windows (Editor tabs, Settings, Desk-Lab apps) | Class A via the existing `mark_dirty()` calls (global epoch until attributed); Class C during gestures |
 | self-animating panels (music preview, bluetooth, OTA, live wallpaper, overlays) | Class B declaration |
-| wallpaper (static, e.g. `moybyte.moy_night.moy`) | nothing — idles free *by construction* |
+| wallpaper (static: a cart with no `_update`) | nothing — idles free *by construction* |
 | bar | Class A: clock tick (1/s), status change, lent-zone redraw request from the app |
 | desk icon column | Class A on selection/label change (own surface — not the wallpaper's, §11) |
 | window chrome | its own WM-owned chrome band per window (§5 preamble), bumped by the WM on focus/title change |

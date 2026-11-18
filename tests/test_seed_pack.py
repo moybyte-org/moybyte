@@ -111,9 +111,9 @@ def test_the_packed_roster_is_much_smaller_than_the_plain_one():
 
 def test_the_zero_images_carry_the_roster_their_board_names():
     """A Zero's image carries the carts board.toml's `[roster] image` names,
-    which its build passes to the generator: the XIAO's the core, every app and
-    five games, the C3's the core alone, and a new C3 store gets nothing more
-    (`[roster] install` empty, owner 2026-11-17): its room is the kid's."""
+    which its build passes to the generator: the XIAO's the core, every app,
+    five games and Pin Light, the C3's the core alone, and a new C3 store gets
+    Pin Light alone (2026-11-18): the rest of its room is the kid's."""
     from runtime import moy_seed
     c3 = os.path.join(os.path.dirname(ZERO), "esp32c3_zero")
     for zero in (ZERO, c3):
@@ -128,8 +128,27 @@ def test_the_zero_images_carry_the_roster_their_board_names():
     assert board_config.roster_only(c3) == moy_seed.CORE
     xiao = board_config.roster_only(ZERO)
     assert "moybyte.notes" in xiao and "moybyte.star_catcher" in xiao
+    assert "moybyte.pin_light" in xiao
     assert board_config.roster_install(ZERO) == ()
-    assert board_config.roster_install(c3) == ()
+    assert board_config.roster_install(c3) == ("moybyte.pin_light",)
+
+
+def test_no_image_nor_browser_bundle_carries_a_test_fixture():
+    """A test fixture (`"moybyte": {"fixture": true}`) is seeded on the host
+    alone: the packed roster every console image freezes, the plain one, the
+    browser bundle's and the device roster leave it out, the host's keeps it,
+    and a Zero's `--only` naming one is refused."""
+    fixtures = {f: m for f, m in gen.read_manifests(SYSTEM_CARTS) if gen.is_fixture(m)}
+    assert fixtures
+    titles = {m["title"] for m in fixtures.values()}
+    assert not titles & {t for t, _v, _b in gen.build_packed(SYSTEM_CARTS)}
+    assert not titles & {c["title"] for c in gen.build_carts(SYSTEM_CARTS)}
+    assert titles <= {c["title"] for c in gen.build_carts(SYSTEM_CARTS, fixtures=True)}
+    for target in ("device", "web"):
+        assert not set(fixtures) & set(gen.roster(target))
+    assert set(fixtures) <= set(gen.roster("host"))
+    with pytest.raises(ValueError):
+        gen.build_packed(SYSTEM_CARTS, (sorted(fixtures)[0],))
 
 
 def test_an_only_that_names_no_cart_is_refused():

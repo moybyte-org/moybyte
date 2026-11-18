@@ -73,7 +73,7 @@ def test_the_roster_this_runs_is_the_one_that_ships():
     subset -- a filtered scan, a store that failed to populate -- every test
     below would go green while covering less than it claims."""
     on_disk = set(_titles())
-    assert len(on_disk) >= 30, on_disk
+    assert len(on_disk) >= 25, on_disk
     import sys
     sys.path.insert(0, os.path.join(ROOT, "tools"))
     import gen_device_carts as gen
@@ -81,7 +81,7 @@ def test_the_roster_this_runs_is_the_one_that_ships():
     # the CLI, not by this).
     shipped = set(gen.roster("device"))
     assert shipped <= on_disk, sorted(shipped - on_disk)
-    assert len(shipped) >= 30, sorted(shipped)
+    assert len(shipped) >= 20, sorted(shipped)
 
 
 @pytest.mark.parametrize("folder", _titles())

@@ -608,28 +608,6 @@ def test_paint_and_map_editors_fully_cover_the_running_cart(tmp_path):
                 "%s leaked the cart at %d,%d" % (open_tab.__name__, x, y)
 
 
-def test_hop_quest_uses_tilemap_and_still_plays(tmp_path):
-    # Hop Quest now draws its level with map() and reads collision with mget() (#32).
-    # Verify the cart loads its tilemap, draws ground through map(), and the attract
-    # auto-pilot still clears every coin + reaches the win banner (gameplay intact).
-    from runtime import host_app
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _open_cart(ws, "Hop Quest")
-    assert ws.cart["type"] == "game"
-    assert ws.cart.get("map") and not ws.run.project.tilemap.is_blank()    # the level is a tilemap
-    ground_row = ws.ns["MH"] - 1                               # ground is the bottom row
-    assert ws.ns["_solid"](0, ground_row) and not ws.ns["_solid"](0, 0)  # mget collision works
-    ws.run.project.config["autoplay"] = 1
-    ws.saves.apply()
-    coins = len(ws.ns["coins"])
-    most, won = 0, False
-    for _ in range(900):                    # attract-mode auto-play climbs the stair
-        ws.frame(1 / 30)
-        most = max(most, ws.ns.get("got", 0))
-        if ws.ns.get("won", 0.0) > 0.0:
-            won = True
-    assert most == coins and won            # collected every coin and won the round
-    assert probe.drew_something(ws.run.canvas)  # the map() blit drew the ground
 
 
 def test_brick_siege_runs_with_tilemap_and_autoplay_progresses(tmp_path):
@@ -1504,7 +1482,7 @@ def test_map_default_zoom_fits_whole_shipped_maps(tmp_path):
     from runtime.map_editor_ui import _MV_ZOOMS
 
     fitted = 0
-    for name in ("brick_siege", "bench", "letter_blitz", "hop_quest", "sky_run"):
+    for name in ("brick_siege", "bench", "letter_blitz", "harpoon_pop"):
         _C, ws, _drv = _open_cart_map(tmp_path / name, name)
         w, h = ws.run.project.tilemap.w, ws.run.project.tilemap.h
         assert ws.map_ui.map_zoom == 0                          # opens at the fit default

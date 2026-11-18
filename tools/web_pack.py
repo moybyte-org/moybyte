@@ -52,9 +52,9 @@ web bundle's, which carries the shell and the seed carts). The index keeps no
 earlier build's: a console a step behind lists none of them and keeps the
 ones its image seeds. `moybyte.core` marks the ones a console never removes
 (moy_seed.CORE). A test fixture (`"moybyte": {"fixture": true}`,
-gen_device_carts.is_fixture: Bench, Coin Quest and the others the perf ledger,
-the on-glass suites and the tests run) is seeded like every system cart but is
-no official cart, so no index lists it. A console trusts the built-ins' namespace only from its own
+gen_device_carts.is_fixture: Bench and the others the perf ledger, the
+on-glass suites and the tests run) is seeded on the host alone and is no
+official cart, so no image or bundle carries it and no index lists it. A console trusts the built-ins' namespace only from its own
 release's index with the signature verified (cart_index.parse_index).
 """
 

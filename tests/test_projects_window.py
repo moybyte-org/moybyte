@@ -150,7 +150,7 @@ def test_the_window_lies_on_its_panel_never_the_wallpaper(tmp_path):
     ws.look.select_wallpaper(None, persist=False)
     _frame(ws)
     plain = bytes(win.buf._buf)
-    ws.look.select_wallpaper(ws.look._default_wallpaper(), persist=False)
+    ws.look.select_wallpaper("moybyte.space_desktop", persist=False)
     _frame(ws)
     assert bytes(win.buf._buf) == plain
     ws.look.select_wallpaper(None, persist=False)
@@ -282,7 +282,7 @@ def test_the_card_the_shelfs_margin_cuts_shows_its_part_past_it(tmp_path, where)
 
     g = at(grid._geom)
     left, pitch, side = g[1][0] + g[9][4] - g[5], g[3], g[2]
-    k = 3
+    k = 2
 
     def put(s):
         at(lambda: setattr(grid, "scroll", s))
@@ -290,9 +290,9 @@ def test_the_card_the_shelfs_margin_cuts_shows_its_part_past_it(tmp_path, where)
         assert at(lambda: grid.scroll) == s and not grid.moving
         return at(lambda: dict(grid._visible())[k]), bytes(cv._buf)
 
-    whole, a = put(2 * pitch)
+    whole, a = put(pitch)
     assert whole[0] >= left, "the card shows uncut"
-    cut, b = put(2 * pitch + whole[0] - (left - side // 2))
+    cut, b = put(pitch + whole[0] - (left - side // 2))
     assert cut[0] < left < cut[0] + cut[2], "the margin cuts the card"
     w, dx = cv.w, whole[0] - cut[0]
     off = [(x, y) for y in range(cut[1] + side // 4, cut[1] + 3 * side // 4)

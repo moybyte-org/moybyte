@@ -820,6 +820,54 @@ CONSENT = ("len([ws.consent.made(__import__('app_perms').app_id(c)) "
            "for c in ws.carts.all if (c.get('path') or '').rstrip('/') == %r])")
 
 
+def push_folder(b, board_dir, local, folder):
+    """The cart folder `local` pushed into the board's store as `folder`,
+    rescanned and recorded as made on the console (`CONSENT`), as a cable
+    push is. True where the store had no `folder` before, so the caller
+    removes it after (`remove_folders`)."""
+    import contextlib
+    import io
+    had = {f for f, _m in (store_folders(b) or ())}
+    root = str(b.pyval("str(ws.carts_root)", timeout=20, strict=True))
+    dest = root.rstrip("/") + "/" + folder
+    names = cart_files(local)
+    link = raw_link(b, board_config.load(board_dir)["serial"])
+    if not b.pyexec(HELPERS):
+        raise RuntimeError("could not install the upload helpers")
+    with contextlib.redirect_stdout(io.StringIO()):
+        push_files(b, {n: os.path.join(local, n) for n in names}, names, dest, link)
+    b.pyval("len(ws.carts.synced() or ())", timeout=60)
+    b.pyval(CONSENT % dest, timeout=60)
+    return folder not in had
+
+
+def push_fixtures(b, board_dir, titles):
+    """The test fixtures among the seed carts `titles`
+    (gen_device_carts.is_fixture), which no image carries, pushed from
+    system_carts/ under their seed folders (`push_folder`). Returns the
+    folders this pushed, which the caller removes after (`drop_folders`)."""
+    import gen_device_carts as gen
+    src = os.path.join(ROOT, "system_carts")
+    folders = gen.title_to_folder(src)
+    fixtures = {f for f, m in gen.read_manifests(src) if gen.is_fixture(m)}
+    pushed = []
+    for title in titles:
+        folder = folders.get(title)
+        if folder in fixtures and push_folder(b, board_dir,
+                                              os.path.join(src, folder + ".moy"),
+                                              folder + ".moy"):
+            pushed.append(folder + ".moy")
+    return pushed
+
+
+def drop_folders(b, folders):
+    """`folders` taken off the store as the console removes a cart
+    (`remove_folders`) and the shelf rescanned."""
+    if folders:
+        remove_folders(b, list(folders))
+        b.pyval("len(ws.carts.synced() or ())", timeout=60)
+
+
 def connect(board, port, verbose=False):
     """A live, identity-checked P4Board on `board`'s `port`: attached and
     verified (never pulsed) for an `attach_only` board, reset only when a

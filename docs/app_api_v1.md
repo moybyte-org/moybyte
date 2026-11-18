@@ -182,7 +182,7 @@ absent (`runtime/carts/moy_store_base.py`, `VENDOR_KEY`):
 | `assets` | a cart's scenes, in order | `docs/moy_cart_api.md`, Scenes |
 | `glass`, `pictures` | a wallpaper drawn per glass, a picture wallpaper | `docs/theme_and_shell_2026-11.md` §3.9 |
 | `graduated` | written by the Editor when blocks become code; never by hand | `runtime/editors/blocks.py` |
-| `system`, `order`, `targets`, `app`, `fixture` | the seed carts' (`system_carts/`): a system cart, its place, the targets it ships to, a shipped app's declaration, and `true` for a test fixture, which is seeded but no release publishes as an official cart | §13 |
+| `system`, `order`, `targets`, `app`, `fixture` | the seed carts' (`system_carts/`): a system cart, its place, the targets it ships to, a shipped app's declaration, and `true` for a test fixture, which only the host seeds: no console image or browser bundle carries it and no release publishes it as an official cart | §13 |
 
 ## 3. Drawing an app
 

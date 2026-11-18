@@ -9,7 +9,7 @@ from runtime import host_app, ui_draw
 
 
 from ws_helpers import build_desktop_ws as _ws, select_on_home
-from ws_helpers import boot_on_fixture, settle_badges
+from ws_helpers import boot_on_fixture, install_shape, settle_badges
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
@@ -57,21 +57,23 @@ def test_desk_icon_labels_fit_their_pills(tmp_path):
 # -- #174: the desk column, DRAWN, on the wallpaper that hid the bug ----------
 #
 # The geometry assertion above cannot see the failure it was written for: the
-# overflow was drawn in title_ink on Open Machine's black field, so it left the
-# pill and vanished. These render the desk and count what actually landed.
+# overflow was drawn in title_ink on a black wallpaper field, so it left the
+# pill and vanished. These render the desk over one (the Night Glass shape cart's
+# black sky) and count what actually landed.
 
 _WINDOWED = [((480, 320), 1), ((1024, 600), 1), ((1024, 600), 2),
              ((1024, 600), 3)]
 
 
-def _desk_on_open_machine(tmp_path, size=(1024, 600), fs=2, titles=None):
+def _desk_on_a_black_field(tmp_path, size=(1024, 600), fs=2, titles=None):
     ws = _ws(tmp_path, sys_size=size, font_scale=fs)
     if titles:
         # An app's manifest title, as declared: the registry's rows are
         # written once, so the test registers its own title over the read.
         declared = ws.spine.app_title
         ws.spine.app_title = lambda kind: titles.get(kind) or declared(kind)
-    ws.look.select_wallpaper("moybyte.open_machine", persist=False)
+    install_shape(ws, "night_glass")
+    ws.look.select_wallpaper("night_glass", persist=False)
     ws.home.open_desk()
     ws.pointer.visible = False
     settle_badges(ws)
@@ -93,10 +95,10 @@ def _overlaps(a, b):
 
 
 @pytest.mark.parametrize("size,fs", _WINDOWED)
-def test_desk_labels_render_whole_on_the_open_machine_wallpaper(tmp_path, size, fs):
+def test_desk_labels_render_whole_on_a_black_wallpaper(tmp_path, size, fs):
     """Every shipped desk label fits its band whole, at every windowed config
     -- PROJECTS drew as PROJECT and STORYBOOK as STORYBO."""
-    ws = _desk_on_open_machine(tmp_path, size, fs)
+    ws = _desk_on_a_black_field(tmp_path, size, fs)
     cv = ws.sys_canvas
     efs = ws.look.effective_font_scale()
     seen = []
@@ -114,7 +116,7 @@ def test_a_long_app_title_keeps_every_desk_icon_on_the_canvas(tmp_path):
     marched the last column past the right edge -- and an icon drawn off the
     canvas is unreachable, not merely ugly. It clips inside its band instead."""
     long_title = "CALCULATING MACHINE DELUXE"
-    ws = _desk_on_open_machine(tmp_path, fs=3, titles={"calc": long_title})
+    ws = _desk_on_a_black_field(tmp_path, fs=3, titles={"calc": long_title})
     cv = ws.sys_canvas
     rects = ws.wm._backdrop_layer._icon_rects()
     assert any(label == long_title for _k, _b, _p, label, _c in rects)
@@ -131,7 +133,7 @@ def test_any_number_of_apps_keeps_every_desk_icon_on_the_canvas(tmp_path, size, 
     """Each app a user adds is a tile: where the columns would run past the
     desk's edge the tiles shrink until they fit, never off the canvas and
     never over each other."""
-    ws = _desk_on_open_machine(tmp_path, size, fs)
+    ws = _desk_on_a_black_field(tmp_path, size, fs)
     desk = ws.wm._backdrop_layer
     base = desk._icon_catalog()
     extra = [("app%d" % i, "APP %d" % i, None) for i in range(n - len(base))]

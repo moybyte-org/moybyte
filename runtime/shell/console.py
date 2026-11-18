@@ -2843,7 +2843,7 @@ class Workstation:
         """#184: the deferred-transition acknowledgment (GAPS 51) -- the
         toast's pill in flat fills, painted once on the frame between a tap
         and its heavy transition, which the panel retains through the load:
-        the cart's kind as an icon and what opens ("Opening Sky Run..."),
+        the cart's kind as an icon and what opens ("Opening Star Catcher..."),
         over the middle of the card being opened on a handheld and in the
         middle of the bar on the desk, the one band no window covers."""
         cv = self.sys_canvas

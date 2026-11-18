@@ -13,7 +13,7 @@ import pytest
 
 from runtime import host_app
 from runtime import moy_input as mi
-from ws_helpers import no_unlock_banner, quiesce, settle_badges
+from ws_helpers import no_unlock_banner, quiesce, settle_badges, shelf_cart
 
 DT = 1 / 30
 _NOW = [100000]
@@ -34,7 +34,7 @@ def clock(monkeypatch):
 # surface -> (cart, workspace, tab)
 SURFACES = {"blocks": ("Coin Quest", "code", "blocks"),
             "cards": ("Coin Quest", "settings", "cards"),
-            "cards pictures": ("Hop Quest", "settings", "cards"),
+            "cards pictures": ("Space Desktop", "settings", "cards"),
             "music": ("Sky Run", "sound", "music"),
             "map": ("Sky Run", "art", "map")}
 
@@ -46,7 +46,7 @@ def _desk(path, cart, key, tab, ships, window=False):
     no_unlock_banner(ws)
     quiesce(ws)
     ws.home.open_desk()
-    ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == cart))
+    ws.open_in_editor(shelf_cart(ws, cart))
     drv = host_app.ConsoleDriver(ws)
     for _ in range(3):
         drv.frame(DT)

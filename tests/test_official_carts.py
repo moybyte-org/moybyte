@@ -41,10 +41,10 @@ def _manifests():
     return out
 
 
-# The test fixtures (owner, 2026-11-18): seeded for the perf ledger, the
-# on-glass suites and the tests, never listed as an official cart.
-FIXTURES = {"moybyte.bench", "moybyte.bench_lua", "moybyte.coin_quest",
-            "moybyte.tap_only_red", "moybyte.open_machine", "moybyte.pin_light"}
+# The test fixtures (owner, 2026-11-18): seeded on the host for the tests,
+# pushed to a board for a run, never in an image nor listed as an official cart.
+FIXTURES = {"moybyte.bench", "moybyte.bench_lua", "moybyte.brick_siege_lua",
+            "moybyte.sakura", "moybyte.tap_only_red"}
 
 
 def _official():
@@ -61,7 +61,7 @@ def test_the_core_set_is_one_list_every_reader_shares():
         assert cid in mans, "%s is no seed cart" % cid
     assert moy_seed.is_core("moybyte.files.moy") and moy_seed.is_core("moybyte.files")
     assert not moy_seed.removable("moybyte.files.moy")
-    assert moy_seed.removable("moybyte.hop_quest.moy")
+    assert moy_seed.removable("moybyte.coin_quest.moy")
     assert not moy_seed.removable("dm.moy"), "only a built-in is the seed's to keep away"
 
 
@@ -88,26 +88,22 @@ def test_the_record_reads_only_optional_built_ins_once_each(tmp_path):
     os.makedirs(root)
     rec = tmp_path / "moybyte" / "system" / "removed"
     rec.parent.mkdir()
-    rec.write_text(" moybyte.sky_run.moy \r\nmoybyte.files.moy\ndm.moy\n\n"
-                   "moybyte.sky_run.moy\nmoybyte.hop_quest.moy")
-    assert moy_carts.load_removed(root) == ["moybyte.sky_run.moy", "moybyte.hop_quest.moy"]
-    assert not moy_carts.note_removed(root, "moybyte.hop_quest.moy")
+    rec.write_text(" moybyte.letter_blitz.moy \r\nmoybyte.files.moy\ndm.moy\n\n"
+                   "moybyte.letter_blitz.moy\nmoybyte.coin_quest.moy")
+    assert moy_carts.load_removed(root) == ["moybyte.letter_blitz.moy", "moybyte.coin_quest.moy"]
+    assert not moy_carts.note_removed(root, "moybyte.coin_quest.moy")
     assert moy_carts.note_removed(root, "moybyte.paint.moy")
-    assert rec.read_text() == ("moybyte.sky_run.moy\nmoybyte.hop_quest.moy\n"
+    assert rec.read_text() == ("moybyte.letter_blitz.moy\nmoybyte.coin_quest.moy\n"
                                "moybyte.paint.moy\n"), "a write rewrites the record as read"
-    assert moy_carts.unremove(root, ["moybyte.hop_quest.moy", "dm.moy"]) == [
-        "moybyte.hop_quest.moy"]
-    assert rec.read_text() == "moybyte.sky_run.moy\nmoybyte.paint.moy\n"
+    assert moy_carts.unremove(root, ["moybyte.coin_quest.moy", "dm.moy"]) == [
+        "moybyte.coin_quest.moy"]
+    assert rec.read_text() == "moybyte.letter_blitz.moy\nmoybyte.paint.moy\n"
 
 
 def test_the_core_set_holds_what_the_shell_opens_and_names():
     """Each core cart's reason, held to the code that gives it."""
     mans = _manifests()
     core = set(moy_seed.CORE)
-    # the default backdrop: the first wallpaper cart by its order
-    walls = sorted((m["moybyte"]["order"], cid) for cid, m in mans.items()
-                   if m["moybyte"].get("type") == "wallpaper")
-    assert walls[0][1] in core
     # the Wallpaper slot a drawing is copied into (Files' and Paint's WALL)
     from runtime import picture_copies
     slot, = [cid for cid, m in mans.items() if m["moybyte"].get("type") == "wallpaper"
@@ -175,6 +171,23 @@ def keys(monkeypatch):
     monkeypatch.setattr(ci, "INDEX_KEYS", TEST_KEYS)
 
 
+# The seven carts cut from the seed set (owner, 2026-11-18): a store seeded
+# before that sweeps their folders once, and keeps every fixture's.
+CUT = ("hop_quest", "pixel_pet", "sky_run", "tiny_runner", "ocean_desktop",
+       "open_machine", "moy_night")
+
+
+def test_a_store_from_before_the_cut_sweeps_the_cut_carts_and_keeps_the_fixtures(tmp_path):
+    root = str(tmp_path / "carts")
+    kept = ["moybyte.%s.moy" % f for f in ("bench", "star_catcher")]
+    for name in ["moybyte.%s.moy" % c for c in CUT] + kept:
+        os.makedirs(os.path.join(root, name))
+    moy_seed._save_store_version(root, moy_seed.STORE_FORMAT, 8)
+    assert moy_seed.sweep_store(root, export=None, board="b") == len(CUT)
+    assert sorted(n for n in os.listdir(root) if n.endswith(".moy")) == kept
+    assert not set(SEEDS.iterdir()) & {SEEDS / ("moybyte.%s.moy" % c) for c in CUT}
+
+
 def test_the_test_fixtures_are_the_ones_the_owner_named():
     assert {cid for cid, m in _manifests().items() if gen.is_fixture(m)} == FIXTURES
     assert not FIXTURES & set(moy_seed.CORE), "a core cart is listed, so no fixture"
@@ -205,7 +218,7 @@ def test_every_seed_cart_but_a_fixture_is_an_official_entry_of_its_release(tmp_p
         assert not any(n.startswith("thumbs/") for n in names)
         assert c.get("cover") is None or (tmp_path / "release" / c["cover"]["url"]).exists()
         assert ci.runs_on(c, ("lua",))
-    assert "scenes/" in "".join(official["moybyte.hop_quest"]["assets"][0]["files"]), \
+    assert "scenes/" in "".join(official["moybyte.coin_quest"]["assets"][0]["files"]), \
         "a cart's subfolders travel"
     # one cart is one asset: the same bytes the same name on every board
     again = tmp_path / "again"
@@ -231,8 +244,8 @@ def test_only_the_console_s_own_signed_index_is_trusted_with_built_ins(tmp_path,
 
 
 def test_a_python_built_in_from_anywhere_else_is_still_refused():
-    entry = {"id": "moybyte.hop_quest", "name": "Hop", "version": 1,
-             "folder": "moybyte.hop_quest.moy", "runtime": "python",
+    entry = {"id": "moybyte.coin_quest", "name": "Quest", "version": 1,
+             "folder": "moybyte.coin_quest.moy", "runtime": "python",
              "licence": {"url": "L", "size": 1, "sha256": "0" * 64},
              "assets": [{"url": "a", "size": 1, "sha256": "0" * 64,
                          "files": {"main.py": {"size": 1, "sha256": "0" * 64}}}]}
@@ -279,17 +292,17 @@ def test_a_removed_optional_cart_stays_removed_and_a_get_brings_it_back(
         tmp_path, keys, monkeypatch):
     root, seed, _shelf = _seeded(tmp_path)
     inst = OwnInst(root)
-    hop = "moybyte.hop_quest.moy"
-    _drain(pkg.removed(inst, hop))
-    assert not os.path.exists(root + "/" + hop)
-    assert moy_carts.load_removed(root) == [hop]
+    quest = "moybyte.coin_quest.moy"
+    _drain(pkg.removed(inst, quest))
+    assert not os.path.exists(root + "/" + quest)
+    assert moy_carts.load_removed(root) == [quest]
     # the next boot's seed writes it no more, its newer version included
     shelf = moy_catalogue.seed(seed, root, moy_catalogue.catalogue(root))
-    assert not os.path.exists(root + "/" + hop)
-    assert hop not in [e["path"].rsplit("/", 1)[-1] for e in shelf]
-    newer = [(t, v + 1 if t == "Hop Quest" else v, b) for t, v, b in seed]
+    assert not os.path.exists(root + "/" + quest)
+    assert quest not in [e["path"].rsplit("/", 1)[-1] for e in shelf]
+    newer = [(t, v + 1 if t == "Coin Quest" else v, b) for t, v, b in seed]
     moy_catalogue.seed(newer, root, moy_catalogue.catalogue(root))
-    assert not os.path.exists(root + "/" + hop)
+    assert not os.path.exists(root + "/" + quest)
     # a core cart is never recorded
     assert not moy_carts.note_removed(root, "moybyte.files.moy")
     # Get Carts lists it to get, and installs it from the release
@@ -297,9 +310,9 @@ def test_a_removed_optional_cart_stays_removed_and_a_get_brings_it_back(
     monkeypatch.setattr(ci, "page_want", lambda: digest)
     inst._net = MemNet(routes)
     carts = ci.fitting(ci.parse_index(routes[OWN], OWN, OWN))
-    c, = [c for c in carts if c["folder"] == hop]
+    c, = [c for c in carts if c["folder"] == quest]
     rows = _rows(root, carts)
-    assert rows[hop] == "get"
+    assert rows[quest] == "get"
     assert rows["moybyte.files.moy"] == "installed", "a seed stands by its version"
     job = ci.Install(c, ci.plan(c), inst.net(), root, inst.op)
     while job.step():
@@ -307,8 +320,8 @@ def test_a_removed_optional_cart_stays_removed_and_a_get_brings_it_back(
     assert job.path, job.error
     _drain(pkg.landed(inst, job.path, None))
     assert moy_carts.load_removed(root) == []
-    assert os.path.exists(root + "/" + hop + "/scenes")
-    assert _rows(root, carts)[hop] == "installed"
+    assert os.path.exists(root + "/" + quest + "/scenes")
+    assert _rows(root, carts)[quest] == "installed"
 
 
 def _rows(root, carts):
@@ -330,8 +343,8 @@ def test_pkg_remove_takes_an_optional_built_in_and_keeps_a_core_one(tmp_path):
     root, _seed, _shelf = _seeded(tmp_path)
     out, err = [], []
     p = pkg.Pkg(OwnInst(root), out.append, err.append)
-    assert _done(p.remove(["moybyte.sky_run"])) == 0
-    assert moy_carts.load_removed(root) == ["moybyte.sky_run.moy"]
+    assert _done(p.remove(["moybyte.letter_blitz"])) == 0
+    assert moy_carts.load_removed(root) == ["moybyte.letter_blitz.moy"]
     assert _done(p.remove(["moybyte.files"])) == 1
     assert "core" in err[-1] and os.path.exists(root + "/moybyte.files.moy")
 
@@ -344,20 +357,20 @@ def test_a_page_s_delete_over_the_sync_wire_is_the_console_s_removal(tmp_path):
     `pkg remove` is tests/moy_sh/serial/pkg.sh's transcript."""
     from runtime.moy_sync import apply_ops
     root, seed, _shelf = _seeded(tmp_path)
-    sky = "moybyte.sky_run.moy"
-    applied, errors, _ = apply_ops(root, [{"p": sky, "dc": 1}])
+    blitz = "moybyte.letter_blitz.moy"
+    applied, errors, _ = apply_ops(root, [{"p": blitz, "dc": 1}])
     assert (applied, errors) == (1, [])
-    assert not os.path.exists(root + "/" + sky)
-    assert moy_carts.load_removed(root) == [sky]
+    assert not os.path.exists(root + "/" + blitz)
+    assert moy_carts.load_removed(root) == [blitz]
     moy_catalogue.seed(seed, root, moy_catalogue.catalogue(root))
-    assert not os.path.exists(root + "/" + sky), "the next boot's seed keeps it away"
+    assert not os.path.exists(root + "/" + blitz), "the next boot's seed keeps it away"
     _, errors, _ = apply_ops(root, [{"p": "moybyte.files.moy", "dc": 1}])
     assert [why for _i, why in errors] == ["a core cart"]
     assert os.path.exists(root + "/moybyte.files.moy/manifest.json")
     applied, errors, _ = apply_ops(root, [{"p": "dm.moy/main.py", "t": "x = 1"},
                                           {"p": "dm.moy", "dc": 1}])
-    assert (applied, errors) == (2, []) and moy_carts.load_removed(root) == [sky]
-    applied, errors, _ = apply_ops(root, [{"p": sky + "/main.py", "t": "x = 1"}])
+    assert (applied, errors) == (2, []) and moy_carts.load_removed(root) == [blitz]
+    applied, errors, _ = apply_ops(root, [{"p": blitz + "/main.py", "t": "x = 1"}])
     assert (applied, errors) == (1, []) and moy_carts.load_removed(root) == []
 
 
@@ -412,7 +425,7 @@ def test_a_pass_puts_back_a_fixture_a_removal_took(tmp_path):
     moy_carts.note_removed(root, "moybyte.brick_siege.moy")
     import shutil
     shutil.rmtree(root + "/moybyte.brick_siege.moy")
-    assert moy_carts.put_back(root, seed, ["Brick Siege", "Hop Quest"]) == ["Brick Siege"]
+    assert moy_carts.put_back(root, seed, ["Brick Siege", "Coin Quest"]) == ["Brick Siege"]
     assert os.path.exists(root + "/moybyte.brick_siege.moy/manifest.json")
     assert moy_carts.load_removed(root) == []
 
@@ -425,12 +438,12 @@ def test_the_shelf_deletes_an_optional_built_in_only_where_its_release_brings_it
 
     m = cart_manager.CartManager.__new__(cart_manager.CartManager)
     m.ws = WS()
-    hop = {"path": "/sd/moybyte/carts/moybyte.hop_quest.moy"}
+    quest = {"path": "/sd/moybyte/carts/moybyte.coin_quest.moy"}
     files = {"path": "/sd/moybyte/carts/moybyte.files.moy"}
     mine = {"path": "/sd/moybyte/carts/mine.moy"}
-    assert m.deletable(mine) and not m.deletable(hop) and not m.deletable(files)
+    assert m.deletable(mine) and not m.deletable(quest) and not m.deletable(files)
     m.ws.cart_own = OWN
-    assert m.deletable(hop) and not m.deletable(files)
+    assert m.deletable(quest) and not m.deletable(files)
 
 
 # -- the Zero: the update's step brings the official carts it holds ---------------
@@ -469,20 +482,20 @@ def test_after_an_update_a_zero_brings_the_official_carts_it_holds_to_the_releas
     os.makedirs(root)
     seeds = tmp_path / "seeds"
     import shutil
-    for cid in ("moybyte.files", "moybyte.hop_quest", "moybyte.tap_game"):
+    for cid in ("moybyte.files", "moybyte.coin_quest", "moybyte.tap_game"):
         shutil.copytree(str(SEEDS / (cid + ".moy")), str(seeds / (cid + ".moy")))
     digest, routes = _release(tmp_path, seeds=seeds)
     monkeypatch.setattr(ci, "page_want", lambda: digest)
     monkeypatch.setattr(web_addon, "page_state", lambda: None)
-    # the store: an older Hop Quest with a save and a tuning, an up to date Files
-    for cid in ("moybyte.files", "moybyte.hop_quest"):
+    # the store: an older Coin Quest with a save and a tuning, an up to date Files
+    for cid in ("moybyte.files", "moybyte.coin_quest"):
         shutil.copytree(str(seeds / (cid + ".moy")), root + "/" + cid + ".moy")
-    hop = root + "/moybyte.hop_quest.moy"
-    man = json.loads(open(hop + "/manifest.json").read())
+    quest = root + "/moybyte.coin_quest.moy"
+    man = json.loads(open(quest + "/manifest.json").read())
     man["version"] -= 1
-    open(hop + "/manifest.json", "w").write(json.dumps(man))
-    open(hop + "/pmem.json", "w").write("[1, 2]")
-    open(hop + "/config.json", "w").write('{"speed": 120}')
+    open(quest + "/manifest.json", "w").write(json.dumps(man))
+    open(quest + "/pmem.json", "w").write("[1, 2]")
+    open(quest + "/config.json", "w").write('{"speed": 120}')
     net = MemNet(routes)
     step = web_addon.AddonStep(ZeroInst(root, net), OWN, carts=True)
     assert step.wanted()
@@ -492,11 +505,11 @@ def test_after_an_update_a_zero_brings_the_official_carts_it_holds_to_the_releas
     assert step.error is None
     got = [u.rsplit("/", 1)[-1] for u in net.opened]
     assert got[0] == "carts-tdeck.json"
-    assert len(got) == 2 and got[1].startswith("moybyte.hop_quest-"), \
+    assert len(got) == 2 and got[1].startswith("moybyte.coin_quest-"), \
         "only the newer cart is fetched"
-    assert json.loads(open(hop + "/manifest.json").read())["version"] == man["version"] + 1
-    assert open(hop + "/pmem.json").read() == "[1, 2]"
-    assert open(hop + "/config.json").read() == '{"speed": 120}'
+    assert json.loads(open(quest + "/manifest.json").read())["version"] == man["version"] + 1
+    assert open(quest + "/pmem.json").read() == "[1, 2]"
+    assert open(quest + "/config.json").read() == '{"speed": 120}'
     assert not os.path.exists(root + "/moybyte.tap_game.moy"), "a cart it holds, never a new one"
     assert web_addon.official_stamp(root) == digest
     assert not step.wanted(), "a store at its release asks nothing"
@@ -514,21 +527,21 @@ def test_a_console_board_s_step_is_the_add_on_s_alone(tmp_path, monkeypatch):
 
 
 def test_a_cable_flash_installs_a_new_store_s_set_and_updates_what_a_store_holds():
-    offered = {"moybyte.files.moy": 6, "moybyte.hop_quest.moy": 17,
-               "moybyte.tap_game.moy": 11, "moybyte.sky_run.moy": 14}
+    offered = {"moybyte.files.moy": 6, "moybyte.coin_quest.moy": 17,
+               "moybyte.tap_game.moy": 11, "moybyte.letter_blitz.moy": 14}
     image = ("moybyte.files",)
-    install = ("moybyte.hop_quest", "moybyte.tap_game")
+    install = ("moybyte.coin_quest", "moybyte.tap_game")
     new = {"moybyte.files.moy": 6, "web_console_0123456789ab.moy": 0}
     assert board_flash.carts_plan(new, offered, install, image) == [
-        "moybyte.hop_quest.moy", "moybyte.tap_game.moy"]
-    used = {"moybyte.files.moy": 5, "moybyte.hop_quest.moy": 16, "kids.moy": 1}
-    assert board_flash.carts_plan(used, offered, install, image) == ["moybyte.hop_quest.moy"], \
+        "moybyte.coin_quest.moy", "moybyte.tap_game.moy"]
+    used = {"moybyte.files.moy": 5, "moybyte.coin_quest.moy": 16, "kids.moy": 1}
+    assert board_flash.carts_plan(used, offered, install, image) == ["moybyte.coin_quest.moy"], \
         "a store in use gets the newer versions of what it holds and nothing it lacks"
     assert board_flash.carts_plan(used, offered, (), image + install) == [], \
         "the image's own seed keeps the carts it carries"
-    held = dict(used, **{"moybyte.sky_run.moy": 13})
+    held = dict(used, **{"moybyte.letter_blitz.moy": 13})
     assert board_flash.carts_plan(held, offered, (), image + install) == [
-        "moybyte.sky_run.moy"], "an official cart the page installed is brought to the tree"
+        "moybyte.letter_blitz.moy"], "an official cart the page installed is brought to the tree"
 
 
 def test_pkg_installs_a_removed_built_in_from_its_release_asking_nothing(
@@ -539,11 +552,11 @@ def test_pkg_installs_a_removed_built_in_from_its_release_asking_nothing(
     inst = OwnInst(root, MemNet(routes))
     out, err, asked = [], [], []
     p = pkg.Pkg(inst, out.append, err.append, ask=lambda q: asked.append(q) or True)
-    assert _done(p.remove(["moybyte.sky_run"])) == 0
-    assert _done(p.install(["moybyte.sky_run"])) == 0, err
+    assert _done(p.remove(["moybyte.letter_blitz"])) == 0
+    assert _done(p.install(["moybyte.letter_blitz"])) == 0, err
     assert asked == [] and not any("trusted" in line.lower() for line in out)
     assert moy_carts.load_removed(root) == []
-    assert os.path.exists(root + "/moybyte.sky_run.moy/manifest.json")
+    assert os.path.exists(root + "/moybyte.letter_blitz.moy/manifest.json")
 
 
 def test_a_perf_pass_puts_back_its_fixtures_and_says_so():
@@ -559,7 +572,7 @@ def test_a_perf_pass_puts_back_its_fixtures_and_says_so():
     said = []
     stage = perf_pass.Stage(B(), "tdeck", "x", log=said.append)
     stage.conditions = {}
-    stage.put_back(["Brick Siege", "Hop Quest"])
-    assert B.asked == ["ws.carts.put_back(['Brick Siege', 'Hop Quest'])"]
+    stage.put_back(["Brick Siege", "Coin Quest"])
+    assert B.asked == ["ws.carts.put_back(['Brick Siege', 'Coin Quest'])"]
     assert said and "Brick Siege" in said[0] and "removal" in said[0]
     assert stage.conditions["put_back"] == ["Brick Siege"]

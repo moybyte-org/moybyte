@@ -21,13 +21,12 @@ fps: frames drawn a second, PERF DIAG off. frame ms: the loop's work behind one 
 | --- | ---: | ---: |
 | Brick Siege | 60.9 | 18.0 |
 | Brick Siege Lua | 71.1 | 6.4 |
-| Sakura | - | - |
 | Sakura Lua | 29.8 | - |
-| Hop Quest | 50.7 | 21.1 |
-| Sky Run | 51.4 | 20.9 |
 | Letter Blitz | 46.1 | 23.9 |
 | Star Catcher | 62.5 | 16.6 |
 | Jet Teapot uncapped | 33.8 | 28.5 |
+| Hop Quest | 50.7 | 21.1 |
+| Sky Run | 51.4 | 20.9 |
 
 - latest `ec662a5b`: Sakura: not a run tile on this board's home: not measured
 - latest `ec662a5b`: Sakura Lua frame: the loop spins between drawn frames (2698 loop frames a second): no frame cost to read off LOOP
@@ -39,13 +38,12 @@ fps: frames drawn a second, PERF DIAG off. frame ms: the loop's work behind one 
 | --- | ---: | ---: |
 | Brick Siege | 47.2 | 22.8 |
 | Brick Siege Lua | 57.8 | 12.1 |
-| Sakura | - | - |
 | Sakura Lua | 29.9 | - |
-| Hop Quest | 54.8 | 20.1 |
-| Sky Run | 56.2 | 19.4 |
 | Letter Blitz | 45.2 | 23.8 |
 | Star Catcher | 61.3 | 18.3 |
 | Jet Teapot uncapped | 23.2 | 43.7 |
+| Hop Quest | 54.8 | 20.1 |
+| Sky Run | 56.2 | 19.4 |
 
 - latest `ec662a5b`: Sakura: not a run tile on this board's home: not measured
 - latest `ec662a5b`: Sakura Lua frame: the loop spins between drawn frames (484 loop frames a second): no frame cost to read off LOOP
@@ -57,13 +55,12 @@ fps: frames drawn a second, PERF DIAG off. frame ms: the loop's work behind one 
 | --- | ---: | ---: |
 | Brick Siege | 61.1 | 18.6 |
 | Brick Siege Lua | 65.5 | 9.6 |
-| Sakura | - | - |
 | Sakura Lua | 30.0 | - |
-| Hop Quest | 56.2 | 19.3 |
-| Sky Run | 58.0 | 18.6 |
 | Letter Blitz | 50.5 | 22.1 |
 | Star Catcher | 62.5 | 12.7 |
 | Jet Teapot uncapped | 35.1 | 27.3 |
+| Hop Quest | 56.2 | 19.3 |
+| Sky Run | 58.0 | 18.6 |
 
 - latest `ec662a5b`: Sakura: not a run tile on this board's home: not measured
 - latest `ec662a5b`: Sakura Lua frame: the loop spins between drawn frames (2254 loop frames a second): no frame cost to read off LOOP
@@ -76,13 +73,12 @@ fps: frames drawn a second, PERF DIAG off. frame ms: the loop's work behind one 
 | --- | ---: | ---: |
 | Brick Siege | 58.0 | 20.1 |
 | Brick Siege Lua | 58.9 | 16.9 |
-| Sakura | - | - |
 | Sakura Lua | 29.9 | - |
-| Hop Quest | 59.8 | 17.1 |
-| Sky Run | 59.9 | 17.2 |
 | Letter Blitz | 53.8 | 20.8 |
 | Star Catcher | 61.2 | 17.1 |
 | Jet Teapot uncapped | 22.9 | 43.8 |
+| Hop Quest | 59.8 | 17.1 |
+| Sky Run | 59.9 | 17.2 |
 
 - latest `ec662a5b`: Sakura: not a run tile on this board's home: not measured
 - latest `ec662a5b`: Sakura Lua frame: the loop spins between drawn frames (1495 loop frames a second): no frame cost to read off LOOP

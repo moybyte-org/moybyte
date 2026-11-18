@@ -14,7 +14,7 @@ sys.path.insert(0, ROOT)
 from runtime import editor_panes as P      # noqa: E402
 from runtime import host_app                # noqa: E402
 from runtime import ui                      # noqa: E402
-from ws_helpers import quiesce, settle_badges  # noqa: E402
+from ws_helpers import install_shape, quiesce, settle_badges  # noqa: E402
 
 FULL_1024 = (6, 46, 1012, 548)              # full screen: the row is the top 40 px
 STRIP_1024 = (6, 90, 1012, 504)             # the pictures' title-strip frame
@@ -137,7 +137,7 @@ def desk(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
                                     panel_diagonal_in=7.0, font_scale=1, windowed=True)
     ws.home.open_desk()
-    cart = next(c for c in ws.carts.all if c.get("title") == "Sky Run")
+    cart = install_shape(ws, "sky_run")
     ws.open_in_editor(cart)
     drv = host_app.ConsoleDriver(ws)
     for _ in range(3):
@@ -1212,7 +1212,7 @@ def _desk_at(path):
     ws = host_app.build_workstation(str(path / "carts"), sys_size=(1024, 600),
                                     panel_diagonal_in=7.0, font_scale=1, windowed=True)
     ws.home.open_desk()
-    ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Sky Run"))
+    ws.open_in_editor(install_shape(ws, "sky_run"))
     ws.bar_layer.clock_text = lambda: "10:30"
     drv = host_app.ConsoleDriver(ws)
     for _ in range(3):
@@ -1274,7 +1274,7 @@ def test_at_800_the_sound_panes_menu_picks_a_sound(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(800, 480),
                                     panel_diagonal_in=7.0, font_scale=1, windowed=True)
     ws.home.open_desk()
-    ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Sky Run"))
+    ws.open_in_editor(install_shape(ws, "sky_run"))
     drv = host_app.ConsoleDriver(ws)
     for _ in range(3):
         drv.frame(DT)
@@ -1592,7 +1592,7 @@ def test_quiet_frames_warm_the_other_workspaces_and_a_switch_draws_the_same(tmp_
         ws = host_app.build_workstation(str(tmp_path / str(warm)), sys_size=(1024, 600),
                                         panel_diagonal_in=7.0, font_scale=1, windowed=True)
         ws.home.open_desk()
-        ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Sky Run"))
+        ws.open_in_editor(install_shape(ws, "sky_run"))
         drv = host_app.ConsoleDriver(ws)
         d = ws.editor_desk
         if not warm:

@@ -27,8 +27,8 @@ from runtime import cart_index as ci, moy_carts, web_addon    # noqa: E402
 from test_official_carts import OWN, SEEDS, ZeroInst, _release  # noqa: E402
 from test_ota_signing import TEST_KEYS                         # noqa: E402
 
-SOME = ("moybyte.files", "moybyte.hop_quest", "moybyte.tap_game", "moybyte.calc")
-HOP = "moybyte.hop_quest.moy"
+SOME = ("moybyte.files", "moybyte.harpoon_pop", "moybyte.tap_game", "moybyte.calc")
+HARPOON = "moybyte.harpoon_pop.moy"
 
 
 @pytest.fixture
@@ -91,9 +91,9 @@ def test_a_check_lists_the_release_s_official_carts_once(zero):
     assert sorted(c["folder"] for c in doc["carts"]) == sorted(c + ".moy" for c in SOME)
     files, = [c for c in doc["carts"] if c["folder"] == "moybyte.files.moy"]
     assert files["core"] is True
-    hop, = [c for c in doc["carts"] if c["folder"] == HOP]
-    assert hop["core"] is False and hop["name"] == "Hop Quest"
-    assert hop["licence"] and hop["assets"][0]["size"] > 0
+    harpoon, = [c for c in doc["carts"] if c["folder"] == HARPOON]
+    assert harpoon["core"] is False and harpoon["name"] == "Harpoon Pop"
+    assert harpoon["licence"] and harpoon["assets"][0]["size"] > 0
     for c in doc["carts"]:
         for a in c["assets"]:
             assert all(set(m) == {"size"} for m in a["files"].values()), \
@@ -105,8 +105,8 @@ def test_a_check_lists_the_release_s_official_carts_once(zero):
 
 
 def test_an_install_fetches_from_the_release_and_lands_on_the_board(zero):
-    moy_carts.note_removed(zero.root, HOP)
-    code, doc = _call(zero, "POST", {"action": "install", "folder": HOP})
+    moy_carts.note_removed(zero.root, HARPOON)
+    code, doc = _call(zero, "POST", {"action": "install", "folder": HARPOON})
     assert code == 200 and doc["state"] == "installing"
     seen = []
     while zero.official.step(0):
@@ -115,12 +115,12 @@ def test_an_install_fetches_from_the_release_and_lands_on_the_board(zero):
     assert ("installing", None) in seen
     assert any(p and p[1] > 0 for _s, p in seen), "the download's progress is readable"
     code, doc = _call(zero, "GET")
-    assert doc == dict(doc, state="done", folder=HOP, error=None)
-    assert os.path.exists(zero.root + "/" + HOP + "/manifest.json")
+    assert doc == dict(doc, state="done", folder=HARPOON, error=None)
+    assert os.path.exists(zero.root + "/" + HARPOON + "/manifest.json")
     assert moy_carts.load_removed(zero.root) == [], "its removal record is dropped"
-    assert zero.inst.rescans[-1].endswith(HOP)
+    assert zero.inst.rescans[-1].endswith(HARPOON)
     got = [u.rsplit("/", 1)[-1] for u in zero.net.opened]
-    assert got[0] == "carts-tdeck.json" and got[1].startswith("moybyte.hop_quest-")
+    assert got[0] == "carts-tdeck.json" and got[1].startswith("moybyte.harpoon_pop-")
 
 
 def test_a_cart_the_release_does_not_publish_is_not_installed(zero):
@@ -133,7 +133,7 @@ def test_a_cart_the_release_does_not_publish_is_not_installed(zero):
 
 def test_a_full_store_refuses_before_it_fetches_a_cart(zero):
     zero.official.reserve = 1 << 60
-    _call(zero, "POST", {"action": "install", "folder": HOP})
+    _call(zero, "POST", {"action": "install", "folder": HARPOON})
     _run(zero)
     code, doc = _call(zero, "GET")
     assert doc["state"] == "error" and doc["error"] == ci.FULL
@@ -153,13 +153,13 @@ def test_a_removal_leaves_pkg_s_record_and_a_core_cart_stays(zero):
     code, doc = _call(zero, "POST", {"action": "remove", "folder": "moybyte.files.moy"})
     assert code == 409 and doc["ok"] is False
     assert os.path.exists(zero.root + "/moybyte.files.moy")
-    code, doc = _call(zero, "POST", {"action": "remove", "folder": HOP})
+    code, doc = _call(zero, "POST", {"action": "remove", "folder": HARPOON})
     assert code == 409, "a cart the board does not hold"
 
 
 def test_one_request_at_a_time_and_none_beside_the_release_s_own_step(zero):
     assert _call(zero, "POST", {"action": "check"})[0] == 200
-    code, doc = _call(zero, "POST", {"action": "install", "folder": HOP})
+    code, doc = _call(zero, "POST", {"action": "install", "folder": HARPOON})
     assert code == 409 and doc["message"].startswith("busy")
     _run(zero)
     zero.official.other = lambda: True
@@ -168,7 +168,7 @@ def test_one_request_at_a_time_and_none_beside_the_release_s_own_step(zero):
 
 
 def test_a_cancelled_install_leaves_the_store_as_it_was(zero):
-    _call(zero, "POST", {"action": "install", "folder": HOP})
+    _call(zero, "POST", {"action": "install", "folder": HARPOON})
     zero.official.step(0)
     zero.official.step(0)
     code, doc = _call(zero, "POST", {"action": "cancel"})
@@ -176,7 +176,7 @@ def test_a_cancelled_install_leaves_the_store_as_it_was(zero):
     _run(zero)
     code, doc = _call(zero, "GET")
     assert doc["state"] == "idle" and doc["error"] is None
-    assert not os.path.exists(zero.root + "/" + HOP)
+    assert not os.path.exists(zero.root + "/" + HARPOON)
 
 
 def test_both_methods_need_a_paired_page(zero):
@@ -390,7 +390,7 @@ def test_get_carts_on_a_zero_s_page_lists_the_board_s_release(page, monkeypatch)
     _frames(ws, worker, lambda: app.phase == "list")
     rows = dict((r["cart"]["folder"], r["state"]) for r in app.rows)
     assert rows == {"moybyte.files.moy": "installed", "moybyte.calc.moy": "installed",
-                    HOP: "get", "moybyte.tap_game.moy": "get"}
+                    HARPOON: "get", "moybyte.tap_game.moy": "get"}
     assert worker.asked[0] == ("POST", '{"action": "check"}')
     assert app.free is not None and app.free[0] > 0, "the board's room, not the page's"
     assert "carts" not in ws.leases.holders(), "the page's radio is not the board's"
@@ -403,18 +403,18 @@ def test_get_on_a_zero_s_page_asks_the_board_and_brings_its_copy_over(page, zero
     ws, app, worker, proot, landed = page
     ws.spine.open_app(app)
     _frames(ws, worker, lambda: app.phase == "list")
-    i = [r["cart"]["folder"] for r in app.rows].index(HOP)
+    i = [r["cart"]["folder"] for r in app.rows].index(HARPOON)
     app._tap_row(i)
     app._press("GET")
     seen = []
     _frames(ws, worker, lambda: (seen.append(app._progress_of()), app.phase == "done")[1])
     assert any(t > 0 for _ti, _li, _d, t in seen), "the board's progress is drawn"
-    assert os.path.exists(zero.root + "/" + HOP + "/manifest.json"), "the board wrote it"
-    assert os.path.exists(proot + "/" + HOP + "/manifest.json"), "and the page has its copy"
-    assert landed == [HOP]
+    assert os.path.exists(zero.root + "/" + HARPOON + "/manifest.json"), "the board wrote it"
+    assert os.path.exists(proot + "/" + HARPOON + "/manifest.json"), "and the page has its copy"
+    assert landed == [HARPOON]
     assert app.cur["state"] == "installed"
-    assert any(c.get("path", "").endswith(HOP) for c in ws.carts.all)
-    assert ("POST", json.dumps({"action": "install", "folder": HOP})) in worker.asked
+    assert any(c.get("path", "").endswith(HARPOON) for c in ws.carts.all)
+    assert ("POST", json.dumps({"action": "install", "folder": HARPOON})) in worker.asked
 
 
 def test_remove_on_a_zero_s_page_is_the_board_s_and_a_core_cart_offers_none(page, zero):
@@ -441,9 +441,9 @@ def test_a_board_that_will_not_install_says_why_and_changes_nothing(page, zero):
     ws.spine.open_app(app)
     _frames(ws, worker, lambda: app.phase == "list")
     zero.official.reserve = 1 << 60
-    app._tap_row([r["cart"]["folder"] for r in app.rows].index(HOP))
+    app._tap_row([r["cart"]["folder"] for r in app.rows].index(HARPOON))
     app.free = None
     app._press("GET")
     _frames(ws, worker, lambda: app.phase == "failed")
     assert app.why == ci.FULL
-    assert not os.path.exists(proot + "/" + HOP)
+    assert not os.path.exists(proot + "/" + HARPOON)

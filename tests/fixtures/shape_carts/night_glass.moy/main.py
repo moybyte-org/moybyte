@@ -1,4 +1,5 @@
-# Moy Night -- the moybyte desktop wallpaper (brand colorway), drawn per glass.
+# Night Glass -- the test fixture of a per-glass static wallpaper (the brand
+# colorway), tests/ws_helpers.py, install_shape.
 #
 # A STATIC night scene: a black sky with a deterministic starfield, a crescent
 # moon under the bar at the top right, a dithered ground along the foot, and

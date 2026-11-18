@@ -429,11 +429,18 @@ RETIRED = ("Ray Test", "Ray Lua", "Layer Test", "Battle City", "Bubble Trouble",
 # (bd4d890a9, 2026-11-08), and nothing reads it. The generation lives in the
 # store's stamp (`store.ver`, below); `retired.ver`, which held it alone
 # before the stamp, is a sibling the sweep takes.
+# Generation 9 takes, by folder, the seven carts cut from the seed set on
+# 2026-11-18. The test fixtures left every image that day too, and they stay:
+# a store keeps the copy it was seeded, edited or not (tests/fixtures/
+# store_trial's Bench), as it keeps any cart, and a tool that runs one pushes
+# it over that copy.
 RETIRED_FOLDERS = tuple("moybyte.%s.moy" % s for s in (
     "ocean", "pet", "platformer", "scroll_demo", "tap_red", "theme_picker",
-    "wallpaper_space", "wifi", "mesh"))
+    "wallpaper_space", "wifi", "mesh",
+    "hop_quest", "pixel_pet", "sky_run", "tiny_runner", "ocean_desktop",
+    "open_machine", "moy_night"))
 RETIRED_SIBLINGS = ("written", "retired.ver")
-RETIRED_GEN = 8
+RETIRED_GEN = 9
 # -- the store's format and its one door (docs/refactor_2026-11.md, phase 13) --
 #
 # A store carries a FORMAT STAMP: the sidecar `store.ver` beside the carts
@@ -668,17 +675,18 @@ def stamp_board(root, me):
 # Every seed cart but a test fixture is an OFFICIAL cart: its release
 # publishes it in the board's own index (tools/web_pack.py), beside the
 # browser console add-on. A test fixture (`"moybyte": {"fixture": true}`:
-# Bench, Coin Quest and the others the perf ledger and the suites run) is
-# seeded and removed like the rest, but no index lists it, so only a tool's
-# `put_back` brings a removed one back. CORE is
+# Bench and the others the perf ledger and the suites run) is seeded on the
+# host alone: no console image carries one and no index lists one, so a tool
+# that runs one on a board pushes it for the run and removes what it pushed.
+# CORE is
 # what a console cannot work without and never offers to remove, by the ids
 # the shell opens or names: Get Carts (the way back to everything else),
 # Files, Appearance (Settings' APPEARANCE row and Files open it by id),
 # Achievements (the kernel's notify rows name it), the Wallpaper slot a
-# drawing is copied into (Files' and Paint's WALL), and Moy Night, the first
-# wallpaper and so the default backdrop (appearance.Appearance.
-# _default_wallpaper). Settings and the update screen are the shell's own and
-# no cart. tests/test_official_carts.py holds each reason to the code.
+# drawing is copied into (Files' and Paint's WALL). No wallpaper cart is core:
+# a theme that names no wallpaper shows its backdrop or its fill
+# (appearance.Appearance.theme_wallpaper). Settings and the update screen are
+# the shell's own and no cart. tests/test_official_carts.py holds each reason to the code.
 #
 # Every other seed cart is OPTIONAL: a console removes it like any cart, and
 # the removal is RECORDED in `system/removed` beside the carts folder, one
@@ -700,7 +708,7 @@ def stamp_board(root, me):
 # never fetches it again (runtime/carts/web_addon.py's AddonStep); installing
 # one drops the line. `recorded` is what a removal writes a line for.
 CORE = ("moybyte.achievements", "moybyte.appearance", "moybyte.files",
-        "moybyte.get_carts", "moybyte.moy_night", "moybyte.wallpaper")
+        "moybyte.get_carts", "moybyte.wallpaper")
 REMOVED_NAME = "system/removed"
 ADDON_LINE = "web_console"
 ADDON_PREFIX = "web_console_"

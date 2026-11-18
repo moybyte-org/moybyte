@@ -1,5 +1,5 @@
-"""Tests for the new seed cartridges (#5, #19): Pixel Pet, Tiny Runner, Hop Quest
-(platformer), and Tap Only Red (touch mini-game). Each loads through the SHARED
+"""Tests for the seed game cartridges (#5, #19): Star Catcher, Harpoon Pop and
+Tap Only Red (touch mini-game). Each loads through the SHARED
 console via host_app (the same code path the device runs) and is driven headless
 for several frames -- exercising attract-mode auto-play and, where relevant, the
 input contract (buttons + the touch() api). Kept in its own file so it doesn't
@@ -14,7 +14,7 @@ import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" prob
 
 SYSTEM_CARTS = ROOT / "system_carts"
 
-NEW_CARTS = ("Pixel Pet", "Tiny Runner", "Hop Quest", "Tap Only Red")
+NEW_CARTS = ("Star Catcher", "Tap Only Red")
 
 
 from ws_helpers import open_cart as _open_cart
@@ -31,7 +31,7 @@ def _run(ws, frames, dt=1 / 30):
 def test_seed_cart_folders_present_and_valid():
     import json
 
-    for folder in ("moybyte.pixel_pet", "moybyte.tiny_runner", "moybyte.hop_quest", "moybyte.tap_only_red", "moybyte.harpoon_pop"):
+    for folder in ("moybyte.star_catcher", "moybyte.tap_only_red", "moybyte.harpoon_pop"):
         d = SYSTEM_CARTS / (folder + ".moy")
         assert (d / "manifest.json").is_file(), folder
         assert (d / "main.py").is_file(), folder
@@ -87,120 +87,6 @@ def test_carts_are_lively_in_attract_mode(tmp_path):
 
 # -- per-cart gameplay sanity ------------------------------------------------
 
-def test_pet_feeding_and_playing_raise_meters(tmp_path):
-    from runtime import host_app
-
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _open_cart(ws, "Pixel Pet")
-    ws.ns["food"] = 10.0
-    ws.ns["joy"] = 10.0
-    ws.input.set_held("left", True)             # LEFT = feed
-    ws.input.begin_frame()
-    ws.frame(1 / 30)
-    ws.input.set_held("left", False)
-    assert ws.ns["food"] > 10.0
-    ws.input.set_held("right", True)            # RIGHT = play
-    ws.input.begin_frame()
-    ws.frame(1 / 30)
-    ws.input.set_held("right", False)
-    assert ws.ns["joy"] > 10.0
-
-
-def test_tiny_runner_collision_resets_and_keeps_best(tmp_path):
-    from runtime import host_app
-
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _open_cart(ws, "Tiny Runner")
-    ws.ns["score"] = 50.0
-    ws.ns["hero_y"] = 0.0
-    ws.ns["vel"] = 0.0
-    ws.ns["obs"][:] = [[ws.ns["HERO_X"], 10, 30]]   # an obstacle on top of the hero
-    ws.input.begin_frame()
-    ws.frame(1 / 30)
-    assert ws.ns["score"] == 0.0                    # run reset on the hit
-    assert ws.ns["best"] >= 50                       # best run preserved
-
-
-def test_platformer_collect_all_and_reach_goal_wins(tmp_path):
-    from runtime import host_app
-
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _open_cart(ws, "Hop Quest")
-    for coin in ws.ns["coins"]:
-        coin[2] = True                               # collect everything
-    gx, gy = ws.ns["goal"]
-    ts = ws.ns["TS"]
-    ws.ns["px"] = float(gx * ts)
-    ws.ns["py"] = float(gy * ts)
-    ws.input.begin_frame()
-    ws.frame(1 / 30)
-    assert ws.ns["won"] > 0.0                        # standing on the goal -> win
-
-
-def test_platformer_falling_off_respawns(tmp_path):
-    from runtime import host_app
-
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _open_cart(ws, "Hop Quest")
-    spawn = ws.ns["spawn"]
-    ts = ws.ns["TS"]
-    ws.ns["py"] = float(ws.ns["MH"] * ts + 200)           # well below the level
-    ws.input.begin_frame()
-    ws.frame(1 / 60)                     # ONE tick of this 60fps cart (#217)
-    assert ws.ns["py"] == float(spawn[1] * ts)            # back at the spawn tile
-
-
-def test_platformer_level_rows_are_equal_width():
-    # The invisible side walls depend on every row being the same length; ragged
-    # rows used to give some rows a wall 1 col closer than others (#19 review).
-    # The level is the TILEMAP now, not a string grid in main.py, so this reads the
-    # blob the Map editor writes and pins it against the cart's OWN MW/MH rather than
-    # a literal here -- re-authoring the level stays free, while a blob that disagrees
-    # with the constants (the shape a resize leaves behind) is caught.
-    import re
-
-    src = (SYSTEM_CARTS / "moybyte.hop_quest.moy" / "main.py").read_text(encoding="utf-8")
-    mw = int(re.search(r"^MW = (\d+)", src, re.M).group(1))
-    mh = int(re.search(r"^MH = (\d+)", src, re.M).group(1))
-    blob = (SYSTEM_CARTS / "moybyte.hop_quest.moy" / "map.moymap").read_text(encoding="utf-8")
-    lines = [ln.strip() for ln in blob.split("\n") if ln.strip()]
-    assert lines, "empty map.moymap"
-    assert lines[0].split() == [str(mw), str(mh)], (
-        "map header %r disagrees with main.py MW/MH (%d x %d)" % (lines[0], mw, mh))
-    rows = lines[1:]
-    assert len(rows) == mh, "expected %d rows, got %d" % (mh, len(rows))
-    widths = {len(r) for r in rows}
-    assert widths == {mw * 2}, "ragged map rows, widths seen: " + repr(sorted(widths))
-
-
-def test_platformer_attract_collects_coins_and_completes(tmp_path):
-    # The attract auto-pilot (no input) must make REAL progress, not sit in a
-    # dead limit-cycle: over a long headless run it has to collect every coin and
-    # actually complete a round (#19 review: it used to win 0/10 forever). This is
-    # the same code path the device runs.
-    from runtime import host_app
-
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _open_cart(ws, "Hop Quest")
-    ws.run.project.config["autoplay"] = 1                             # opt into the auto-pilot
-    ws.saves.apply()
-    ncoins = len(ws.ns["coins"])
-    assert ncoins > 0
-
-    max_got = 0
-    full_wins = 0
-    for _ in range(3000):                                 # long run, no input
-        ws.input.begin_frame()                            # nothing held -> attract
-        ws.frame(1 / 30)
-        got = sum(1 for c in ws.ns["coins"] if c[2])
-        if got > max_got:
-            max_got = got
-        if ws.ns["won"] >= 1.5:                           # the frame a round is won
-            full_wins += 1
-
-    assert max_got == ncoins, "attract only collected %d/%d coins" % (max_got, ncoins)
-    assert full_wins >= 1, "attract never completed a round in 3000 frames"
-
 
 def test_tap_red_scores_red_and_penalizes_other(tmp_path):
     from runtime import host_app
@@ -241,11 +127,7 @@ def test_tap_red_scores_red_and_penalizes_other(tmp_path):
 # interacts with -- the collectible, the obstacle and the goal were still circ/rect
 # in code, which is the same defect one rung down.
 CONVERTED_SHEETS = {
-    "moybyte.pixel_pet": (0, 1, 2, 3, 6),      # pet faces, then the mood face and the care heart
-    "moybyte.tiny_runner": (0, 1, 2, 32),   # runner heroes, a cactus, the parallax hill
-    "moybyte.hop_quest": (0, 1, 3, 5),  # hop heroes, the coin, the goal flag
     "moybyte.star_catcher": (0, 1, 2, 3, 6),   # catchers, star, basket span, life heart
-    "moybyte.sky_run": (0, 3, 6, 32, 34, 38),  # both heroes, coin, tree, cloud, flag
     "moybyte.harpoon_pop": (0, 2, 5, 8, 12, 64),   # both hunters, then one tile per bubble size
     "moybyte.letter_blitz": (1, 2, 3, 16, 18),     # brick, turret, star, the two tank spans
     # The bench twins' folded ray scene: one wall texture per maze tile id, and
@@ -296,7 +178,7 @@ def test_glyph_data_carts_keep_their_table_in_source():
 def test_converted_carts_draw_no_hand_rolled_art():
     # The pass this ratchet records: the collectible/obstacle/goal art moved out of
     # main.py, so these carts no longer reach for a primitive where a tile belongs.
-    for folder in ("moybyte.hop_quest", "moybyte.star_catcher", "moybyte.sky_run", "moybyte.harpoon_pop"):
+    for folder in ("moybyte.star_catcher", "moybyte.harpoon_pop"):
         src = (SYSTEM_CARTS / (folder + ".moy") / "main.py").read_text(encoding="utf-8")
         assert "spr(" in src, folder + " draws no sprites"
 
@@ -304,9 +186,7 @@ def test_converted_carts_draw_no_hand_rolled_art():
 def test_converted_carts_load_their_sheet_and_run_headless(tmp_path):
     from runtime import host_app
 
-    title_for = {"moybyte.pixel_pet": "Pixel Pet", "moybyte.tiny_runner": "Tiny Runner",
-                 "moybyte.hop_quest": "Hop Quest", "moybyte.star_catcher": "Star Catcher",
-                 "moybyte.sky_run": "Sky Run", "moybyte.harpoon_pop": "Harpoon Pop",
+    title_for = {"moybyte.star_catcher": "Star Catcher", "moybyte.harpoon_pop": "Harpoon Pop",
                  "moybyte.letter_blitz": "Letter Blitz", "moybyte.bench": "Bench",
                  "moybyte.bench_lua": "Bench Lua"}
     ws = host_app.build_workstation(str(tmp_path / "carts"))
@@ -324,38 +204,16 @@ def test_converted_carts_load_their_sheet_and_run_headless(tmp_path):
         ws.home.go_home()
 
 
-def test_pet_picker_selects_a_sprite_tile(tmp_path):
-    from runtime import host_app
-    from ws_helpers import settings_tile
-
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _open_cart(ws, "Pixel Pet")
-    ws.text.open_menu()
-    pet = [f for f in ws.cart["edit"] if f["key"] == "pet"][0]
-    assert pet["display"] == "sprite-tiles"
-    assert len(pet["choices"]) == 3
-    cx, cy = settings_tile(ws, "pet", 2)
-    ws.pointer.place(cx, cy)
-    ws.pointer.click = True
-    ws.router.handle_pointer()
-    assert ws.run.project.config["pet"] == 2
-    ws.saves.apply()
-    assert ws.cart_error is None
-    assert ws.ns["pet"] == 2                             # the running cart uses the picked tile
-
-
 # -- the wallpaper carts also moved to editable sprite tiles (#15/#18) --------
 #
-# Space Desktop (frog/robot pet) and Ocean Desktop (fish) used to hardcode their
-# character as an inline image() ASCII blob in main.py; now each keeps it in the
-# cart's sprites.moygfx and draws with spr(<int tile id>, ...). These assert the
+# Space Desktop (frog/robot pet) used to hardcode its character as an inline
+# image() ASCII blob in main.py; now it keeps it in the cart's sprites.moygfx and draws with spr(<int tile id>, ...). These assert the
 # sheet the editor loads is non-empty and the draw is a real sprite-tile draw.
 import re  # noqa: E402
 
 # Folder -> the sprite tile ids its sprites.moygfx must paint.
 WALLPAPER_SHEETS = {
     "moybyte.space_desktop": (0, 1),    # frog / robot pet faces (copied from star_catcher, #18)
-    "moybyte.ocean_desktop": (0,),                # the fish
 }
 
 
@@ -385,7 +243,7 @@ def test_wallpaper_carts_draw_via_integer_sprite_tile():
 def test_wallpaper_carts_load_their_sheet_and_run_headless(tmp_path):
     from runtime import host_app
 
-    title_for = {"moybyte.space_desktop": "Space Desktop", "moybyte.ocean_desktop": "Ocean Desktop"}
+    title_for = {"moybyte.space_desktop": "Space Desktop"}
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     for folder, tiles in WALLPAPER_SHEETS.items():
         _open_cart(ws, title_for[folder])

@@ -209,7 +209,8 @@ def test_the_shell_rows_reach_the_consoles_servers(tmp_path):
     from runtime import moy_loop
     import moy_app
     ws = build_ws(tmp_path)
-    use_theme(ws, "night", "dark")      # a wallpaper cart: Moy's is its backdrop
+    use_theme(ws, "night", "dark")
+    ws.look.select_wallpaper("moybyte.space_desktop", persist=False)   # a wallpaper cart
     app = ws.app_abi
     table = moy_app.table()
     row = {n: i for i, n in enumerate(table)}

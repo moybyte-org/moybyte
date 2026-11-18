@@ -159,8 +159,8 @@ def test_live_wallpaper_keeps_launcher_animating(tmp_path):
     live wallpaper."""
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
-    # Pick a wallpaper CART with a live _update (a STATIC cart -- Moy Night --
-    # deliberately has none, so walk the options until an animating one is found).
+    # Pick a wallpaper CART with a live _update (a STATIC cart -- the Wallpaper
+    # slot -- has none, so walk the options until an animating one is found).
     cart_opts = ws.look.wallpaper_options()
     for opt in cart_opts:
         ws.look.select_wallpaper(opt, persist=False)

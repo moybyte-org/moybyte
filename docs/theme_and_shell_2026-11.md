@@ -1103,11 +1103,11 @@ there is no setting beside it (owner, 2026-10-14). A cart is
 picture, the wallpaper copy WALL wrote); NONE is `"wallpapers": {}` with no
 `images`, the theme naming its wallpapers and none of them, so the desk is
 `desktop`'s fill under the theme's backdrop. A theme naming neither key shows
-its backdrop where its `look` has one (`moy`), and else the console's default,
-the first wallpaper cart (Moy's night on a seeded store). The look reads the
-keys at every switch (`Appearance.theme_wallpaper`): the named cart where it
-is installed, else the picture, else NONE or the backdrop, else the default;
-a SAFE start runs no cart. The backdrop is rastered into the picture's own
+its backdrop where its `look` has one (`moy`), and else its fill: no wallpaper
+cart is a console's default (the seed set's Moy Night, which was, left it on
+2026-11-18). The look reads the keys at every switch
+(`Appearance.theme_wallpaper`): the named cart where it is installed, else the
+picture, else the backdrop or the fill; a SAFE start runs no cart. The backdrop is rastered into the picture's own
 bake when its records or the colour its fill paints move (a theme load or
 mode switch; an accent change keeps it, `Wallpaper._draw_backdrop`): the
 desk draws `backdrop.desk`, the home and the handheld's every screen
@@ -1134,8 +1134,8 @@ host runs instead).
 - **The default is static.** An animated wallpaper defeats the redraw gate and
   the home's retained stamp (`launcher_layer._try_stamp_retained` is skipped
   while `ws.animating(dt)`). That is the open live-wallpaper defect (#66, #73). So
-  Moy's night, the default, is a still image, or animates only small dirty
-  rects.
+  the default is a theme's backdrop or fill, a still image, and a wallpaper
+  cart runs only where a theme or a kid names one.
 - **A wallpaper per glass** (docs/history/look_2026-10.md step 28, GAPS 23). A
   wallpaper cart whose manifest says `"moybyte": {"glass": true}` draws on
   the system canvas itself, so `W` and `H` are the glass's, and lays out
@@ -1147,9 +1147,8 @@ host runs instead).
   (`WindowedWM._clear_of_subject`). Its preview renders at the glass's size
   around the quiet rectangles it last drew with. Any other wallpaper draws
   its 320×240 frame on the game canvas, cover-cropped onto a bigger glass.
-  Moy's night draws per glass; over any wallpaper the home's title,
-  metadata and hint labels are white, the title and metadata over a black
-  shadow, as the desk's labels are.
+  Over any wallpaper the home's title, metadata and hint labels are white,
+  the title and metadata over a black shadow, as the desk's labels are.
 - **Readability at home.** A wallpaper with its own text or characters
   mid-screen fights the carousel (mocked 2026-09-27 with Space Desktop). The
   home's card band has no surface of its own: the cards lie on the

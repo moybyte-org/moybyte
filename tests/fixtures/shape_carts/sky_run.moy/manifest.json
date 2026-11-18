@@ -2,7 +2,7 @@
   "format": "moy-1",
   "version": 14,
   "title": "Sky Run",
-  "id": "moybyte.sky_run",
+  "id": "local.sky_run",
   "runtime": "python",
   "main": "main.py",
   "canvas": "320x240",
@@ -11,8 +11,6 @@
   "genre": "platformer",
   "moybyte": {
     "type": "game",
-    "system": true,
-    "order": 120,
     "permissions": [
       "graphics",
       "input",

@@ -12,7 +12,7 @@ import pytest
 
 from runtime import moy_play as tick_model
 from runtime.moy_play import Tick as TickScheduler, MAX_CATCHUP, MAX_DIV
-from ws_helpers import build_ws as _ws, select_on_home
+from ws_helpers import build_ws as _ws, install_shape, select_on_home
 
 
 # -- the scheduler, as arithmetic ---------------------------------------------
@@ -488,7 +488,8 @@ def test_a_game_holds_its_rate_on_a_faster_loop(tmp_path):
 
 def test_a_sixty_cart_runs_two_ticks_per_draw_on_a_thirty_loop(tmp_path):
     ws = _ws(tmp_path)
-    _open(ws, "Hop Quest")
+    install_shape(ws, "sky_run")                  # a cart that declares "fps": 60
+    _open(ws, "Sky Run")
     assert ws.cart["fps"] == 60 and ws.run.player.tick_ms == 16
     calls = _count(ws)
     _frames(ws, 30, 1 / 30)
@@ -723,7 +724,8 @@ def test_the_state_snapshot_carries_the_tick_model(tmp_path):
     from runtime.dev_channel import _remote_state
     ws = _ws(tmp_path)
     assert _remote_state(ws)["tick"] is None
-    _open(ws, "Hop Quest")
+    install_shape(ws, "sky_run")
+    _open(ws, "Sky Run")
     assert _remote_state(ws)["tick"] == [60, 1, 0, True]
 
 

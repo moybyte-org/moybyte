@@ -131,17 +131,18 @@ updater's available() is False, and /update says so."""
 
 [roster]
 # The image carries only the CORE carts (moy_seed.CORE: Get Carts, Files,
-# Appearance, Achievements, the Wallpaper slot and Moy Night, the default
-# backdrop), which zero_host.seed_carts seeds as a console seeds its own
+# Appearance, Achievements and the Wallpaper slot), which zero_host.seed_carts seeds as a console seeds its own
 # (present unless the kid removed one), and a new store gets nothing more
 # (owner, 2026-11-17): beside the browser console add-on the store has little
 # room above zero_host.SEED_RESERVE, and that room is the kid's. Every other
 # system cart but a test fixture is an official cart the release publishes in
 # carts-<board>.json, which the page this board serves adds and removes
 # (`/official`). With no OTA, a cable flash brings the official carts the
-# store holds to the image's release.
+# store holds to the image's release. A cable flash or a provisioning installs
+# Pin Light into a new store (2026-11-18), the cart that drives this board's
+# pins from a browser.
 image = "core"
-install = []
+install = ["moybyte.pin_light"]
 
 [flash]
 # No `after`: esptool's hard_reset (an RTS pulse through the USB-Serial/JTAG)

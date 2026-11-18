@@ -1,16 +1,14 @@
 {
   "format": "moy-1",
   "version": 6,
-  "title": "Moy Night",
-  "id": "moybyte.moy_night",
+  "title": "Night Glass",
+  "id": "local.night_glass",
   "runtime": "python",
   "main": "main.py",
   "canvas": "320x240",
   "moybyte": {
     "type": "wallpaper",
     "glass": true,
-    "system": true,
-    "order": 10,
     "permissions": [
       "graphics",
       "input"

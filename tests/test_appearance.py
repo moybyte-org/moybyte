@@ -262,22 +262,23 @@ def test_wallpaper_options_are_the_wallpaper_carts(tmp_path):
     assert ws.look.wp_cart_by_id("no-such-wallpaper") is None
 
 
-def test_a_seed_brings_the_default_wallpaper(tmp_path):
+def test_a_seed_brings_no_wallpaper_cart(tmp_path):
     """No seed names a wallpaper: the default, Moy, has a backdrop, so the
-    desk shows it (no wallpaper cart), and a theme with neither shows the
-    first wallpaper cart, as an absent setting did."""
+    desk shows it (no wallpaper cart), and a theme with neither shows its
+    fill -- no wallpaper cart is core, so none is a default."""
     ws = build_ws(tmp_path)
     assert ws.look.theme_name in THEME_NAMES
     assert ws.look.wallpaper_id is None and ws.look.backdrop("desk")
     use_theme(ws, "night", store=True)
-    assert ws.look.wallpaper_id == ws.look.wallpaper_options()[0]
-    assert ws.look.wallpaper_id != ws.look.PICTURE
+    assert ws.look.wallpaper_id is None
 
 
 def test_select_wallpaper_falls_back_on_an_unknown_id(tmp_path):
     ws = build_ws(tmp_path)
+    ws.look.select_wallpaper("moybyte.space_desktop", persist=False)
+    assert ws.look.wallpaper_id == "moybyte.space_desktop"
     ws.look.select_wallpaper("no-such-wallpaper", persist=False)
-    assert ws.look.wallpaper_id == ws.look.wallpaper_options()[0]
+    assert ws.look.wallpaper_id is None          # the theme's fill
     ws.look.select_wallpaper(None, persist=False)
     assert ws.look.wallpaper_id is None          # NONE: the theme's fill
 
@@ -365,7 +366,7 @@ def test_a_stored_wallpaper_row_reads_as_nothing(tmp_path):
 def test_picking_a_theme_brings_its_wallpaper(tmp_path):
     """The wallpaper travels with the theme: a package naming a cart shows it,
     one naming a cart that is not installed falls back to its picture, then to
-    the default; switching back to a seed brings the seed's."""
+    its fill; switching back to a seed brings the seed's."""
     ws = build_ws(tmp_path)
     opts = [o for o in ws.look.wallpaper_options() if o != ws.look.PICTURE]
     _store_package(ws, "sunset", {"wallpapers": {"desk": opts[-1]}})
@@ -373,7 +374,7 @@ def test_picking_a_theme_brings_its_wallpaper(tmp_path):
     ws.look.set_theme("sunset")
     assert ws.look.wallpaper_id == opts[-1]
     ws.look.set_theme("gone")
-    assert ws.look.wallpaper_id == opts[0]
+    assert ws.look.wallpaper_id is None
     ws.look.set_theme("moy")
     assert ws.look.wallpaper_id is None          # Moy's backdrop
 
@@ -1117,7 +1118,7 @@ def test_a_reboot_re_applies_every_persisted_look_setting(tmp_path):
         ws2 = build_ws(tmp_path)
         assert (ws2.look.theme_name, ws2.look.theme_variant) == ("contrast", "light")
         assert ws2.look.font_scale == 2
-        assert ws2.look.wallpaper_id == ws2.look.wallpaper_options()[0]
+        assert ws2.look.wallpaper_id is None         # contrast: its fill
         assert ws2.theme_colors == live_colors("contrast", "light").tokens
     finally:
         ui_draw.use_shape(None)

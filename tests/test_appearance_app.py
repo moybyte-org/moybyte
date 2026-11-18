@@ -341,11 +341,12 @@ def test_a_font_preset_on_moy_night_overrides_its_family(tmp_path):
 def test_the_wallpapers_page_is_tabs_over_cards_and_b_comes_back(tmp_path):
     ws = _ws(tmp_path)
     use_theme(ws, "night", "dark", store=True)
+    ws.look.select_wallpaper("moybyte.space_desktop", persist=False)
     app = _open(ws)
     look = ws.look
     _focus(ws, app, "Wallpaper")
     _press(ws, app, "a")
-    assert app.view == "walls" and app.tab == 1            # night's is a cart
+    assert app.view == "walls" and app.tab == 1            # the one shown is a cart
     on = app._focused
     assert on.startswith("Wallpaper ") and app._kinds[on] == "card"
     _press(ws, app, "b")

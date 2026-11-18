@@ -345,14 +345,9 @@ The pre-unification host UI (`shell.py`, `workstation.py`, `engine.py`, `api.py`
 older `.moyproj` SDK was removed in 2026-07 (git history has it).
 
 Content + tooling:
-- `system_carts/` — `moybyte.moy_night.moy` (the first wallpaper, which a theme with no backdrop shows: a STATIC night scene drawn
-  per glass, Moy asleep clear of the shell's quiet rectangles — free under the redraw
-  gate, incl. the web view),
-  `moybyte.open_machine.moy` (the STATIC MOY64 construction-grid backdrop from the visual
-  identity — also free under the redraw gate),
-  `moybyte.space_desktop.moy` (Living Desktop: starfield + pet),
-  `moybyte.ocean_desktop.moy` (bubbles + fish), `moybyte.star_catcher.moy` (a **game**: catch falling
-  stars), and `moybyte.paint.moy` (the full-canvas Paint app; saves a shared `.moyimg`,
+- `system_carts/` — `moybyte.space_desktop.moy` (Living Desktop: starfield + pet; a theme
+  that names no wallpaper shows its own backdrop or its fill),
+  `moybyte.star_catcher.moy` (a **game**: catch falling stars), and `moybyte.paint.moy` (the full-canvas Paint app; saves a shared `.moyimg`,
   publishes it through the `moybyte.wallpaper.moy` wallpaper, and can attach it to a game as
   `images/bg.moyimg`). Paint's store actions are its model's (`ArtworkService`) and
   `picture_copies`'; they are not part of the kid cart API.

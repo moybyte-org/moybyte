@@ -154,6 +154,29 @@ def _list_settled():
         "timeout": 15000}
 
 
+# Carts imported through the page's drop hook before Files opens (it lists
+# the shelf as it opens), so its list overflows whatever the seed set holds.
+_EXTRA_CARTS = 24
+
+
+def _overflow_the_shelf(tmp_path):
+    """Steps that import `_EXTRA_CARTS` copies of a small cart through
+    `pzImport`, each awaited, every copy landing under its own folder."""
+    from runtime import moy_carts
+    cart = tmp_path / "sky_run.moy.zip"
+    moy_carts.pack(os.path.join(os.path.dirname(__file__), "fixtures", "shape_carts",
+                                "sky_run.moy"), str(cart))
+    steps = [{"file": str(cart), "as": "__cart"}]
+    for _ in range(_EXTRA_CARTS):
+        steps += [
+            {"js": "window.__moyImported = null; pzImport(new File([window.__cart], "
+                   "'sky_run.moy.zip')); 'sent'"},
+            {"waitFor": "window.__moyImported", "timeout": 15000},
+            {"js": "'IMPORTED ' + JSON.stringify(window.__moyImported)"},
+        ]
+    return steps
+
+
 def test_the_wheel_scrolls_files_list_in_chrome(tmp_path, base):
     """Over Files' list a notch scrolls it and the notch back returns it,
     the pointer resting where it was."""
@@ -163,14 +186,18 @@ def test_the_wheel_scrolls_files_list_in_chrome(tmp_path, base):
         return [*_list_settled(), {"js": "'%s ' + JSON.stringify(%s)" % (tag, _LIST_HASH)}]
 
     steps = [
+        {"note": "the console up", "wait": 4000},
+        *_overflow_the_shelf(tmp_path),
+        {"js": "WORKER.postMessage({t: 'open', cart: 'moybyte.files.moy'}); 'sent'"},
         {"note": "Files up", "wait": 6000},
         {"move": at}, *probe("BEFORE"), {"shot": "files_before"},
         {"wheel": at + [0, 300]}, *probe("DOWN"), {"shot": "files_down"},
         {"wheel": at + [0, -300]}, *probe("BACK"),
     ]
-    out, js = web_e2e.run(tmp_path, "wheel_files", "?desktop=1&cart=moybyte.files.moy&dev=1",
+    out, js = web_e2e.run(tmp_path, "wheel_files", "?desktop=1&dev=1",
                           steps, base, tmp_path / "chrome_wheel", boot_ms=30000)
     got = _tagged(js)
+    assert got["IMPORTED"].startswith("imported "), out[-2000:]
     assert got["DOWN"] != got["BEFORE"], "the wheel moved nothing:\n" + out[-2000:]
     assert got["BACK"] == got["BEFORE"], "the notch back did not return it:\n" + out[-2000:]
 

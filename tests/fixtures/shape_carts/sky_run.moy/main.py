@@ -1,4 +1,6 @@
-# Sky Run -- a side-scroller that shows off the SCROLL ENGINE (#54). The world is
+# Sky Run -- the test fixture of a cart with every asset an Editor tab edits
+# (tests/ws_helpers.py, install_shape): a side-scroller that shows off the
+# SCROLL ENGINE (#54). The world is
 # WIDER than the screen: RUN with LEFT / RIGHT, HOP with A / UP. The camera follows
 # you and the whole world slides past. Grab the coins and reach the checkered flag
 # to win the round (it celebrates, then resets).

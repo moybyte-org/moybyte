@@ -95,9 +95,13 @@ def _manifest(folder):
 # -- every system cart has a faithful embedded mirror -----------------------
 
 def test_every_system_cart_has_an_embedded_entry():
+    """Every seed cart but a test fixture, which no image carries."""
     carts = _carts_by_title()
     for folder in sorted(p.name[:-4] for p in SYSTEM_CARTS.glob("*.moy")):
         man = _manifest(folder)
+        if _gdc.is_fixture(man):
+            assert man["title"] not in carts, "an image carries the fixture " + folder
+            continue
         assert man["title"] in carts, "no embedded CARTS entry mirrors " + folder
         assert TITLE_TO_FOLDER[man["title"]] == folder
 

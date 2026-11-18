@@ -7,13 +7,12 @@
 #define MOY_BUILTIN_NS "moybyte"
 
 // The core carts' ids, the initializer of a const char *const array.
-#define MOY_CORE_COUNT 6
+#define MOY_CORE_COUNT 5
 #define MOY_CORE_IDS \
     "moybyte.achievements", \
     "moybyte.appearance", \
     "moybyte.files", \
     "moybyte.get_carts", \
-    "moybyte.moy_night", \
     "moybyte.wallpaper",
 
 #endif // MOY_CORE_H

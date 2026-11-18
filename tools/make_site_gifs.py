@@ -5,14 +5,14 @@ Drives `runtime/host_app` (the same `Workstation` the T-Deck runs) with a script
 *visible* cursor that taps real controls, and records short animated GIFs of the
 2026-07 shell:
 
-  paint   open the Editor on Pixel Pet -> SPRITES tab -> paint a smile on the
-          pet's tile -> PLAY -> the pet is wearing it in the running game.
+  paint   open the Editor on Star Catcher -> SPRITES tab -> paint a smile on
+          the catcher's tile -> PLAY -> the frog is wearing it in the game.
   code    open the Editor on Star Catcher -> CODE tab -> retype a constant ->
           PLAY -> the change is on screen.
   blocks  open the Editor on Tap Game -> BLOCKS tab -> snap a new block into the
           program -> CODE tab -> the same block, compiled to Python.
-  tap     (not in the README) the Config "Make it mine" cards: pick another pet,
-          PLAY, the game runs the new one.
+  tap     (not in the README) the Config "Make it mine" cards: pick another
+          catcher, PLAY, the game runs the new one.
 
 Re-runnable any time the console changes so the README footage tracks the latest
 look (`make site-gifs`). Interactions are REAL taps through handle_pointer and
@@ -27,7 +27,7 @@ whatever is in the developer's own ~/.moybyte store.
     python tools/make_site_gifs.py --scene code    # just one
     python tools/make_site_gifs.py --scale 3 --fps 20
     python tools/make_site_gifs.py --windowed --out docs/media/desktop \
-        --wallpaper open_machine --scene paint     # the desktop tier's set
+        --wallpaper space_desktop --scene paint    # the desktop tier's set
 """
 
 import argparse
@@ -79,9 +79,9 @@ class Recorder:
                                              windowed=windowed)
         self.carts_dir = carts_dir
         # The desktop BACKDROP is a wallpaper-type cart chosen by slug (#28) -- the
-        # same id the Appearance app persists, so `--wallpaper open_machine` records
-        # exactly what a kid who picked it would see. None keeps the boot default
-        # (the first wallpaper cart in the store). persist=False: a recording must
+        # same id the Appearance app persists, so `--wallpaper space_desktop`
+        # records exactly what a kid who picked it would see. None keeps the boot
+        # default (the theme's backdrop). persist=False: a recording must
         # not depend on -- or leave -- a system/settings, and the store is a temp dir.
         if wallpaper:
             self.ws.look.select_wallpaper(wallpaper, persist=False)
@@ -370,13 +370,13 @@ class Recorder:
 
 # --- scenes -----------------------------------------------------------------
 def scene_paint(r):
-    """The hero: paint a smile onto the pet's sprite, PLAY, it's wearing it.
+    """The hero: paint a smile onto the catcher's sprite, PLAY, it's wearing it.
 
-    Pixel Pet's tile 0 is a frog with a flat red mouth bar; dragging the two
-    corners up turns it into a smile, and the pet is drawn from that same tile at
-    4x, so PLAY shows it immediately.
+    Star Catcher's tile 0 is a frog with no mouth; a red stroke across its
+    lower face is a smile, and the catcher is drawn from that same tile at 4x,
+    so PLAY shows it immediately.
     """
-    cart = r.reset_cart("moybyte.pixel_pet.moy", cfg={"autoplay": 1})
+    cart = r.reset_cart("moybyte.star_catcher.moy", cfg={"autoplay": 1})
     r.desk(16)                               # (windowed tier only) the desktop
     r.open_editor(cart)                      # lands on Config ("Make it mine")
     r.settle(14)
@@ -387,7 +387,7 @@ def scene_paint(r):
     r.settle(20)                             # the tile preview updates too
     r.tab(None, after=2)                     # PLAY
     r.park_player()
-    r.play(46)                               # ...the pet is wearing it
+    r.play(46)                               # ...the frog is wearing it
     return r.frames
 
 
@@ -439,21 +439,22 @@ def scene_blocks(r):
 
 
 def scene_tap(r):
-    """The "Make it mine" cards: pick another pet on the Config tab, then PLAY."""
-    cart = r.reset_cart("moybyte.pixel_pet.moy", cfg={"autoplay": 1})
+    """The "Make it mine" cards: pick another catcher on the Config tab, then
+    PLAY."""
+    cart = r.reset_cart("moybyte.star_catcher.moy", cfg={"autoplay": 1})
     r.desk(16)
     r.open_editor(cart)
     r.settle(20)
 
-    def _other_pet():
-        f = next(x for x in r.ws.cart["edit"] if x["key"] == "pet")
-        cur = r.ws.run.project.config.get("pet", 0)
-        for box, k in r.ws.cards_layer.page()._tiles.get("pet", ()):
+    def _other_catcher():
+        f = next(x for x in r.ws.cart["edit"] if x["key"] == "basket")
+        cur = r.ws.run.project.config.get("basket", 0)
+        for box, k in r.ws.cards_layer.page()._tiles.get("basket", ()):
             if f["choices"][k] != cur:
                 return box
         return (0, 0, 0, 0)
 
-    r.click(*_c(r.local(_other_pet)), steps=12, after=14)
+    r.click(*_c(r.local(_other_catcher)), steps=12, after=14)
     r.tab(None, after=2)                      # PLAY
     r.park_player()
     r.play(44)
@@ -512,8 +513,8 @@ def main():
     ap.add_argument("--font-scale", type=int, default=1, dest="font_scale")
     ap.add_argument("--wallpaper", default=None, metavar="SLUG",
                     help="desktop backdrop: a wallpaper cart's slug (its folder name "
-                         "without .moy, e.g. open_machine / moy_night); default = "
-                         "the store's first")
+                         "without .moy, e.g. space_desktop); default = the "
+                         "theme's backdrop")
     args = ap.parse_args()
     size = None
     if args.size:

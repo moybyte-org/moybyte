@@ -92,7 +92,7 @@ class Sheet(AppLayer):
         self.pressing = 0
         self.foot = 0
         self.vals = {"tabs": 1, "seg": 0, "list": 1, "table": 1, "toggle": True,
-                     "field": "", "named": "Sky Run", "bad": "http"}
+                     "field": "", "named": "Star Catcher", "bad": "http"}
 
     def is_app(self, cart):
         return False
@@ -190,7 +190,7 @@ class Sheet(AppLayer):
     def _dialog(self, ui, rect):
         ui.hints(("confirm", "Choose", "back", "Back"))
         ui.label("The page under the dialog")
-        ui.dialog("Delete Sky Run?", ("Cancel", "Delete"), "danger")
+        ui.dialog("Delete Star Catcher?", ("Cancel", "Delete"), "danger")
         ui.label("This can't be undone.", {"wrap": True})
         ui.dialog()
 

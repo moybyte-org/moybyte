@@ -271,14 +271,14 @@ def test_a_publish_deletes_the_official_carts_no_index_needs(tmp_path, monkeypat
 
     def seed_files(src):
         files = real(src)
-        if os.path.basename(src) == "moybyte.sky_run.moy":
+        if os.path.basename(src) == "moybyte.star_catcher.moy":
             files["main.py"] += b"\n# build %d\n" % run[0]
         return files
     monkeypatch.setattr(web_pack, "seed_files", seed_files)
 
-    def sky(board):
+    def caught(board):
         doc = json.loads((release / (web_pack.INDEX_NAME % board)).read_text())
-        entry, = [c for c in doc["carts"] if c["id"] == "moybyte.sky_run"]
+        entry, = [c for c in doc["carts"] if c["id"] == "moybyte.star_catcher"]
         return entry["assets"][0]["url"]
 
     def official():
@@ -294,18 +294,18 @@ def test_a_publish_deletes_the_official_carts_no_index_needs(tmp_path, monkeypat
         assert publish.main() == 0
 
     publish_run(0, ("tdeck", "p4"))
-    z = {0: sky("tdeck")}
-    assert sky("p4") == z[0]
+    z = {0: caught("tdeck")}
+    assert caught("p4") == z[0]
     others = official() - {z[0]}
     assert len(others) > 10 and any(n.endswith(".png") for n in others)
     for n in (1, 2):
         publish_run(n, ("tdeck",))
-        z[n] = sky("tdeck")
+        z[n] = caught("tdeck")
     # p4's index still names the first, tdeck's had the one before its own
     assert official() == others | {z[0], z[1], z[2]}
     publish_run(3, ("tdeck", "p4"))
-    z[3] = sky("tdeck")
-    assert sky("p4") == z[3]
+    z[3] = caught("tdeck")
+    assert caught("p4") == z[3]
     assert official() == others | {z[0], z[2], z[3]}
     addons = [n for n in os.listdir(str(release)) if n.startswith("moybyte_web-")
               and n.endswith(".moy.zip")]

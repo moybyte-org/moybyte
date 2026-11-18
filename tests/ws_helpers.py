@@ -20,6 +20,17 @@ from runtime import host_app
 # that draw a palette theme or a frame style; `mint`, a colours-only package.
 FIXTURE_THEMES = Path(__file__).resolve().parent / "fixtures" / "themes"
 
+# The carts of a particular shape a mechanism's test needs and no seed cart
+# has (tests/fixtures/shape_carts/<name>.moy), copied onto a console's shelf
+# by `install_shape`:
+#   sky_run       every asset an Editor tab edits (a sprite sheet, a map wider
+#                 than any glass's overview, a scene, a sound bank) and
+#                 `"fps": 60`: the Editor's tabs and panes, the map overview's
+#                 pan, the sixty-tick pace
+#   night_glass   a static wallpaper drawn per glass (`"glass": true`): W/H,
+#                 QUIET and the SUBJECT a window keeps clear of
+SHAPE_CARTS = Path(__file__).resolve().parent / "fixtures" / "shape_carts"
+
 
 def fresh_icon_caches(monkeypatch):
     """runtime/toolkit/iconsets.py's module caches, empty for this test alone: what a
@@ -136,6 +147,50 @@ def select_on_home(ws, title):
     return ws.launcher.selected()
 
 
+def install_shape(ws, name):
+    """Copy the shape cart `name` (SHAPE_CARTS) onto `ws`'s shelf, as a push
+    does, and return its cart."""
+    import json
+    import shutil
+    src = SHAPE_CARTS / (name + ".moy")
+    dst = Path(ws.carts_root) / (name + ".moy")
+    if not dst.exists():
+        shutil.copytree(src, dst)
+        ws.carts.rescan()
+    title = json.loads((src / "manifest.json").read_text())["title"]
+    return next(c for c in ws.carts.all if c["title"] == title)
+
+
+def ship_shelf(ws, target):
+    """`ws`'s shelf as the build for `target` ("device", "web") ships it: a
+    seed cart the target's roster leaves out (a test fixture,
+    tools/gen_device_carts.roster), which the host seeds for its own tests,
+    is taken off the live roster. Returns `ws`."""
+    import os
+    from tools import gen_device_carts as gen
+    seeds = set(gen.cart_order())
+    ships = set(gen.roster(target))
+    keep = [c for c in ws.carts.all
+            if os.path.basename((c.get("path") or "").rstrip("/"))[:-len(".moy")]
+            not in seeds - ships]
+    if len(keep) != len(ws.carts.all):
+        ws.carts.apply(keep)
+    return ws
+
+
+def shelf_cart(ws, title):
+    """The cart titled `title` on `ws`'s shelf: a seeded one, else the shape
+    cart of that title, installed (`install_shape`)."""
+    import json
+    cart = next((c for c in ws.carts.all if c.get("title") == title), None)
+    if cart is not None:
+        return cart
+    for d in sorted(SHAPE_CARTS.iterdir()):
+        if json.loads((d / "manifest.json").read_text())["title"] == title:
+            return install_shape(ws, d.name[:-len(".moy")])
+    raise AssertionError("no cart titled %r on the shelf or among the shape carts" % title)
+
+
 def open_cart(ws, title):
     """Open a seeded cart by TITLE. Games, the kid's carts and apps live in
     the home's tabs; a WALLPAPER leaves them (spec shell_ux_v1.md) but stays
@@ -228,11 +283,11 @@ def build_ws_with_shelf(tmp_path, n):
 
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)        # seeds the system carts
-    while len(ws.launcher.items) < n:                 # top up with extra carts
-        i = len(ws.launcher.items)
+    while len(ws.launcher.items) < n:                 # top up with extra games:
+        i = len(ws.launcher.items)                    # the Games tab's shelf
         moy_carts.create("Extra %02d" % i, carts_dir,
-                         src="def _draw():\n    cls(1)\n", type="app")
-        ws.launcher.items = shelf(carts_dir)
+                         src="def _draw():\n    cls(1)\n", type="game")
+        ws.launcher.items = [c for c in shelf(carts_dir) if c.get("type") == "game"]
     ws.launcher.sel = 0
     ws.launcher.scroll = 0
     return ws

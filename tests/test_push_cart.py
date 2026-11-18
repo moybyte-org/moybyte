@@ -1337,3 +1337,19 @@ def test_the_on_glass_suites_push_through_the_same_body(tmp_path):
     os.remove(os.path.join(cart, name))
     on_glass._push_folder(_driver(dev2, "p4"), BOARD_DIRS["p4"], cart, d)
     assert not any(p.endswith(".aot") for p in dev2.fs.files), dev2.fs.files
+
+
+def test_push_fixtures_pushes_only_the_test_fixtures_it_is_named(monkeypatch):
+    """A tool that runs seed carts on a board pushes the test fixtures among
+    them, which no image carries, and only those; a folder the store held
+    already is not the tool's to remove, so it is not in what comes back."""
+    calls = []
+
+    def push_folder(b, board_dir, local, folder):
+        calls.append(folder)
+        return folder != "moybyte.bench.moy"            # the store held Bench
+    monkeypatch.setattr(push_cart, "push_folder", push_folder)
+    got = push_cart.push_fixtures(None, "bdir", ["Brick Siege", "Brick Siege Lua",
+                                                 "Bench", "Star Catcher", "No Such"])
+    assert calls == ["moybyte.brick_siege_lua.moy", "moybyte.bench.moy"]
+    assert got == ["moybyte.brick_siege_lua.moy"]
