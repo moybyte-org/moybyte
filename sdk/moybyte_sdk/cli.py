@@ -577,7 +577,10 @@ def check_manifest(man, cart, errors, warnings):
         if r is None:
             errors.append('"%s" is no permission (native/os_calls.json): it grants nothing' % p)
         elif not any(t in r[app_perms.TIERS] for t in tiers):
-            warnings.append('"%s" is never granted on the %s tier' % (p, tier))
+            # the console refuses it at install and launch (app_perms._served)
+            errors.append('"%s" is never granted on the %s tier%s'
+                          % (p, tier, ': a cart there reaches the internet through "http"'
+                             if p == "network" else ""))
     req = ven.get("required", [])
     if not _strs(req):
         errors.append('"required" is not a list of names')

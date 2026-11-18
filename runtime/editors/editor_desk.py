@@ -49,6 +49,9 @@ _OWNERS = {"cards": ("cards_layer", "layout"), "blocks": ("block_ui", "block_lay
            "theme_config": ("theme_config_layer", "layout"),
            "theme_sprites": ("theme_sprites_layer", "layout")}
 
+# The Editor's tabs (`EditorApp._offers` answers for these).
+_OPENED = ("cards", "code", "blocks", "paint", "map", "scene", "music")
+
 # The tabs whose pane layouts `warm_step` builds ahead: those `_pane_layout`
 # knows how to lay out.
 _OWNERS_OR_CODE = tuple(_OWNERS) + ("code",)
@@ -240,6 +243,17 @@ class EditorDesk(Layer):
         cart = self.ws.cart
         return bool(cart is not None and cart.get("blocks") and self.ws.text.takes_blocks())
 
+    def lacks(self):
+        """The panes the open cart has not got: each whose Editor tab, or
+        the tab it serves, the Editor does not offer it (`_offers`)."""
+        offers = self.ws.editor_app._offers
+        return tuple(c for c in P.CONTENTS
+                     if P.tab_for(c) in _OPENED and not offers(P.tab_for(c)))
+
+    def keys(self):
+        """The workspace keys the open cart has, in the row's order."""
+        return [k for k, _l, _i in self.ws.editor_app.workspaces()]
+
     def arrangement(self):
         """The workspace on show at the surface's size, its dividers as the
         board remembers them for this project and size."""
@@ -260,7 +274,7 @@ class EditorDesk(Layer):
         return arr
 
     def _new_arrangement(self, key, area, u):
-        arr = P.Arrangement(key, area, u, self._blocks(), self.shows_game())
+        arr = P.Arrangement(key, area, u, self._blocks(), self.shows_game(), self.lacks())
         arr.restore(self._saved().get(self._mem_key(arr)))
         return arr
 
@@ -275,7 +289,7 @@ class EditorDesk(Layer):
     def _warm_sig(self, key, area, u):
         cart = self.ws.cart or {}
         return (key, area, u, self._blocks(), cart.get("path") or cart.get("title"),
-                self.shows_game())
+                self.shows_game(), self.lacks())
 
     def warm_step(self):
         """On a quiet frame, one workspace not on show made ready as its first
@@ -304,7 +318,7 @@ class EditorDesk(Layer):
         if self._warm_for != mark:
             self._warm_for = mark
             self._warm.clear()
-            self._warm_left = [k for k in P.KEYS if k != self.key]
+            self._warm_left = [k for k in self.keys() if k != self.key]
         left = self._warm_left
         self._warm_due = len(left) > 1
         while left:
@@ -367,7 +381,7 @@ class EditorDesk(Layer):
     def switch(self, key):
         """Show workspace `key`. The panes left behind that hold an edit owe
         their commit (`EditorApp.commit_later`); focus lands where it was."""
-        if key == self.key or key not in P.KEYS or self.key == P.THEME:
+        if key == self.key or key not in self.keys() or self.key == P.THEME:
             return False
         app = self.ws.editor_app
         for pane, _r, _p in self.panes():
@@ -386,10 +400,11 @@ class EditorDesk(Layer):
         return True
 
     def step(self, d):
-        if self.key not in P.KEYS:
+        keys = self.keys()
+        if self.key not in keys:
             return False
-        i = (P.KEYS.index(self.key) + d) % len(P.KEYS)
-        return self.switch(P.KEYS[i])
+        i = (keys.index(self.key) + d) % len(keys)
+        return self.switch(keys[i])
 
     def _land(self):
         """The workspace's panes built, and the focused pane's tab the
@@ -1839,7 +1854,9 @@ class EditorDesk(Layer):
         if ctrl and mods & _ALT and code in (_LEFT, _RIGHT, _UP, _DOWN):
             return self._nudge(code)
         if ctrl and not mods & (_ALT | _SHIFT) and ord("1") <= code <= ord("5"):
-            return self.switch(P.KEYS[code - ord("1")]) or True
+            keys = self.keys()
+            n = code - ord("1")
+            return (n < len(keys) and self.switch(keys[n])) or True
         if ctrl and code == 9:                          # Ctrl+Tab, Ctrl+Shift+Tab
             self.step(-1 if mods & _SHIFT else 1)
             return True

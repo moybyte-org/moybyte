@@ -51,6 +51,7 @@ is the code line-height for the crash panel, imported from the code editor leaf
 test load).
 """
 
+import sys as _sys
 import chrome_ops as _ch
 
 # #65 Phase 2: the lockstep frame's local-input packer. The BUTTON ORDER comes
@@ -220,6 +221,7 @@ class Player(PlayerDiag):
         self._notice = None           # a notice's text: the panel is a notice
                                       # while cart_error still holds it (`notice`)
         self.notice_title = None  # ...and the title it is drawn under (None: the fit's)
+        self._detail = None           # ...and its cause exact, under Details
         self.crash_line = None        # 1-based cart line of the last runtime crash (#24)
         self.crash_file = None        # WHICH of the cart's scripts that line is in
                                       # (SPEC.md 4), or None for main/no crash
@@ -992,12 +994,13 @@ class Player(PlayerDiag):
         self.crash_file = None
         return False
 
-    def _refuse_notice(self, text, title):
+    def _refuse_notice(self, text, title, detail=None):
         """Refuse a run before any of the cart's code has run, on the panel
-        drawn as a notice under `title`."""
+        drawn as a notice under `title`, `detail` its cause exact."""
         self._refuse(text)
         self._notice = text
         self.notice_title = title
+        self._detail = detail
         return False
 
     def _begin_run(self, ws, project, t0):
@@ -1500,16 +1503,24 @@ class Player(PlayerDiag):
                 raise ValueError("unknown cart runtime '%s'" % runtime)
             if make is None:
                 # The graceful floor: a cart on a build without its runtime
-                # opens the panel, never a hang.
-                raise RuntimeError("needs the %s runtime (not in this build)"
-                                   % RUNTIME_NAMES[runtime])
+                # gets the notice that says so, never a hang; its cause
+                # exact under Details. A native cart in the browser is the
+                # board-only one.
+                raise _Refused(_ui_draw.s("say.board_only_text"
+                                          if runtime == "elf" and _sys.platform == "webassembly"
+                                          else "say.runtime_text"),
+                               _ui_draw.s("say.runtime"),
+                               "needs the %s runtime (not in this build)"
+                               % RUNTIME_NAMES[runtime])
             if runtime == "wasm" or runtime == "elf":
                 # A compiled cart's imports against this console's table, and
                 # a compiled or native cart's load footprint against what this
                 # console can give it, before anything loads.
                 cart = ws.cart or {}
                 if runtime == "elf" and _cart_unbuilt(make, cart):
-                    raise _Refused(_ui_draw.s("say.chip_text"), _ui_draw.s("say.chip"))
+                    raise _Refused(_ui_draw.s("say.chip_text"), _ui_draw.s("say.chip"),
+                                   "no main.%s.elf" % make.engine.CHIP
+                                   if hasattr(make, "engine") else None)
                 missing = _cart_missing(make, cart)
                 if missing:
                     raise _Refused(newer_notice(missing),
@@ -1563,7 +1574,7 @@ class Player(PlayerDiag):
                 if notice is not None:
                     sub = INTERP_NOTICE_SUB.get(getattr(lua, "interp_cause", None),
                                                 INTERP_NOTICE_SUB_DEFAULT)
-                    notice(INTERP_NOTICE_TITLE, sub, "warn")
+                    notice(INTERP_NOTICE_TITLE, _ui_draw.s(sub), "warn")
             t_exec = _ticks_diff(_ticks_ms(), t5)
             t6 = _ticks_ms()
             if lua.init is not None:
@@ -1591,14 +1602,17 @@ class Player(PlayerDiag):
             # retried on the interpreter inside WasmRun -- what reaches here
             # is a real error (a trap, a bad signature, a malformed cart).
             # A native cart's is the same.
-            if runtime == "wasm" or runtime == "elf":
+            if isinstance(exc, _Refused):
+                self.crash_file, self.crash_line = None, None
+                self._notice = self.cart_error = exc.args[0]
+                self.notice_title = exc.args[1]
+                self._detail = exc.args[2] if len(exc.args) > 2 else None
+            elif runtime == "wasm" or runtime == "elf":
                 self.crash_file, self.crash_line = None, None
                 title = (ws.cart or {}).get("title")
-                if isinstance(exc, _Refused):
-                    self._notice = self.cart_error = exc.args[0]
-                    self.notice_title = exc.args[1]
-                elif _out_of_memory(exc):
+                if _out_of_memory(exc):
                     print("Moybyte cart load:", self.cart_error)
+                    self._detail = self.cart_error
                     fit = _cart_fit(make, ws.cart or {})
                     self._notice = self.cart_error = fit_notice(
                         title, fit[0] if fit else None, fit[1] if fit else None)
@@ -1612,7 +1626,7 @@ class Player(PlayerDiag):
                                 _ticks_diff(_ticks_ms(), t0),
                                 h0[0], h1[0], h0[1], h1[1])
             if self.notice:
-                _os_log.failed(self.pid, self.cart_error)
+                _os_log.failed(self.pid, self._detail or self.cart_error)
             else:
                 self._crashed(None, self.cart_error)
             self._print_run_diag("RUNERR", "err=%s" % self.cart_error)
@@ -2102,6 +2116,12 @@ class Player(PlayerDiag):
         console has."""
         n = self._notice
         return n if n is not None and n == self.cart_error else None
+
+    @property
+    def notice_detail(self):
+        """The notice up's cause exact, for the stop card's Details (a
+        parent's or the cart's author's), else None."""
+        return self._detail if self.notice is not None else None
 
     @property
     def newer(self):

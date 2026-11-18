@@ -159,7 +159,9 @@ costs are #227's.
   run, a service's start). So `clipboard` is Python's, wasm's and ELF's,
   `network` Python's and ELF's (its sockets), `notifications` and `front`
   every tier's, `alarms` too, and an install prompt
-  asks a cart only for what its tier can do (`tests/test_app_perms.py`).
+  asks a cart only for what its tier can do; one that asks for what none of
+  its tiers serves (a Lua or wasm cart's `network`, whose door is `http`) is
+  refused at install and launch, by name (`tests/test_app_perms.py`).
 - **Trust** is the overview's §4 C row: an ELF that has loaded runs at the
   kernel's trust, and no permission binds it past its consent. The strike ledger and crash record are the floor, keyed for
   an unsigned module by **content hash**, since an id is the author's to

@@ -175,8 +175,7 @@ def manifest_check(inst, man, folder, shelf):
     consent = inst.consent()
     _g, _a, refusal = consent.check(cart, install=True)
     if refusal is not None:
-        raise _ci.InstallError("Not for this console: " + refusal,
-                               "%s: %s" % (folder, refusal))
+        raise _ci.InstallError(_ci.NOT_HERE, refusal)
     if _perms.vendor(man).get("type") == "command":
         name = _command_name(cart["id"])
         why = None

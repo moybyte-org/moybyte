@@ -656,7 +656,12 @@ opens a text file from Files with (Notes).
 it is a `NameError` (Lua: `nil`), like a typo. A permission the user turned
 off in Settings (About → App permissions) has its names bound to `None`
 (`nil`), so `if prefs is None:` is how an app copes. A permission naming what
-this console lacks (`pins` on a board without them) leaves no name. Only a
+this console lacks (`pins` on a board without them) leaves no name. A
+permission none of the cart's tiers serves (its own, and its service's) is the
+cart's mistake: the install and the launch refuse it, naming it, and `moy app
+check` reports it as an error. `network` is the one an author meets: it hands
+Python's `wifi` and a native module's sockets, and the way every tier reaches
+the internet is `http` (`moybyte.http`, by handle on the compiled tiers). Only a
 `required` one refuses the launch, naming what is missing, at install and
 again at launch; an app requiring a device the console lacks shows no run
 tile (the home's Games, Mine and Apps, the desk), while Files and Make still

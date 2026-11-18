@@ -300,7 +300,10 @@ def _refusal(perm, why, tier):
     if why == "folder":
         return 'needs "%s" - this console has no such folder' % perm
     if why == "tier":
-        return 'needs "%s" - not for a %s cart' % (perm, tier)
+        if perm == "network":
+            return ('asks for "network", which is a Python or native cart\'s: a %s cart '
+                    'reaches the internet through "http"' % tier)
+        return 'asks for "%s", which a %s cart cannot hold' % (perm, tier)
     return 'needs "%s" - this console does not know it' % perm
 
 
@@ -309,8 +312,9 @@ def check(cart, rec, have):
     console holding the services `have`, under consent record `rec` (None:
     none; UNASKED: every permission absent and the run refused).
     `granted` and `absent` split the manifest's permissions; `refusal` is
-    the message naming the first `required` permission that is absent, else
-    None."""
+    the message naming the first `required` permission that is absent, or
+    the first that no tier of the cart's serves (`_served`: a Lua or wasm
+    cart's `network`, whose door is `http`), else None."""
     perms = (cart.get("permissions") if cart else None) or ()
     if rec is UNASKED:
         return [], list(perms), UNASKED_REFUSAL
@@ -324,7 +328,8 @@ def check(cart, rec, have):
             granted.append(p)
             continue
         absent.append(p)
-        if refusal is None and (p in req or why == "folder"):
+        if refusal is None and (p in req or why == "folder" or (
+                why == "tier" and not _served(p, cart))):
             refusal = _refusal(p, why, tier)
     if refusal is None:
         for p in req:
@@ -335,6 +340,15 @@ def check(cart, rec, have):
         refusal = (_refusal("full_access", _why_absent("full_access", tier, have, rec), tier)
                    if "full_access" in perms else 'a native cart must ask for "full_access"')
     return granted, absent, refusal
+
+
+def _served(perm, cart):
+    """Whether one of the tiers `cart`'s programs run on (`tiers_of`: its
+    own and its service's) serves `perm`. One none of them serves is the
+    cart's mistake, refused at install and at launch with what to ask for
+    instead, never a name that is silently absent."""
+    r = row(perm)
+    return r is not None and any(t in r[TIERS] for t in tiers_of(cart))
 
 
 def lacking(cart, have):

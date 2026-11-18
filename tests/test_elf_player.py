@@ -169,7 +169,9 @@ def test_a_trap_shows_the_stop_card(ws):
     assert p.cart_error is not None and "SIGSEGV" in p.cart_error, p.cart_error
     card = ws.pause
     assert card.open and card.stopped
-    assert card.rows == (card.RESTART, card.HOME), "a native cart has no code to see"
+    # its src/ to read, its trap's text under Details, and no See why: a
+    # native trap has no line to open
+    assert card.rows == (card.RESTART, card.SEE_CODE, card.HOME, card.DETAILS)
     from runtime import elf_binding
     assert elf_binding.info(pid) is None
     card.choose_row(card.RESTART)
@@ -219,7 +221,8 @@ def test_a_game_built_for_another_chip_gets_the_chip_notice(tmp_path, built):
     assert p.notice_title == en["strings"]["say.chip"]
     _frames(ws, 2)
     card = ws.pause
-    assert card.rows == (card.HOME,), "a notice, not a stop: nothing to restart"
+    assert card.rows == (card.HOME, card.DETAILS), "a notice, not a stop: nothing to restart"
+    assert p.notice_detail == "no main.host.elf"
 
 
 def test_a_command_has_no_screen_to_present_to(tmp_path):

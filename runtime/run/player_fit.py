@@ -159,11 +159,13 @@ _OUT_OF_MEMORY = "out of memory"
 # other non-tamper refusal (a corrupt or foreign-chip key despite a matching
 # file name) reads the same as "missing": this console's copy is not one it
 # can use, whatever the reason.
+# The sub-lines are the shell's strings (`slow.<cause>`), in a kid's words:
+# the cause's detail is the cart log's (moycore_glue's interp line).
 INTERP_NOTICE_TITLE = "RUNNING SLOWLY"
 INTERP_NOTICE_SUB = {
-    "missing": "needs an update",
-    "unsigned": "isn't signed",
-    "firmware": "console needs an update",
+    "missing": "slow.missing",
+    "unsigned": "slow.unsigned",
+    "firmware": "slow.firmware",
 }
 INTERP_NOTICE_SUB_DEFAULT = INTERP_NOTICE_SUB["missing"]
 

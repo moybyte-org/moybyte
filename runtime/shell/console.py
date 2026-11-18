@@ -2277,8 +2277,8 @@ class Workstation:
             self.run.player.crash_line = None
             self.home.go_home()
             return True
-        # A compiled cart has no source to open: its trap stays on the stop
-        # card, which offers no See why (native/moy_wasm/README.md).
+        # A compiled cart's trap has no line to open: it stays on the stop
+        # card, which offers See the code instead (`see_code`).
         if _carts.is_compiled(self.cart):
             return False
         err = self.cart_error or "crashed"
@@ -2291,6 +2291,35 @@ class Workstation:
         # set that may only shrink (tests/test_console_facade.py), and this is a
         # new name with two readers.
         self.code_file = self.run.player.crash_file or None
+        self._open_code()
+        if line is not None:
+            # Land the caret on the line that raised (set_menu_view only marks
+            # it when it BUILDS the editor -- an editor kept open across the
+            # PLAY needs the explicit jump).
+            self.saves.mark_code_error(line - 1, err[:32])
+        self.crash_popup = err
+        self.frame_state.dirty = True
+        return True
+
+    def see_code(self):
+        """The stop card's See the code: a compiled cart's `src/` in the Code
+        tab, to read (`EditorApp.code_read_only`), on no line, since a
+        module's trap has none. True when it navigated; False (no project, a
+        parked console, a cart with no `src/`, or not a compiled one) keeps
+        the card."""
+        if self.run.project is None or self.cart is None or self.web.parked:
+            return False
+        if not _carts.is_compiled(self.cart) or not self.text.code_sources():
+            return False
+        self.cart_error = None
+        self.run.player.crash_line = None
+        self.code_file = None
+        self._open_code()
+        return True
+
+    def _open_code(self):
+        """The stopped run's world released as a normal exit's is, and the
+        Editor open on its Code tab over `code_file`."""
         self.run.player.release_world()
         # Windowed desk world (#73/#105): the crashed playtest window closes
         # like a normal exit (never truncating windows stacked above it);
@@ -2301,14 +2330,7 @@ class Workstation:
         self.editor_app.open(self.run.project)
         self.editor = None            # rebuild over the file that raised
         self.text.set_menu_view("code")
-        if line is not None:
-            # Land the caret on the line that raised (set_menu_view only marks
-            # it when it BUILDS the editor -- an editor kept open across the
-            # PLAY needs the explicit jump).
-            self.saves.mark_code_error(line - 1, err[:32])
-        self.crash_popup = err
         self.frame_state.dirty = True
-        return True
 
     def running_cart_shows_bar(self):
         """True while a TOOL/APP cart is PLAYING (screen "desktop", not crashed): it runs

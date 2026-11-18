@@ -232,6 +232,7 @@ NO_MEMORY = "Not enough memory free to unpack it."
 NET_MEMORY = "Not enough memory free to download. Restart the console, then try again."
 BAD_SIGNATURE = "The cart shelf's signature is wrong."
 NOT_FOR_APPS = "It uses a part of the console apps can't: %s."
+NOT_HERE = "This cart can't be installed on this console."
 
 _MP = getattr(sys, "implementation", None) is not None \
     and sys.implementation.name == "micropython"

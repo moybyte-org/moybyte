@@ -26,14 +26,21 @@ def _stopped(tmp_path, src=CRASHER, **kw):
 
 # -- the stop card (GAPS 49) ---------------------------------------------------------
 
-def test_a_crash_opens_the_stop_card_with_see_why_restart_and_home(tmp_path):
+def test_a_crash_opens_the_stop_card_with_see_why_restart_home_and_details(tmp_path):
     ws = _stopped(tmp_path)
     p = ws.pause
     assert ws.cart_error and p.open and p.stopped
-    assert p.rows == (p.SEE_WHY, p.RESTART, p.HOME)
+    assert p.rows == (p.SEE_WHY, p.RESTART, p.HOME, p.DETAILS)
     assert ws.wm.top_is_player()                 # over the run's last frame
     card = p._host.box("Pause")
     assert card is not None and card[2] > 0
+    assert not p.details
+    p.choose_row(p.DETAILS)                      # the error exact, the card staying up
+    _frames(ws)
+    assert p.open and p.details
+    p.choose_row(p.DETAILS)
+    _frames(ws)
+    assert p.open and not p.details and p._host.box("Pause")[3] == card[3]
     p.choose_row(p.SEE_WHY)                      # the crash-to-code throw
     assert ws.screen == "menu" and ws.menu_view == "code"
     assert ws.crash_popup and not p.open
@@ -55,7 +62,7 @@ def test_a_compiled_carts_trap_has_no_see_why(tmp_path):
     ws.cart["runtime"] = "wasm"
     _frames(ws, 3)
     p = ws.pause
-    assert p.open and p.rows == (p.RESTART, p.HOME)
+    assert p.open and p.rows == (p.RESTART, p.HOME, p.DETAILS)
 
 
 def test_a_notice_is_the_same_card_over_the_screen_it_was_asked_from(tmp_path):

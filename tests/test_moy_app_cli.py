@@ -306,3 +306,15 @@ def test_the_package_puts_moy_app_on_path():
     found = text.split("[tool.setuptools.packages.find]", 1)[1].split("\n[", 1)[0]
     assert '"sdk"' in found and '"moybyte_sdk*"' in found
     assert callable(cli.main)
+
+
+def test_network_on_a_lua_cart_is_an_error_that_names_http(tmp_path):
+    """The console refuses a Lua cart that asks for `network` (app_perms:
+    no Lua name serves it), so `check` says so first, with the door it has."""
+    cart = _new(tmp_path, "lua", tier="lua")
+    _manifest(cart, lambda m: m["moybyte"]["permissions"].append("network"))
+    errors, _w, _n = cli.check_cart(cart)
+    assert ('"network" is never granted on the lua tier: a cart there reaches the '
+            'internet through "http"') in errors
+    _manifest(cart, lambda m: m["moybyte"].update(permissions=["http"]))
+    assert not [e for e in cli.check_cart(cart)[0] if "never granted" in e]

@@ -687,7 +687,7 @@ _AOT_TAMPER_EVIDENCE = ("refused: bad signature", "refused: malformed signature"
 
 # The one non-tamper refusal that names a SIGNED-vs-not cause rather than a
 # stale/foreign module: `self.interp_cause` reads this to pick the notice's
-# sub-line ("isn't signed" against "needs an update", runtime/run/player.py).
+# sub-line (`slow.unsigned` against `slow.missing`, runtime/run/player_fit.py).
 _AOT_UNSIGNED = "refused: unsigned module"
 
 # A load that stops on a helper the module calls and this firmware's runtime

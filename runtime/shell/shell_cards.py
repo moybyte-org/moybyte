@@ -18,6 +18,7 @@ import ui as _ui
 import layout_base as _lb
 import shell_layout as _shell_layout
 import app_perms as _perms
+import moy_carts as _carts
 import about_ui as _about_ui
 
 
@@ -89,13 +90,21 @@ class PauseMenu:
 
     A stopped run is its sibling, the stop card (GAPS 49, `stop`): the same
     card over the run's last frame washed, naming the cart and Stopped, the
-    sentence (`say.crash_line`), the error exact in the code face on a
-    `sunk` inset, then See why (the Code tab on the line,
+    sentence (`say.crash_line`), then See why (the Code tab on the line,
     `Workstation._crash_to_code`; none for a compiled or native cart or
-    one with nothing to edit), Restart and Home, its keys in its foot. A notice (a
+    one with nothing to edit), Restart, Home and Details (the error exact
+    in the code face on a `sunk` inset), its keys in its foot. A notice (a
     compiled cart this console cannot run) is the same card with its words
     in the body face and Open Updates (a newer console's) or Home. Esc, B or
-    Super leave for Home."""
+    Super leave for Home.
+
+    What a kid reads comes first, in the shell's strings: the sentence,
+    then what to do (`stop.yours` where See why opens the line, else
+    `stop.maker`, a compiled cart's, whose bug only its maker can fix). The
+    error exact, or a notice's cause, waits under Details, the card's last
+    row, for a parent or the cart's author: chosen, it stands where the
+    words were, and chosen again, the words come back. A compiled cart that ships
+    `src/` has See the code, its `src/` to read (`Workstation.see_code`)."""
 
     ITEMS = ("Resume", "Restart", "Options", "Quit")
     ICONS = ("play", "rotate", "settings", "close")
@@ -106,8 +115,9 @@ class PauseMenu:
     DESK_ITEMS = ("Resume", WINDOW, "Restart", "Options", "Quit")
     DESK_ICONS = ("play", "maximize", "rotate", "settings", "close")
     SEE_WHY, RESTART, HOME, UPDATES = "See why", "Restart", "Home", "Open Updates"
+    SEE_CODE, DETAILS = "See the code", "Details"
     _STOP_ICONS = {"See why": "code", "Restart": "rotate", "Home": "home",
-                   "Open Updates": "settings"}
+                   "Open Updates": "settings", "See the code": "code", "Details": "doc"}
 
     def __init__(self, ws):
         self.ws = ws
@@ -123,6 +133,7 @@ class PauseMenu:
         self._hold = _ui_draw.Hold()
         self._capture = False       # keep that frame before the card first draws
         self.stopped = False        # the stop card, over a run that stopped
+        self.details = False        # ...its Details shown: the error exact
         self.rows = self.ITEMS      # the card's rows
         self.icons = self.ICONS
 
@@ -171,11 +182,16 @@ class PauseMenu:
         cart = ws.cart or {}
         if player.notice is not None:
             rows = (self.UPDATES, self.HOME) if player.newer else (self.HOME,)
-        elif (ws.run.project is None or cart.get("runtime") == "wasm" or cart.get("native")
-              or ws.web.parked):
-            rows = (self.RESTART, self.HOME)
+            if player.notice_detail:
+                rows += (self.DETAILS,)
+        elif ws.run.project is None or ws.web.parked:
+            rows = (self.RESTART, self.HOME, self.DETAILS)
+        elif _carts.is_compiled(cart):
+            rows = ((self.RESTART, self.SEE_CODE, self.HOME, self.DETAILS)
+                    if ws.text.code_sources() else (self.RESTART, self.HOME, self.DETAILS))
         else:
-            rows = (self.SEE_WHY, self.RESTART, self.HOME)
+            rows = (self.SEE_WHY, self.RESTART, self.HOME, self.DETAILS)
+        self.details = False
         self.rows = rows
         self.icons = tuple([self._STOP_ICONS[r] for r in rows])
         self._open()
@@ -235,11 +251,21 @@ class PauseMenu:
 
     def choose_row(self, row):
         """A stop card's row: See why throws into the Code tab on the line,
-        Restart runs the cart again, Open Updates opens Settings' Updates,
-        Home leaves for the run's caller."""
+        See the code opens a compiled cart's `src/` there to read, Restart
+        runs the cart again, Open Updates opens Settings' Updates, Home
+        leaves for the run's caller, and Details shows or hides the error
+        exact, the card staying up."""
         ws = self.ws
+        if row == self.DETAILS:
+            self.details = not self.details
+            self._host.reset()
+            ws.pause_touch()
+            ws.mark_dirty()
+            return
         self._shut()
         if row == self.SEE_WHY and ws.crash_to_code():
+            return
+        if row == self.SEE_CODE and ws.see_code():
             return
         if row == self.RESTART:
             ws.reset_canvas_state()
@@ -516,6 +542,11 @@ class PauseMenu:
         if host.due():
             ws.request_frame()
 
+    def _error_lines(self):
+        """The error exact's inset: four lines on the desk, three on a
+        handheld, whose glass holds it with the card's rows."""
+        return _STOP_ERROR if _desk_class() else _STOP_ERROR_HAND
+
     def _stop_body(self, cart):
         """The stop card's body under its icon: the cart and its state, what
         happened, the rows and the keys."""
@@ -526,21 +557,32 @@ class PauseMenu:
             _ui.info(title, "")
             _ui.rule()
             _ui.label(str(player.notice_title or ""), _STOP_SENTENCE)
-            _ui.label(player.notice, _STOP_WORDS)
+            if self.details and player.notice_detail:
+                _ui.label(player.notice_detail, self._error_lines())
+            else:
+                _ui.label(player.notice, _STOP_WORDS)
         else:
             _ui.info(title, "Stopped")
             _ui.rule()
             _ui.label(_ch.crash_title(ws.cart_error, ws.run.player.crash_line), _STOP_SENTENCE)
-            _ui.label(str(ws.cart_error or "").strip() or _ui_draw.s("chrome.no_text"),
-                      _STOP_ERROR)
+            if self.details:
+                _ui.label(str(ws.cart_error or "").strip() or _ui_draw.s("chrome.no_text"),
+                          self._error_lines())
+            else:
+                _ui.label(_ui_draw.s("stop.yours" if self.SEE_WHY in self.rows
+                                     else "stop.maker"), _STOP_WORDS)
         _ui.menu("", self.rows, self.icons)
-        _ui.hints(("confirm", "Choose", "back", "Home"))
+        if _desk_class() or not (self.details or self.SEE_CODE in self.rows):
+            # a handheld's glass holds the keys under three rows and the
+            # words, not under four or the error exact
+            _ui.hints(("confirm", "Choose", "back", "Home"))
 
 
 # The stop card's lines: the sentence, a notice's words, the error exact.
 _STOP_SENTENCE = {"wrap": True, "lines": 2}
 _STOP_WORDS = {"wrap": True, "lines": 4, "tone": "dim"}
 _STOP_ERROR = {"wrap": True, "lines": 4, "face": "mono", "sunk": True}
+_STOP_ERROR_HAND = {"wrap": True, "lines": 3, "face": "mono", "sunk": True}
 _WRAP = {"wrap": True, "lines": 3}
 
 

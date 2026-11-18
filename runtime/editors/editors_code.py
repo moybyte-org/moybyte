@@ -43,6 +43,10 @@ class CodeEditor:
 
     INDENT = "  "      # block indent/outdent step: two spaces (matches Tab->2 spaces)
 
+    # A read-only buffer moves, selects, finds and copies, and every edit
+    # verb refuses it (a compiled cart's `src/`, EditorApp.code_read_only).
+    read_only = False
+
     def __init__(self, src="", cols=None, rows=None, clip=None):
         # COLS/ROWS default to the 320x240 baseline class attrs; a responsive shell
         # (#39 step 2) passes the layout-derived window so a bigger system canvas
@@ -188,6 +192,8 @@ class CodeEditor:
         self._scroll()
 
     def insert(self, ch):
+        if self.read_only:
+            return
         if self.has_selection():             # typing over a selection replaces it (#89)
             self.delete_selection()
         else:
@@ -202,6 +208,8 @@ class CodeEditor:
         self._scroll()                       # keep the caret on screen while typing
 
     def newline(self):
+        if self.read_only:
+            return
         if self.has_selection():             # enter over a selection replaces it (#89)
             self.delete_selection()
         else:
@@ -222,6 +230,8 @@ class CodeEditor:
         self._scroll()
 
     def backspace(self):
+        if self.read_only:
+            return
         if self.has_selection():             # backspace over a selection deletes it (#89)
             self.delete_selection()
             return
@@ -244,6 +254,8 @@ class CodeEditor:
     def delete(self):
         """Forward delete: the character after the caret, or the next line
         joined onto this one at its end; a selection is deleted."""
+        if self.read_only:
+            return
         if self.has_selection():
             self.delete_selection()
             return
@@ -261,6 +273,8 @@ class CodeEditor:
 
     def key(self, code):
         """Feed one keyboard ASCII byte. Returns True if it changed the text."""
+        if self.read_only:
+            return False
         if not code:
             return False
         if code in (0x0D, 0x0A):             # enter / return
@@ -366,6 +380,8 @@ class CodeEditor:
     def delete_selection(self):
         """Remove the selected span, leaving the caret at its start. Returns True
         iff something was deleted (so callers can fall through to a plain edit)."""
+        if self.read_only:
+            return False
         b = self.selection_bounds()
         if b is None:
             return False
@@ -389,6 +405,8 @@ class CodeEditor:
 
     def cut(self):
         """Copy the selection then delete it. Returns True iff the text changed."""
+        if self.read_only:
+            return False
         if not self.has_selection():
             return False
         self.clipboard = self.selected_text()
@@ -426,6 +444,8 @@ class CodeEditor:
     def paste(self):
         """Insert the clipboard at the caret (replacing any selection). Returns True
         iff the text changed."""
+        if self.read_only:
+            return False
         text = self.paste_text()
         if not text:
             return self.delete_selection()   # empty clipboard: paste still drops a selection
@@ -436,6 +456,8 @@ class CodeEditor:
     def insert_text(self, s):
         """Insert a (possibly multi-line) string at the caret, advancing it to the
         end of the inserted text. dirty + scroll like a normal edit."""
+        if self.read_only:
+            return
         if not s:
             return
         if self.has_selection():
@@ -475,6 +497,8 @@ class CodeEditor:
 
     def indent_selection(self):
         """Prepend one INDENT step to every line in the block. Returns True."""
+        if self.read_only:
+            return False
         r0, r1 = self._block_rows()
         d = len(self.INDENT)
         for r in range(r0, r1 + 1):
@@ -490,6 +514,8 @@ class CodeEditor:
     def outdent_selection(self):
         """Strip up to one INDENT step of leading spaces from every line in the
         block. Returns True iff any line changed."""
+        if self.read_only:
+            return False
         r0, r1 = self._block_rows()
         changed = False
         for r in range(r0, r1 + 1):
@@ -645,6 +671,8 @@ class CodeEditor:
     def complete(self, word):
         """Accept an autocomplete candidate: replace the identifier prefix left of the
         caret with `word`, leaving the caret at its end. Returns True."""
+        if self.read_only:
+            return False
         p = self.word_prefix()
         ln = self.lines[self.row]
         start = self.col - len(p)

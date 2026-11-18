@@ -548,8 +548,9 @@ def compile_check(src):
 def is_compiled(cart):
     """True for a compiled cart: a `"runtime": "wasm"` module, or a native one
     (its manifest's `"moybyte": {"native": [chips]}`, main `main.<chip>.elf`).
-    Its main is a module, never text: no write replaces it, the Code tab shows
-    only its `src/`, and a crash has no line to open."""
+    Its main is a module, never text, rebuilt from its `src/` on a
+    computer: no code write reaches it or its `src/`, the Code tab shows its
+    `src/` to read, and a crash has no line to open."""
     cart = cart or {}
     return cart.get("runtime") == "wasm" or bool(cart.get("native"))
 
@@ -656,16 +657,14 @@ def save_code(cart, src, force=False, name=None):
     badge with. The gate still refuses on every SOFT path -- the idle debounce
     and the PLAY gate -- so half-typed source is never published mid-typing and
     a broken cart is never RUN; it surfaces at the next run as crash-to-code."""
+    if is_compiled(cart):
+        # A compiled cart runs its module, which is rebuilt from `src/` on a
+        # computer: a write here would be an edit Play never runs, and no
+        # text write may ever replace the module.
+        return SAVE_BAD_SYNTAX, "a compiled cart's code is rebuilt on a computer"
     ok, msg = runtime_compile_check(cart, src)
     if not ok and not force:
         return SAVE_BAD_SYNTAX, msg
-    if is_compiled(cart):
-        # A compiled cart's code is its `src/`; its main is a module that no
-        # text write may ever replace.
-        srcs = cart_sources(cart)
-        name = name if name is not None else (srcs[0] if srcs else None)
-        if name not in srcs:
-            return SAVE_BAD_SYNTAX, "a compiled cart has no such source"
     if name is None:
         name = cart.get("main", "main.py")
     _write_atomic(cart["path"] + "/" + name, src)

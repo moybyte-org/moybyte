@@ -261,6 +261,11 @@ def sent(words):
     words[IN_REP] = words[IN_KEYREP] = words[IN_ASK] = 0
 
 
+# Why a native cart did not run here, as the shell says it: in words a kid
+# reads, the chip it lacks a module for after them.
+NO_MODULE = "it was built for another kind of console (it has no %s module)"
+
+
 class LinkedUi:
     """What the Player asks a run's toolkit (ui_draw.run_typing, run_cancel,
     run_back), asked of an app drawing with the toolkit it links
@@ -442,7 +447,7 @@ class ElfRuntime:
         None), or (REFUSED, why) when it did not run."""
         path = self.module(cart)
         if path is None:
-            return REFUSED, "it has no module for this console (%s)" % self.engine.CHIP
+            return REFUSED, NO_MODULE % self.engine.CHIP
         joined = "".join(r + "\0" for r in roots) or None
         return self.engine.command(path, tuple(argv), joined, pid, cart.get("id") or "",
                                    bg_pid, budget_ms, self._flags(cart, net), run)
@@ -452,7 +457,7 @@ class ElfRuntime:
         None), or (REFUSED, why)."""
         path = self.module(cart)
         if path is None:
-            return REFUSED, "it has no module for this console (%s)" % self.engine.CHIP
+            return REFUSED, NO_MODULE % self.engine.CHIP
         joined = "".join(r + "\0" for r in roots) or None
         return self.engine.start(path, tuple(argv), joined, pid, cart.get("id") or "",
                                  budget_ms, self._flags(cart, net), run)
@@ -464,7 +469,7 @@ class ElfRuntime:
         None, or why it did not start."""
         path = self.module(cart)
         if path is None:
-            return "it has no module for this console (%s)" % self.engine.CHIP
+            return NO_MODULE % self.engine.CHIP
         return self.engine.service(path, pid, cart.get("id") or "", self._flags(cart, False),
                                    run)
 
@@ -517,7 +522,7 @@ class ElfGame(LinkedUi):
         self._ws = ws
         path = rt.module(cart)
         if path is None:
-            raise RuntimeError("it has no module for this console (%s)" % rt.engine.CHIP)
+            raise RuntimeError(NO_MODULE % rt.engine.CHIP)
         canvas = ws.run.canvas
         self.pid = ws.run.player.pid
         self._w, self._h = canvas.w, canvas.h

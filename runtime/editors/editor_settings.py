@@ -5,7 +5,9 @@
 #   SettingsPage.point    a pointer sample, and a tap on a picker's tile
 """The Editor's Settings tab (E-06; docs/media/look_2026-10/EDITOR_LAYOUT.md's
 `config` pictures): the cart's `edit` cards drawn on the public UI API, the
-handheld's tab and the desk Editor's Settings pane alike.
+handheld's tab and the desk Editor's Settings pane alike. A cart whose run
+reads no `config.json`, or none of the files some tab edits
+(`EditorApp._offers`), has a note over the cards saying so instead.
 
 The cards are one group: an `int` card a slider whose value stands at its
 right, a two-way `choice` a toggle (a `choice-icons` one too: its two
@@ -58,6 +60,8 @@ class SettingsPage:
 
     def _fields(self):
         ws = self.ws
+        if not ws.editor_app._offers("mine"):
+            return []               # its run reads no config.json
         valid = ws.cards_layer._validate_field
         return [f for f in (ws.cart.get("edit") or []) if not valid(f)]
 
@@ -88,6 +92,9 @@ class SettingsPage:
             self._o["gen"] += 1
         ui.at(*rect)
         ui.page("", self._o)
+        note = self.ws.editor_app.missing_note()
+        if note is not None:
+            ui.note("info", (note,))
         ui.group("", {"card": True})
         tap = None
         for f in fields:

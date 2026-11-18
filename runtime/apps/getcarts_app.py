@@ -157,7 +157,7 @@ def _asked(job):
     while job.step():
         yield
     if job.error is not None:
-        raise _ci.InstallError(job.error)
+        raise _ci.InstallError(job.error, getattr(job, "detail", None))
 
 
 def _host_of(url):
@@ -373,6 +373,7 @@ class GetCartsAppLayer(ListShellApp):
         self._tail = None             # (steps, then, failed): a landing's or a removal's, a frame a step
         self._sweep = None            # what install/ holds going, a store op a frame, no key held
         self.why = ""                 # the NOT INSTALLED page's reason
+        self.why_detail = None        # ...and its cause exact, under it
         self.toast = None             # (text, icon, until ms): a passing message
         self.thumbs = {}              # cover sha256 -> (side, RGB565) or None
         self._pane_k = None           # the desk pane's parts (`_pane_parts`)
@@ -596,7 +597,7 @@ class GetCartsAppLayer(ListShellApp):
                 self._pump_get()
         except _ci.InstallError as exc:
             _ci._log(exc.detail)
-            self._fail(exc.text)
+            self._fail(exc.text, exc.detail)
         except Exception as exc:  # noqa: BLE001 -- the store never takes the shell down
             _ci._log("%r" % (exc,))
             self._fail(_ci.STOPPED)
@@ -1014,7 +1015,7 @@ class GetCartsAppLayer(ListShellApp):
         self._fetch = None
         self._fetching = None
         if job.error is not None:
-            self._fail(job.error)
+            self._fail(job.error, getattr(job, "detail", None))
             return
         self._lic_text = str(job.doc.get("text") or "")
         self.lic[1] = self._wrap(self._lic_text)
@@ -1208,7 +1209,7 @@ class GetCartsAppLayer(ListShellApp):
             self._run(_pkg.landed(self._inst, job.path, consented), self._got,
                       lambda exc: self._fail(_ci.STOPPED))
         elif job.error:
-            self._fail(job.error)
+            self._fail(job.error, getattr(job, "detail", None))
         else:
             self._go("cart")
             self._focus_go()
@@ -1236,11 +1237,14 @@ class GetCartsAppLayer(ListShellApp):
         if self.phase == "cart":
             self._focus_go()
 
-    def _fail(self, why):
+    def _fail(self, why, detail=None):
+        """The NOT INSTALLED page: `why` in a kid's words, `detail` the
+        cause exact, its Details line, where it says more."""
         self._drop_fetch()
         self._unpick()
         self._release()
         self.why = why
+        self.why_detail = detail if detail and detail != why else None
         self._go("failed")
 
     def _play(self):
@@ -2092,7 +2096,10 @@ class GetCartsAppLayer(ListShellApp):
         if ph == "nomemory":
             return ("warn", "Memory full", self._lines(_ci.NET_MEMORY))
         if ph == "failed":
-            return ("warn", "Not installed", self._lines(self.why) + ["Nothing changed."])
+            lines = self._lines(self.why) + ["Nothing changed."]
+            if self.why_detail:
+                lines += self._lines("Details: " + self.why_detail)
+            return ("warn", "Not installed", lines)
         return ("getcarts", "", [])
 
     def _lines(self, text):

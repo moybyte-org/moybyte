@@ -4955,12 +4955,14 @@ INTERP_NOTICE_TITLE = "RUNNING SLOWLY"
 # importing the runtime): "missing" covers no module for this console at
 # all, one built for another chip, and one left over from an older format --
 # every one of those is simply the wrong file name to this console, so the
-# Player cannot tell them apart and shows the same "needs an update"; a
+# Player cannot tell them apart and shows the same "missing" line; a
 # module that matched this console's name but carried no signature, its cart
 # not granted "full_access", is "unsigned"; one whose load stopped on a helper
-# this firmware does not register is "firmware".
-INTERP_NOTICE_SUB = {"missing": "needs an update", "unsigned": "isn't signed",
-                     "firmware": "console needs an update"}
+# this firmware does not register is "firmware". The words are the shell's
+# strings (`slow.<cause>`, native/moy_spine/strings/en.json).
+INTERP_NOTICE_SUB = {c: json.loads((ROOT / "native" / "moy_spine" / "strings" / "en.json")
+                                   .read_text())["strings"]["slow." + c]
+                     for c in ("missing", "unsigned", "firmware")}
 
 
 def _runs_on_interpreter(board, title, check=None, cause="missing"):

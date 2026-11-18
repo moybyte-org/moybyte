@@ -916,7 +916,7 @@ same here as on any other console that implements the spec.
 | `srand(seed=0)` | seed `rnd`: the same seed replays the same sequence on the same tier |
 | `flr(x)` | floor to int |
 | `W`, `H` | canvas size (320, 240) |
-| `wifi` | **only present** if the cart's manifest `moybyte.permissions` include `"network"` (capability-gated, `#38`), and `None` while that is turned off in Settings. A normal cart has no `wifi` name at all |
+| `wifi` | Python's older, wider door to the radio: **only present** if the cart's manifest `moybyte.permissions` include `"network"` (capability-gated, `#38`), and `None` while that is turned off in Settings. A normal cart has no `wifi` name at all. The way in from every tier is `moybyte.http` under `"http"` (below); a Lua or wasm cart that asks for `"network"` is refused at install and launch, and `moy app check` says so |
 | `net` / `on_net` | **only present** if the cart's manifest `moybyte.permissions` include `"multiplayer"` (capability-gated, `#65`), and `None` while that is turned off in Settings. See **Multiplayer** above |
 
 ### Moybyte-side verbs

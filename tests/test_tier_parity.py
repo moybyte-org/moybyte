@@ -73,8 +73,10 @@ def test_no_text_write_reaches_a_native_module(tmp_path):
     cart = MOY.load(path)
     elf = os.path.join(path, "main.host.elf")
     before = open(elf, "rb").read()
-    assert MOY.save_code(cart, "int frame = 1;\n")[0] == MOY.SAVE_OK
-    assert open(os.path.join(path, "src", "game.c")).read() == "int frame = 1;\n"
+    # its src/ is rebuilt into the module on a computer: an edit here is one
+    # Play never runs, so the store writes none
+    assert MOY.save_code(cart, "int frame = 1;\n")[0] == MOY.SAVE_BAD_SYNTAX
+    assert open(os.path.join(path, "src", "game.c")).read() == "int frame;\n"
     assert MOY.save_code(cart, "x", name="main.host.elf")[0] == MOY.SAVE_BAD_SYNTAX
     assert open(elf, "rb").read() == before
     assert MOY.save_blocks(cart, {"objects": []})[0] == MOY.SAVE_BAD_SYNTAX
@@ -176,3 +178,122 @@ def test_a_lua_cart_sends_and_hears_net_messages(tmp_path):
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
     peer.pump()
     assert heard == [{"got": 7, "list": [1, 2.5, 'a"b\n'], "ok": True}]
+
+
+# -- the Editor offers a tab only where the run reads what it writes ---------------
+
+
+def _wasm(root, title="Wasm Bits"):
+    d = os.path.join(root, "wasm_bits.moy")
+    os.makedirs(os.path.join(d, "src"))
+    with open(os.path.join(d, "manifest.json"), "w") as f:
+        json.dump({"title": title, "runtime": "wasm", "main": "main.wasm",
+                   "moybyte": {"type": "game"}}, f)
+    with open(os.path.join(d, "main.wasm"), "wb") as f:
+        f.write(b"\0asm\1\0\0\0")
+    with open(os.path.join(d, "src", "main.c"), "w") as f:
+        f.write("int frame;\n")
+    return d
+
+
+ASSET_TABS = ("paint", "map", "scene", "music")
+
+
+def test_each_tier_is_offered_the_tabs_its_run_reads(tmp_path):
+    ws = host_app.build_workstation(_store(tmp_path, _lua, _native, _wasm))
+    want = {"Lua Bits": ASSET_TABS, "Wasm Bits": ("paint", "map", "music"),
+            "Native Bits": ()}
+    for title, tabs in want.items():
+        ws.open_in_editor(_cart(ws, title))
+        app = ws.editor_app
+        ladder = [t for t, _g in app._ladder()]
+        chips = [t[0] for t in app._chips()]
+        for tab in ASSET_TABS:
+            assert (tab in ladder) == (tab in tabs) == (tab in chips), (title, tab)
+            ws.text.set_menu_view(tab)
+            assert app.tab == (tab if tab in tabs else "cards"), (title, tab)
+        assert app._offers("mine") == (title != "Native Bits")
+
+
+def test_a_native_carts_config_tab_has_no_make_it_mine_cards_and_says_why(tmp_path):
+    ws = host_app.build_workstation(_store(tmp_path, _native, _wasm))
+    from runtime import ui_draw
+    cart = _cart(ws, "Native Bits")
+    cart["edit"] = [{"key": "speed", "type": "int", "min": 1, "max": 9, "default": 3}]
+    ws.open_in_editor(cart)
+    ws.text.set_menu_view("cards")
+    from runtime import editor_settings
+    page = editor_settings.SettingsPage(ws, None, (None, None))
+    assert page._fields() == []
+    assert ws.editor_app.missing_note() == ui_draw.s("editor.no_assets")
+    ws.open_in_editor(_cart(ws, "Wasm Bits"))
+    assert ws.editor_app.missing_note() == ui_draw.s("editor.no_scenes")
+
+
+@pytest.mark.parametrize("title", ["Native Bits", "Wasm Bits"])
+def test_a_compiled_carts_code_tab_reads_and_never_writes(tmp_path, title):
+    ws = host_app.build_workstation(_store(tmp_path, _native, _wasm))
+    cart = _cart(ws, title)
+    ws.open_in_editor(cart)
+    ws.text.set_menu_view("code")
+    app = ws.editor_app
+    assert app.tab == "code" and app.code_read_only()
+    ed = ws.editor
+    assert ed.read_only and ed.text() == "int frame;\n"
+    path = os.path.join(cart["path"], "src", ws.text.code_file_name()[4:])
+    for k in (ord("x"), 13, 8, 127, 9):
+        assert ed.key(k) is False
+    ed.select_all()
+    assert ed.cut() is False and ed.paste() is False and ed.delete_selection() is False
+    assert ed.copy() and ed.text() == "int frame;\n"
+    ed.insert_text("more")
+    assert ed.text() == "int frame;\n" and not ed.dirty
+    assert ws.saves.save_code() is True               # nothing to write
+    with open(path) as f:
+        assert f.read() == "int frame;\n"
+    # a Lua cart's code is still its own
+    ws2 = host_app.build_workstation(_store(tmp_path / "lua", _lua))
+    ws2.open_in_editor(_cart(ws2, "Lua Bits"))
+    ws2.text.set_menu_view("code")
+    assert not ws2.editor.read_only and ws2.editor.key(ord("x"))
+
+
+def test_the_read_only_code_tab_draws_its_banner_over_the_code(tmp_path):
+    ws = host_app.build_workstation(_store(tmp_path, _native))
+    ws.open_in_editor(_cart(ws, "Native Bits"))
+    ws.text.set_menu_view("code")
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    lay = ws.code_layout
+    cl = ws.code_layer
+    h = cl._banner_h(lay)
+    assert h > 0 and cl._top_rows(lay) * lay.lh >= h
+    assert cl._y0(lay) >= lay.y0 + h
+    assert ws.editor.ROWS == lay.rows - cl._top_rows(lay)
+
+
+def test_the_desk_offers_the_workspaces_and_panes_the_cart_has(tmp_path):
+    ws = host_app.build_workstation(_store(tmp_path, _native, _wasm, _lua),
+                                    sys_size=(1024, 600), panel_diagonal_in=7.0,
+                                    font_scale=1, windowed=True)
+    ws.home.open_desk()
+    drv = host_app.ConsoleDriver(ws)
+    want = {"Native Bits": ["settings", "code"],
+            "Wasm Bits": ["settings", "code", "art", "sound"],
+            "Lua Bits": ["settings", "code", "art", "world", "sound"]}
+    for title, keys in want.items():
+        ws.open_in_editor(_cart(ws, title))
+        for _ in range(2):
+            drv.frame(1 / 30)
+        d = ws.editor_desk
+        assert d.keys() == keys, title
+        shown = {c for pane, _r, _p in d.panes() for c in pane}
+        for k in keys:
+            d.switch(k)
+            drv.frame(1 / 30)
+            shown |= {c for pane, _r, _p in d.panes() for c in pane}
+        lacks = set(d.lacks())
+        assert not shown & lacks, (title, shown & lacks)
+        d.step(1)
+        assert d.key in keys
+    assert "scene" in shown and lacks == {"blocks"}

@@ -93,8 +93,12 @@ on a PICO-8 port that is as often the generated half as the game, and a marker
 on somebody else's line N is worse than none (#89). The marker then RE-CHECKS on every
 edit/undo — it retires only when the source actually parses again, and follows
 the live syntax error while it doesn't. With no open cart, and for a
-compiled (`"runtime": "wasm"`) cart, whose trap has no source line behind
-it, the card offers no See why: Restart and Home. This is still the caller model: the crash path is just one more
+compiled (wasm or native) cart, whose trap has no source line behind
+it, the card offers no See why: Restart and Home, and a compiled cart that
+ships `src/` has See the code, its `src/` in the Code tab to read (it is
+rebuilt on a computer, so the tab takes no edit). Every stop card says a
+kid's sentence first and keeps the error exact under Details
+(`runtime/shell/shell_cards.py`). This is still the caller model: the crash path is just one more
 pop, into the one place the fix can happen.)*
 
 ---
@@ -509,7 +513,7 @@ carries no signature (a cart somebody rebuilt from its source) runs at full
 native speed when its consent grants `full_access`, the install prompt's "Full
 access to the console" (`docs/os_2026-11.md` §1); without it the module is
 ignored and the cart plays on the interpreter instead, with a short system
-notice ("isn't signed") saying so (2026-09-30, "A cart survives its
+notice ("its fast copy isn't signed", `slow.unsigned`) saying so (2026-09-30, "A cart survives its
 firmware") — never the blocking crash panel, either way. A module whose
 signature is present and fails is refused either way
 (`native/moy_wasm/README.md`, "An unsigned module").

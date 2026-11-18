@@ -1670,8 +1670,10 @@ def test_an_install_out_of_memory_says_to_restart(tmp_path):
     _frames(ws, app, n=400)
     assert app.phase == "failed"
     icon, title, lines = app._empty_words()
-    assert title == "Not installed" and " ".join(lines[:-1]) == ci.NET_MEMORY
-    assert lines[-1] == "Nothing changed."
+    n = lines.index("Nothing changed.")
+    assert title == "Not installed" and " ".join(lines[:n]) == ci.NET_MEMORY
+    # the cause exact under the kid's words, for a parent or the shelf's author
+    assert " ".join(lines[n + 1:]).startswith("Details: ") and app.why_detail
     assert "carts" not in ws.leases.holders()
 
 

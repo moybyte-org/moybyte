@@ -253,5 +253,5 @@ def test_missing_runtime_opens_the_panel_not_a_hang(tmp_path):
     ws.runtimes.pop("lua", None)                       # a device-shaped build
     _open(ws, "Sakura Lua")
     assert ws.run.player.cart_error is not None
-    assert "Lua runtime" in ws.run.player.cart_error
+    assert "Lua runtime" in ws.run.player.notice_detail      # the cause, under Details
     ws.frame(1 / 30)                                     # panel frame must not raise
