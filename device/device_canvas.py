@@ -2971,9 +2971,8 @@ class SystemCanvas(DeviceCanvas):
         scale = max(1, (sw + gw - 1) // gw, (sh + gh - 1) // gh)
         ox = (sw - gw * scale) // 2
         oy = (sh - gh * scale) // 2
-        fb = getattr(gc, "flush_batch", None)
-        if fb is not None:
-            fb()
+        if hasattr(gc, "flush_batch"):
+            gc.flush_batch()
         if self._batch_arr[0] > 4:
             self.flush_batch()
         self._gfx.blit565_scale(self._buf, sw, sh, int(ox), int(oy),

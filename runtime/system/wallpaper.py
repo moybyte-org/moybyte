@@ -1527,15 +1527,15 @@ class Wallpaper:
         a player WINDOW in windowed mode.) A system canvas with no readable
         framebuffer has nothing to copy into: draw the frame as ONE scaled spr
         instead, and let the canvas clip the crop."""
-        fb = getattr(gc, "flush_batch", None)
-        if fb is not None:
-            fb()
-        bc = getattr(sc, "blit_cover", None)
-        if bc is not None:
+        # (asked with hasattr and called by name: a getattr of a method makes
+        # a bound method, every frame of a live wallpaper)
+        if hasattr(gc, "flush_batch"):
+            gc.flush_batch()
+        if hasattr(sc, "blit_cover"):
             # A device system canvas (the P4, #58): native cover-crop blit in one
             # moy_gfx call -- an RGB565 canvas has no index buffer for the loops
             # below, and a per-frame Python expansion of ~600k px is unusable.
-            bc(gc)
+            sc.blit_cover(gc)
             return
         gbuf = getattr(gc, "buf", None)
         sbuf = getattr(sc, "buf", None)
