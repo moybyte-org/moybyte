@@ -421,7 +421,8 @@ int moy_ui_frame_under(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int activ
 // in place of the canvas's own pixels: `src` laid into every pixel of buffer
 // rect `outer` but those of `inner` (the clip does not apply), with the
 // shadow over it where it falls -- the restore of a cache and the shadow of
-// the first window over it, one pass (moy_shape_shadow_fill).
+// the first window over it, one pass (moy_shape_shadow_fill). The window's
+// body is left on the shadow's rows: the window paints it.
 int moy_ui_frame_under_fill(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int active,
                             int mode, const void *src, size_t len, moy_ui_box_t outer,
                             moy_ui_box_t inner);

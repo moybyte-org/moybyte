@@ -1418,7 +1418,8 @@ def frame_under_fill(cv, th, rect, title_h, active, src, outer, inner, mode=UNDE
     """`frame_under` over `src`, a buffer laid out as the canvas's: `src`
     laid into buffer rect `outer` but `inner` (the clip does not apply), the
     shadow blended over it where it falls, each pixel once -- a cache's
-    restore and the first window's shadow over it in one pass."""
+    restore and the first window's shadow over it in one pass. The window's
+    body is left on the shadow's rows: the window paints it."""
     _C.frame_under_fill(cv, _LOOK if th is _TH else _look(th), rect, title_h, active, mode,
                         src, outer, inner)
 

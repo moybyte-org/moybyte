@@ -1266,7 +1266,8 @@ int moy_shape_shadow(const moy_text_target_t *t, int x, int y, int w, int h,
             }
             continue;
         }
-        // the shadow stores [Xa, Xb) but the hole's [hx0, hx1)
+        // the shadow stores [Xa, Xb) but the hole's [hx0, hx1), which the
+        // fill leaves to the caster too
         tgt_row(&g, Y);
         int hx0 = imax(g.hx0, Xa), hx1 = imin(g.hx1, Xb);
         if (hx1 <= hx0) {
@@ -1275,7 +1276,6 @@ int moy_shape_shadow(const moy_text_target_t *t, int x, int y, int w, int h,
         for (int k = 0; k < nf; k++) {
             int a0 = f[2 * k], a1 = f[2 * k + 1];
             copy_px(row, frow, a0, imin(a1, Xa));
-            copy_px(row, frow, imax(a0, hx0), imin(a1, hx1));
             copy_px(row, frow, imax(a0, Xb), a1);
         }
         int i = Y - sy;
