@@ -996,6 +996,14 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
             wm.hand_content_damage(cv, bx, by, bw, bh)
         return laid
 
+    def _band_owed(self):
+        """Whether a band pass that answered -1 (a buffer lags its band)
+        owes the frames that bring every buffer to it: where the wallpaper
+        puts its own pixels back and the band's keys stand. Keys of -1 (the
+        band not the home's alone on the glass: a dialog over it) keep
+        nothing, so no frame pays that debt."""
+        return self._bd_now is not None and self._keys[0] != -1
+
     def _still_debt(self):
         """Ask for the frame that brings one more buffer to this frame,
         while nothing moves and no press waits on it (as the windowed WM
@@ -1053,7 +1061,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
         # band's record stays honest.
         # (under the menu's hold the retained frame is the one before it)
         if not ws.menu_ui.holds_home() and self._try_stamp_retained(cv, dt):
-            if self._band_note(cv, dt) == -1 and self._bd_now is not None:
+            if self._band_note(cv, dt) == -1 and self._band_owed():
                 self._still_debt()
             parts = self._still_now(cv, dt)
             if parts is not None and not self._note_still(cv, parts):
@@ -1086,7 +1094,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
             _t3 = _ticks_ms()
             ws.pf_home = (_ticks_diff(_t1, _t0), _ticks_diff(_t2, _t1),
                            _ticks_diff(_t3, _t2))
-        if end == -1 and self._bd_now is not None:
+        if end == -1 and self._band_owed():
             self._still_debt()       # every buffer to this frame: the next step is a band frame
         parts = self._still_now(cv, dt)
         owed = parts is not None and not self._note_still(cv, parts)
