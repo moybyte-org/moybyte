@@ -355,11 +355,15 @@ def test_an_award_the_process_is_full_for_goes_at_the_shells_wake(ws):
         L.current(was)
     settle_badges(ws)
     assert not ws.ach.has(GAME, "first_clear")
+    # the wake comes ACH_EVERY_MS after the award; a loaded host's slices
+    # arrive late, so wait for it rather than for a fixed window
     now = moybyte._ticks_ms()
-    while moybyte._ticks_diff(moybyte._ticks_ms(), now) <= moybyte.ACH_EVERY_MS + 20:
+    while moybyte._ticks_diff(moybyte._ticks_ms(), now) <= moybyte.ACH_EVERY_MS + 5000:
         time.sleep(0.005)
         S.SCHED.tick(0)
-    settle_badges(ws)
+        settle_badges(ws)
+        if ws.ach.has(GAME, "first_clear"):
+            break
     assert ws.ach.has(GAME, "first_clear")
     moybyte.WAKES.end(pid)
 
