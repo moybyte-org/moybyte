@@ -1438,7 +1438,10 @@ class WasmRuntime:
         SERVICE): its `_start` on a task of its own, its argv the cart's id;
         its module chosen as `command`'s is, its app rows answered for
         `run`, the app grant compiled_run made. None, or why it did not
-        start."""
+        start: an engine with no services (the browser's, whose page has
+        one thread: native/moy_wasm_web/README.md) refuses it."""
+        if not hasattr(_moy_wasm, "service_start"):
+            return "a wasm service does not run on this console"
         app_id = cart.get("id") or ""
 
         def start(path, sha, interp, unsigned_ok):

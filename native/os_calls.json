@@ -269,7 +269,7 @@
     {"name": "moybyte.item_read", "server": "c", "perm": null, "in": ["item:int", "data:out"], "ret": "len", "how": "here", "door": true, "wasm": true, "elf": 101, "wasi": true, "example": [0]},
     {"name": "moybyte.item_write", "server": "c", "perm": null, "in": ["item:int", "data:bytes"], "ret": "int", "how": "here", "door": true, "wasm": true, "elf": 102, "wasi": true, "example": [0, "x"]},
     {"name": "wifi", "server": "python", "perm": "network", "py": ["wifi"]},
-    {"name": "net", "server": "python", "perm": "multiplayer", "py": ["net", "on_net"], "lua": ["on_net"]},
+    {"name": "net", "server": "python", "perm": "multiplayer", "py": ["net", "on_net"], "lua": ["net", "on_net"]},
     {"name": "pins", "server": "python", "perm": "pins", "py": ["pin_write", "pin_read"], "lua": ["pin_write", "pin_read"]},
     {"name": "console", "server": "python", "perm": "console", "py": ["print"], "lua": ["print"]},
     {"name": "moybyte.lease", "server": "python", "perm": "lease", "py": ["moybyte.lease"]},

@@ -737,8 +737,10 @@ Player (`MOY_PLAY_RUNS`, `native/moy_play/moy_play.h`), so a Lua game joins
 the running set as a Python one does, held aside reading no input
 (`moy_play_mute`) (P5.3, 2026-11-07). A compiled run is a session of its
 own on a board's engine and the host's (`native/moy_wasm/moy_wasm_session.h`),
-so compiled games join the running set too, and the share decides whether
-two fit; the browser's engine holds one session, so there a compiled game
+so compiled games join the running set too, held aside reading no input
+as a Lua run is (`mute`: the kernel's where its Player runs the frames, and
+a native run's or a WASI app's frame message, `elf_run.LinkedUi`), and the share
+decides whether two fit; the browser's engine holds one session, so there a compiled game
 runs alone and admission names everything running to close
 (`player_fit.shares_runtime`). Each run takes one of four
 owner tags (`cart`, `cart2`..`cart4`) for its layer loans and its audio

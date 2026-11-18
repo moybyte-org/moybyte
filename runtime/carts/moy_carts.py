@@ -545,6 +545,23 @@ def compile_check(src):
         return False, str(exc)
 
 
+def is_compiled(cart):
+    """True for a compiled cart: a `"runtime": "wasm"` module, or a native one
+    (its manifest's `"moybyte": {"native": [chips]}`, main `main.<chip>.elf`).
+    Its main is a module, never text: no write replaces it, the Code tab shows
+    only its `src/`, and a crash has no line to open."""
+    cart = cart or {}
+    return cart.get("runtime") == "wasm" or bool(cart.get("native"))
+
+
+def is_python(cart):
+    """Whether `cart` runs on the console's Python tier: the one tier the
+    Python parse gate checks and the only one blocks can author, since the
+    block compiler emits Python (docs/moy_cart_api.md)."""
+    return (not is_compiled(cart)
+            and ((cart or {}).get("runtime") or "python") == "python")
+
+
 def runtime_compile_check(cart, src):
     """The parse gate for THIS cart's runtime -- (ok, message), compile_check's
     shape. Every commit path asks here (the store's save_code, ws.saves.save_code,
@@ -558,8 +575,9 @@ def runtime_compile_check(cart, src):
     got. So the gate degrades to COMMIT rather than to never-commit, and a Lua
     syntax error surfaces where it always did, at PLAY. Gating Lua means a
     compile-only entry on BOTH tiers; one alone would have the host and a board
-    disagree about what saves."""
-    if (cart or {}).get("runtime", "python") != "python":
+    disagree about what saves. A compiled cart's `src/` is not what runs, so
+    it commits unchecked too."""
+    if not is_python(cart):
         return True, ""
     return compile_check(src)
 
@@ -581,7 +599,7 @@ def cart_sources(cart):
     not text, and an empty answer is what takes the Code tab away."""
     if not cart:
         return []
-    if cart.get("runtime") == "wasm":
+    if is_compiled(cart):
         return [n for n, _ in cart.get("src_after") or ()]
     return ([n for n, _ in cart.get("src_before") or ()]
             + [cart.get("main", "main.py")]
@@ -593,7 +611,7 @@ def source_text(cart, name=None):
     file. `name` None -- or main's own name -- is `src`."""
     if not cart:
         return None
-    if cart.get("runtime") == "wasm":
+    if is_compiled(cart):
         srcs = cart.get("src_after") or ()
         name = name if name is not None else (srcs[0][0] if srcs else None)
     elif name is None or name == cart.get("main", "main.py"):
@@ -641,7 +659,7 @@ def save_code(cart, src, force=False, name=None):
     ok, msg = runtime_compile_check(cart, src)
     if not ok and not force:
         return SAVE_BAD_SYNTAX, msg
-    if cart.get("runtime") == "wasm":
+    if is_compiled(cart):
         # A compiled cart's code is its `src/`; its main is a module that no
         # text write may ever replace.
         srcs = cart_sources(cart)
@@ -738,6 +756,8 @@ def save_blocks(cart, program):
     program is malformed (a BlockError) -- in which case NEITHER file is touched,
     so a corrupt edit can never truncate the cart or strand a broken main.py.
     Writes blocks.json first then main.py; both are atomic."""
+    if not is_python(cart):
+        return SAVE_BAD_SYNTAX, "blocks make Python, and this cart is not Python"
     blocks = _import_blocks()
     try:
         src = blocks.compile_blocks(program)
@@ -991,7 +1011,7 @@ def _kept(cart):
 
 
 def duplicate(cart, root=CARTS_DIR, new_title=None, ns=USER_NS):
-    if cart.get("runtime") == "wasm" and cart.get("path"):
+    if is_compiled(cart) and cart.get("path"):
         return _duplicate_compiled(cart, root, new_title, ns)
     dup = create(new_title or (cart["title"] + " copy"), root,
                  src=cart["src"], cfg=dict(cart["cfg"]), edit=cart["edit"], type=cart["type"],
@@ -1052,7 +1072,7 @@ def _duplicate_compiled(cart, root, new_title, ns=USER_NS):
     d = _unique_dir(root, slug(title), ns)
     _mkdir(d)
     man["title"] = title
-    main = cart.get("main", "main.wasm")
+    main = cart["main"]
 
     def _fill():
         _write(d + "/manifest.json", json.dumps(man))

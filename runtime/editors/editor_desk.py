@@ -238,7 +238,7 @@ class EditorDesk(Layer):
 
     def _blocks(self):
         cart = self.ws.cart
-        return bool(cart is not None and cart.get("blocks"))
+        return bool(cart is not None and cart.get("blocks") and self.ws.text.takes_blocks())
 
     def arrangement(self):
         """The workspace on show at the surface's size, its dividers as the

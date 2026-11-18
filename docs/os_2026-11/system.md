@@ -42,7 +42,8 @@ collision with a built-in or an installed name is refused at install naming
 the holder, and `<id>/<name>` always runs a specific one (owner,
 2026-11-03). Two kinds: **line programs** (`argv`, `stdin`, `stdout`,
 `stderr` as byte streams over kernel pipe buffers, an exit code; a Python
-cart's `main(argv)` in the shell's VM, a wasm command's WASI `_start`
+cart's `main(argv)` in the shell's VM, a Lua cart's `main(argv)` in a Lua
+state of its own, a wasm command's WASI `_start`
 (`tiers.md` §3), an ELF's `main(argc, argv)` over the POSIX rows (`tiers.md`
 §1)) and **full-screen text apps** (`top`, an editor, a mesh chat) over the shell's
 **terminal emulation**: an ANSI/VT100 subset (below), so full-screen apps, a
@@ -60,7 +61,11 @@ holding the permissions its consent grants, its `print` and `input` the
 session's streams over the door, its exit code `main`'s answer, under the
 scheduler's guard for 30 s at most. A command run with `&` runs to its end
 before the prompt returns, its output into the log under its pid, and `wait`
-reads its code. A compiled (`"runtime": "wasm"`) command is its module's
+reads its code. A Lua (`"runtime": "lua"`) command is the same process row
+and streams, its scripts run as a Lua service of its own
+(`native/moycore/moycore_svc.h`), `print` and `input` its console calls and
+its exit code `main`'s answer; its chunks run under that service's start
+limit, a console call's wait apart. A compiled (`"runtime": "wasm"`) command is its module's
 WASI `_start` (`native/moy_wasm/moy_wasi.h`), crossing the same door and
 holding the same process row and guard: its stdio the session's own
 descriptors, its args and exported variables the shell's, its files the

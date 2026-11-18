@@ -196,22 +196,26 @@ def post_paste(pid):
     _E.post(pid, 0, "paste", b'["' + b[:cut] + b'"]')
 
 
-def fill_words(ws, words, ptr, ring, lay=None, pid=0):
+def fill_words(ws, words, ptr, ring, lay=None, pid=0, quiet=False):
     """An app's input words for this frame (IN_*), into the array('i')
     `words`; `ptr` a four-item list pointer_state fills, `ring` the keys
     typed and not yet sent (key_ring): this frame's joins it, and the
     oldest is the word; `lay` the (w, h, fs) its `_layout` was last told
     (the Player's), None for none. A Ctrl+V typed posts app `pid` the
-    console's Paste (`post_paste`) as it joins the ring."""
+    console's Paste (`post_paste`) as it joins the ring. `quiet` (a run
+    held aside) reads no pointer, key or step."""
     inp = ws.input
     try:
-        pointer_state(inp, ptr)
+        if quiet:
+            ptr[2] = 0
+        else:
+            pointer_state(inp, ptr)
     except Exception:  # noqa: BLE001 -- no pointer this frame, not a dead app
         ptr[2] = 0
     words[IN_X] = int(ptr[0])
     words[IN_Y] = int(ptr[1])
     words[IN_PTR] = int(ptr[2])
-    key = int(getattr(inp, "last_key", 0) or 0)
+    key = 0 if quiet else int(getattr(inp, "last_key", 0) or 0)
     if key and ring[1] < KEYS_HELD:
         ring[2 + (ring[0] + ring[1]) % KEYS_HELD] = key
         ring[1] += 1
@@ -232,7 +236,8 @@ def fill_words(ws, words, ptr, ring, lay=None, pid=0):
         words[IN_LAYOUT_W] = lay[0]
         words[IN_LAYOUT_H] = lay[1]
         words[IN_LAYOUT_FS] = lay[2]
-    add_steps(inp, words)
+    if not quiet:
+        add_steps(inp, words)
 
 
 def add_steps(inp, words):
@@ -260,7 +265,30 @@ class LinkedUi:
     """What the Player asks a run's toolkit (ui_draw.run_typing, run_cancel,
     run_back), asked of an app drawing with the toolkit it links
     (sdk/src/moyui_link.c): what its last frame told (moy_ui_tell, TOLD_*),
-    a cancel or a back taken going in on the next frame message (ASK_*)."""
+    a cancel or a back taken going in on the next frame message (ASK_*).
+    And the input its frame message carries, which a run held aside
+    (`mute`, runtime/shell/procs.py) does not read."""
+
+    _muted = False
+
+    def mute(self, on):
+        """Held aside while `on`: its frames carry no buttons, pointer or key."""
+        self._muted = bool(on)
+
+    def _input(self):
+        """This frame's buttons into `_masks` (held, pressed), the presses
+        joining those its next message carries, and an app's input words:
+        none of them while it is muted."""
+        out = self._masks
+        if self._muted:
+            out[0] = out[1] = 0
+        else:
+            read_buttons(self._ws.input, self._mask_of, out)
+        self._pressed |= out[1]
+        if self._words is not None:
+            fill_words(self._ws, self._words, self._ptr, self._keys, self._lay, self.pid,
+                       self._muted)
+        return out
 
     def _ask(self, told, ask, take):
         words = self._words
@@ -528,9 +556,7 @@ class ElfGame(LinkedUi):
     def _update(self, dt):
         if not self._live:
             return
-        out = self._masks
-        read_buttons(self._ws.input, self._mask_of, out)
-        self._pressed |= out[1]
+        out = self._input()
         self._shown = False             # the call lets the last frame go
         tick = int(dt * 1000)
         self._ms += tick
@@ -538,8 +564,6 @@ class ElfGame(LinkedUi):
         if wait > WAIT_US_MAX:
             wait = WAIT_US_MAX
         words = self._words
-        if words is not None:
-            fill_words(self._ws, words, self._ptr, self._keys, self._lay, self.pid)
         got = self._e.frame(self.pid, out[0], self._pressed, self._ms, wait, words)
         if got == ENDED or got < 0:
             self._end()

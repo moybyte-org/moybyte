@@ -262,6 +262,37 @@ def test_a_command_that_arrived_as_files_asks_in_its_terminal_first(console):
     assert call(d, "spawn", "0", "exits") == 5 and "Open it?" not in io.out
 
 
+def test_a_lua_command_runs_on_the_lua_tier(tmp_path):
+    """tests/fixtures/apps/hello_lua.moy: its main.lua run as Lua (never as
+    Python text), `print` and `input` over the session's streams, main's
+    answer the exit code, a Lua error its crash."""
+    import os
+    import shutil
+    from runtime.host_app import build_workstation
+    from runtime import sched_lua
+    if sched_lua.runtime() is None:
+        pytest.skip("no host Lua tier")
+    root = tmp_path / "carts"
+    root.mkdir()
+    here = os.path.dirname(os.path.abspath(__file__))
+    shutil.copytree(os.path.join(here, "fixtures", "apps", "hello_lua.moy"),
+                    str(root / "local.hello_lua.moy"))
+    S.SCHED.reset()
+    ws = build_workstation(str(root))
+    try:
+        io = _IO(b"Ada\n")
+        d = ShellDoor(ws, io)
+        assert call(d, "spawn", "0", "hello_lua", "a", "b") == 3, io.err
+        assert io.out == "hello\ta b\nwho? hi\tAda\n"
+        assert not [p for p in S.SCHED.procs.values() if p.kind == S.COMMAND]
+        io = _IO()
+        d = ShellDoor(ws, io)
+        assert call(d, "spawn", "0", "hello_lua") == 1
+        assert "no name" in io.err
+    finally:
+        S.SCHED.reset()
+
+
 def moybyte_wakes():
     from runtime import moybyte
     return moybyte.WAKES.list

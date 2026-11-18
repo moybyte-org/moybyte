@@ -288,6 +288,7 @@ import moy_app as _moy_app
 # in-process except cannot do this job.
 from crash_guard import CrashGuard, WALLPAPER_KEY
 import app_perms as _app_perms
+import moy_carts as _carts
 
 # Appearance (appearance.py): `ws.look`, the LOOK collaborator (#209 landing D)
 # -- theme + variant, the system font scale, the theme's wallpaper, `custom`
@@ -2278,7 +2279,7 @@ class Workstation:
             return True
         # A compiled cart has no source to open: its trap stays on the stop
         # card, which offers no See why (native/moy_wasm/README.md).
-        if self.cart.get("runtime") == "wasm":
+        if _carts.is_compiled(self.cart):
             return False
         err = self.cart_error or "crashed"
         line = self.run.player.crash_line

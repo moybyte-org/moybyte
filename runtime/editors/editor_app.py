@@ -400,9 +400,10 @@ class EditorApp:
             self.theme_tab(view)
             return
         self._drop_theme()
-        if view == "code" and ws.cart is not None and not ws.text.code_sources():
+        if ws.cart is not None and view in ("code", "blocks") and not self._offers(view):
             # A compiled cart that ships no `src/` has no Code tab: there is no
-            # text behind its main.wasm to show (native/moy_wasm/README.md).
+            # text behind its module to show (native/moy_wasm/README.md). Only
+            # a Python cart has a Blocks tab: blocks compile to Python.
             view = "cards"
         if view != self.tab and self.project is ws.run.project:
             # (#111) autosave-only: the OUTGOING tab still owes whatever it
@@ -1050,23 +1051,34 @@ class EditorApp:
                 return i
         return 0
 
-    def _has_code(self):
-        """Whether the open cart has a Code tab: every cart whose main is text
-        does, and a compiled cart only when it ships `src/`."""
-        return bool(self.ws.cart is None or self.ws.text.code_sources())
+    def _offers(self, tab):
+        """Whether the open cart has `tab`. Code: every cart whose main is
+        text does, and a compiled cart only when it ships `src/`. Blocks: a
+        Python cart only. Every other tab, always."""
+        ws = self.ws
+        if ws.cart is None:
+            return True
+        if tab == "code":
+            return bool(ws.text.code_sources())
+        if tab == "blocks":
+            return ws.text.takes_blocks()
+        return True
 
     def _ladder(self):
         """The base-density ladder for the open cart: `_ZONE_TABS`, less the
-        Code tab when there is no code (the draw and the hit test share it)."""
-        if self._has_code():
-            return _ZONE_TABS
-        return tuple(t for t in _ZONE_TABS if t[0] != "code")
+        tabs it has not got (`_offers`; the draw and the hit test share it)."""
+        return self._less(_ZONE_TABS)
 
     def _chips(self):
         """The shelf-density twin of `_ladder`."""
-        if self._has_code():
-            return _TAB_CHIPS
-        return tuple(t for t in _TAB_CHIPS if t[0] != "code")
+        return self._less(_TAB_CHIPS)
+
+    def _less(self, tabs):
+        """`tabs` itself while the cart has every one, else a copy without
+        the ones it lacks."""
+        if self._offers("code") and self._offers("blocks"):
+            return tabs
+        return tuple(t for t in tabs if self._offers(t[0]))
 
     def _draw_history_icon(self, cv, glyph, x, y, ic, enabled):
         """Draw the UNDO/REDO bar icon (#88), in the theme's `disabled` ink when

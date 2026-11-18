@@ -1035,7 +1035,7 @@ The calls a program reaches on more than one tier, each by its name there
 | `moybyte.recv` | none |  |  | `moybyte_recv` |  |
 | `moybyte.item_read` | none |  |  | `moybyte_item_read`, `moybyte.os.item_read` | `moy_item_read` |
 | `moybyte.item_write` | none |  |  | `moybyte_item_write`, `moybyte.os.item_write` | `moy_item_write` |
-| `net` | `multiplayer` | `net`, `on_net` | `on_net` |  |  |
+| `net` | `multiplayer` | `net`, `on_net` | `net`, `on_net` |  |  |
 | `pins` | `pins` | `pin_write`, `pin_read` | `pin_write`, `pin_read` |  |  |
 | `console` | `console` | `print` | `print` |  |  |
 | `moybyte.at` | `alarms` | `moybyte.at` | `moybyte.at` | `moybyte_at`, `moybyte.os.at` | `moy_at` |

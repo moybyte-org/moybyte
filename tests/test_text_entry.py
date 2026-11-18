@@ -56,11 +56,14 @@ def test_text_entry_open_cuts_to_the_cap_and_keys_through_the_ladder():
 
 # -- arm_prompt: the three callers, one latched frame -------------------------
 
-def _ws_with_lua_cart(tmp_path):
+def _ws_with_lua_cart(tmp_path, python=False):
+    """A console with one cart open in the Editor: a Lua one, or where
+    `python` a Python one (the only kind with a Blocks tab)."""
     root = str(tmp_path / "carts")
     moy_carts.ensure_dirs(root)
-    moy_carts.create("Lua One", root, src="function _draw() cls(1) end\n",
-                     runtime="lua", main="main.lua",
+    src, rt, main = (("def _draw():\n    cls(1)\n", "python", "main.py") if python
+                     else ("function _draw() cls(1) end\n", "lua", "main.lua"))
+    moy_carts.create("Lua One", root, src=src, runtime=rt, main=main,
                      edit=[{"key": "n", "type": "int", "min": 0, "max": 9,
                             "card": "N"}])
     ws = host_app.build_workstation(root)
@@ -132,7 +135,7 @@ def test_new_script_survives_the_keypress_that_opened_it(tmp_path):
 
 
 def test_block_prompt_survives_the_keypress_that_opened_it(tmp_path):
-    ws = _ws_with_lua_cart(tmp_path)
+    ws = _ws_with_lua_cart(tmp_path, python=True)
     ws.text.set_menu_view("blocks")
     bu = ws.block_ui
     ws.input.begin_frame()

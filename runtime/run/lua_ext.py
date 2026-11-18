@@ -372,6 +372,7 @@ NOT_REGISTRABLE = frozenset((
     "scene", "load_scene", "actors",       # rows of actors: prelude + C
     "touching", "move_actor", "move_actor_to", "remove_actor", "draw_scene",
     "open_editor",                         # an editor handle: prelude + handles
+    "on_net",                              # takes a function: prelude + handles
     "_minimise", "_restore", "moy_action", "moy_open",   # the state's own (LUA_EVENTS)
 ))
 
@@ -745,6 +746,65 @@ do
 end
 """
 
+PRELUDE_NET = """
+do
+  -- A multiplayer cart's `net.send(data)` and `on_net(fn)` (docs/moy_cart_api.md,
+  -- Multiplayer), where the run's permissions grant them: a message crosses
+  -- as JSON, the shape the link carries it in (runtime/run/players.py), so
+  -- a table goes as an array or an object.
+  local send = __net_send
+  __net_send = nil
+  if send then
+    local type, tostring, pairs, next, concat = type, tostring, pairs, next, table.concat
+    local format, byte, gsub = string.format, string.byte, string.gsub
+    local function esc(c) return format("\\\\u%04x", byte(c)) end
+    local function put(v, out)
+      local t = type(v)
+      if t == "table" then
+        if v[1] ~= nil or next(v) == nil then
+          out[#out + 1] = "["
+          for i = 1, #v do
+            if i > 1 then out[#out + 1] = "," end
+            put(v[i], out)
+          end
+          out[#out + 1] = "]"
+        else
+          local sep = "{"
+          for k, x in pairs(v) do
+            out[#out + 1] = sep
+            put(tostring(k), out)
+            out[#out + 1] = ":"
+            put(x, out)
+            sep = ","
+          end
+          out[#out + 1] = "}"
+        end
+      elseif t == "string" then
+        out[#out + 1] = '"' .. gsub(v, '[%c"\\\\]', esc) .. '"'
+      elseif t == "number" or t == "boolean" then
+        out[#out + 1] = tostring(v)
+      else
+        out[#out + 1] = "null"
+      end
+    end
+    local handler
+    net = {}
+    function net.send(data)
+      local out = {}
+      put(data, out)
+      send(concat(out))
+    end
+    function on_net(fn)
+      handler = fn
+      return fn
+    end
+    function __net_msg(m)
+      if handler then handler(m) end
+    end
+  end
+end
+"""
+
 PRELUDE_FASTMATH = """
 do
   -- #66 M0: rnd/flr as pure Lua. The registered trampolines cost a full
@@ -765,7 +825,7 @@ end
 # second name would be a second thing to remember to send.
 PRELUDE_HANDLES = (PRELUDE_HANDLES.replace(
     "@LAYER_VERBS@", ", ".join('"%s"' % v for v in LAYER_VERBS))
-    + PRELUDE_EDITOR + PRELUDE_APP + PRELUDE_MOYBYTE)
+    + PRELUDE_EDITOR + PRELUDE_APP + PRELUDE_MOYBYTE + PRELUDE_NET)
 
 _LUA_PRELUDE = PRELUDE_HANDLES + PRELUDE_FASTMATH
 
@@ -805,6 +865,7 @@ def install_handles(ns, reg, call=None):
     _install_editor(ns, reg, pins)
     _install_app(ns, reg)
     _install_moybyte(ns, reg, call, pins)
+    _install_net(ns, reg, call)
     return pins
 
 
@@ -894,6 +955,24 @@ def _install_moybyte(ns, reg, call, pins):
     if hasattr(ns, "__setitem__"):
         for name in LUA_EVENTS:
             ns[name] = (lambda n: lambda *a: rw.event(n, a))(name)
+
+
+def _install_net(ns, reg, call):
+    """A multiplayer run's `net` (PRELUDE_NET), where the namespace holds the
+    Player's gated backend: a sent message is the JSON text the prelude
+    made, and each message the Player pumps reaches the state's
+    `__net_msg` through `call`, before its `_update` as on the Python tier."""
+    net = ns.get("net") if hasattr(ns, "get") else None
+    if net is None or call is None:
+        return
+    import json as _json
+    reg("__net_send", lambda text: net.send(_json.loads(text)))
+
+    def _deliver(m):
+        err = call("__net_msg", _json.dumps([m]))
+        if err and err != "the run has closed":
+            raise RuntimeError(err)
+    net.on_message(_deliver)
 
 
 def _install_app(ns, reg):

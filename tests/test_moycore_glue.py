@@ -1010,7 +1010,8 @@ def test_every_handle_the_prelude_consumes_is_registered(w):
     both states below rather than exempted, because "registered when granted"
     is the actual invariant and a rename would still break it. The app names
     that read the Python face's tables (`__themes`, `__files_badge`) are gated
-    the same way, on the role their permission names."""
+    the same way, on the role their permission names, and `__net_send` on
+    `multiplayer` (`net` in the namespace)."""
     from runtime.lua_ext import PRELUDE_HANDLES
 
     w.run()
@@ -1019,13 +1020,13 @@ def test_every_handle_the_prelude_consumes_is_registered(w):
     # events' entry, which the console calls (moycore.call). And the layer and scene natives are the RUNTIME's
     # own C (moycore_layers.h, moycore_scene.h), installed by run_begin and
     # hl_new, never registered.
-    fields = {"__id", "__img", "__c", "__e", "__index", "__moybyte_event"}
+    fields = {"__id", "__img", "__c", "__e", "__index", "__moybyte_event", "__net_msg"}
     natives = {"__layer_canvas", "__layer_verb", "__layer_blit",
                "__layer_new", "__layer_spr_img", "__image_handle",
                "__scene_names", "__scene_rows", "__draw_scene"}
     wanted = set(re.findall(r"__\w+", PRELUDE_HANDLES)) - fields - natives
     gated = {n for n in wanted
-             if n.startswith("__ed_") or n in ("__themes", "__files_badge")}
+             if n.startswith("__ed_") or n in ("__themes", "__files_badge", "__net_send")}
     assert gated, "the editor handles vanished from the prelude"
     # `__moybyte_call` is the run's `moybyte` table's, which its C takes
     # (moycore.own, native/moycore/moycore_moybyte.h), never the prelude's.
@@ -2672,6 +2673,28 @@ def test_a_tampered_module_or_a_trap_is_never_retried(tmp_path):
         assert world.mod.WasmRuntime(FakeWs()).command(cart, ["probe"]) == (-1, "unreachable")
         assert len(calls) == 1
     finally:
+        world.close()
+
+
+def test_an_engine_with_no_services_refuses_one_and_the_scheduler_says_so(tmp_path):
+    """The browser's engine (native/moy_wasm_web) runs commands and no
+    services: `service` answers the refusal, never an AttributeError, and
+    the scheduler ends the service's row with it."""
+    from runtime import scheduler as S
+    world, cart, _calls = _command_world(tmp_path, (), [])
+    try:
+        assert not hasattr(world.mod._moy_wasm, "service_start")
+        world.mod._moy_wasm.mem = lambda: (1 << 20, 1 << 20, 0, 0, 0)
+        rt = world.mod.WasmRuntime(FakeWs())
+        why = "a wasm service does not run on this console"
+        assert rt.service(cart, 9) == why
+        ws = FakeWs()
+        ws.runtimes = {"wasm": rt}
+        p = S.Proc(77, S.SERVICE, "svc", cart)
+        assert S.CompiledServices(S.SCHED).start(p, ws, cart, "wasm") is None
+        assert p.state == S.EXITED and p.rt is None
+    finally:
+        del world.mod._moy_wasm.mem
         world.close()
 
 

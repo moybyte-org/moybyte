@@ -55,7 +55,7 @@ def lua_chunks(cart):
             + [(s, "@" + n) for n, s in cart.get("src_after") or ()])
 
 
-def _env_text(env):
+def env_text(env):
     """What the console hands a Lua service, as moycore_svc_start takes it:
     the JSON text [values, calls], or None for nothing."""
     if not env:
@@ -100,7 +100,7 @@ class LuaServices:
             if svc is None:
                 raise OSError(EINVAL, "no Lua runtime")
             s._open(p.pid, False)
-            p.native = svc.svc_start(p.pid, p.name, chunks, _env_text(env), run)
+            p.native = svc.svc_start(p.pid, p.name, chunks, env_text(env), run)
         except (TypeError, ValueError) as e:
             _log(ERR, p.pid, "what the console hands it is not JSON: %s" % e)
             p.state, p.code = EXITED, EXIT_CRASHED

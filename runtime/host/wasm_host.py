@@ -287,7 +287,9 @@ class WasmHostRun:
         inp = self._ws.input
         # MOY_BUTTONS: the order is lua_ext's, never restated here.
         masks = getattr(inp, "button_masks", None)
-        if masks is not None:
+        if self._muted:
+            held = pressed = 0
+        elif masks is not None:
             held, pressed = masks(MOY_BUTTONS)
         else:
             held = pressed = 0
@@ -317,6 +319,21 @@ class WasmHostRun:
 
     def _sync_view(self):
         self._view = sync_view(self._ws, self._run.view(), self._view)
+
+    _muted = False
+
+    def mute(self, on):
+        """A run held aside (runtime/shell/procs.py) reads no input while
+        `on`: its frames' snapshot has no buttons, key or pointer -- the
+        kernel's (moy_play.h) where the kernel's Player runs its frames,
+        its buttons here where `update` does."""
+        self._muted = bool(on)
+        if self._prun:
+            from runtime import moy_play
+            try:
+                moy_play.mute(self._prun, on)
+            except (RuntimeError, AttributeError):
+                pass
 
     # -- the frame in C (native/moy_play) -------------------------------------
 

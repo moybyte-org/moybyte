@@ -257,6 +257,44 @@ def test_the_hooks_run_under_the_tick_model(tmp_path):
     assert abs(got[3] - 33333) <= 1, got[3]      # dt is the tick's period
 
 
+# A cart that counts, in pmem slot 0, the ticks it saw "right" held.
+RIGHTS = """
+(module
+  (import "moy" "pmem" (func $pmem (param i32 i32 i32) (result i32)))
+  (import "moy" "btn" (func $btn (param i32 i32) (result i32)))
+  (memory (export "memory") 1 1)
+  (func (export "_init"))
+  (func (export "_draw"))
+  (func (export "_update") (param $dt f32)
+    (if (call $btn (i32.const 1) (i32.const 0))
+      (then (drop (call $pmem (i32.const 0)
+        (i32.add (call $pmem (i32.const 0) (i32.const 0) (i32.const 0)) (i32.const 1))
+        (i32.const 1)))))))
+"""
+
+
+def test_held_aside_it_reads_no_buttons(tmp_path):
+    """A run held aside (runtime/shell/procs.py) is muted, as the board's
+    wasm and Lua runs are: its ticks see no buttons until it is given back."""
+    _binding_or_skip()
+    ws = host_app.build_workstation(_store(tmp_path, _wat_cart("Rights", RIGHTS, 1)))
+    open_cart(ws, "Rights")
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    run = ws.run.player.lua
+    src = ws.input.source("kbd")
+    src.set_button("right", True)
+    run.mute(True)
+    for _ in range(10):
+        ws.input.begin_frame()
+        ws.frame(_DT)
+    assert _pmem(ws)[0] == 0
+    run.mute(False)
+    for _ in range(10):
+        ws.input.begin_frame()
+        ws.frame(_DT)
+    assert _pmem(ws)[0] > 0
+
+
 # A cart that writes time() into pmem slot 0 every _update.
 CLOCK = """
 (module

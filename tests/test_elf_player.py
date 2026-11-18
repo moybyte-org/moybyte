@@ -97,6 +97,27 @@ def test_it_takes_its_buttons(ws):
     assert y == 16 and x >= 16 + 4 * 2, (x, y)
 
 
+def test_held_aside_it_reads_no_buttons(ws):
+    """A run held aside (runtime/shell/procs.py) is muted, as every tier's
+    run is: its frames carry no buttons until it is given back."""
+    p = _start(ws)
+    p.lua.mute(True)
+    src = ws.input.source("kbd")
+    src.set_button("right", True)
+    for _ in range(4):
+        ws.input.begin_frame()
+        ws.frame(DT)
+    assert _square(ws) == (16, 16)
+    p.lua.mute(False)
+    for _ in range(4):
+        ws.input.begin_frame()
+        ws.frame(DT)
+    src.set_button("right", False)
+    _frames(ws, 3)
+    x, y = _square(ws)
+    assert y == 16 and x > 16, (x, y)
+
+
 def test_a_pause_holds_it_and_resume_goes_on(ws):
     p = _start(ws)
     pid = p.lua.pid

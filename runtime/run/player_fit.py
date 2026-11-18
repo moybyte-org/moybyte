@@ -113,8 +113,7 @@ RUNTIME_NAMES = {"lua": "Lua", "wasm": "wasm", "elf": "native"}
 def _compiled(cart):
     """True for a compiled ("runtime": "wasm") or native cart: no source to
     show, no line to mark, no EDIT action on its error panel."""
-    cart = cart or {}
-    return cart.get("runtime") == "wasm" or bool(cart.get("native"))
+    return _carts.is_compiled(cart)
 
 
 # A compiled cart bigger than this console can hold (native/moy_wasm/README.md:

@@ -165,7 +165,8 @@ The few Lua-specific notes:
 - A crash opens the same stop card, and its See why drops on the offending
   `main.lua` line. The code editor's tap-palette offers `~` (for `~=`) in a
   Lua project.
-- The blocks editor stays Python-only for now (compiles to Python by design).
+- The blocks editor stays Python-only for now (compiles to Python by design):
+  a Lua or compiled cart has no Blocks tab.
 - **Numbers on the device are 32-bit** (`LUA_32BITS`, #67): floats carry ~7
   digits and integers wrap at ±2.1 billion — plenty for scores, timers and
   positions, and float math runs on the hardware FPU (part of why Lua is the
@@ -673,6 +674,10 @@ def _update(dt):
 Both `net` and `on_net` are **only present** when the manifest asks for
 `"multiplayer"` — a normal cart has no `net` name at all (just like `wifi`) —
 and are `None` while it is turned off in Settings.
+
+A Lua cart has the same two (`net.send(data)`, `on_net(function(msg) ... end)`).
+A message crosses as JSON, which is how the link carries it, so a Lua table
+arrives as a list or a dict, and a Python tuple as a list.
 
 > **Keeping two consoles in step:** if both sides run the same game logic, seed your
 > randomness the same way on both (share a start seed and use it for `rnd()`), and keep

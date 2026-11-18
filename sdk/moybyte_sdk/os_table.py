@@ -462,6 +462,7 @@ LUA = {
     'moybyte.status_show': (),
     'moybyte.status_state': (),
     'moybyte.x25519': (),
+    'net': ('multiplayer',),
     'on_net': ('multiplayer',),
     'open_app': ('launch', 'front'),
     'pin_read': ('pins',),

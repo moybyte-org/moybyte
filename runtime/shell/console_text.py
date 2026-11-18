@@ -14,6 +14,7 @@ input policy's (runtime/shell/input_policy.py).
 """
 
 import ui_draw as _ui_draw
+import moy_carts as _carts
 
 # The block vocabulary/compiler (#29). Imported under whichever name it's known by:
 # bare `blocks` on the device (frozen top-level) and on the host once host_app has
@@ -123,6 +124,12 @@ class Text:
         ws = self.ws
         ws.editor_app.open_music()
 
+    def takes_blocks(self):
+        """Whether the open cart has a Blocks tab: a Python cart, the one tier
+        the block compiler writes (moy_carts.is_python)."""
+        cart = self.ws.run.project.cart if self.ws.run.project is not None else None
+        return cart is None or _carts.is_python(cart)
+
     def cart_has_handwritten_code(self):
         """True if the current cart's main.py is real, hand-written code that the
         block editor must not overwrite: there is non-trivial source AND it was NOT
@@ -188,7 +195,7 @@ class Text:
         if ws.code_file:
             return ws.code_file
         cart = ws.run.project.cart or {}
-        if cart.get("runtime") == "wasm":
+        if _carts.is_compiled(cart):
             srcs = self.code_sources()
             return srcs[0] if srcs else None
         return cart.get("main", "main.py")
