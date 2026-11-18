@@ -291,10 +291,12 @@ def test_the_hint_strip_names_the_dialogs_keys(tmp_path, monkeypatch, kind):
     drawn = []
     hints = launcher_layer._ui_draw.hints
 
-    def spy(cv, th, rect, items, desk=False, draw=True):
+    def spy(cv, th, rect, items, desk=False, draw=True, answer=True):
         if draw:
-            drawn.append(tuple(items))
-        return hints(cv, th, rect, items, desk, draw)
+            # (the strip draws the line it laid out, `ui_draw.hint_line`)
+            drawn.append(tuple(items.decode().split("\0")) if type(items) is bytes
+                         else tuple(items))
+        return hints(cv, th, rect, items, desk, draw, answer)
 
     def strip():
         cv = ws.glass_canvas

@@ -1229,6 +1229,45 @@ def home(loop, info):
     for _ in range(60):
         loop.step()
     home_swiped(loop, info)
+    home_live(loop, info)
+
+
+def home_live(loop, info):
+    """The home over a LIVE wallpaper (Sakura, a cart with `_update`): every
+    frame is the home's full paint, the wallpaper's frame and its blit
+    included, and allocates nothing beyond what the wallpaper cart's own
+    code makes. Then the carousel dragged across it, the wallpaper held
+    still (`Wallpaper.held`): each frame and whether it advanced."""
+    ws = loop.ws
+    was = ws.look.wallpaper_id
+    ws.look.select_wallpaper("moybyte.sakura", persist=False)
+    for _ in range(60):
+        loop.step()
+    w = ws.wallpaper
+    info["home_live_anim"] = w.is_animating(FRAME_S)
+    gc.collect()
+    gc.disable()
+    d0 = ws.frame_state.frames_drawn
+    info["home_live"] = _frames(loop, @WINDOW_MS@, False, @MIN_FRAMES@)
+    info["home_live_drawn"] = ws.frame_state.frames_drawn - d0
+    gc.enable()
+    g, (bx, by, bw, bh) = ws.launcher, ws.launcher.band_rect()
+    cy = by + bh // 2
+    held = []
+    real = w.held
+
+    def _held():
+        r = real()
+        if r:
+            held.append(1)
+        return r
+    w.held = _held
+    info["home_live_drag"] = _swiped(loop, bx + bw * 3 // 4, cy, bx + bw // 4, cy, 12, 40)
+    w.held = real
+    info["home_live_held"] = len(held)
+    ws.look.select_wallpaper(was, persist=False)
+    for _ in range(60):
+        loop.step()
 
 
 def _swiped(loop, x0, y0, x1, y1, n, steps):
@@ -1453,6 +1492,8 @@ def _stage(dest, exe, apps=False, desk=False):
                     dest / "carts" / "moybyte.notes.moy")
     shutil.copytree(ROOT / "system_carts" / "moybyte.star_catcher.moy",
                     dest / "carts" / "moybyte.star_catcher.moy")
+    shutil.copytree(ROOT / "system_carts" / "moybyte.sakura.moy",
+                    dest / "carts" / "moybyte.sakura.moy")
     if apps:
         _stage_shelf(dest)
         for app in ("appearance", "storybook", "get_carts", "my_art"):
@@ -1780,6 +1821,30 @@ def test_the_home_idle_paints_nothing_and_allocates_nothing(result):
     assert info["home_top"] == "launcher", text[-3000:]
     assert info["home_idle_drawn"] == 0, info["home_idle_drawn"]
     _assert_quiet(info["home_idle"], "the home idle", text, minute=True)
+
+
+# What the T-Deck home's frame over a live wallpaper may allocate: every
+# frame is a full paint -- the wallpaper, its blit, the hint strip as it was
+# laid out (`HomeHints._hint_laid_out`) and the band's table pass. What is
+# left is the band pass's cards and caption, the path HOME_BAND_FRAME holds
+# a ceiling over (2026-11-18: 576 B, down from 3 KB).
+HOME_LIVE_FRAME = 640
+
+
+def test_a_live_wallpaper_home_frame_allocates_under_its_ceiling(result):
+    """Sakura on the home: every frame paints, and none allocates more than
+    HOME_LIVE_FRAME; dragged across, the wallpaper holds still."""
+    info, text = result
+    assert info["home_live_anim"], text[-3000:]
+    frames = info["home_live"]
+    assert len(frames) > 20 and info["home_live_drawn"] == len(frames), (
+        info["home_live_drawn"], len(frames))
+    assert max(frames) <= HOME_LIVE_FRAME, (
+        "a live-wallpaper home frame allocated over %d bytes: %s"
+        % (HOME_LIVE_FRAME, sorted(set(frames))))
+    assert info["home_live_held"] > 0
+    drag = [a for a, _drew in info["home_live_drag"]]
+    assert max(drag) <= HOME_SWIPE_FRAME, drag
 
 
 # What one moving frame of the T-Deck home's carousel may allocate: a
@@ -2153,6 +2218,24 @@ def main():
         info["drawn"] = drawn
         info["moved"] = moved
         info["dragging"] = wm._drag is not None
+        for _ in range(30):
+            step()
+        # The desk over a live wallpaper: every frame renders the desk.
+        ws.look.select_wallpaper("moybyte.sakura", persist=False)
+        for _ in range(60):
+            step()
+        info["live_anim"] = ws.wallpaper.is_animating(FRAME_S)
+        gc.collect()
+        gc.disable()
+        live = []
+        d0 = ws.frame_state.frames_drawn
+        for _ in range(@N@):
+            a = gc.mem_alloc()
+            step()
+            live.append(gc.mem_alloc() - a)
+        gc.enable()
+        info["live"] = live
+        info["live_drawn"] = ws.frame_state.frames_drawn - d0
         print("RESULT " + json.dumps(info))
     except BaseException as exc:             # noqa -- say it, then end the run
         sys.print_exception(exc)
@@ -2192,6 +2275,23 @@ def test_the_desk_drag_moves_a_window_and_paints_every_frame(desk):
     assert info["order"] == ["settings"] and info["dragging"], text[-3000:]
     assert info["drawn"] == [1] * DESK_DRAG, info["drawn"]
     assert info["moved"] >= DESK_DRAG * 3 // 4, info["moved"]
+
+
+# What a desk frame over a live wallpaper may allocate: the desk renders
+# whole every frame, its column, quiet rectangles and tiles' look kept
+# (`_BackdropLayer._icon_rects`); what is left is the windows' chrome and
+# the taskbar's chips, which every desk repaint draws (2026-11-18: 448 B,
+# down from 3.3 KB).
+DESK_LIVE_FRAME = 512
+
+
+def test_a_live_wallpaper_desk_frame_allocates_under_its_ceiling(desk):
+    info, text = desk
+    assert info["live_anim"], text[-2000:]
+    assert info["live_drawn"] == DESK_DRAG, info["live_drawn"]
+    assert max(info["live"]) <= DESK_LIVE_FRAME, (
+        "a live-wallpaper desk frame allocated over %d bytes: %s"
+        % (DESK_LIVE_FRAME, info["live"]))
 
 
 def test_a_desk_drag_frame_allocates_only_the_answers_the_drag_moved(desk):

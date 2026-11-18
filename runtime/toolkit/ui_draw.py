@@ -1214,18 +1214,27 @@ def hint_kind(name=None):
     return INPUTS[_C.hint_input()]
 
 
-def hints(cv, th, rect, items, desk=False, draw=True):
+def hints(cv, th, rect, items, desk=False, draw=True, answer=True):
     """Keycap hints in band `rect`, from its left (the public `ui.hints`'s
     part, for chrome that lays itself out): `items` alternate an action --
     `confirm`, `back`, `change`, `tabs`, `menu` or `cancel`, drawn as the keys of the
     hint input (`hint_kind`) -- or keys spelled out -- space-separated;
     `enter`, `left`, `right`, `up` and `down` draw as signs -- and what they
-    do. Answers
-    each pair's (x0, x1) across the band, what a tap hit-tests (x0 == x1 for
-    a pair the input has no key for; none under touch); `draw` False only
-    measures."""
-    b = b"\0".join([str(t).encode("utf-8") for t in items])
-    return _C.hints(cv, _LOOK if th is _TH else _look(th), rect, b, desk, draw)
+    do; or the line `hint_line` made of them, which draws with nothing made.
+    Answers each pair's (x0, x1) across the band, what a tap hit-tests (x0 ==
+    x1 for a pair the input has no key for; none under touch); `draw` False
+    only measures, `answer` False draws and answers None."""
+    b = items if type(items) is bytes else hint_line(items)
+    look = _LOOK if th is _TH else _look(th)
+    if answer:
+        return _C.hints(cv, look, rect, b, desk, draw)
+    _C.hints(cv, look, rect, b, desk, draw, False)
+
+
+def hint_line(items):
+    """`hints`'s items as the one line the C reads, their texts joined by
+    NUL: made once, drawn every frame after."""
+    return b"\0".join([str(t).encode("utf-8") for t in items])
 
 
 def status_row(cv, th, rect, items):

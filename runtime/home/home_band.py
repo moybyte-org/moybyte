@@ -29,8 +29,14 @@ def _wall_ink(ws):
     (docs/history/look_2026-10.md steps 25 and 28)."""
     if ws.look.wallpaper_id is None:
         return None
-    black, white = ws.look.live.fixed[2:]
-    return white, black
+    f = ws.look.live.fixed
+    k = _WALL_INK[0]
+    if k is None or k[0] != f[3] or k[1] != f[2]:
+        k = _WALL_INK[0] = (f[3], f[2])
+    return k
+
+
+_WALL_INK = [None]      # the pair `_wall_ink` answered last: the same while it stands
 
 
 def _overlaps_any(rects, others):

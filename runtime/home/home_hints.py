@@ -12,8 +12,10 @@ drawn on the wallpaper's ink, and their taps and their letters on a
 keyboard. A mixin over `LauncherHomeLayer`, its FIRST base: a band frame
 draws the strip beside the band (`_beside`) on every moving frame, and on
 MicroPython a method the class lacks is looked up through its bases in
-order. It owns no state of its own: the tab row's focus and the selection
-it names are the layer's.
+order. The tab row's focus and the selection it names are the layer's;
+its own state is the strip as it was laid out last (`_hint_laid_out`), so
+a full paint of the home -- every frame over a live wallpaper -- draws it
+with nothing made.
 """
 
 import ui as _ui
@@ -163,6 +165,69 @@ class HomeHints:
         wall = self._wall()
         if wall is not None:
             th = self._wall_theme(th, wall[0])
+        laid = self._hint_laid_out(cv, th)
+        desk = laid[0]
+        if laid[2] is not None:
+            _ui_draw.hints(cv, th, laid[1], laid[2], desk, True, False)
+        elif laid[3]:
+            self._draw_search(cv, th, th["ink"])
+        if laid[4] is not None:
+            _ui_draw.hints(cv, th, laid[4], laid[5], desk, True, False)
+
+    # What the strip was laid out from (`_hint_reads`), and how:
+    # (desk, the verbs' band, their keycaps' line or None, the search's
+    # place, the tab keys' band or None, their line).
+    _HINT_READS = 18
+    _hint_k = None
+    _hint_v = None
+    _hint_laid = None
+
+    def _hint_laid_out(self, cv, th):
+        """The strip `_draw_hints` draws, laid out again only where
+        something it reads moved: the glass and the look, the strip's rect,
+        the tab and the selection, the favourites (the settings' gen), the
+        input whose keys it names, the keys' place and a modal's, the
+        search, the store's say."""
+        ws = self.ws
+        g = self.grid
+        n = self._HINT_READS
+        v = self._hint_v
+        k = self._hint_k
+        if v is None:
+            v = self._hint_v = [None] * n
+            k = self._hint_k = [None] * n
+        v[0] = cv
+        v[1] = cv.w
+        v[2] = cv.h
+        v[3] = ws.layout.fs
+        v[4] = ws.look.look_gen
+        v[5] = th
+        v[6] = g.foot()[5]
+        v[7] = g.tab
+        v[8] = g.sel
+        v[9] = g.items
+        v[10] = ws.system.gen()
+        v[11] = _ui_draw.hint_kind()
+        v[12] = self._button_focus
+        v[13] = self._tab_keys
+        v[14] = modal_keys(ws)
+        v[15] = getattr(ws, "search_query", "")
+        v[16] = getattr(ws, "search_typing", False)
+        v[17] = getattr(ws, "can_manage", True)
+        i = 0
+        while i < n and (v[i] is k[i] or v[i] == k[i]):
+            i += 1
+        if i == n and self._hint_laid is not None:
+            return self._hint_laid
+        i = 0
+        while i < n:
+            k[i] = v[i]
+            i += 1
+        self._hint_laid = laid = self._hint_lay(cv, th)
+        return laid
+
+    def _hint_lay(self, cv, th):
+        desk = self.grid.desk()
         keys = modal_keys(self.ws)
         if keys is None and self._tab_keys:
             keys = _TAB_ROW_KEYS
@@ -170,24 +235,23 @@ class HomeHints:
             # the system menu's card or the delete confirm is up over the
             # home: the keys it takes, never the home's verbs
             rect = self.grid.foot()[5]
-            _ui_draw.hints(cv, th, self._hint_inner(rect), keys, self.grid.desk())
-            return
+            return (desk, self._hint_inner(rect), _ui_draw.hint_line(keys), False,
+                    None, None)
         spans, rect, items = self._hint_fit(cv)
         n = sum(1 for v, _a, _b in spans if v != "tabs")
         query = getattr(self.ws, "search_query", "")
         typing = getattr(self.ws, "search_typing", False)
-        if self.searchable and (query or typing):
+        search = bool(self.searchable and (query or typing))
+        if search:
             n = 0
-        desk = self.grid.desk()
-        if n:
-            _ui_draw.hints(cv, th, self._hint_inner(rect), items[:2 * n], desk)
-        elif self.searchable and (query or typing):
-            self._draw_search(cv, th, th["ink"])
+        tabs = None
         for v, x0, _x1 in spans:
             if v == "tabs":
                 left = x0 - (rect[0] + self._hint_lead())
-                _ui_draw.hints(cv, th, (rect[0] + left, rect[1], rect[2] - left, rect[3]),
-                               _TAB_KEYS, desk)
+                tabs = (rect[0] + left, rect[1], rect[2] - left, rect[3])
+        return (desk, self._hint_inner(rect),
+                _ui_draw.hint_line(items[:2 * n]) if n else None, search,
+                tabs, _ui_draw.hint_line(_TAB_KEYS) if tabs is not None else None)
 
     def _wall_theme(self, th, white):
         """`th` with its hint labels' roles white, for the strip over a

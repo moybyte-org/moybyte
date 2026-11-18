@@ -69,6 +69,17 @@ class _BackdropLayer(Layer):
         self.ws = wm.ws
         self._cat_at = [None, None, None]  # what `_cat_sig` was made at (`_column_sig`)
         self._cat_sig = None
+        self._catalog = None          # the `_icon_catalog` `_cat_sig` was made of
+        # The column's rects (`_icon_rects`), their icons' squares, the
+        # quiet rectangles and the tiles' look, each kept while what it was
+        # made from stands: a live desk draws the column every frame.
+        self._rects_at = [None, None, None]
+        self._rects = None
+        self._iboxes = None
+        self._quiet_at = [None, None]
+        self._quiet = None
+        self._style_at = [None, None, None, None, None]
+        self._style = None
         self._sig_keys = [None] * 11  # `_desk_sig`'s values, compared in place
         self._sig_gen = 0             # ...and the count that moves with them
 
@@ -272,8 +283,9 @@ class _BackdropLayer(Layer):
             at[0] = carts.gen
             at[1] = carts.titled
             at[2] = n
+            cat = self._catalog = self._icon_catalog()
             self._cat_sig = tuple((key, label, c.get("path") if c else None)
-                                  for key, label, c in self._icon_catalog())
+                                  for key, label, c in cat)
         return self._cat_sig
 
     def _draw_desktop(self, dt):
@@ -284,9 +296,16 @@ class _BackdropLayer(Layer):
     def quiet(self):
         """The desk's quiet rectangles (docs/theme_and_shell_2026-11.md §3.9): the
         bars and the icon column, its tiles and labels as one rectangle per
-        column. Built when the desk cache is lost, never per frame."""
+        column. Made when the column or the bars move."""
+        rects = self._icon_rects()
+        bars = self.ws.wallpaper.bars()
+        at = self._quiet_at
+        if at[0] is rects and at[1] is bars:
+            return self._quiet
+        at[0] = rects
+        at[1] = bars
         cols = {}
-        for _key, box, band, _label, _cart in self._icon_rects():
+        for _key, box, band, _label, _cart in rects:
             x0 = min(box[0], band[0])
             y0 = min(box[1], band[1])
             x1 = max(box[0] + box[2], band[0] + band[2])
@@ -296,9 +315,10 @@ class _BackdropLayer(Layer):
                 x0, y0 = min(x0, c[0]), min(y0, c[1])
                 x1, y1 = max(x1, c[2]), max(y1, c[3])
             cols[box[0]] = (x0, y0, x1, y1)
-        return self.ws.wallpaper.bars() + tuple(
+        self._quiet = bars + tuple(
             (x0, y0, x1 - x0, y1 - y0) for x0, y0, x1, y1 in
             (cols[k] for k in sorted(cols)))
+        return self._quiet
 
     # -- desk icons (#105: desktop mode's launch surface) ---------------------
     #
@@ -351,12 +371,23 @@ class _BackdropLayer(Layer):
 
     def _icon_rects(self):
         """[(key, box_rect, label_rect, label, cart), ...] -- a left-edge column
-        wrapping into further columns; recomputed per call from live geometry."""
+        wrapping into further columns, laid out again when the column
+        (`_column_sig`), the font scale or the desk's rect moves; callers
+        read it and never change it."""
         ws = self.ws
         fs = ws.look.effective_font_scale()
-        dx, dy, dw, dh = self.wm.desk_rect()
+        d = self.wm.desk_rect()
+        sig = self._column_sig()
+        at = self._rects_at
+        if at[0] is sig and at[1] == fs and at[2] == d and self._rects is not None:
+            return self._rects
+        at[0] = sig
+        at[1] = fs
+        at[2] = d
         box = _layout_base.metric("tile", fs)
-        return self._look_rects(self._icon_catalog(), box, fs, dx, dy, dw, dh)
+        self._rects = self._look_rects(self._catalog, box, fs, d[0], d[1], d[2], d[3])
+        self._iboxes = [_icon_box(e[1]) for e in self._rects]
+        return self._rects
 
     def _look_rects(self, catalog, box, fs, dx, dy, dw, dh):
         """The column under a look (docs/history/look_2026-10.md step 25): `box`
@@ -419,13 +450,47 @@ class _BackdropLayer(Layer):
         and `label.shadow` under it where the look sets one; over a
         wallpaper, white over a shadow."""
         look = ws.look.live.look
+        fixed = ws.look.live.fixed
+        on = ws.look.wallpaper_id is not None
+        at = self._style_at
+        gen = ws.look.look_gen
+        if (at[0] is look and at[1] is fixed and at[2] is th and at[3] == on
+                and at[4] == gen):
+            tiles, tink, lab, shadow = self._style
+        else:
+            at[0] = look
+            at[1] = fixed
+            at[2] = th
+            at[3] = on
+            at[4] = gen
+            tiles, tink, lab, shadow = self._style = self._tile_style(look, fixed, th, on)
+        rects = self._icon_rects()
+        boxes = self._iboxes
+        i = 0
+        for key, box, band, label, cart in rects:
+            ibox = boxes[i]
+            i += 1
+            _ui_draw.bar_part(cv, th, _ui_draw.BAR_TILE, box, 0, _tile_fill(tiles, key))
+            if not ws.draw_icon(key, ibox, tink, cv):
+                img = ws.covers.icon_sheet_for(cart) if cart is not None else None
+                if img is not None:
+                    sc = max(1, (box[2] * 24 // 44) // 16)
+                    cv.spr(img, box[0] + (box[2] - 16 * sc) // 2,
+                           box[1] + (box[3] - 16 * sc) // 2, sc)
+                else:
+                    _bar_glyph(self.ICON_GLYPHS.get(key, "app"), ibox, tink, cv)
+            _ui_draw.label(cv, band, label, lab, _ui_draw.ALIGN_CENTER, None, shadow)
+
+    def _tile_style(self, look, fixed, th, on):
+        """(tiles, the icons' ink, the labels' ink, their shadow) of the
+        column under `look`, over a wallpaper where `on`."""
         leaves = look[0]
         ink = th.get("ink", 0)
         tiles = dict(look[2]) if len(look) > 2 else {}
         tink = leaves.get("tile_ink")
         tink = tink if _set(tink) else ink
-        if ws.look.wallpaper_id is not None:
-            black, white = ws.look.live.fixed[2:]
+        if on:
+            black, white = fixed[2:]
             lab, shadow = white, (black, _WALL_SHADOW_A, 1, 1)
         else:
             lab = leaves.get("label.ink")
@@ -436,17 +501,7 @@ class _BackdropLayer(Layer):
                 a, dx, dy = (leaves.get("label.shadow." + f) for f in ("alpha", "dx", "dy"))
                 shadow = (sc, (a * 255 + 50) // 100 if _set(a) else 255,
                           dx if _set(dx) else 1, dy if _set(dy) else 1)
-        for key, box, band, label, cart in self._icon_rects():
-            _ui_draw.bar_part(cv, th, _ui_draw.BAR_TILE, box, 0, _tile_fill(tiles, key))
-            if not ws.draw_icon(key, _icon_box(box), tink, cv):
-                img = ws.covers.icon_sheet_for(cart) if cart is not None else None
-                if img is not None:
-                    sc = max(1, (box[2] * 24 // 44) // 16)
-                    cv.spr(img, box[0] + (box[2] - 16 * sc) // 2,
-                           box[1] + (box[3] - 16 * sc) // 2, sc)
-                else:
-                    _bar_glyph(self.ICON_GLYPHS.get(key, "app"), _icon_box(box), tink, cv)
-            _ui_draw.label(cv, band, label, lab, _ui_draw.ALIGN_CENTER, shadow=shadow)
+        return tiles, tink, lab, shadow
 
     def _draw_desk_icons(self):
         ws = self.ws

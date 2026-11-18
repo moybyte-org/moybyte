@@ -1673,10 +1673,11 @@ static mp_obj_t ui_status(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_status_obj, 5, 5, ui_status);
 
-// hints(cv, look, rect, items, desk, draw) -> ((x0, x1), ...): keycap hints in
-// band `rect` (moy_ui_hints_at), each pair's span across it; drawn when `draw`.
+// hints(cv, look, rect, items, desk, draw[, answer]) -> ((x0, x1), ...):
+// keycap hints in band `rect` (moy_ui_hints_at), each pair's span across it;
+// drawn when `draw`. With `answer` false, None: a strip drawn where it was
+// laid out before makes nothing.
 static mp_obj_t ui_hints(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
     moy_ui_sink_t s;
     sink_of(&s, a[0], a[1]);
     mp_buffer_info_t b;
@@ -1684,6 +1685,9 @@ static mp_obj_t ui_hints(size_t n_args, const mp_obj_t *a) {
     int16_t spans[32];
     int n = moy_ui_hints_at(&s, box_of(a[2]), (const uint8_t *)b.buf, b.len, s.fs,
                             mp_obj_is_true(a[4]), mp_obj_is_true(a[5]), spans, 16);
+    if (n_args > 6 && !mp_obj_is_true(a[6])) {
+        return mp_const_none;
+    }
     if (n > 16) {
         n = 16;
     }
@@ -1694,7 +1698,7 @@ static mp_obj_t ui_hints(size_t n_args, const mp_obj_t *a) {
     }
     return mp_obj_new_tuple((size_t)n, t);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_hints_obj, 6, 6, ui_hints);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_hints_obj, 6, 7, ui_hints);
 
 // input([kind]) -> kind: the input in use (MOY_UI_INPUT_*), which the hints
 // draw the keys of; set when `kind` is given.

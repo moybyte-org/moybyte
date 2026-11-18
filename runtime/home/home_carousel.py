@@ -70,7 +70,7 @@ class Carousel(Launcher):
         self._quiet_for = None        # the geometry `quiet` was computed for
         self._quiet_q = ()
         self._vis_g = None            # the geometry and key `_vis` was laid out for
-        self._vis_key = None
+        self._vis_key = [None] * 6    # (scroll, moving, centre, count, motion, scale)
         self._vis = None
         Launcher.__init__(self, items, layout, names)
 
@@ -515,8 +515,11 @@ class Carousel(Launcher):
         s = self.scroll
         moving = self.moving
         c = self.nearest()
-        key = (s, moving, c, n, self.motion, self.scale)
-        if self._vis_g is g and self._vis_key == key:
+        key = self._vis_key
+        motion = self.motion
+        scale = self.scale
+        if (self._vis_g is g and key[0] == s and key[1] == moving and key[2] == c
+                and key[3] == n and key[4] == motion and key[5] == scale):
             return self._vis
         bx, _by, bw, _bh = g[1]
         pitch = g[3]
@@ -534,7 +537,8 @@ class Carousel(Launcher):
             if r[0] + r[2] > bx and r[0] < bx + bw:
                 out.append((i, r))
         out.sort(key=lambda e: 2 * e[1][2] + (e[0] == c))
-        self._vis_g, self._vis_key, self._vis = g, key, out
+        key[0], key[1], key[2], key[3], key[4], key[5] = s, moving, c, n, motion, scale
+        self._vis_g, self._vis = g, out
         return out
 
     def tile_rect(self, i):
@@ -851,10 +855,10 @@ class Carousel(Launcher):
         theme's size and the others' smaller, in motion as at rest; the
         cards, smallest first, the hero last and at rest lifted by the
         theme's focus mark; then the title and the metadata of the hero."""
-        clip = getattr(cv, "clip", None)
-        if clip is not None:
+        clip = hasattr(cv, "clip")
+        if clip:
             self._card_clip = r
-            clip(*r)
+            cv.clip(r[0], r[1], r[2], r[3])
         c = self.nearest()
         th = self.theme
         vis = self._visible()
@@ -871,9 +875,9 @@ class Carousel(Launcher):
                 self._draw_home_card(cv, self.items[i], t, i == c, sheet_for)
         if self.items:
             self._draw_caption(cv, self.items[c])
-        if clip is not None:
+        if clip:
             self._card_clip = None
-            clip()
+            cv.clip()
 
     def _draw_caption(self, cv, it):
         """The title of the card nearest the centre in the `title` face,

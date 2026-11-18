@@ -139,6 +139,7 @@ def test_any_number_of_apps_keeps_every_desk_icon_on_the_canvas(tmp_path, size, 
     extra = [("app%d" % i, "APP %d" % i, None) for i in range(n - len(base))]
     monkey = desk._icon_catalog
     desk._icon_catalog = lambda: base + extra
+    desk._cat_at[0] = None        # the roster moved: the column is made again
     try:
         rects = desk._icon_rects()
     finally:

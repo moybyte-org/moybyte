@@ -285,12 +285,14 @@ def install(m, lib, tokens):
         b = bytes(items)
         _check(lib.moy_ui_status(c.byref(s), box_of(rect), b, len(b), int(count), s.fs))
 
-    def hints(cv, look, rect, items, desk, draw):
+    def hints(cv, look, rect, items, desk, draw, answer=True):
         s = sink(cv, look)
         b = bytes(items)
         spans = (c.c_int16 * 32)()
         n = lib.moy_ui_hints_at(c.byref(s), box_of(rect), b, len(b), s.fs, int(desk),
                                 int(bool(draw)), spans, 16)
+        if not answer:
+            return None
         return tuple((spans[2 * k], spans[2 * k + 1]) for k in range(min(n, 16)))
 
     def game_btn(cv, rect, label, fill):

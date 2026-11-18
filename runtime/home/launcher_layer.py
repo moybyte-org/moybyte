@@ -601,7 +601,8 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
         bd = self._bd_now
         if bd is not None:
             fill = self.ws.wallpaper.restorer(cv, bd)
-        elif self._band_bg is None or self._band_key != self._band_key_of(cv):
+        elif (self._band_bg is None or self._band_key is None
+              or self._band_key != self._band_key_of(cv)):
             return False
         else:
             fill = self._backdrop_fill
