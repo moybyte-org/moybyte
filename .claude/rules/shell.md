@@ -239,8 +239,12 @@ to whoever called it.
   own image from the frame it ends with (`moycore_run_pmem_tick`,
   `MOYCORE_PMEM_SAVE_MS`), the kernel's front included. On a card the saver's
   task writes it and the frame never waits; on internal flash, whose writes
-  stop both cores whatever task makes them, the record is written at that
-  frame boundary. The record is `pmem.bin`
+  stop both cores whatever task makes them, it is written at that frame
+  boundary, as one record appended to the pmem log
+  (`native/moy_store/moy_plog.h`, the board's `pmem` partition, erased
+  ahead) instead of a littlefs write; the console's idle desk frame
+  (`moy_carts.tidy_pmem`) writes the log back into each `pmem.bin` and
+  erases it, one step a frame. The record at rest is `pmem.bin`
   (`native/moy_store/moy_pmem.h`): two slots written in turn, in place, so a
   save is a few sectors and a cut one reads back as the old cells or the new.
   `Pmem.flush()` saves synchronously and waits out a save in flight: exit

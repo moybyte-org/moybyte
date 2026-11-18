@@ -146,7 +146,9 @@ class Pmem:
     one slot of pmem.bin (native/moy_store/moy_pmem.h), a few sectors written
     in place; the frame never waits for a save in flight. On internal flash,
     whose writes turn the cache off on both cores whatever task makes them,
-    the saver writes the record then, at this frame boundary. Exit,
+    the saver writes then, at this frame boundary: one record appended to the
+    pmem log (native/moy_store/moy_plog.h) where the board has one, written
+    back into pmem.bin at an idle desk frame (moy_carts.tidy_pmem). Exit,
     pause and a crash call `flush`, which saves now and waits for whatever is
     in flight. A save the store refuses loses that one snapshot, never retried
     per frame.

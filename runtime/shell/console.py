@@ -3358,6 +3358,13 @@ class Workstation:
                 # backstop for the unexpected one, and it says so once rather
                 # than every idle frame forever.
                 try:
+                    # The pmem log's quiet work (moy_carts.tidy_pmem: a
+                    # logged save written back to its file, or a sector
+                    # erased ahead), one flash step a quiet frame and
+                    # nothing else on it.
+                    tidy = getattr(self.carts_store, "tidy_pmem", None)
+                    if tidy is not None and tidy():
+                        return
                     covers.prefetch_tick()
                     # Mint the home retained-frame buffer off the paint path too
                     # (idempotent after the first call; the device new_layer

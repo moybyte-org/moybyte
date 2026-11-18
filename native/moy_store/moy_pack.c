@@ -242,8 +242,15 @@ static int add_member(zw_t *z, const char *base, const char *rel, const char *fo
     return st.is_dir ? walk(z, p, r, 0) : add_file(z, p, r);
 }
 
+// moy_pmem.h's (weak: an image without the pmem record links none).
+int moy_pmem_settle(const char *path);
+#pragma weak moy_pmem_settle
+
 int moy_pack_paths(const char *base, const char *const *rels, size_t n, const char *folder,
                    const char *dest, int history) {
+    if (moy_pmem_settle != NULL) {
+        moy_pmem_settle(base);      // the files carry the cart's newest pmem
+    }
     zw_t z;
     memset(&z, 0, sizeof z);
     z.history = history;

@@ -91,6 +91,8 @@
       {"py": "pmem_save(path, cells)", "hand": true},
       {"py": "save_wait(a0=None)", "hand": true},
       {"py": "save_stats(a0=None)", "hand": true, "absent": ["host"]},
+      {"py": "pmem_tidy()", "hand": true},
+      {"py": "pmem_log(a0=None)", "hand": true, "absent": ["host"]},
       {"py": "task(a0, a1, a2=None)", "hand": true, "absent": ["host"]},
       {"py": "task_join(a0=None)", "hand": true, "absent": ["host"]},
       {"py": "set_publish_root(root)", "hand": true},

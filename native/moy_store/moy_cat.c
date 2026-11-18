@@ -1620,7 +1620,14 @@ static void rmtree(const char *path, int depth) {
     afree(&a);
 }
 
+// moy_pmem.h's (weak: an image without the pmem record links none).
+void moy_pmem_forget(const char *path);
+#pragma weak moy_pmem_forget
+
 void moy_cat_rmtree(const char *path) {
+    if (moy_pmem_forget != NULL) {
+        moy_pmem_forget(path);      // a cart's logged pmem goes with its folder
+    }
     rmtree(path, 0);
 }
 

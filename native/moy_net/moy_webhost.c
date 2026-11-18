@@ -929,6 +929,10 @@ static void binary_value(out_t *o, const char *path, const char *rel,
     body(o, "\"}", 2);
 }
 
+// moy_pmem.h's (weak: an image without the pmem record links none).
+int moy_pmem_settle(const char *path);
+#pragma weak moy_pmem_settle
+
 // runtime/carts/moy_sync.py's is_binary: a cart's cover and its saves by name, a
 // theme package's fonts and sheets by suffix.
 static int is_binary(const char *name) {
@@ -979,6 +983,9 @@ static void walk(out_t *o, walk_t *w, size_t pn, size_t rn, int depth,
         if (is_dir_of(name)) {
             walk(o, w, pn + 1u + len, rn + 1u + len, depth + 1, first);
         } else if (w->bytes || is_binary(name)) {
+            if (strcmp(name, "pmem.bin") == 0 && moy_pmem_settle != NULL) {
+                moy_pmem_settle(w->path);   // the file holds the newest save
+            }
             binary_value(o, w->path, w->rel, first);
         } else {
             text_value(o, w->path, w->rel, first);

@@ -18,6 +18,17 @@
 // and the slot being written either whole or failing its checksum: a read
 // after it answers the previous cells or the new ones, never a mix
 // (native/moy_store/fuzz_fs.c's cases 16 and 17 cut it at every block write).
+//
+// ON INTERNAL FLASH WITH A PMEM LOG (moy_plog.h: the board's "pmem"
+// partition, beside the internal store) a save is a record appended to the
+// log instead, and a read is the path's newest record there, else the file.
+// The file stays the record at rest: moy_pmem_tidy, at a quiet moment, writes
+// each logged path back into its file and marks its records dead, then erases
+// a sector of them, one step a call. Whatever hands a cart's files on or
+// takes its folder away goes through the two verbs below: the export
+// (moy_pack) and the sync wire's read settle first; a removal (the shelf's,
+// moy_cat_rmtree) and the sync wire's write of pmem.bin forget, so a cart
+// installed again in that folder starts from its file, or from none.
 
 #ifndef MOY_PMEM_H
 #define MOY_PMEM_H
@@ -33,5 +44,14 @@
 int moy_pmem_read(const char *path, int32_t cells[MOY_PMEM_CELLS]);
 // 0, or the medium's code (MOY_ENOMEM where the scratch is short).
 int moy_pmem_write(const char *path, const int32_t cells[MOY_PMEM_CELLS]);
+// The log's records at or under `path` (NULL: all) written back to their
+// files now: 0, or the first write's error.
+int moy_pmem_settle(const char *path);
+// The log's records at or under `path` dropped, unwritten.
+void moy_pmem_forget(const char *path);
+// One step of the log's quiet-moment work (a path written back, else a
+// sector erased): 1 when it did one, 0 when nothing is left. A write-back
+// the medium refuses is tried again after the next save.
+int moy_pmem_tidy(void);
 
 #endif // MOY_PMEM_H

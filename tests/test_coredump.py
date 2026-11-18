@@ -178,13 +178,19 @@ def test_an_image_that_dumps_to_flash_has_a_partition_after_its_slots(board_dir)
         return
     (core,) = cores
     ota_1 = next(r for r in rows if r[0] == "ota_1")
-    # Right after the second slot, so the store (a listed vfs, or the tail
-    # MicroPython builds from the last partition's end) follows it.
+    # Right after the second slot, then the pmem log where a board has one,
+    # then the store (a listed vfs, or the tail MicroPython builds from the
+    # last partition's end).
     assert int(core[3], 16) == int(ota_1[3], 16) + int(ota_1[4], 16)
     assert int(core[4], 16) % 0x1000 == 0 and int(core[4], 16) >= 0x10000
+    end = int(core[3], 16) + int(core[4], 16)
+    plog = [r for r in rows if r[0] == "pmem"]
+    if plog:
+        assert int(plog[0][3], 16) == end
+        end += int(plog[0][4], 16)
     vfs = [r for r in rows if r[0] == "vfs"]
     if vfs:
-        assert int(vfs[0][3], 16) == int(core[3], 16) + int(core[4], 16)
+        assert int(vfs[0][3], 16) == end
 
 
 class _Native:

@@ -54,6 +54,7 @@
 #include "moy_seed.h"
 #include "moy_shelf.h"
 #include "moy_removed.h"
+#include "moy_plog.h"
 #include "moy_pmem.h"
 #include "moy_save.h"
 
@@ -1655,6 +1656,34 @@ static mp_obj_t mod_save_stats(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_save_stats_obj, 0, 1, mod_save_stats);
 
+// The pmem log (moy_plog.h). pmem_tidy() -> 1 when it wrote a logged path
+// back to its file or erased a sector, 0 when nothing is left: one step, what
+// an idle frame calls. pmem_log(reset=False) -> (sectors, blank, alive,
+// appends, erases, erases on the save path, write-backs, refused); sectors
+// is 0 where there is no log.
+static mp_obj_t mod_pmem_tidy(void) {
+    int did = 0;
+    GUARD_BEGIN
+    table_sync(0);
+    did = moy_pmem_tidy();
+    GUARD_END
+    return MP_OBJ_NEW_SMALL_INT(did);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_pmem_tidy_obj, mod_pmem_tidy);
+
+static mp_obj_t mod_pmem_log(size_t n_args, const mp_obj_t *args) {
+    moy_plog_stats_t st;
+    moy_store_lock();
+    moy_plog_stats(&st, n_args > 0 && mp_obj_is_true(args[0]));
+    moy_store_unlock();
+    mp_obj_t t[8] = { mp_obj_new_int_from_uint(st.sectors), mp_obj_new_int_from_uint(st.blank),
+                      mp_obj_new_int_from_uint(st.alive), mp_obj_new_int_from_uint(st.appends),
+                      mp_obj_new_int_from_uint(st.erases), mp_obj_new_int_from_uint(st.erases_now),
+                      mp_obj_new_int_from_uint(st.settles), mp_obj_new_int_from_uint(st.refused) };
+    return mp_obj_new_tuple(8, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_pmem_log_obj, 0, 1, mod_pmem_log);
+
 #if defined(__unix__) && !defined(__EMSCRIPTEN__) && MICROPY_PY_THREAD
 // THE TESTS' TASK: a thread of no VM working the store as a program's own task
 // does, each op inside the store's gate (tests/test_store_tasks.py).
@@ -1895,6 +1924,8 @@ static const mp_rom_map_elem_t moy_store_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_pmem_read), MP_ROM_PTR(&mod_pmem_read_obj) },
     { MP_ROM_QSTR(MP_QSTR_pmem_save), MP_ROM_PTR(&mod_pmem_save_obj) },
     { MP_ROM_QSTR(MP_QSTR_save_wait), MP_ROM_PTR(&mod_save_wait_obj) },
+    { MP_ROM_QSTR(MP_QSTR_pmem_tidy), MP_ROM_PTR(&mod_pmem_tidy_obj) },
+    { MP_ROM_QSTR(MP_QSTR_pmem_log), MP_ROM_PTR(&mod_pmem_log_obj) },
     { MP_ROM_QSTR(MP_QSTR_save_stats), MP_ROM_PTR(&mod_save_stats_obj) },
     #if defined(MOY_STORE_TASK)
     { MP_ROM_QSTR(MP_QSTR_task), MP_ROM_PTR(&mod_task_obj) },

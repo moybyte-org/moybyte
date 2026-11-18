@@ -115,7 +115,7 @@ from moyimg import _b64_encode, encode_moyimg, decode_moyimg, text_sig
 from moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
                     _write_atomic, _read_recover, _read_bak, _forget_bak,
                     set_publish_root, _read_bytes, _write_bytes, _pmem_read,
-                    _pmem_save, _save_wait)
+                    _pmem_save, _save_wait, _pmem_tidy)
 
 
 def load_cover(path):
@@ -821,6 +821,13 @@ def save_pmem(cart, cells):
     path = pmem_path(cart)
     _pmem_save(path, cells)
     _save_wait(path)
+
+
+def tidy_pmem():
+    """One step of the pmem log's quiet-moment work (native/moy_store/
+    moy_plog.h: a logged save written back to its pmem.bin, else a sector of
+    the log erased): True when it did one. What an idle desk frame calls."""
+    return bool(_pmem_tidy())
 
 
 # --- shared sprite sheet (cross-cart sprite reuse, #18) ---------------------

@@ -52,6 +52,7 @@ _SIGS = (
     ("moy_fs_publish", [_P, _P, _S], c.c_int),
     ("moy_pmem_read", [_P, c.POINTER(c.c_int32)], c.c_int),
     ("moy_save_pmem", [_P, c.POINTER(c.c_int32)], c.c_int),
+    ("moy_pmem_tidy", [], c.c_int),
     ("moy_fs_publish_bak", [_P, _P, _S], c.c_int),
     ("moy_fs_publish_mark", [_P, _P, _S], c.c_int),
     ("moy_fs_write", [_P, _P, _S], c.c_int),
@@ -388,6 +389,11 @@ def binding():
 
     def save_wait(path=None):
         """Nothing is ever in flight here: pmem_save wrote it."""
+
+    def pmem_tidy():
+        """One step of the pmem log's quiet work (native/moy_store/moy_plog.h):
+        0 here, where no volume has a log."""
+        return _lib().moy_pmem_tidy()
 
     def read_recover(path, at=None):
         lib, buf = _lib(), _Buf()

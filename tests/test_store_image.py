@@ -33,10 +33,10 @@ import web_pack  # noqa: E402
 
 # Each board: its folder, the store's offset and size its table and chip give.
 BOARDS = {
-    "tdeck": ("lilygo_t_deck_plus_mainline", 0xC40000, 0x3C0000),
-    "guition_s3": ("guition_jc3248w535", 0xC40000, 0x3C0000),
-    "p4": ("esp32_p4_wifi6_touch_lcd_7b", 0xD30000, (32 << 20) - 0xD30000),
-    "guition_p4": ("guition_jc8012p4a1c", 0xD30000, (16 << 20) - 0xD30000),
+    "tdeck": ("lilygo_t_deck_plus_mainline", 0xC60000, 0x3A0000),
+    "guition_s3": ("guition_jc3248w535", 0xC60000, 0x3A0000),
+    "p4": ("esp32_p4_wifi6_touch_lcd_7b", 0xD50000, (32 << 20) - 0xD50000),
+    "guition_p4": ("guition_jc8012p4a1c", 0xD50000, (16 << 20) - 0xD50000),
     "xiao_zero": ("seeed_xiao_esp32s3_zero", 0x420000, 0x3E0000),
     "c3_zero": ("esp32c3_zero", 0x1E0000, 0x220000),
 }
@@ -75,7 +75,7 @@ def _merged(board, offset, app=b"app" * 1000):
     rows = _csv(board)
     table = bytearray()
     for name, kind, sub, off, size in (r[:5] for r in rows):
-        table += struct.pack("<HBBII16sI", 0x50AA, TYPES[kind], SUBTYPES[sub],
+        table += struct.pack("<HBBII16sI", 0x50AA, TYPES[kind], SUBTYPES.get(sub) if sub in SUBTYPES else int(sub, 0),
                              int(off, 0), int(size, 0), name.encode(), 0)
     table += b"\xeb\xeb" + b"\xff" * 14 + hashlib.md5(table).digest()
     app_at = min(int(r[3], 0) for r in rows if r[1] == "app")

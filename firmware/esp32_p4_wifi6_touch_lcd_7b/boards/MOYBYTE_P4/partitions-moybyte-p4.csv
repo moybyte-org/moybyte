@@ -13,7 +13,7 @@
 # over the cable, and Settings -> LAST CRASH clears it; 128 KiB holds every
 # task's TCB and the used part of its stack with room for a deep VM stack.
 # The store is the TF card when one mounts; the internal fallback, the tail
-# from 0xD30000 (the rest of the chip, 18.81 MiB), holds the whole seed set
+# from 0xD50000 (the rest of the chip, 18.69 MiB), holds the whole seed set
 # with room to spare. The tail is deliberately UNLISTED: mainline
 # MicroPython auto-builds the vfs over the unallocated remainder (the "plus"
 # table behavior). build.sh copies this file into ports/esp32/ at stage time
@@ -25,6 +25,16 @@
 # the store somewhere else on the board erases the new store's first blocks
 # before it writes (tools/board_flash.py); the store re-seeds.
 #
+# The pmem partition (owner, 2026-11-18) follows the coredump partition: the
+# pmem log, a raw area a cart's pmem save appends to where the store is this
+# internal flash (native/moy_store/moy_plog.h), erased ahead so a save is one
+# program of its record and never a littlefs write. 128 KiB is 32 sectors,
+# hours of a typical cart's saves between two quiet moments; it came off the
+# store. Its subtype 0x40 is ours: nothing of ESP-IDF's or MicroPython's
+# looks for it, and an image on an older table (an OTA keeps the table it was
+# cabled with) finds no "pmem" partition and keeps pmem in each cart's
+# pmem.bin.
+#
 # Name,   Type, SubType, Offset,   Size,     Flags
 nvs,      data, nvs,     0x9000,   0x4000,
 otadata,  data, ota,     0xd000,   0x2000,
@@ -32,3 +42,4 @@ phy_init, data, phy,     0xf000,   0x1000,
 ota_0,    app,  ota_0,   0x10000,  0x680000,
 ota_1,    app,  ota_1,   0x690000, 0x680000,
 coredump, data, coredump, 0xD10000, 0x20000,
+pmem,     data, 0x40,    0xD30000, 0x20000,

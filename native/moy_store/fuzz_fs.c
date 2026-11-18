@@ -30,6 +30,7 @@
 #include "moy_json.h"
 #include "moy_load.h"
 #include "moy_pack.h"
+#include "moy_plog.h"
 #include "moy_pmem.h"
 #include "moy_seed.h"
 #include "moy_ufiles.h"
@@ -101,6 +102,9 @@ void moy_store_free(void *q, size_t n) {
 
 static uint8_t disk[SECTORS * SECTOR];
 static uint8_t flash[LBLOCKS * LBLOCK];
+#define PLOG_SECTORS 4u
+#define LOG_CASE(c) ((c) >= 18)  // with the pmem log on the flash medium
+static uint8_t plog[PLOG_SECTORS * MOY_PLOG_SECTOR];
 
 static int lands(void) {
     long k = writes++;
@@ -192,6 +196,34 @@ static int l_erase(const struct lfs2_config *c, lfs2_block_t b) {
     return 0;
 }
 
+// The pmem log's RAM flash: a program ANDs its bytes in, 16 at a time, and
+// an erase sets the sector's second half, then its first: each piece is one
+// block write a cut can stop before.
+static int g_prog(void *ctx, uint32_t off, const void *buf, uint32_t n) {
+    (void)ctx;
+    const uint8_t *b = buf;
+    for (uint32_t i = 0; i < n; i += 16u) {
+        if (!lands()) {
+            continue;
+        }
+        for (uint32_t j = i; j < n && j < i + 16u; j++) {
+            plog[off + j] &= b[j];
+        }
+    }
+    return 0;
+}
+
+static int g_erase(void *ctx, uint32_t off) {
+    (void)ctx;
+    if (lands()) {
+        memset(plog + off + MOY_PLOG_SECTOR / 2u, 0xff, MOY_PLOG_SECTOR / 2u);
+    }
+    if (lands()) {
+        memset(plog + off, 0xff, MOY_PLOG_SECTOR / 2u);
+    }
+    return 0;
+}
+
 static int l_sync(const struct lfs2_config *c) {
     (void)c;
     return 0;
@@ -234,6 +266,7 @@ static void format(void) {
         memset(flash, 0xff, sizeof flash);
         CHECK(lfs2_format(&lfs, &lcfg) == 0);
     }
+    memset(plog, 0xff, sizeof plog);
 }
 
 static void mount(void) {
@@ -247,6 +280,11 @@ static void mount(void) {
     } else {
         memset(&lfs, 0, sizeof lfs);
         CHECK(lfs2_mount(&lfs, &lcfg) == 0);
+        if (LOG_CASE(scase)) {
+            moy_plog_medium_t m = { .map = plog, .size = sizeof plog, .prog = g_prog,
+                                    .erase = g_erase };
+            moy_plog_attach(&m, &lfs);
+        }
     }
     mounted = 1;
 }
@@ -256,6 +294,7 @@ static void mount(void) {
 static void unmount_cold(void) {
     moy_vol_unwind();
     moy_fs_roots_clear();
+    moy_plog_attach(NULL, NULL);
     mounted = 0;
     CHECK(scratch == 0 && kept == 0);
 }
@@ -451,7 +490,7 @@ static void run_cat(const uint8_t *data, size_t size) {
 #define DEST "/carts/a.moy/.journal/0001.snap"
 #define DEST_HERE "/carts/a.moy/0001.snap"
 
-#define NCASES 18
+#define NCASES 22
 #define UF_CASE(c) ((c) >= 12 && (c) <= 15)
 #define PM_CASE(c) ((c) >= 16)
 
@@ -587,7 +626,9 @@ static void uf_verify(void) {
 
 #define PM_FILE "/carts/a.moy/pmem.bin"
 
-static long pm_marks[4];        // `writes` after each record the sequence wrote
+#define PM_OTHER "/carts/b.moy/pmem.bin"
+
+static long pm_marks[8];        // `writes` after each record the sequence wrote
 static int pm_n;
 
 // Record k's cells (0: all zero, what a file with no valid record reads as).
@@ -598,6 +639,12 @@ static void pm_cells(int32_t *c, int k) {
     c[0] = k;
 }
 
+static void pm_put(const char *path, int k) {
+    int32_t c[MOY_PMEM_CELLS];
+    pm_cells(c, k);
+    CHECK(moy_pmem_write(path, c) == 0);
+}
+
 static void pm_write(int k) {
     int32_t c[MOY_PMEM_CELLS];
     pm_cells(c, k);
@@ -605,33 +652,120 @@ static void pm_write(int k) {
     pm_marks[pm_n++] = writes;
 }
 
-// Case 16 writes records 2, 3 and 4 over record 1, case 17 records 1 and 2
-// where there was none: either slot taken, each cut mid-slot.
+// The record the read starts from, and the last the sequence writes.
+static int pm_first(void) {
+    switch (scase) {
+        case 16: case 18: return 1;
+        case 19: return 3;
+        case 20: return 2;
+        case 21: return 10;
+        default: return 0;
+    }
+}
+
+static int pm_last(void) {
+    switch (scase) {
+        case 16: case 18: return 4;
+        case 17: return 2;
+        case 21: return 14;
+        default: return 0;
+    }
+}
+
+// The cases:
+//   16 records 2, 3 and 4 written over record 1    17 records 1 and 2 where there was none
+// and with the pmem log on the flash medium (on the card, the file's):
+//   18 records 2, 3 and 4 logged over the file's 1
+//   19 records 2 and 3 logged over the file's 1, then written back and the
+//      log erased (moy_pmem_settle, moy_pmem_tidy to the end)
+//   20 record 2 logged over the file's 1, then the cart's folder forgotten
+//   21 the log full of records 2..10 and another cart's newest, then 11..14:
+//      a sector erased on the save path
 static void pm_sequence(void) {
     pm_n = 0;
-    for (int k = scase == 16 ? 2 : 1; k <= (scase == 16 ? 4 : 2); k++) {
+    if (scase == 19) {
+        moy_pmem_settle(NULL);
+        while (moy_pmem_tidy()) {
+        }
+        return;
+    }
+    if (scase == 20) {
+        moy_pmem_forget("/carts/a.moy");
+        return;
+    }
+    for (int k = pm_first() + 1; k <= pm_last(); k++) {
         pm_write(k);
+    }
+    if (medium == 1 && LOG_CASE(scase) && cut_at < 0) {
+        moy_plog_stats_t st;            // uncut, the saves were the log's
+        moy_plog_stats(&st, 0);
+        CHECK(st.appends == (uint32_t)pm_n && st.refused == 0);
+        CHECK(st.erases_now == (scase == 21 ? 1u : 0u));
     }
 }
 
 // The read is the newest record whose every block write landed or the one
-// after it, never a mix: then two more records land, and read back.
+// after it, never a mix (20: the logged one or the file's): then two more
+// records land and read back, and the log written back and erased reads them
+// still.
 static void pm_verify(void) {
     int32_t got[MOY_PMEM_CELLS], want[MOY_PMEM_CELLS];
-    int first = scase == 16 ? 1 : 0, landed = 0;
+    int first = pm_first(), landed = 0;
     while (landed < pm_n && (last_cut < 0 || pm_marks[landed] <= last_cut)) {
         landed++;
     }
     int valid = moy_pmem_read(PM_FILE, got);
     CHECK(valid == (got[0] != 0));
     int k = got[0];
-    CHECK(k == first + landed || (landed < pm_n && k == first + landed + 1));
+    if (scase == 20) {
+        CHECK(k == 2 || k == 1);
+    } else {
+        CHECK(k == first + landed || (landed < pm_n && k == first + landed + 1));
+    }
     pm_cells(want, k);
     CHECK(memcmp(got, want, sizeof got) == 0);
+    if (scase == 21) {
+        pm_cells(want, 50);
+        CHECK(moy_pmem_read(PM_OTHER, got) == 1 && memcmp(got, want, sizeof got) == 0);
+    }
     for (int again = 7; again <= 8; again++) {
         pm_cells(want, again);
         CHECK(moy_pmem_write(PM_FILE, want) == 0);
         CHECK(moy_pmem_read(PM_FILE, got) == 1 && memcmp(got, want, sizeof got) == 0);
+    }
+    if (LOG_CASE(scase)) {
+        CHECK(moy_pmem_settle(NULL) == 0);
+        while (moy_pmem_tidy()) {
+        }
+        CHECK(moy_pmem_read(PM_FILE, got) == 1 && memcmp(got, want, sizeof got) == 0);
+        moy_plog_stats_t st;
+        moy_plog_stats(&st, 0);
+        CHECK(st.alive == 0);
+    }
+}
+
+static void pm_before(void) {
+    if (scase == 16 || scase >= 18) {
+        pm_put(PM_FILE, 1);
+    }
+    if (!LOG_CASE(scase)) {
+        return;
+    }
+    CHECK(moy_pmem_settle(NULL) == 0);      // record 1 is the file's
+    while (moy_pmem_tidy()) {
+    }
+    // the log's state: written with the log on (mount attached it)
+    if (scase == 19) {
+        pm_put(PM_FILE, 2);
+        pm_put(PM_FILE, 3);
+    } else if (scase == 20) {
+        pm_put(PM_FILE, 2);
+    } else if (scase == 21) {
+        CHECK(moy_fs_mkdir("/carts/b.moy") == 0);
+        pm_put(PM_OTHER, 50);
+        for (int k = 2; k <= 10; k++) {
+            pm_put(PM_FILE, k);
+        }
     }
 }
 
@@ -670,10 +804,8 @@ static void before(int with_v1) {
     if (UF_CASE(scase)) {
         uf_before();
     }
-    if (scase == 16) {
-        int32_t c[MOY_PMEM_CELLS];
-        pm_cells(c, 1);
-        CHECK(moy_pmem_write(PM_FILE, c) == 0);
+    if (PM_CASE(scase)) {
+        pm_before();
     }
     unmount_cold();
 }
@@ -845,15 +977,18 @@ static void verify(int had_v1) {
 }
 
 static uint8_t image_before[sizeof disk > sizeof flash ? sizeof disk : sizeof flash];
+static uint8_t plog_before[sizeof plog];
 
 static void save_image(void) {
     memcpy(image_before, medium == 0 ? disk : flash, medium == 0 ? sizeof disk
                                                                   : sizeof flash);
+    memcpy(plog_before, plog, sizeof plog);
 }
 
 static void load_image(void) {
     memcpy(medium == 0 ? disk : flash, image_before, medium == 0 ? sizeof disk
                                                                   : sizeof flash);
+    memcpy(plog, plog_before, sizeof plog);
 }
 
 // Every cut of one sequence: the number of cuts made.

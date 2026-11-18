@@ -18,9 +18,12 @@
 // which delays one panel kick, never a frame by the write. Any other path is
 // written at once, on the caller's task (as is one when all four slots hold
 // other paths): internal flash, whose writes turn the cache off on both cores
-// whichever task makes them, so no task can take one off the frame. The
-// callers make that write at a frame boundary, at most every
-// widgets.Pmem.SAVE_MS. Where there is no task (the browser, the unix port,
+// whichever task makes them, so no task takes one off the frame, and whose
+// writer needs a stack in internal RAM, which the SAVE task's is not (the
+// T-Deck reset at its first save from that task, 2026-11-18). There a save
+// is one record appended to the pmem log (moy_plog.h) where the board's
+// table has one, else the file's slot. The callers make that write at a
+// frame boundary, at most every widgets.Pmem.SAVE_MS. Where there is no task (the browser, the unix port,
 // the CPython host, a board image without the kernel's task table) every save
 // is written at once.
 //

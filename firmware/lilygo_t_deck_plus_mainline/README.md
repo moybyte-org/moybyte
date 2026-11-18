@@ -42,7 +42,8 @@ rather than a cable flash. The build prints the image's headroom; nothing else
 is current. The slots are 6 MiB since 2026-11-17 (the browser console is an
 add-on cart, not in the image), and the 128 KiB coredump
 partition after them (2026-11-09: a panic's ESP-IDF core dump,
-`tools/coredump.py`) came off the vfs; the table's CSV,
+`tools/coredump.py`) came off the vfs, as did the pmem log's partition after it
+(2026-11-18, `native/moy_store/moy_plog.h`); the table's CSV,
 `boards/MOYBYTE_TDECK/partitions-moybyte-tdeck.csv`, carries why.
 
 ---
@@ -74,7 +75,7 @@ Outputs land in `dist/tdeck_mainline/`:
 |---|---|---|
 | `moybyte_tdeck.bin` | bootloader + partition table + app, merged | cable flash at **0x0** (the S3's bootloader offset; the P4's is 0x2000) |
 | `moybyte_tdeck_app.bin` | the app partition alone | what an OTA writes into the inactive slot |
-| `moybyte_tdeck_install.bin` | the merged image, then at the internal store's 0xC40000 a store holding the browser console add-on (`tools/store_image.py firmware/lilygo_t_deck_plus_mainline`) | the website's install at **0x0**: it erases the internal store, an SD card is not touched, and the first boot on a card moves the add-on there |
+| `moybyte_tdeck_install.bin` | the merged image, then at the internal store's 0xC60000 a store holding the browser console add-on (`tools/store_image.py firmware/lilygo_t_deck_plus_mainline`) | the website's install at **0x0**: it erases the internal store, an SD card is not touched, and the first boot on a card moves the add-on there |
 
 The merged image leaves `otadata` (0x1D000) erased, so the bootloader falls back
 to `ota_0` — the same effect the fork build got by erasing that region

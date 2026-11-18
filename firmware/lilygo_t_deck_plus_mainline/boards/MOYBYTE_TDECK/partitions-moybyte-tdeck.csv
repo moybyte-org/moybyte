@@ -23,6 +23,16 @@
 # Settings -> LAST CRASH clears it. 128 KiB holds every task's TCB and the used
 # part of its stack with room for a deep VM stack; it came off the vfs.
 #
+# The pmem partition (owner, 2026-11-18) follows the coredump partition: the
+# pmem log, a raw area a cart's pmem save appends to where the store is this
+# internal flash (native/moy_store/moy_plog.h), erased ahead so a save is one
+# program of its record and never a littlefs write. 128 KiB is 32 sectors,
+# hours of a typical cart's saves between two quiet moments; it came off the
+# store. Its subtype 0x40 is ours: nothing of ESP-IDF's or MicroPython's
+# looks for it, and an image on an older table (an OTA keeps the table it was
+# cabled with) finds no "pmem" partition and keeps pmem in each cart's
+# pmem.bin.
+#
 # Name,   Type, SubType, Offset,   Size,     Flags
 nvs,      data, nvs,     0x9000,   0x14000,
 otadata,  data, ota,     0x1D000,  0x2000,
@@ -30,4 +40,5 @@ phy_init, data, phy,     0x1F000,  0x1000,
 ota_0,    app,  ota_0,   0x20000,  0x600000,
 ota_1,    app,  ota_1,   0x620000, 0x600000,
 coredump, data, coredump, 0xC20000, 0x20000,
-vfs,      data, fat,     0xC40000, 0x3C0000,
+pmem,     data, 0x40,    0xC40000, 0x20000,
+vfs,      data, fat,     0xC60000, 0x3A0000,
