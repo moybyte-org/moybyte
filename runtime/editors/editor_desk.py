@@ -100,6 +100,7 @@ _CODE_MORE = (("select", "Select", "sel"), ("copy", "Copy\tCtrl+C", "copy"),
               ("linenums", "Line numbers", "gutter"), ("code", "Complete", "auto"))
 
 _TAB_PAD = 28               # a header tab's room beside its word
+_TAB_LEAD = 12              # the tabs row's lead before its first tab (the desk's group pad)
 LOUPE = 3                   # the Sheet's loupe: a held tile at 3x its 16 px
 _DOUBLE_MS = 400            # a second press this soon on a header or handle
 _FULL_MS = 1000
@@ -1066,7 +1067,15 @@ class EditorDesk(Layer):
                 self._still_tool(pid, u)
                 continue
             c = self.tab_of(pane)
-            tools_w = cell + 4 * u + (7 * cell if c in _ON_VERBS else cell if c == "sounds" else 0)
+            # The header's tools, right to left: Grow, the Game's pause and
+            # the Sound and Sounds headers' own, then the tools that fit and
+            # the more menu of the rest. The title or tabs keep left of them
+            # all; tabs that would not fit labelled are short (`_short_tabs`).
+            fixed = (cell * (1 + (c == "game")) + 4 * u
+                     + (7 * cell if c in _ON_VERBS else cell if c == "sounds" else 0))
+            short = len(pane) > 1 and self._tabs_w(pane, -1, u) > w - fixed - 8 * u
+            tools, folded = self._head_fit(pane, c, x, w, u, short)
+            tools_w = fixed + cell * (len(tools) + bool(folded))
             if c == "code" and len(pane) == 1:
                 pass                            # its file tabs: `_code_head`
             elif len(pane) == 1:
@@ -1082,10 +1091,13 @@ class EditorDesk(Layer):
                     ui.at(sx, y + (hh - lh) // 2, max(0, x + w - tools_w - sx), lh)
                     ui.label(status, {"tone": "dim"})
             else:
-                items = [P.CONTENTS[c][0] for c in pane]
-                ui.at(x + 4 * u, y + 2 * u, max(0, w - tools_w - 8 * u), hh - 4 * u)
                 cur = self._tabs.get(pane, 0)
-                got = ui.tabs(pid, items, cur, {"id": pid})
+                if short:
+                    got = self._short_tabs(pid, pane, cur, x + 4 * u, y, hh, u)
+                else:
+                    items = [P.CONTENTS[c][0] for c in pane]
+                    ui.at(x + 4 * u, y + 2 * u, max(0, w - tools_w - 8 * u), hh - 4 * u)
+                    got = ui.tabs(pid, items, cur, {"id": pid})
                 if got != cur and got is not None and got >= 0:
                     self._tabs[pane] = got
                     if n == self._focus.get(self.key, 0):
@@ -1094,7 +1106,6 @@ class EditorDesk(Layer):
             if ui.tool("maximize", "Grow\tCtrl+Shift+Enter", {"id": pid + " grow"}):
                 self.grow(pane)
             tx = x + w - cell - 2 * u
-            tools, folded = self._head_fit(pane, c, x, w, u)
             if folded:
                 tx -= cell
                 ui.at(tx, y, cell, hh)
@@ -1179,7 +1190,34 @@ class EditorDesk(Layer):
             ws.text.open_code_file(names[got])
         return tx
 
-    def _head_fit(self, pane, c, x, w, u):
+    def _tabs_w(self, pane, cur, u):
+        """The width a pane's header tabs take: every one labelled, or with
+        `cur` an index, short -- that one labelled, the others icons."""
+        if cur == -1:
+            return sum(ui.text_size(P.CONTENTS[k][0])[0] + _TAB_PAD * u for k in pane)
+        return (32 * u * (len(pane) - 1) + (_TAB_PAD + _TAB_LEAD) * u
+                + ui.text_size(P.CONTENTS[pane[cur]][0])[0])
+
+    def _short_tabs(self, pid, pane, cur, x, y, hh, u):
+        """A short pane's tabs (EDITOR_LAYOUT.md): the current one labelled,
+        the others as icons in tool cells, in the tabs' order. The tab tapped
+        or None."""
+        got = None
+        for j, k in enumerate(pane):
+            label, icon = P.CONTENTS[k][0], P.CONTENTS[k][1]
+            if j == cur:
+                tw = ui.text_size(label)[0] + (_TAB_PAD + _TAB_LEAD) * u
+                ui.at(x, y + 2 * u, tw, hh - 4 * u)
+                ui.tabs(pid, [label], 0, {"id": pid})
+                x += tw
+            else:
+                ui.at(x, y, 32 * u, hh)
+                if ui.tool(icon, label, {"id": "%s tab %s" % (pid, k)}):
+                    got = j
+                x += 32 * u
+        return got
+
+    def _head_fit(self, pane, c, x, w, u, short=False):
         """The header tools a pane shows and the ones its more menu holds:
         as many as fit right of its name or tabs, the rest (the leftmost)
         folded, as the Code header's are."""
@@ -1190,7 +1228,7 @@ class EditorDesk(Layer):
         if len(pane) == 1:
             lead = 8 * u + 28 * u + ui.text_size(self._title(c, P.CONTENTS[c][0]))[0]
         else:
-            lead = 4 * u + sum(ui.text_size(P.CONTENTS[k][0])[0] + _TAB_PAD * u for k in pane)
+            lead = 4 * u + self._tabs_w(pane, self._tabs.get(pane, 0) if short else -1, u)
         room = (w - lead - 2 * u - cell - 4 * u) // cell
         if room >= len(tools):
             return tools, ()

@@ -1483,6 +1483,45 @@ def test_a_narrow_headers_tools_fold_into_its_more_menu(blocks_desk):
                 assert not d._head_fit(pane, c, r[0], r[2], 1)[1]
 
 
+def test_a_short_panes_tabs_are_its_current_one_labelled_and_icons(tmp_path, monkeypatch):
+    """The Editor in its window (896 wide), playing: the Code workspace's
+    right pane holds Game, Sprites, Sounds, Map and Log, too many to label
+    beside its pause and grow, so it shows the current tab labelled and the
+    others as icons (EDITOR_LAYOUT.md), all left of its tools; an icon opens
+    its tab."""
+    ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
+                                    panel_diagonal_in=7.0, font_scale=1, windowed=True)
+    ws.home.open_desk()
+    ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Star Catcher"))
+    drv = host_app.ConsoleDriver(ws)
+    for _ in range(3):
+        drv.frame(DT)
+    ws.wm.toggle_max(ws.wm.windows["menu"])     # full screen (E-04) to its window
+    ws.text.set_menu_view("code")
+    ws.text.leave_menu()                         # Play: the game docks in the pane
+    d = ws.editor_desk
+    drawn = []                                   # the panes the window's frame draws
+    frame = d._frame
+    monkeypatch.setattr(d, "_frame", lambda cv, th, shown, u: (
+        drawn.append(list(shown)), frame(cv, th, shown, u)))
+    for _ in range(3):
+        ws.mark_dirty()
+        drv.frame(DT)
+    n, pane, (x, _y, w, _h) = next(s for s in drawn[-1] if "game" in s[1])
+    assert len(pane) == 5
+    assert w < d._tabs_w(pane, -1, 1) + 2 * 32   # labelled, they would run under the tools
+    cur = d._tabs.get(pane, 0)
+    assert x + 4 + d._tabs_w(pane, cur, 1) <= d._tools_x[n]
+    other = next(j for j, k in enumerate(pane) if j != cur)
+    bx, by, bw, bh = d._host.box("pane %d tab %s" % (n, pane[other]))
+    cx, cy = ws.wm.windows["menu"].content_rect()[:2]   # the window's, on the glass
+    _click(drv, cx + bx + bw // 2, cy + by + bh // 2)
+    ws.mark_dirty()
+    drv.frame(DT)
+    assert d._tabs.get(pane, 0) == other
+    assert x + 4 + d._tabs_w(pane, other, 1) <= d._tools_x[n]
+
+
 def test_a_settled_header_more_menu_paints_nothing(blocks_desk):
     ws, drv = blocks_desk
     d = ws.editor_desk
