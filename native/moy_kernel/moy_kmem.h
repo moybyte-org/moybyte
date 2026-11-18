@@ -39,6 +39,23 @@
 #define MOY_KMEM_DMA 0x20u
 #define MOY_KMEM_ZERO 0x40u
 
+// MOY_KMEM_SRAM_CAPS: the heap caps of the internal SRAM a latency-bound block
+// lives in, which MOY_KMEM_INTERNAL asks and every placement or meter of
+// "internal SRAM" names. On a P4 IDF registers two more internal heaps at low
+// priority (components/heap/port/esp32p4/memory_layout.c): the LP SRAM
+// (RTCRAM, under CONFIG_ESP_SYSTEM_ALLOW_RTC_FAST_MEM_AS_HEAP, on the LP bus,
+// uncached and slow per word) and the 8 KB SPM, and serves an INTERNAL | 8BIT
+// request from them once no L2 SRAM heap has a block that fits. Every L2 SRAM
+// heap is DMA-capable -- both memory types, and the internal pool PSRAM's
+// start reserves (esp_psram_extram_reserve_dma_pool) -- and neither of the
+// other two is, so on a P4 that cap keeps a block out of them and nothing
+// else. An S3's internal heaps are one kind.
+#if defined(CONFIG_IDF_TARGET_ESP32P4) && CONFIG_IDF_TARGET_ESP32P4
+#define MOY_KMEM_SRAM_CAPS (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT | MALLOC_CAP_DMA)
+#else
+#define MOY_KMEM_SRAM_CAPS (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
+#endif
+
 #ifdef MOY_ON_BOARD
 void *moy_kalloc(size_t n, unsigned flags);
 void *moy_krealloc(void *p, size_t n, unsigned flags);

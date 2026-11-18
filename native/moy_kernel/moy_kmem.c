@@ -35,7 +35,7 @@ void *moy_kalloc(size_t n, unsigned flags) {
         return p;
     }
     if (flags & MOY_KMEM_INTERNAL) {
-        uint32_t caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT | dma;
+        uint32_t caps = MOY_KMEM_SRAM_CAPS | dma;
         return zero ? heap_caps_calloc(1, n, caps) : heap_caps_malloc(n, caps);
     }
     return zero ? calloc(1, n) : malloc(n);
@@ -47,7 +47,7 @@ void *moy_krealloc(void *p, size_t n, unsigned flags) {
         return heap_caps_realloc(p, n, PSRAM_CAPS | dma);
     }
     if (flags & MOY_KMEM_INTERNAL) {
-        return heap_caps_realloc(p, n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT | dma);
+        return heap_caps_realloc(p, n, MOY_KMEM_SRAM_CAPS | dma);
     }
     return realloc(p, n);
 }

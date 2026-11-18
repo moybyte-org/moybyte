@@ -165,11 +165,11 @@ static void *big_realloc(void *ptr, size_t osize, size_t nsize)
 #ifdef MOY_ON_BOARD
     int tried_sram = 0;
     np = NULL;
-    size_t sram_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    size_t sram_free = heap_caps_get_free_size(MOY_KMEM_SRAM_CAPS);
     if (sram_free < g_sram_free_min) g_sram_free_min = sram_free;
     if (sram_free >= nsize + g_sram_floor) {
         tried_sram = 1;
-        np = heap_caps_realloc(ptr, nsize, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        np = heap_caps_realloc(ptr, nsize, MOY_KMEM_SRAM_CAPS);
     }
     if (np == NULL) {
         if (!tried_sram) g_sram_denied++;   // the FLOOR turned it away, not a

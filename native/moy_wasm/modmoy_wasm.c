@@ -157,7 +157,7 @@ static run_t *g_run;
 static struct sess *g_sessions;
 static moy_mutex_t g_lock = MOY_MUTEX_INIT;
 
-#define SRAM_CAPS (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
+#define SRAM_CAPS MOY_KMEM_SRAM_CAPS
 #define PSRAM_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
 
 #if CONFIG_IDF_TARGET_ESP32S3

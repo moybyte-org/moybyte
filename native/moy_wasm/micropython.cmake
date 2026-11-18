@@ -143,6 +143,7 @@ target_include_directories(moy_wamr
         ${MOY_WAMR_CORE}/iwasm/include
     PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
+        ${CMAKE_CURRENT_LIST_DIR}/../moy_kernel
         ${MOY_WAMR_CORE}/iwasm/common
         ${MOY_WAMR_CORE}/iwasm/aot
         ${MOY_WAMR_CORE}/iwasm/interpreter

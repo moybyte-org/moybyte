@@ -976,9 +976,10 @@ def test_moycore_hardware_learned_constraints_pinned():
     #    the knob while run_desktop lowered the old runtime's, which left a
     #    moycore cart at 48KB: ~97% PSRAM on this board, i.e. the 2x regime.
     #    (The knob itself is executed in tests/test_moycore_loop.py.)
-    assert "MALLOC_CAP_INTERNAL" in mod
+    assert "MOY_KMEM_SRAM_CAPS" in mod                 # internal SRAM, one spelling
+    assert "MALLOC_CAP_INTERNAL" in (NATIVE / "moy_kernel" / "moy_kmem.h").read_text()
     assert "48 * 1024" in mod                          # the WiFi/DMA headroom floor
-    assert mod.index("MALLOC_CAP_INTERNAL") < mod.index("MALLOC_CAP_SPIRAM")
+    assert mod.index("MOY_KMEM_SRAM_CAPS") < mod.index("MALLOC_CAP_SPIRAM")
     runtime_src = runtime_text(ROOT / "modules" / "moy_runtime.py")
     assert 'for _mod in ("moy_lua", "moycore")' in runtime_src, \
         "the boot-time floor drop must reach moycore by name"

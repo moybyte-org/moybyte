@@ -220,7 +220,7 @@ static void block_free(void *p) {
 // caller takes PSRAM) and on a build with no board heap.
 static void *sram_take(media_t *m, size_t n) {
 #ifdef MOY_ON_BOARD
-    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < n + MOY_MEDIA_SRAM_FLOOR) {
+    if (heap_caps_get_free_size(MOY_KMEM_SRAM_CAPS) < n + MOY_MEDIA_SRAM_FLOOR) {
         return NULL;
     }
     void *p = moy_kalloc(n, MOY_KMEM_INTERNAL | MOY_KMEM_ZERO);
