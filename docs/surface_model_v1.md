@@ -932,7 +932,16 @@ first frame washes that page out of the buffer the frame drew into
 (`last_buffer`, the compositor's face of §14.6's buffer; `copy_last` where
 a compositor names no such buffer; one persistent buffer holds it already)
 instead of drawing it, and holds it as above. A dialog a page's own draw
-opens (a tap on its link) draws the page, which drew this frame anyway. The system menu
+opens (a tap on its link) draws the page, which drew this frame anyway.
+The sprite pickers open over the page the same way (a tap on the Size
+caption), copying it into the frame's buffer (`last`'s `copy`: they wash
+nothing) and drawing again only the hint strip, which names their keys.
+A popover's first pass lays its body out to size its card and draws
+nothing, so the frame that opens the pickers runs that pass ahead and
+shows the card, and the hold's key is taken again after the draw
+(`Hold.drew`): it names the card's place, which a card learns by drawing,
+so the frame after leaves the page and the card as that frame drew them
+(`HOLD_LEFT`). The system menu
 holds the handheld home the same way (`SystemMenuUI.put_home`): where the
 fullscreen WM draws the home and the menu's card alone, the whole frame
 under the card -- the bars, the washed content and the hint strip naming
