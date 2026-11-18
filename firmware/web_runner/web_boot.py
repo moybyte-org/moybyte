@@ -698,20 +698,22 @@ def page_boot(carts_root, query_json, coarse=False, scheme=""):
         boot(carts_root, None, w, h, True, coarse=coarse, scheme=scheme)
     else:
         boot(carts_root, cart=cart, coarse=coarse, scheme=scheme)
-    _S["page_start"] = (q.get("edit"), q.get("tab"), desktop, cart, len(names))
+    _S["page_start"] = (q.get("edit"), q.get("tab"), bool(q.get("play")),
+                        desktop, cart, len(names))
     return ""
 
 
 def page_start():
     """What a page's address starts the console on (after `page_boot`):
-    ?edit=<cart>[&tab=code|paint|map|...] opens that cart in the Editor
-    (`start_edit`), where a plain visit lands on the home; a desk with a cart
-    named opens it; and the one-cart player of a bundle of one cart is a
-    kiosk -- the exit gesture restarts the game instead of dropping into the
-    shell, because the game IS the page."""
-    edit, tab, desktop, cart, served = _S.pop("page_start")
+    ?edit=<cart>[&tab=code|paint|map|...][&play=1] opens that cart in the
+    Editor (`start_edit`), where a plain visit lands on the home, and with
+    play=1 presses its Play; a desk with a cart named opens it; and the
+    one-cart player of a bundle of one cart is a kiosk -- the exit gesture
+    restarts the game instead of dropping into the shell, because the game
+    IS the page."""
+    edit, tab, play, desktop, cart, served = _S.pop("page_start")
     if edit:
-        start_edit(edit, tab or None)
+        start_edit(edit, tab or None, play)
     if desktop and cart:
         open_cart(cart)
     if not desktop and served == 1 and cart:
@@ -859,18 +861,36 @@ def edit_cart(name, tab=None):
     })
 
 
-def start_edit(name, tab=None):
-    """The start option (`?edit=<cart>&tab=<tab>`): boot into the Editor on
-    `name`'s `tab` where a plain visit boots to the home. It is `edit_cart`
-    without the First Steps badge -- opening the editor was the page's doing,
-    not a thing the visitor did, and a banner over the first frame would hide
-    the code the start option is there to show. Returns edit_cart's JSON."""
+def start_edit(name, tab=None, play=False):
+    """The start option (`?edit=<cart>&tab=<tab>&play=1`): boot into the
+    Editor on `name`'s `tab` where a plain visit boots to the home. It is
+    `edit_cart` without the First Steps badge -- opening the editor was the
+    page's doing, not a thing the visitor did, and a banner over the first
+    frame would hide the code the start option is there to show. On the desk
+    the Editor is a window, the desk around it in sight, unless this browser
+    left it full screen (`win_full`); `play` presses its Play, which on the
+    desk runs the cart in the Editor's Game pane. Returns edit_cart's JSON."""
     ws = _S["ws"]
     was, ws.ach.mute = ws.ach.mute, True
     try:
-        return edit_cart(name, tab)
+        got = edit_cart(name, tab)
     finally:
         ws.ach.mute = was
+    left = ws.system.get("win_full", None)
+    restore = not (isinstance(left, dict) and "menu" in left)
+    play = play and json.loads(got)["ok"]
+
+    def settle():
+        # The Editor's window is made by the frame after the open, so this
+        # runs at that frame's tail.
+        wm = ws.wm
+        win = getattr(wm, "windows", {}).get("menu")
+        if restore and win is not None and win.full():
+            wm.toggle_max(win)
+        if play:
+            ws.text.leave_menu()
+    ws.defer(settle, toast=play)
+    return got
 
 
 def drop_kind(name, head_json):

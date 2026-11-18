@@ -825,11 +825,15 @@ var shrink = document.getElementById("shrink");
 var tabs = [].slice.call(document.querySelectorAll(".tab:not(.exp)"));
 // What the console is asked to start as: the player skips its own play-button
 // (the visitor's click was this page's), and opens Star Catcher on its Code tab
-// -- the picture the still shows -- in either tier. The colour scheme rides
-// along so a first-run console wears Moy Night or Moy Day to match this page.
-function startQuery() {
+// in either tier. On the desk the Editor is a window with the game playing in
+// its Game pane, the picture the still shows; the handheld's Play would cover
+// the code, so its tab starts on the code alone. The colour scheme rides along
+// so a first-run console wears Moy Night or Moy Day to match this page.
+function startQuery(tab) {
   var dark = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches;
-  return "&start=1&edit=moybyte.star_catcher.moy&tab=code&scheme=" + (dark ? "dark" : "light");
+  return "&start=1&edit=moybyte.star_catcher.moy&tab=code"
+    + (tab.dataset.tier === "desktop" ? "&play=1" : "")
+    + "&scheme=" + (dark ? "dark" : "light");
 }
 // The stage is the console's aspect ratio PLUS the height the player page needs
 // besides its canvas (title, the saved-in-this-browser bar): the player reports
@@ -881,7 +885,7 @@ function show(tab) {
   f.setAttribute("title", tab.querySelector("b").textContent + " tier");
   f.setAttribute("allow", "autoplay");
   f.setAttribute("allowfullscreen", "");
-  f.src = "player/index.html" + tab.dataset.q + startQuery();
+  f.src = "player/index.html" + tab.dataset.q + startQuery(tab);
   stage.appendChild(f);
 }
 tabs.forEach(function (t) { t.addEventListener("click", function () { show(t); }); });
@@ -932,7 +936,8 @@ document.addEventListener("keydown", function (e) {
 """
 
 
-STILL_ALT = ("The Moybyte desktop with Star Catcher's code open in the editor")
+STILL_ALT = ("The Moybyte desktop with Star Catcher open in the editor's window, "
+             "its code beside the game playing")
 
 
 def page(pal, has_player, cards, channel=None, stills=False):
@@ -1388,12 +1393,19 @@ pickDevice();
 # site build, from the player bundle this build ships (so the picture cannot
 # lag the console, nor the console's theme), by the same headless-Chrome driver
 # the browser tests use (firmware/web_runner/browsershot.mjs: node 22 and
-# Google Chrome). The console is started the way the hero starts it (Star
-# Catcher open on its Code tab), and each capture checks the console itself
-# says it is in that state and that variant, so a still of the wrong thing
-# fails the build rather than shipping.
+# Google Chrome). The console is started the way the hero starts the desk (Star
+# Catcher open in the Editor's window on its Code tab, the game playing in its
+# Game pane), and each capture checks the console itself says it is in that
+# state and that variant, so a still of the wrong thing fails the build rather
+# than shipping.
 STILLS = (("night", "dark"), ("day", "light"))
-STILL_QUERY = "?desktop=1&start=1&edit=moybyte.star_catcher.moy&tab=code"
+STILL_QUERY = "?desktop=1&start=1&edit=moybyte.star_catcher.moy&tab=code&play=1"
+# What the console reports for the still (`__moyState`): the Editor's tab, the
+# theme and its variant, whether the Editor's window leaves the desk in sight,
+# and whether its game plays.
+STILL_STATE = ("window.__moyState().then(s => 'STILL ' + JSON.stringify("
+               "[s.edit.tab, s.theme.name, s.theme.variant,"
+               " s.wins.menu[2] < 1024, 'desktop' in s.wins]))")
 
 
 def capture_stills(player, media):
@@ -1414,15 +1426,14 @@ def capture_stills(player, media):
                 json.dump({"query": STILL_QUERY, "scheme": scheme,
                            "boot_ms": 60000, "steps": [
                     {"wait": 2500},
-                    {"js": "window.__moyState().then(s => 'STILL ' + "
-                           "JSON.stringify([s.edit.tab, s.theme.name, s.theme.variant]))"},
+                    {"js": STILL_STATE},
                     {"shot": "still"}]}, f)
             r = subprocess.run(
                 ["node", "browsershot.mjs", scenario, tmp], cwd=runner,
                 env=dict(os.environ, MOY_DIST=player), capture_output=True,
                 text=True, timeout=300)
             m = re.search(r'STILL (\[.*?\])', r.stdout.replace('\\"', '"'))
-            want = ["code", "moy", scheme]
+            want = ["code", "moy", scheme, True, True]
             if r.returncode != 0 or not m or json.loads(m.group(1)) != want:
                 sys.exit("!! capturing the %s still failed (wanted %s, the console "
                          "said %s):\n%s\n%s" % (name, want, m and m.group(1),

@@ -84,10 +84,19 @@ def test_no_player_is_loaded_before_the_click(tmp_path, monkeypatch):
 
 
 def test_the_console_starts_as_the_stills_were_taken(tmp_path, monkeypatch):
+    """The desk's start is the still's query: the Editor on Star Catcher's
+    code with its game playing, which the console opens as a window on the
+    desk (web_boot.start_edit); the handheld's start leaves Play out, since
+    a game on the handheld covers the code."""
     _, html = _site(tmp_path, monkeypatch, _fake_capture([]))
-    assert "&start=1&edit=moybyte.star_catcher.moy&tab=code&scheme=" in html
-    assert build.STILL_QUERY.endswith("&edit=moybyte.star_catcher.moy&tab=code")
-    assert "&start=1" in build.STILL_QUERY
+    assert '"&start=1&edit=moybyte.star_catcher.moy&tab=code"' in html
+    assert '(tab.dataset.tier === "desktop" ? "&play=1" : "")' in html
+    assert 'data-tier="desktop" data-q="?desktop=1"' in html
+    assert build.STILL_QUERY == ("?desktop=1&start=1&edit=moybyte.star_catcher.moy"
+                                 "&tab=code&play=1")
+    # The capture fails unless the Editor is a window and its game plays.
+    assert "s.wins.menu[2] < 1024" in build.STILL_STATE
+    assert "'desktop' in s.wins" in build.STILL_STATE
 
 
 def test_a_failed_capture_stops_the_build(tmp_path, monkeypatch):
