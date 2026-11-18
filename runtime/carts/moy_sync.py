@@ -860,6 +860,7 @@ SYSTEM_KEYS = {
     "theme": (PORTABLE, str),
     "theme_variant": (PORTABLE, str),
     "layout_theme": (PORTABLE, str),
+    "home_style": (PORTABLE, str),
     "name": (PORTABLE, str),
     USER_NS_KEY: (PORTABLE, str),
     "steady": (PORTABLE, bool),

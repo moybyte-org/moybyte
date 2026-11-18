@@ -192,7 +192,7 @@ class Spine:
                                     "theme_variant", ws.look.theme_variant))
             if ws.look.theme_name != name:   # as at boot: the default's mode
                 ws.look.set_theme_variant(DEFAULT_VARIANT, persist=False)
-        if "layout_theme" in keys:
+        if "layout_theme" in keys or "home_style" in keys:
             ws.look.apply_layout()
         for key, _label, default, setter, _gate, _dev in SETTINGS_TOGGLES:
             if key in keys:
