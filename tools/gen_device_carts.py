@@ -31,6 +31,10 @@ Phase 5, 2026-08-19). A system cart declares, in its own `manifest.json`'s
     "app": {...}            -- optional; a SYSTEM APP (docs/app_api_v1.md):
                                id / entry ("module:Class") / order
                                (registration precedence) / min_size.
+    "fixture": true         -- optional; a TEST FIXTURE (the perf ledger's,
+                               the on-glass suites', the tests'): seeded like
+                               every system cart, but no official cart, so
+                               the release index leaves it out (`is_fixture`).
 
 Five hand-maintained lists used to hold that same information -- `CART_ORDER`
 here, the title->folder map in tests/test_device_seed_parity.py, the web
@@ -70,6 +74,7 @@ mp_obj_str_t`), which is the property that actually mattered.
   title_to_folder(dir) -> {title: folder}
   roster(dir, target) -> [folder]  the carts that ship on `target`
   app_decls(dir) -> [dict]         the system-app declarations, in reg. order
+  is_fixture(man) -> bool          a test fixture, which no release publishes
   build_carts(dir) -> list[dict]   the CARTS structure (what gets frozen)
   render_module(carts) -> str      a freezable carts_data.py source
   pack_cart(cart) -> bytes         one cart's JSON, raw-deflated
@@ -90,7 +95,7 @@ from runtime.moy_store_base import BUILTIN_NS, cart_folder, vendor  # noqa: E402
 
 DEFAULT_FORMAT = "moybyte-cart-v1"
 
-# Every consumer of system_carts/ reads its declarations through the four
+# Every consumer of system_carts/ reads its declarations through the
 # functions below. Adding a system cart is an edit to its OWN manifest.json --
 # there is no list here, in the tests, in the web build or in console.py to keep
 # in step with it.
@@ -181,6 +186,14 @@ def roster(target, system_carts_dir=None):
         if targets is None or "*" in targets or target in targets:
             out.append(folder)
     return out
+
+
+def is_fixture(man):
+    """Whether the seed cart whose manifest is `man` is a test fixture
+    (`"moybyte": {"fixture": true}`): seeded like every system cart, but no
+    official cart, so tools/web_pack.py leaves it out of the release's index
+    and tools/board_flash.py out of the carts a cable flash installs."""
+    return vendor(man).get("fixture") is True
 
 
 def app_decls(system_carts_dir=None):

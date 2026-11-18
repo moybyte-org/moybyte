@@ -136,7 +136,7 @@ updater's available() is False, and /update says so."""
 # (present unless the kid removed one), and a new store gets nothing more
 # (owner, 2026-11-17): beside the browser console add-on the store has little
 # room above zero_host.SEED_RESERVE, and that room is the kid's. Every other
-# system cart is an official cart the release publishes in
+# system cart but a test fixture is an official cart the release publishes in
 # carts-<board>.json, which the page this board serves adds and removes
 # (`/official`). With no OTA, a cable flash brings the official carts the
 # store holds to the image's release.

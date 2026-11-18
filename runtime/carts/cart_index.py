@@ -67,8 +67,8 @@ What it does differently, because a console is not a PC:
     but a server is not proof of what it serves; what lands is sandboxed,
     signed or validated data. The one exception is the console's own
     release: its index, signature verified, lists every seed cart of that
-    build as an OFFICIAL cart (`parse_index`'s `own`), which installs as the
-    image's seed would, Python included.
+    build but a test fixture as an OFFICIAL cart (`parse_index`'s `own`),
+    which installs as the image's seed would, Python included.
 
 The store layout sits BESIDE the carts folder (moy_store_base._sibling_path):
 `installed.json`, the record of what this store installed (index, id, version,

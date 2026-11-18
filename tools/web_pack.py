@@ -6,7 +6,8 @@
 #   cart_manifest    the add-on cart's manifest.json for a page
 #   publish_cart     the add-on cart for a page, packed beside it
 #   index_entry      its entry in the board's index
-#   official_entries every seed cart as an official entry of the release
+#   official_carts   the seed carts a release publishes: all but the test fixtures
+#   official_entries every official cart as an entry of the release
 #   index_doc        the board's index: the official entries, this add-on, then every earlier add-on
 #   publish_addon    the carts, their licence and the board's index, in one folder
 """The browser console add-on and the official carts, as a release and a LAN
@@ -23,8 +24,9 @@ Beside every payload, whether or not any console has the add-on installed:
                                    web_console_<12 hex>.moy, holding manifest.json
                                    (moybyte.fits: the digest), the pack and its
                                    licence
-    <cart id>-<12 hex>.zip         each seed cart (system_carts/), an OFFICIAL
-                                   cart: the folder as the tree holds it, named
+    <cart id>-<12 hex>.zip         each seed cart (system_carts/) but a test
+                                   fixture, an OFFICIAL cart: the folder as the
+                                   tree holds it, named
                                    by the zip's digest, so one cart is one
                                    asset on every board's index and release
     <cart id>-<12 hex>.png         its cover; a release keeps the ones its
@@ -32,8 +34,8 @@ Beside every payload, whether or not any console has the add-on installed:
                                    publish (official_assets, the publisher's
                                    prune_carts)
     carts-<board>.json             an index in moy-spec's format (cartindex.py,
-                                   version 1): an entry per seed cart of THIS
-                                   build, then one per add-on ever published
+                                   version 1): an entry per official cart of
+                                   THIS build, then one per add-on ever published
                                    for the board, newest first, each naming
                                    its page's digest in moybyte.fits; signed as
                                    a carts index is when the key is there
@@ -49,7 +51,10 @@ console lists only its own release's (cart_index.fits_here; the digest is the
 web bundle's, which carries the shell and the seed carts). The index keeps no
 earlier build's: a console a step behind lists none of them and keeps the
 ones its image seeds. `moybyte.core` marks the ones a console never removes
-(moy_seed.CORE). A console trusts the built-ins' namespace only from its own
+(moy_seed.CORE). A test fixture (`"moybyte": {"fixture": true}`,
+gen_device_carts.is_fixture: Bench, Coin Quest and the others the perf ledger,
+the on-glass suites and the tests run) is seeded like every system cart but is
+no official cart, so no index lists it. A console trusts the built-ins' namespace only from its own
 release's index with the signature verified (cart_index.parse_index).
 """
 
@@ -64,6 +69,7 @@ import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import board_config  # noqa: E402
+import gen_device_carts  # noqa: E402
 import gen_web_blob as gwb  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -247,14 +253,26 @@ def io_zip(top, files):
     return buf.getvalue()
 
 
+def official_carts(seeds=SEED_DIR):
+    """The folders of the official carts under `seeds`, in folder order:
+    every seed cart but a test fixture (gen_device_carts.is_fixture)."""
+    out = []
+    for n in sorted(os.listdir(seeds)):
+        man = os.path.join(seeds, n, "manifest.json")
+        if n.endswith(".moy") and os.path.isfile(man):
+            with open(man, "rb") as f:
+                if not gen_device_carts.is_fixture(json.loads(f.read().decode())):
+                    out.append(n)
+    return out
+
+
 def official_entries(digest, folder, seeds=SEED_DIR):
-    """The official entry of every seed cart under `seeds` for the page
-    `digest`, in folder order, their zips and covers written into `folder`
-    (which holds the licence already)."""
+    """The official entry of every official cart under `seeds`
+    (official_carts) for the page `digest`, in folder order, their zips and
+    covers written into `folder` (which holds the licence already)."""
     core = board_config.core_carts()
     return [seed_entry(os.path.join(seeds, n), digest, folder, core)
-            for n in sorted(os.listdir(seeds))
-            if n.endswith(".moy") and os.path.isfile(os.path.join(seeds, n, "manifest.json"))]
+            for n in official_carts(seeds)]
 
 
 def index_entry(digest, version, cart, folder):
@@ -331,7 +349,7 @@ def official_assets(names, indexes):
 
 def index_doc(board, entry, earlier=None, official=()):
     """The bytes of `carts-<board>.json`: the `official` entries (this
-    build's seed carts), the add-on `entry`, then every add-on entry of the
+    build's official carts), the add-on `entry`, then every add-on entry of the
     board's earlier index (`earlier`, its bytes) for another page, so a
     console a step behind its channel still finds the add-on its image fits."""
     carts = list(official) + [entry] + [
@@ -345,8 +363,8 @@ def index_doc(board, entry, earlier=None, official=()):
 def publish_addon(page, folder, board, version, key_pem=None, earlier=None,
                   seeds=SEED_DIR):
     """Everything a console installs the add-on and the official carts from,
-    into `folder`: the page's cart, every seed cart under `seeds` (None:
-    none), the licence and `carts-<board>.json` over the board's `earlier`
+    into `folder`: the page's cart, every official cart under `seeds`
+    (None: none), the licence and `carts-<board>.json` over the board's `earlier`
     index (its bytes; None reads the one already in `folder`), signed with
     `key_pem` when given. Returns {"cart", "index", "official"}: the add-on's
     and the index's names, and the official entries' count."""

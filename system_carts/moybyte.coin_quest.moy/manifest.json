@@ -11,6 +11,7 @@
   "moybyte": {
     "type": "game",
     "system": true,
+    "fixture": true,
     "order": 110,
     "permissions": [
       "graphics",

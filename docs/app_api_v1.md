@@ -182,7 +182,7 @@ absent (`runtime/carts/moy_store_base.py`, `VENDOR_KEY`):
 | `assets` | a cart's scenes, in order | `docs/moy_cart_api.md`, Scenes |
 | `glass`, `pictures` | a wallpaper drawn per glass, a picture wallpaper | `docs/theme_and_shell_2026-11.md` §3.9 |
 | `graduated` | written by the Editor when blocks become code; never by hand | `runtime/editors/blocks.py` |
-| `system`, `order`, `targets`, `app` | the seed carts' (`system_carts/`): a system cart, its place, the targets it ships to, a shipped app's declaration | §13 |
+| `system`, `order`, `targets`, `app`, `fixture` | the seed carts' (`system_carts/`): a system cart, its place, the targets it ships to, a shipped app's declaration, and `true` for a test fixture, which is seeded but no release publishes as an official cart | §13 |
 
 ## 3. Drawing an app
 
@@ -1451,8 +1451,8 @@ gives the app its tile, title and re-seed, and its manifest declares the
 app. A built-in is known by where it came from: a folder the firmware's seed
 wrote (`moy_store_base.builtin_name`, against the roster the seed records
 for its store, `seeded`). Only the seed writes the built-ins' namespace,
-and the console's own release index, which publishes the seed carts as its
-official carts (a carts index naming a `moybyte.` folder or id is refused
+and the console's own release index, which publishes the seed carts but
+the test fixtures as its official carts (a carts index naming a `moybyte.` folder or id is refused
 unless it is that index with its signature verified,
 `.claude/rules/carts.md`; a cart made under an author of that name is made as
 `local.`'s), and an id of that namespace

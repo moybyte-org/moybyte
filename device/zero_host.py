@@ -133,7 +133,7 @@ def identity():
 # raw-deflate stream each, `carts_data.CARTS_Z`, and this function inflates
 # them, so a Zero flashed from the website's flasher (site/build.py's BOARDS)
 # has a working console with no second, cabled step. Every other system cart
-# is an OFFICIAL cart its release publishes, which the page this board serves
+# but a test fixture is an OFFICIAL cart its release publishes, which the page this board serves
 # installs (`/official`, make_official) and a cable flash refreshes
 # (tools/board_flash.py's install_carts).
 #

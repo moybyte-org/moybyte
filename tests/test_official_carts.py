@@ -1,5 +1,5 @@
-"""The official carts: every seed cart (system_carts/) published in its
-release's `carts-<board>.json` (tools/web_pack.py), the core set a console
+"""The official carts: every seed cart (system_carts/) but a test fixture
+published in its release's `carts-<board>.json` (tools/web_pack.py), the core set a console
 never removes (moy_seed.CORE), a removal's record that the seed honours, and
 the Zero's way of carrying them -- the core in its image, the rest installed
 by a cable flash (tools/board_flash.py) and brought to each release by the
@@ -39,6 +39,16 @@ def _manifests():
         if d.name.endswith(".moy"):
             out[d.name[:-4]] = json.loads((d / "manifest.json").read_text())
     return out
+
+
+# The test fixtures (owner, 2026-11-18): seeded for the perf ledger, the
+# on-glass suites and the tests, never listed as an official cart.
+FIXTURES = {"moybyte.bench", "moybyte.bench_lua", "moybyte.coin_quest",
+            "moybyte.tap_only_red", "moybyte.open_machine", "moybyte.pin_light"}
+
+
+def _official():
+    return {cid: m for cid, m in _manifests().items() if not gen.is_fixture(m)}
 
 
 # -- the core set -----------------------------------------------------------------
@@ -165,13 +175,24 @@ def keys(monkeypatch):
     monkeypatch.setattr(ci, "INDEX_KEYS", TEST_KEYS)
 
 
-def test_every_seed_cart_is_an_official_entry_of_its_release(tmp_path, keys, monkeypatch):
+def test_the_test_fixtures_are_the_ones_the_owner_named():
+    assert {cid for cid, m in _manifests().items() if gen.is_fixture(m)} == FIXTURES
+    assert not FIXTURES & set(moy_seed.CORE), "a core cart is listed, so no fixture"
+    for d in ("seeed_xiao_esp32s3_zero", "esp32c3_zero"):
+        assert not FIXTURES & set(board_config.roster_install(str(ROOT / "firmware" / d)))
+
+
+def test_every_seed_cart_but_a_fixture_is_an_official_entry_of_its_release(tmp_path, keys,
+                                                                          monkeypatch):
     digest, routes = _release(tmp_path)
     monkeypatch.setattr(ci, "page_want", lambda: digest)
     got = ci.fitting(ci.parse_index(routes[OWN], OWN, OWN))
     official = {c["id"]: c for c in got if ci.is_official(c)}
-    mans = _manifests()
-    assert set(official) == set(mans)
+    mans = _official()
+    assert set(official) == set(mans) and not FIXTURES & {c["id"] for c in got}
+    assert not any(n[len(BASE):].startswith(tuple(f + "-" for f in FIXTURES)) for n in routes), \
+        "a fixture's zip or cover was published"
+    assert set(board_flash.offered_carts()) == {cid + ".moy" for cid in mans}
     for cid, c in official.items():
         assert c["moybyte"]["fits"] == digest
         assert c["moybyte"]["core"] == (cid in moy_seed.CORE)

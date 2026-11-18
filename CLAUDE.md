@@ -65,7 +65,8 @@ a browser. **`.moy` is the only cart format** (the `.moyproj` SDK was deleted
   each board.toml's `[board] ota`, the name every tool takes.
 - `device/`, `native/` — the device tier and the C modules every board stages.
 - `system_carts/*.moy` — the seed carts (manifest + main + config), which each
-  release also publishes as its official carts; all but `moy_seed.CORE` are
+  release also publishes as its official carts, but for the test fixtures
+  (`"moybyte": {"fixture": true}`); all but `moy_seed.CORE` are
   removable (`.claude/rules/carts.md`).
 
 **Where a piece belongs (owner, 2026-09-26).** What a cart author needs to make

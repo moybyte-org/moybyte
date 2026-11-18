@@ -453,13 +453,18 @@ KEPT = ("pmem.json", "config.json")      # moy_seed._RESEED_PRESERVE
 
 
 def offered_carts(seeds=SEED_DIR):
-    """{folder: manifest version} of every seed cart in `seeds`, in order."""
+    """{folder: manifest version} of every official cart in `seeds`, in
+    order: the seed carts but the test fixtures, which no release publishes
+    (gen_device_carts.is_fixture)."""
     import json
+    from tools.gen_device_carts import is_fixture
     out = {}
     for d in sorted(Path(seeds).iterdir()):
         man = d / "manifest.json"
         if d.name.endswith(".moy") and man.is_file():
-            out[d.name] = int(json.loads(man.read_text()).get("version", 0))
+            m = json.loads(man.read_text())
+            if not is_fixture(m):
+                out[d.name] = int(m.get("version", 0))
     return out
 
 

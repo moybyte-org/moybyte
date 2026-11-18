@@ -54,7 +54,7 @@ with `--password`, the password browsers pair with, installs the browser
 console add-on and the official carts, and keeps the module push as an opt-in
 dev loop. The image carries its seed carts (the core carts, every app and
 five games) and seeds them as a console seeds its own; every other system
-cart is an official cart its release publishes, which the browser console
+cart but a test fixture is an official cart its release publishes, which the browser console
 the board serves adds and removes: its Get Carts asks the board through the
 sealed `/official` (`zero_host.make_official`), and the board fetches the
 cart from its release and writes its own store. See "Provisioning" below.
@@ -147,8 +147,8 @@ them back on the next visit — but anything that existed *only* here is.
   console seeds its own (`zero_host.seed_carts`): present unless the kid
   removed one (`system/removed`, which the page's delete and Get Carts'
   remove write), a newer one in a new image replacing the store's with its
-  saves and config kept. The other system carts are official carts the
-  release publishes in `carts-xiao_zero.json`, which the page this board
+  saves and config kept. The other system carts, but the test fixtures,
+  are official carts the release publishes in `carts-xiao_zero.json`, which the page this board
   serves installs (`/official`); after an update the board brings the ones
   it holds to the new release (`runtime/carts/web_addon.py`). The website's
   install writes the store with the add-on in it (`tools/store_image.py`);

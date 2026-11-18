@@ -45,8 +45,8 @@ file is what the chip changes.
   fetch and freed after.
 - **The image carries the core carts alone** (owner, 2026-11-17;
   `moy_seed.CORE`, board.toml's `[roster] image`), under the XIAO's seed
-  rule (`zero_host.seed_carts`). The other system carts are official carts the release
-  publishes in `carts-c3_zero.json`. A new store gets nothing beside the
+  rule (`zero_host.seed_carts`). The release publishes the other system carts, all
+  but the test fixtures, as official carts in `carts-c3_zero.json`. A new store gets nothing beside the
   core: next to the add-on its little room is the kid's. With no OTA, a
   cable flash brings every official cart a store holds to the image's
   release (`tools/board_flash.py`'s `install_carts`; the core carts are the

@@ -273,9 +273,9 @@ boot verdict and the rollback confirm the frame loop drives."""
 # since 2026-11-07 (Brick Siege, Letter Blitz, Tap Game, Harpoon Pop, Star
 # Catcher). zero_host.seed_carts seeds them as a console seeds its own (owner,
 # 2026-11-17): present unless the kid removed one, a newer one in a new image
-# replacing the store's. Every other system cart is an official cart the
-# release publishes in carts-<board>.json, which the page this board serves
-# installs (`/official`); after an update the board brings the ones it holds
+# replacing the store's. Every other system cart but a test fixture is an
+# official cart the release publishes in carts-<board>.json, which the page
+# this board serves installs (`/official`); after an update the board brings the ones it holds
 # to the new release (runtime/carts/web_addon.py), and a cable flash brings
 # them to this tree's (tools/board_flash.py's install_carts).
 image = [

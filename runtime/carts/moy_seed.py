@@ -665,8 +665,12 @@ def stamp_board(root, me):
 
 # -- the official carts: core, optional, and a removal's record ---------------
 #
-# Every seed cart is an OFFICIAL cart: its release publishes it in the board's
-# own index (tools/web_pack.py), beside the browser console add-on. CORE is
+# Every seed cart but a test fixture is an OFFICIAL cart: its release
+# publishes it in the board's own index (tools/web_pack.py), beside the
+# browser console add-on. A test fixture (`"moybyte": {"fixture": true}`:
+# Bench, Coin Quest and the others the perf ledger and the suites run) is
+# seeded and removed like the rest, but no index lists it, so only a tool's
+# `put_back` brings a removed one back. CORE is
 # what a console cannot work without and never offers to remove, by the ids
 # the shell opens or names: Get Carts (the way back to everything else),
 # Files, Appearance (Settings' APPEARANCE row and Files open it by id),

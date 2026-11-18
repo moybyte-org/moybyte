@@ -29,7 +29,8 @@ carries its own provenance beside it:
       latest-tdeck.json            <- the OTA manifest pointing at it
       moybyte_web-<digest>.moy.zip <- the browser console add-on cart an image
                                       names; every one ever published stays
-      moybyte.<cart>-<hex>.zip     <- each seed cart, an official cart, and
+      moybyte.<cart>-<hex>.zip     <- each official cart (a seed cart but a
+                                      test fixture), and
       moybyte.<cart>-<hex>.png        its cover: one asset for every board,
                                       kept while an index references it
       carts-tdeck.json             <- the index listing this build's official
