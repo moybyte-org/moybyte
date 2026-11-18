@@ -756,9 +756,10 @@ def test_a_stacked_fields_cancel_gives_each_field_its_own_text(tmp_path):
 
 
 def test_a_popover_first_shows_at_its_settled_box(tmp_path):
-    """A popover with no size kept lays its body out and draws nothing, owing
-    the next frame: the first frame it shows on is the frame after it, and
-    the one after that draws the same."""
+    """A popover with no size kept shows on the frame that opens it, at the
+    box it rests at: the frame after it moves focus into it (the page's
+    field gives up its focused look, the popover's takes it) and every frame
+    after that draws the same."""
     from test_ui_linked import _pixels
     st = _Stack(tmp_path)
     base = _pixels(st.ws)
@@ -768,9 +769,6 @@ def test_a_popover_first_shows_at_its_settled_box(tmp_path):
         st.ws.mark_dirty()
         st.drv.frame(DT)
         shots.append(_pixels(st.ws))
-    shown = [i for i, s in enumerate(shots) if s != base]
-    assert shown, "the popover never showed"
-    first = shown[0]
-    assert first >= 1, "it showed on its first frame, at a size it had not measured"
-    same = shots[first] == shots[first + 1]
-    assert same, "the popover's box moved after it first showed"
+    assert shots[0] != base, "the frame that opens it shows nothing of it"
+    rest = shots[1] == shots[2] == shots[3]
+    assert rest, "the popover's box moved after it first showed"

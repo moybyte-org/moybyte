@@ -237,12 +237,11 @@ def test_the_pickers_frames_over_the_held_page_draw_as_a_whole_draw_does(tmp_pat
 @pytest.mark.parametrize("desk", (False, True), ids=("handheld", "desk"))
 def test_the_pickers_open_on_their_first_frame_over_the_page_as_it_was(tmp_path, monkeypatch,
                                                                        desk, bufs, kind):
-    """A popover's first pass sizes its card and draws nothing; the pickers
-    size theirs ahead on the frame that opens them, so that frame shows the
-    card. Opened by an input that changed nothing else, over a page the
-    frame before drew alone on the glass, that frame takes the page from it
-    (`Hold.last`) and draws only the hint strip, which names the pickers'
-    keys; a desk pane draws it once. Each frame after takes the page and
+    """A popover shows its card on the frame that opens it. Opened by an
+    input that changed nothing else, over a page the frame before drew
+    alone on the glass, that frame takes the page from it (`Hold.last`) and
+    draws only the hint strip, which names the pickers' keys; a desk pane
+    draws it once. Each frame after takes the page and
     the card from the frame before and draws inside the card's band. Every
     frame draws what a whole draw does."""
     monkeypatch.setattr(ui_draw, "hint_kind", lambda: kind)

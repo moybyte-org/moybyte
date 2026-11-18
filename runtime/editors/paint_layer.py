@@ -818,10 +818,6 @@ class PaintLayer(Layer):
                 self._draw_hints(cv, lay, pe, ws.theme_colors)
             if how in (_ui_draw.HOLD_DRAW, _ui_draw.HOLD_LAST) and not hold.copies(cv):
                 hold.keep(ws, cv, rect, key, True, self._dt)
-            if key[-1] is None:
-                # a popover's first pass sizes its card and draws nothing:
-                # sized here, the card shows on the frame that opened it
-                self._draw_pickers()
             self._draw_pickers(how == _ui_draw.HOLD_LEFT)
             if self._pop == "pickers" and self._host.box("Sprites") != key[-1]:
                 after = self._pick_key(sheet)

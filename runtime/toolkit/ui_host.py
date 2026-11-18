@@ -674,8 +674,8 @@ class Hold:
     def drew(self, key):
         """This frame drew the page and the modal under `key` after all:
         the key `under` was given named where the modal's card lay the frame
-        before, and a card learns its place by drawing (a popover's first
-        frames size it), so the frames after compare with the place this
+        before, and a card learns its place by drawing (none the frame
+        before its first), so the frames after compare with the place this
         frame left it in. The page held without the card (`keep`) is held
         under it too."""
         if self._drew is None or self._drew_f != _PAINT[0]:

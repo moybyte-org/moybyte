@@ -199,6 +199,10 @@ void mua_parts_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
 void mua_wash(const moy_ui_ctx_t *c, const moy_ui_sink_t *s);
 
 // moy_ui_api_pop.c
+// The first frame of a popover context `c` draws (moy_ui_inst_t's
+// pop_lent, NULL: none), and that given back.
+struct moy_ui_pop_lent *mua_pop_lent(const moy_ui_ctx_t *c);
+void mua_pop_drop(moy_ui_ctx_t *c);
 void mua_card_finish(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
 void mua_grid_end(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
 
