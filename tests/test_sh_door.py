@@ -293,6 +293,45 @@ def test_a_lua_command_runs_on_the_lua_tier(tmp_path):
         S.SCHED.reset()
 
 
+LONG_LUA = """
+-- A Lua command that computes past a service start's 2 s of CPU.
+function main(argv)
+  local n = 0
+  while os.clock() < 2.5 do n = n + 1 end
+  print("done", os.clock() >= 2.5)
+  return 0
+end
+"""
+
+
+def test_a_lua_command_has_a_python_commands_budget(tmp_path):
+    """A Lua command's start runs under COMMAND_MS of CPU, as a Python
+    command does, not a service start's MOYCORE_SVC_STOP_MS (2 s): one that
+    computes for 2.5 s of CPU finishes, its exit code main's."""
+    import json
+    from runtime.host_app import build_workstation
+    from runtime import sched_lua, sh_door
+    if sched_lua.runtime() is None:
+        pytest.skip("no host Lua tier")
+    assert sh_door.COMMAND_MS > 2500
+    root = tmp_path / "carts"
+    cart = root / "local.long_lua.moy"
+    cart.mkdir(parents=True)
+    (cart / "main.lua").write_text(LONG_LUA)
+    (cart / "manifest.json").write_text(json.dumps({
+        "format": "moy-1", "title": "local.long_lua", "id": "local.long_lua",
+        "runtime": "lua", "main": "main.lua", "moybyte": {"type": "command"}}))
+    S.SCHED.reset()
+    ws = build_workstation(str(root))
+    try:
+        io = _IO()
+        d = ShellDoor(ws, io)
+        assert call(d, "spawn", "0", "long_lua") == 0, io.err
+        assert io.out == "done\ttrue\n"
+    finally:
+        S.SCHED.reset()
+
+
 def moybyte_wakes():
     from runtime import moybyte
     return moybyte.WAKES.list

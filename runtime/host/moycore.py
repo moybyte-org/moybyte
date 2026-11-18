@@ -108,12 +108,13 @@ def _bytes(s):
     return s.encode() if isinstance(s, str) else bytes(s)
 
 
-def svc_start(pid, name, src, env=None, app=None):
+def svc_start(pid, name, src, env=None, app=None, start_ms=0):
     """Service `pid` started (moycore_svc_start): its handle. `src` is its
     one script, or its scripts as (text, chunkname) pairs in load order
     (a None chunkname the service's own);
     `env` what the console hands it, the JSON text [values, calls], or None;
-    `app` its app's run, moy_app's `run()` bytes, or None."""
+    `app` its app's run, moy_app's `run()` bytes, or None; `start_ms` its
+    start's limit of CPU (0: a service's, MOYCORE_SVC_STOP_MS)."""
     pairs = [(src, None)] if isinstance(src, (str, bytes)) else list(src)
     chunks = (_lb.SvcChunk * len(pairs))()
     for i, (text, chunk) in enumerate(pairs):
@@ -125,7 +126,7 @@ def svc_start(pid, name, src, env=None, app=None):
     _svc_check(_lb.play_lib().moycore_svc_start(pid, name.encode(), chunks, len(pairs), e,
                                                 len(e) if e is not None else 0,
                                                 bytes(app) if app is not None else None,
-                                                _lb.ctypes.byref(h)))
+                                                start_ms, _lb.ctypes.byref(h)))
     return h.value
 
 

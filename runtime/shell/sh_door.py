@@ -286,9 +286,11 @@ def lua_command(run, pid, name, argv, env, stdin, stdout):
     """Lua command `run`'s body for `run_program`: its scripts run as a Lua
     service of process `pid` (sched_lua: a state of its own, stepped here
     where the tier gives it no task), handed `env`, `argv` and its streams
-    as console calls the door answers (the scheduler's `calls`). The chunks
-    run under the service start's limit (MOYCORE_SVC_STOP_MS), a console
-    call's wait apart; past COMMAND_MS it is stopped. Its exit code."""
+    as console calls the door answers (the scheduler's `calls`). Its start
+    (the chunks, then `main`) runs under COMMAND_MS of CPU, a Python
+    command's budget, its console calls' waits apart, where a service's
+    start has MOYCORE_SVC_STOP_MS; past COMMAND_MS of wall time it is
+    stopped too. Its exit code."""
     import sched_lua
 
     def _out(text):
@@ -313,7 +315,7 @@ def lua_command(run, pid, name, argv, env, stdin, stdout):
                   + [(LUA_TAIL, "=" + name)])
         S = _sched.SCHED
         S.procs[pid].args = (None, None, calls)     # what `calls` answers it from
-        h = svc.svc_start(pid, name, chunks, sched_lua.env_text(calls), None)
+        h = svc.svc_start(pid, name, chunks, sched_lua.env_text(calls), None, COMMAND_MS)
         stepped = not svc.svc_tasks()
         t0 = _ticks_ms()
         stopped = False

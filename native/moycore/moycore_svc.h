@@ -104,7 +104,7 @@
 // stepped service is on the VM's task already and calls the row in place.
 //
 // THE LIFE. The chunk, then `moy_start()` where it is defined, each under
-// MOYCORE_SVC_STOP_MS: an error ends the service with exit 1, and one that
+// its start's limit (MOYCORE_SVC_STOP_MS unless its start names one): an error ends the service with exit 1, and one that
 // leaves no wake (a timer or a message wake: MOY_EVQ_TIMERS and
 // MOYCORE_MB_ONS at most) ends it with 0. Each due timer's callback runs
 // under MOY_SUPER_ABORT_US and is charged to the one supervisor
@@ -187,12 +187,15 @@ typedef struct {
 // shared scripts ahead of it: docs/app_api_v1.md section 7), with what the
 // console hands it in `env` (envn bytes, the JSON array [values, calls];
 // NULL for nothing) and its app's run `app` (copied; NULL for none, no role
-// names): OK with *h, FULL, NOMEM, BAD where this chip runs none or `count`
-// is 0. The start itself runs on the service's task, or at the next step.
+// names), its start (the chunk, then `moy_start`) under `start_ms` of CPU
+// each (0: MOYCORE_SVC_STOP_MS, a service's; a command's run is the whole
+// of its start, sh_door's COMMAND_MS): OK with *h, FULL, NOMEM, BAD where
+// this chip runs none or `count` is 0. The start itself runs on the
+// service's task, or at the next step.
 struct moy_app_run;
 int moycore_svc_start(uint32_t pid, const char *id, const moycore_svc_chunk_t *chunks,
                       size_t count, const char *env, size_t envn,
-                      const struct moy_app_run *app, uint32_t *h);
+                      const struct moy_app_run *app, uint32_t start_ms, uint32_t *h);
 // The TERM: its `moy_stop` runs next on its task. OK, STALE.
 int moycore_svc_stop(uint32_t h);
 int moycore_svc_info(uint32_t h, moycore_svc_info_t *out);

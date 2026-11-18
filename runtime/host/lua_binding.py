@@ -136,7 +136,7 @@ _U32 = ctypes.c_uint32
 
 _SIGS = (
     ("moycore_svc_start", [_U32, _C, ctypes.POINTER(SvcChunk), ctypes.c_size_t, _C,
-                           ctypes.c_size_t, _C, ctypes.POINTER(_U32)], _I),
+                           ctypes.c_size_t, _C, _U32, ctypes.POINTER(_U32)], _I),
     ("moycore_svc_stop", [_U32], _I),
     ("moycore_svc_info", [_U32, ctypes.POINTER(SvcInfo)], _I),
     ("moycore_svc_reap", [_U32], _I),

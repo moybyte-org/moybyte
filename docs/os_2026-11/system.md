@@ -64,8 +64,9 @@ before the prompt returns, its output into the log under its pid, and `wait`
 reads its code. A Lua (`"runtime": "lua"`) command is the same process row
 and streams, its scripts run as a Lua service of its own
 (`native/moycore/moycore_svc.h`), `print` and `input` its console calls and
-its exit code `main`'s answer; its chunks run under that service's start
-limit, a console call's wait apart. A compiled (`"runtime": "wasm"`) command is its module's
+its exit code `main`'s answer; its chunks run under the 30 s a Python
+command has, of CPU, a console call's wait apart (a service's own start
+keeps its 2 s, `MOYCORE_SVC_STOP_MS`). A compiled (`"runtime": "wasm"`) command is its module's
 WASI `_start` (`native/moy_wasm/moy_wasi.h`), crossing the same door and
 holding the same process row and guard: its stdio the session's own
 descriptors, its args and exported variables the shell's, its files the

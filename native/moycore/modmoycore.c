@@ -1196,7 +1196,7 @@ static mp_obj_t mod_pool_check(void)
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_pool_check_obj, mod_pool_check);
 
 // -- the Lua tier's services (moycore_svc.h) ---------------------------------
-//   svc_start(pid, name, src[, env[, app]]) -> h   svc_stop(h)   svc_reap(h)
+//   svc_start(pid, name, src[, env[, app[, start_ms]]]) -> h   svc_stop(h)   svc_reap(h)
 //                                 (src: its one script, or its scripts as
 //                                  (text, chunkname) pairs in load order,
 //                                  a None chunkname the service's own;
@@ -1237,16 +1237,17 @@ static mp_obj_t mod_svc_start(size_t n_args, const mp_obj_t *args)
         env = mp_obj_str_get_data(args[3], &envn);
     }
     const struct moy_app_run *app = n_args > 4 ? moycore_app_run(args[4]) : NULL;
+    uint32_t start_ms = n_args > 5 ? (uint32_t)mp_obj_get_int(args[5]) : 0u;
     uint32_t h;
     int rc = moycore_svc_start((uint32_t)mp_obj_get_int(args[0]), mp_obj_str_get_str(args[1]),
-                               chunks, count, env, envn, app, &h);
+                               chunks, count, env, envn, app, start_ms, &h);
     if (chunks != &one) {
         m_del(moycore_svc_chunk_t, chunks, count);
     }
     svc_check(rc);
     return mp_obj_new_int_from_uint(h);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_svc_start_obj, 3, 5, mod_svc_start);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_svc_start_obj, 3, 6, mod_svc_start);
 
 static mp_obj_t mod_svc_stop(mp_obj_t h)
 {

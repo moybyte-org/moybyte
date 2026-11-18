@@ -95,6 +95,7 @@ typedef struct {
     char *env;                  // what the console hands it, until its start reads it
     size_t envn;
     uint32_t pid;
+    uint32_t start_ms;          // its start's limit: the chunk's and moy_start's
     uint16_t gen;
     volatile uint8_t state;
     volatile uint8_t stop_req;
@@ -526,7 +527,8 @@ static bool ended_by(svc_t *s, int rc, const char *past) {
     if (rc == CALL_EXIT) {
         end(s, s->exit_req);
     } else if (rc == CALL_ABORT) {
-        snprintf(s->why, sizeof s->why, "%s ran past %u ms", past, MOYCORE_SVC_STOP_MS);
+        snprintf(s->why, sizeof s->why, "%s ran past %u ms", past,
+                 (unsigned)(s->then == THEN_STOP ? MOYCORE_SVC_STOP_MS : s->start_ms));
         end(s, MOY_PROC_KILLED);
     } else {
         end(s, MOYCORE_SVC_EXIT_CRASHED);
@@ -559,7 +561,7 @@ static void after(svc_t *s, int rc) {
                 return;
             }
             if (lua_getglobal(s->L, "moy_start") == LUA_TFUNCTION) {
-                begin(s, MOYCORE_SVC_STOP_MS * 1000u, 0, THEN_START);
+                begin(s, s->start_ms * 1000u, 0, THEN_START);
             } else {
                 lua_settop(s->L, 0);
                 started(s);
@@ -685,7 +687,7 @@ static void start(svc_t *s) {
     }
     free(s->src);
     s->src = NULL;
-    begin(s, MOYCORE_SVC_STOP_MS * 1000u, 0, THEN_CHUNK);
+    begin(s, s->start_ms * 1000u, 0, THEN_CHUNK);
 }
 
 static void stop(svc_t *s) {
@@ -872,7 +874,7 @@ static uint32_t handle_of(uint32_t slot) {
 
 int moycore_svc_start(uint32_t pid, const char *id, const moycore_svc_chunk_t *chunks,
                       size_t count, const char *env, size_t envn,
-                      const struct moy_app_run *app, uint32_t *h) {
+                      const struct moy_app_run *app, uint32_t start_ms, uint32_t *h) {
     if (count == 0) {
         return MOYCORE_SVC_BAD;
     }
@@ -902,6 +904,7 @@ int moycore_svc_start(uint32_t pid, const char *id, const moycore_svc_chunk_t *c
     s->env = envc;
     s->envn = envn;
     s->pid = pid;
+    s->start_ms = start_ms != 0u ? start_ms : MOYCORE_SVC_STOP_MS;
     #ifdef SVC_APP
     if (app != NULL) {
         s->run = *app;
