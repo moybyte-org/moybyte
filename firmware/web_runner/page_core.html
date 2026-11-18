@@ -261,7 +261,7 @@ var AW_SRC="class MoyPCM extends AudioWorkletProcessor{"+
 "for(var i=0;i<o.length;i++){"+
 "if(this.n>0){var v=this.b[this.r];this.r=(this.r+1)&this.m;this.n--;s.played++;o[i]=v;this.last=v;}"+
 "else{this.last=Math.abs(this.last)<1e-4?0:this.last*0.9;o[i]=this.last;if(s.got>0)this.d++;}}"+
-"if(++this.k>=8){this.k=0;if(this.q)this.q.postMessage(s);}return true;}}"+
+"if(++this.k>=4){this.k=0;if(this.q)this.q.postMessage(s);}return true;}}"+
 "registerProcessor('moy-pcm',MoyPCM);";
 function audioInit(){var AC=window.AudioContext||window.webkitAudioContext;
 if(!AC||actx)return;try{actx=new AC();}catch(e){actx=null;return;}

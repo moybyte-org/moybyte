@@ -83,7 +83,7 @@ def audio_rate(hz):
 # The depth the page's sink is kept at: deep enough to ride out a late frame
 # (wasm GC pause, phone jank) and the lag of the sink's count, shallow enough
 # that a game sfx mixed into the stream isn't noticeably late.
-_AUDIO_TARGET = 0.15
+_AUDIO_TARGET = 0.12
 _AUDIO_MAX_STEP = 0.20      # bound one frame's top-up render (seconds)
 
 
