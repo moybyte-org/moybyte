@@ -284,6 +284,9 @@ unix-micropython:
 	@MOYBYTE_REQUIRE_WEB_BUNDLE=0 $(PYTHON) tools/gen_web_blob.py --quiet >/dev/null
 	@bash tools/mpy_tree.sh $(UNIX_MP_SRC) $(UNIX_MP_TAG)
 	@$(PYTHON) tools/patch_fatfs_lfn.py $(UNIX_MP_SRC)
+# The console boards' map growth (tools/patch_map_load.py): a lookup's probe
+# length is part of what a frame costs, so the model grows its maps as they do.
+	@$(PYTHON) tools/patch_map_load.py $(UNIX_MP_SRC)
 # Separate from the clone on purpose (the web runner's build.sh learned the
 # same lesson): a checkout can exist WITHOUT its submodules if a previous run
 # died between the two, and a guarded init could never repair that. It is also

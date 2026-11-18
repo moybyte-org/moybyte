@@ -333,9 +333,11 @@ dt = 1 / 30
 for _ in range(20):
     upd(dt)
     drw()
+# Every name the window stores is bound before it opens: a script's first
+# store of a global can grow the script's own globals table.
+i = a0 = a1 = 0
 gc.collect()
 gc.disable()
-i = 0
 a0 = gc.mem_alloc()
 while i < 200:
     upd(dt)

@@ -655,7 +655,7 @@ moybyte.every(1, lambda: None)
 w = moybyte.WAKES
 gc.collect()
 before = gc.mem_alloc()
-for i in range(200):
+for _ in range(200):
     w.pending(out)
 print("DUE", gc.mem_alloc() - before)
 '''

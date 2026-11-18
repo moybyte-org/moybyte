@@ -67,6 +67,9 @@ moybyte_patch_gc_split_reserve
 #    image is REPR_A (the XIAO's reason).
 # DECLINED moybyte_patch_gc_run_hints -- paid inside a frame loop this board has
 #    not got (the XIAO's reason).
+# DECLINED moybyte_patch_map_load -- heap on every map above twelve slots, out
+#    of a 32 KB Python heap, for a frame loop this board has not got (the
+#    XIAO's reason).
 # DECLINED moybyte_patch_gc_meters -- the PERF line and `heapcaps` it feeds run
 #    on neither Zero (the XIAO's reason).
 # DECLINED moybyte_patch_mdns_psram -- there is no PSRAM to move the responder's

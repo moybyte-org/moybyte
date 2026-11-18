@@ -43,6 +43,8 @@
 #     function (node-only path; assertions abort).
 #   - py/obj.h: an equal-length slice store moves no tail
 #     (tools/patch_slice_store.py, the VM patch every board takes).
+#   - py/map.c: a hash map grows at three quarters full
+#     (tools/patch_map_load.py, as every console board does).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -145,6 +147,8 @@ if bad in src:
 PYEOF
   # The VM patch every board takes: an equal-length slice store moves no tail.
   "${PY}" "${REPO_ROOT}/tools/patch_slice_store.py" "${MPY_DIR}"
+  # A hash map grows at three quarters full, as on every console board.
+  "${PY}" "${REPO_ROOT}/tools/patch_map_load.py" "${MPY_DIR}"
 
   # The moybyte variant (canonical copy lives in variant/, re-staged every build).
   mkdir -p "${PORT_DIR}/variants/moybyte"

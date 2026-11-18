@@ -80,6 +80,9 @@ moybyte_patch_fatfs_lfn
 # A found extensible built-in enters sys.modules: every board takes it,
 # and tools/patch_import_cache.py carries the measurement.
 moybyte_patch_import_cache
+# A hash map grows at three quarters full: every console board takes it, and
+# tools/patch_map_load.py carries the measurement.
+moybyte_patch_map_load
 # DECLINED moybyte_patch_thread_state_tls -- the VM's thread state as a
 # `__thread` variable. Measured on the P4s (RISC-V), where the TLS slot's
 # lookup was ~5% of an Editor frame; on this Xtensa board it is unmeasured,
