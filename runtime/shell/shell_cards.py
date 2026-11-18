@@ -489,14 +489,14 @@ class PauseMenu:
         desk = _desk_class()
         if not self.page:
             host.focus(self.rows[self.sel])
-        settled = host.begin(cv, ws.theme_colors, self.surface(), desk)
+        host.begin(cv, ws.theme_colors, self.surface(), desk)
         _ui.popover("Pause", self._width(desk))
         cart = ws.cart
         _ui.icon("moy")
         if self.stopped:
             self._stop_body(cart)
             _ui.popover()
-            if not settled or host.moved:
+            if host.due():
                 ws.request_frame()
             return
         _ui.info(str((cart.get("title") if cart else "") or "Game"), "Paused")
@@ -513,7 +513,7 @@ class PauseMenu:
             _ui.menu("", self.rows, self.icons)
             _ui.hints(("back", "Resume"))
         _ui.popover()
-        if not settled or host.moved:
+        if host.due():
             ws.request_frame()
 
     def _stop_body(self, cart):
@@ -740,7 +740,7 @@ class DeleteConfirm:
         ws = self.ws
         cv = ws.sys_canvas
         ws.icon_spec()                # the theme's set in the engine, as the bar has it
-        settled = self._host.begin(cv, ws.theme_colors, self.surface(), _desk_class())
+        self._host.begin(cv, ws.theme_colors, self.surface(), _desk_class())
         got = -1
         if self.rows:
             pick = _ui.dialog(self.title, self.buttons, "normal")
@@ -767,7 +767,7 @@ class DeleteConfirm:
             act, self._act = self._act, None
             if act is not None:
                 ws.defer(act, toast=False)
-        elif not settled or self._host.moved:
+        elif self._host.due():
             ws.request_frame()
 
 
@@ -1284,7 +1284,7 @@ class SystemMenuUI:
         if 0 <= m.sel < len(m.items) and m.items[m.sel][0] == "item":
             host.focus(m.items[m.sel][4])
         desk = _desk_class()
-        settled = host.begin(cv, ws.theme_colors, self.surface(), desk)
+        host.begin(cv, ws.theme_colors, self.surface(), desk)
         _ui.at(*self._menu_cell())
         _ui.popover("System", self._look_w(desk))
         cap, texts, icons, kinds = "", [], [], []
@@ -1304,7 +1304,7 @@ class SystemMenuUI:
         if texts:
             _ui.menu(cap, texts, icons, kinds=kinds)
         _ui.popover()
-        if not settled or host.moved:
+        if host.due():
             ws.request_frame()
 
     def look_hit(self, px, py):

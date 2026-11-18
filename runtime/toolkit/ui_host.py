@@ -432,6 +432,16 @@ class AppHost:
         is not the last one's."""
         return bool(_C.api_owes(self.ctx))
 
+    def due(self):
+        """Whether the frame after the pass begun last shows anything the
+        glass does not: its begin took input that acts after the pass
+        (`owed`), the pass owes the next (`owes`), or it moved the focus or
+        a scroll on a canvas that retains more than one buffer, so the
+        buffers the next frames paint into lag the glass (`moved`). One
+        retained buffer is the glass: a move its pass drew owes nothing."""
+        return (self.owed or bool(_C.api_owes(self.ctx))
+                or (self._hp[_HP_RETAINED] > 1 and bool(_C.api_moved(self.ctx))))
+
     def quiet(self):
         """Whether no input waits for the next frame: no button, typed key,
         repeat, wheel or press, and no frame owed."""
