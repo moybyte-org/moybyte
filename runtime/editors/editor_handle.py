@@ -517,10 +517,12 @@ class EditorHandle:
         last draw (a key handed to it outside a drawn frame), its caret moved
         where the view has not shown it (`aim`) or its idle save is due --
         what an app drawn on change (`AppFace.animates`) asks of every handle
-        it opened."""
+        it opened. A closed one has none: it saved as it closed, and draws
+        nothing until it is drawn again."""
+        if not self.live:
+            return False
         ed = self.ed
-        if self._gen != self._drawn or (self.live and (self._caret_at != ed.row
-                                                        or self._caret_col != ed.col)):
+        if self._gen != self._drawn or self._caret_at != ed.row or self._caret_col != ed.col:
             return True
         if self.dirty():
             at = self._edit_ms

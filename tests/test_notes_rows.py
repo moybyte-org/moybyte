@@ -310,6 +310,68 @@ def test_an_app_that_draws_its_note_alone_draws_rows(tmp_path):
     assert p.share() > 0.5, p.kinds
 
 
+# -- frames the app has nothing to draw in ----------------------------------------
+
+
+def _passes(ws):
+    """The count of the run's passes from here on (its `_draw` called)."""
+    pl = ws.run.player
+    n = [0]
+    draw = pl.draw
+
+    def counted():
+        n[0] += 1
+        draw()
+    pl.draw = counted
+    return n
+
+
+@pytest.mark.parametrize("closed", (False, True))
+@pytest.mark.parametrize("size", ((1024, 600), None, (320, 240)))
+def test_an_idle_note_paints_nothing_on_any_tier(tmp_path, size, closed):
+    """A note open and let be, or the list after a note closed -- on the
+    desk, the full-screen console and the handheld's 320x240 -- paints no
+    frame and runs no pass: the caret is steady, nothing shown moves on its
+    own, and a closed note's handle owes no frame (`EditorHandle.owes`)."""
+    kw = {"sys_size": size, "font_scale": 2, "windowed": True} if size == (1024, 600) else (
+        {"sys_size": size} if size else {})
+    ws = host_app.build_workstation(str(tmp_path / "carts"), **kw)
+    no_unlock_banner(ws)
+    quiesce(ws)
+    moy_carts.save_file("docs", "alpha", _BODY, ws.carts_root)
+    assert select_on_home(ws, "Notes") is not None
+    ws.open()
+    _pin_clock()
+    drv = host_app.ConsoleDriver(ws)
+    ns = ws.run.player.ns
+    for _ in range(4):
+        _NOW[0] += 33
+        quiesce(ws)
+        drv.frame(_DT)
+    if ns["ed"] is None:
+        ns["_open"]("alpha")
+    for press in (lambda: drv.press("down"), lambda: drv.type_char(ord("a"))):
+        press()
+        for _ in range(3):
+            _NOW[0] += 33
+            drv.frame(_DT)
+    assert ns["ed"].dirty(), "the typed key reached no note"
+    if closed:
+        ns["_close"]()
+        ws.mark_dirty()
+    for _ in range(90):                 # past the idle save, the one frame a pause owes
+        _NOW[0] += 33
+        quiesce(ws)
+        drv.frame(_DT)
+    n = _passes(ws)
+    k = ws.frame_state.frames_drawn
+    for _ in range(90):                 # three seconds
+        _NOW[0] += 33
+        quiesce(ws)
+        drv.frame(_DT)
+    assert (ws.frame_state.frames_drawn - k, n[0]) == (0, 0)
+
+
 # -- shift frames: the view moved ------------------------------------------------
 
 
