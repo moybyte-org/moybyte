@@ -10,7 +10,7 @@
 #   -- manifest metadata       save_manifest_meta, add_source, compile_check
 #   -- a cart's SCRIPTS        cart_sources, source_text, set_source, save_code
 #   -- block source            load_blocks, save_blocks
-#   -- persistent cart memory  load_pmem, save_pmem
+#   -- persistent cart memory  load_pmem, save_pmem, save_pmem_later
 #   -- shared sprite sheet     load_shared_sheet, save_shared_sheet
 #   -- cart management         store_full, create, new_from_template, duplicate
 #   -- the modules split off this file  moy_seed; moy_docs (wifi, system, achievements); moy_pack
@@ -114,7 +114,8 @@ from moy_store_base import THUMBS_DIR
 from moyimg import _b64_encode, encode_moyimg, decode_moyimg, text_sig
 from moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
                     _write_atomic, _read_recover, _read_bak, _forget_bak,
-                    set_publish_root, _read_bytes, _write_bytes)
+                    set_publish_root, _read_bytes, _write_bytes, _pmem_read,
+                    _pmem_save, _save_wait)
 
 
 def load_cover(path):
@@ -761,42 +762,45 @@ def save_blocks(cart, program):
 
 # --- persistent cart memory (pmem, TIC-80-style) ----------------------------
 #
-# A cart's pmem is 256 x SIGNED 32-bit ints stored as a JSON list in pmem.json
-# beside main.py. TIC-80 gives carts pmem(i)/pmem(i,v) for high scores / save
-# state; this is the per-cart backing store. Reads default to all-zero; saves
-# are atomic (same crash-safe path as sprites/config) so an interrupted write
-# can never truncate a kid's save.
+# A cart's pmem is 256 x SIGNED 32-bit ints (SPEC.md 9) in pmem.bin beside
+# main.py: TIC-80's pmem(i)/pmem(i,v) for high scores and save state. The
+# file is native/moy_store/moy_pmem.h's record, two slots written in turn, so
+# a cut save reads back as the cells before it or the ones it wrote.
 
 PMEM_CELLS = 256
-PMEM_MASK = 0xFFFFFFFF
-PMEM_SIGN = 0x80000000       # slots are SIGNED 32-bit (SPEC.md 9, matching 4.2)
+PMEM_FILE = "pmem.bin"
 
 
 def load_pmem(path):
-    """Read a cart's pmem (path = the .moy folder). Returns a list of 256 ints,
-    all zero when there's no pmem.json yet or it's unreadable/short (padded)."""
-    cells = [0] * PMEM_CELLS
+    """A cart's pmem (path = the .moy folder): 256 ints, all zero where it has
+    no record yet."""
     try:
-        data = json.loads(_read(path + "/pmem.json"))
-    except (OSError, ValueError):
-        return cells
-    if isinstance(data, list):
-        for i in range(min(PMEM_CELLS, len(data))):
-            try:
-                v = int(data[i]) & PMEM_MASK
-            except (TypeError, ValueError):
-                v = 0
-            # Slots are signed 32-bit. Reinterpreting is also the migration for
-            # saves written before that was pinned down: a negative a cart wrote
-            # back then landed as a huge unsigned value, and this restores it.
-            cells[i] = v - (PMEM_MASK + 1) if v >= PMEM_SIGN else v
-    return cells
+        return _pmem_read(path + "/" + PMEM_FILE)
+    except OSError:
+        return [0] * PMEM_CELLS
+
+
+def pmem_path(cart):
+    """The file a cart's pmem lives in (needs cart['path'])."""
+    return cart["path"] + "/" + PMEM_FILE
+
+
+def save_pmem_later(cart, cells):
+    """Hand a cart's pmem to the store's saver (native/moy_store/moy_save.h):
+    queued where a task writes its medium, else written now."""
+    _pmem_save(pmem_path(cart), cells)
+
+
+def wait_pmem(cart):
+    """Until no save of the cart's pmem is queued or being written."""
+    _save_wait(pmem_path(cart))
 
 
 def save_pmem(cart, cells):
-    """Persist a cart's pmem list (256 ints) to pmem.json, atomically so an
-    interrupted write can't truncate it (needs cart['path'])."""
-    _write_atomic(cart["path"] + "/pmem.json", json.dumps(list(cells)))
+    """Persist a cart's pmem (256 ints): written when this returns."""
+    path = pmem_path(cart)
+    _pmem_save(path, cells)
+    _save_wait(path)
 
 
 # --- shared sprite sheet (cross-cart sprite reuse, #18) ---------------------

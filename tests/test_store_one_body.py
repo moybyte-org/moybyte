@@ -250,7 +250,7 @@ def test_the_doors_export_holds_the_kids_work(trial):
         man = json.loads(z.read("moybyte/backup.json"))
     assert man["store"] == moy_seed.STORE_FORMAT and man["carts"] == "carts"
     assert "moybyte/carts/local.my_game.moy/journal/journal.jsonl" in names
-    assert "moybyte/carts/moybyte.bench.moy/pmem.json" in names
+    assert "moybyte/carts/moybyte.bench.moy/pmem.bin" in names
     assert not any("/thumbs/" in m or "moybyte.untouched.moy" in m for m in names)
 
 
@@ -292,7 +292,7 @@ def test_another_boards_folder_drops_exactly_the_device_rows(trial):
     assert rows == {"theme": "night", "volume": 4}
     assert after[moy_seed.BOARD_STAMP_NAME] == b"moyboard %s\n" % ME.encode()
     for kept in ("system/password", "system/authorized_keys", "wifi.json",
-                 "carts/moybyte.bench.moy/pmem.json", "apps/local.my_game/save"):
+                 "carts/moybyte.bench.moy/pmem.bin", "apps/local.my_game/save"):
         assert after[kept] == before[kept]
 
 

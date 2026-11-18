@@ -787,16 +787,20 @@ int moycore_frame(float dt, int draw, char *err, size_t n)
     moy_reset_state(&RUN.c.canvas);
     moycore_run_tick_begin();   // h_time_ms counts from here
     moycore_run_tick_dt(dt);
+    int rc;
     if (!RUN.L) {
         // A compiled cart: its two hooks on the engine's thread.
 #if MOYCORE_WASM
-        return moycore_wasm_tick_c(dt, draw, err, n) != 0 ? -1 : 0;
+        rc = moycore_wasm_tick_c(dt, draw, err, n) != 0 ? -1 : 0;
 #else
         (void)dt; (void)draw; (void)err; (void)n;
-        return 0;
+        rc = 0;
 #endif
+    } else {
+        rc = moycore_lua_tick(dt, draw, err, n);
     }
-    return moycore_lua_tick(dt, draw, err, n);
+    moycore_run_pmem_tick(&RUN.c);     // the frame's end: the run's save, when one is due
+    return rc;
 }
 
 static mp_obj_t mod_tick(size_t n_args, const mp_obj_t *args)
@@ -851,6 +855,15 @@ static mp_obj_t mod_pmem_image(mp_obj_t out)
     return mp_obj_new_bool(moycore_run_pmem_image(&RUN.c, p, (int)n));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_pmem_image_obj, mod_pmem_image);
+
+// pmem_to(path) -> whether the run now saves its pmem while it plays
+// (moycore_run_pmem_to); "" or None: only at its end, by the console.
+static mp_obj_t mod_pmem_to(mp_obj_t path)
+{
+    return mp_obj_new_bool(moycore_run_pmem_to(
+        &RUN.c, path == mp_const_none ? NULL : mp_obj_str_get_str(path)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_pmem_to_obj, mod_pmem_to);
 
 // flag_xor(n, mask) -- an Editor flag edit reaching the running cart: tile
 // n's flag byte in the run's own table flips `mask`'s bits, so what the
@@ -1324,6 +1337,7 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_perf_reset),  MP_ROM_PTR(&moycore_perf_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_perf_read),   MP_ROM_PTR(&moycore_perf_read_obj) },
     { MP_ROM_QSTR(MP_QSTR_pmem_image),  MP_ROM_PTR(&mod_pmem_image_obj) },
+    { MP_ROM_QSTR(MP_QSTR_pmem_to),     MP_ROM_PTR(&mod_pmem_to_obj) },
     { MP_ROM_QSTR(MP_QSTR_retarget),    MP_ROM_PTR(&mod_retarget_obj) },
     { MP_ROM_QSTR(MP_QSTR_layer_bind),  MP_ROM_PTR(&mod_layer_bind_obj) },
     { MP_ROM_QSTR(MP_QSTR_image_put),   MP_ROM_PTR(&mod_image_put_obj) },

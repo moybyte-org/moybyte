@@ -449,7 +449,7 @@ def install_addon(board_dir, port, reset=True):
 
 SEED_DIR = ROOT / "system_carts"
 CART_SKIP = ("thumbs", "__pycache__")
-KEPT = ("pmem.json", "config.json")      # moy_seed._RESEED_PRESERVE
+KEPT = ("pmem.bin", "config.json")        # moy_seed._RESEED_PRESERVE
 
 
 def offered_carts(seeds=SEED_DIR):

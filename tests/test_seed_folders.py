@@ -39,7 +39,7 @@ LOCAL = {
     "star.moy/manifest.json": _man("Star", ven=SYS),
     "star.moy/main.py": "old code",
     "star.moy/old.lua": "gone",
-    "star.moy/pmem.json": "[7]",
+    "star.moy/pmem.bin": "[7]",
     "star.moy/journal/journal.jsonl": "{}",
     "same.moy/manifest.json": _man("Same", 3, SYS),
     "same.moy/main.py": "kid's edit",
@@ -50,7 +50,7 @@ LOCAL = {
 BUNDLE = {
     "star.moy/manifest.json": _man("Star", 9, SYS),
     "star.moy/main.py": "new code",
-    "star.moy/pmem.json": "[]",
+    "star.moy/pmem.bin": "[]",
     "star.moy/config.json": "{}",
     "same.moy/manifest.json": _man("Same", 3, SYS),
     "same.moy/main.py": "seed",
@@ -121,7 +121,7 @@ def _check_returning(got, tree):
     star = [w for w in wrote if w.startswith("star.moy/")]
     assert star[-1] == "star.moy/manifest.json"
     assert tree["star.moy/main.py"] == b"new code"
-    assert "star.moy/pmem.json" not in wrote and tree["star.moy/pmem.json"] == b"[7]"
+    assert "star.moy/pmem.bin" not in wrote and tree["star.moy/pmem.bin"] == b"[7]"
     assert "star.moy/config.json" in wrote
     assert sorted(r for r in removed if r.startswith("star.moy/")) == [
         "star.moy/journal/journal.jsonl", "star.moy/old.lua"]

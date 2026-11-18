@@ -4,10 +4,16 @@
 
 #include "moy_platform.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "moycore_run.h"
+
+// native/moy_store/moy_save.h's, where the image links the saver.
+int moy_save_pmem(const char *path, const int32_t *cells);
+#pragma weak moy_save_pmem
+#define SAVE_NOT_HERE 19            // MOY_ENODEV: a volume this task does not reach
 
 moycore_run_t *moycore_run_cur;
 
@@ -106,6 +112,7 @@ static void h_pset(void *u, int s, int32_t v) {
     if (CUR && s >= 0 && s < 256 && CUR->pmem[s] != v) {
         CUR->pmem[s] = v;
         CUR->pmem_dirty = 1;
+        CUR->pmem_unsaved = 1;
     }
 }
 
@@ -218,6 +225,8 @@ static const char *h_cfg(void *u, const char *k) {
 
 void moycore_run_open(moycore_run_t *c, int32_t *snap, int32_t *aq, int aq_cap) {
     moy_host *hs = &c->con.host;
+    c->pmem_path[0] = 0;
+    c->pmem_unsaved = 0;
     g_serial++;
     c->snap = snap;
     c->aq = aq;
@@ -308,6 +317,32 @@ int moycore_run_pmem_image(moycore_run_t *c, int32_t *out, int n) {
     int d = c->pmem_dirty;
     c->pmem_dirty = 0;
     return d;
+}
+
+int moycore_run_pmem_to(moycore_run_t *c, const char *path) {
+    size_t n = path != NULL ? strlen(path) : 0;
+    if (n >= sizeof c->pmem_path) {
+        n = 0;
+    }
+    memcpy(c->pmem_path, path != NULL ? path : "", n);
+    c->pmem_path[n] = 0;
+    c->pmem_saved_ms = moycore_run_now_ms();
+    return n > 0 && moy_save_pmem != NULL;
+}
+
+void moycore_run_pmem_tick(moycore_run_t *c) {
+    if (!c->pmem_unsaved || c->pmem_path[0] == 0 || moy_save_pmem == NULL) {
+        return;
+    }
+    uint32_t now = moycore_run_now_ms();
+    if (now - c->pmem_saved_ms < MOYCORE_PMEM_SAVE_MS) {
+        return;
+    }
+    c->pmem_saved_ms = now;
+    c->pmem_unsaved = 0;
+    if (moy_save_pmem(c->pmem_path, c->pmem) == SAVE_NOT_HERE) {
+        c->pmem_path[0] = 0;        // the console saves it at the run's end
+    }
 }
 
 void moycore_run_pmem_load(moycore_run_t *c, const int32_t *in, int n) {

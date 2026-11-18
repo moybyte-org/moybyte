@@ -494,7 +494,7 @@ def test_after_an_update_a_zero_brings_the_official_carts_it_holds_to_the_releas
     man = json.loads(open(quest + "/manifest.json").read())
     man["version"] -= 1
     open(quest + "/manifest.json", "w").write(json.dumps(man))
-    open(quest + "/pmem.json", "w").write("[1, 2]")
+    open(quest + "/pmem.bin", "w").write("[1, 2]")
     open(quest + "/config.json", "w").write('{"speed": 120}')
     net = MemNet(routes)
     step = web_addon.AddonStep(ZeroInst(root, net), OWN, carts=True)
@@ -508,7 +508,7 @@ def test_after_an_update_a_zero_brings_the_official_carts_it_holds_to_the_releas
     assert len(got) == 2 and got[1].startswith("moybyte.coin_quest-"), \
         "only the newer cart is fetched"
     assert json.loads(open(quest + "/manifest.json").read())["version"] == man["version"] + 1
-    assert open(quest + "/pmem.json").read() == "[1, 2]"
+    assert open(quest + "/pmem.bin").read() == "[1, 2]"
     assert open(quest + "/config.json").read() == '{"speed": 120}'
     assert not os.path.exists(root + "/moybyte.tap_game.moy"), "a cart it holds, never a new one"
     assert web_addon.official_stamp(root) == digest

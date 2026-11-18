@@ -1658,7 +1658,7 @@ static int copy_file(const char *src, const char *dst) {
 }
 
 static int skip(const char *name, size_t n, const char *main) {
-    static const char *const names[] = { "manifest.json", "config.json", "pmem.json",
+    static const char *const names[] = { "manifest.json", "config.json", "pmem.bin",
                                          "thumbs", "journal", "journal.jsonl",
                                          "cursor.json", "s" };
     for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {

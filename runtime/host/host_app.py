@@ -182,7 +182,7 @@ def _seed_system_carts(carts_dir):
     them (and the child duplicates/edits copies), by the rules a board seeds its
     built-ins by (#47, moy_seed.seed_folders over the store as a cache): a built-in
     whose shipped manifest "version" is newer than the seeded copy is RE-SEEDED, its
-    tuning and saves (config.json, pmem.json) kept."""
+    tuning and saves (config.json, pmem.bin) kept."""
     os.makedirs(carts_dir, exist_ok=True)
     names = ([n for n in sorted(os.listdir(SYSTEM_CARTS)) if n.endswith(".moy")]
              if os.path.isdir(SYSTEM_CARTS) else [])

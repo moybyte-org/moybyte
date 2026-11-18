@@ -2365,7 +2365,7 @@ class Workstation:
         # Returns True iff the workspace opened; False leaves ws.cart None with
         # cart_error set (see the rehydrate guard below).
         # Deferred pmem (#66): persist the OUTGOING project's unsaved cells before
-        # the fresh Project replaces it -- a re-open otherwise reloads pmem.json
+        # the fresh Project replaces it -- a re-open otherwise reloads pmem.bin
         # over progress that only ever reached RAM.
         _old = self.run.project
         if _old is not None and _old.pmem is not None:

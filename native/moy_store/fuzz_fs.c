@@ -30,6 +30,7 @@
 #include "moy_json.h"
 #include "moy_load.h"
 #include "moy_pack.h"
+#include "moy_pmem.h"
 #include "moy_seed.h"
 #include "moy_ufiles.h"
 
@@ -450,7 +451,9 @@ static void run_cat(const uint8_t *data, size_t size) {
 #define DEST "/carts/a.moy/.journal/0001.snap"
 #define DEST_HERE "/carts/a.moy/0001.snap"
 
-#define NCASES 16
+#define NCASES 18
+#define UF_CASE(c) ((c) >= 12 && (c) <= 15)
+#define PM_CASE(c) ((c) >= 16)
 
 static char v1[3000], v2[3000];
 static size_t n1, n2;
@@ -580,6 +583,58 @@ static void uf_verify(void) {
     moy_buf_free(&b);
 }
 
+// -- a cart's pmem record (moy_pmem.h) ----------------------------------------------
+
+#define PM_FILE "/carts/a.moy/pmem.bin"
+
+static long pm_marks[4];        // `writes` after each record the sequence wrote
+static int pm_n;
+
+// Record k's cells (0: all zero, what a file with no valid record reads as).
+static void pm_cells(int32_t *c, int k) {
+    for (int j = 0; j < MOY_PMEM_CELLS; j++) {
+        c[j] = k ? (int32_t)((uint32_t)k * 2654435761u ^ (uint32_t)j * 40503u) : 0;
+    }
+    c[0] = k;
+}
+
+static void pm_write(int k) {
+    int32_t c[MOY_PMEM_CELLS];
+    pm_cells(c, k);
+    moy_pmem_write(PM_FILE, c);
+    pm_marks[pm_n++] = writes;
+}
+
+// Case 16 writes records 2, 3 and 4 over record 1, case 17 records 1 and 2
+// where there was none: either slot taken, each cut mid-slot.
+static void pm_sequence(void) {
+    pm_n = 0;
+    for (int k = scase == 16 ? 2 : 1; k <= (scase == 16 ? 4 : 2); k++) {
+        pm_write(k);
+    }
+}
+
+// The read is the newest record whose every block write landed or the one
+// after it, never a mix: then two more records land, and read back.
+static void pm_verify(void) {
+    int32_t got[MOY_PMEM_CELLS], want[MOY_PMEM_CELLS];
+    int first = scase == 16 ? 1 : 0, landed = 0;
+    while (landed < pm_n && (last_cut < 0 || pm_marks[landed] <= last_cut)) {
+        landed++;
+    }
+    int valid = moy_pmem_read(PM_FILE, got);
+    CHECK(valid == (got[0] != 0));
+    int k = got[0];
+    CHECK(k == first + landed || (landed < pm_n && k == first + landed + 1));
+    pm_cells(want, k);
+    CHECK(memcmp(got, want, sizeof got) == 0);
+    for (int again = 7; again <= 8; again++) {
+        pm_cells(want, again);
+        CHECK(moy_pmem_write(PM_FILE, want) == 0);
+        CHECK(moy_pmem_read(PM_FILE, got) == 1 && memcmp(got, want, sizeof got) == 0);
+    }
+}
+
 // The state before the sequence: the folders, and v1 published at A and B.
 static void before(int with_v1) {
     format();
@@ -609,11 +664,16 @@ static void before(int with_v1) {
     }
     if (scase == 8) {                       // a seeded cart a kid has played
         CHECK(seed_once(v1, n1, 1) == 1);
-        CHECK(moy_fs_write(SEED_DIR "/pmem.json", "[7]", 3) == 0);
+        CHECK(moy_fs_write(SEED_DIR "/pmem.bin", "[7]", 3) == 0);
         CHECK(moy_fs_write(SEED_DIR "/config.json", "{\"kid\": 1}", 10) == 0);
     }
-    if (scase >= 12) {
+    if (UF_CASE(scase)) {
         uf_before();
+    }
+    if (scase == 16) {
+        int32_t c[MOY_PMEM_CELLS];
+        pm_cells(c, 1);
+        CHECK(moy_pmem_write(PM_FILE, c) == 0);
     }
     unmount_cold();
 }
@@ -629,11 +689,16 @@ static void before(int with_v1) {
 //   11 adopt a staged cart
 //   12 a user file saved over (moy_ufiles.h)   13 a segment appended to its sidecar
 //   14 the user file renamed                   15 the user file to the trash
+//   16 pmem records written over one           17 pmem records where there was none
 static void sequence(void) {
     if (scase != 1) {
         moy_fs_root(ROOT);
     }
-    if (scase >= 12) {
+    if (PM_CASE(scase)) {
+        pm_sequence();
+        return;
+    }
+    if (UF_CASE(scase)) {
         moy_fs_root("/sd");
         uf_sequence();
         return;
@@ -685,7 +750,9 @@ static void verify(int had_v1) {
         moy_fs_root(ROOT);
     }
     moy_buf_t b;
-    if (scase >= 12) {
+    if (PM_CASE(scase)) {
+        pm_verify();
+    } else if (UF_CASE(scase)) {
         uf_verify();
     } else if (scase == 11) {
         // The cart is the old one or the new one whole, or the old one aside

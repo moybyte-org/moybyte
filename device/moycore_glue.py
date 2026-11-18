@@ -180,6 +180,15 @@ def _run_flags(project):
     return fl if fl is not None else getattr(project, "flags", None)
 
 
+
+def _pmem_to(pmem):
+    """Whether the run saves its own pmem while it plays, from the frame it
+    ends with (native/moycore/moycore_run.h): a cart whose pmem the console
+    persists (`Pmem.path`), on a module whose library links the saver."""
+    to = getattr(_moycore, "pmem_to", None)
+    path = getattr(pmem, "path", None) if pmem is not None else None
+    return bool(to is not None and path and to(path))
+
 class MoycoreRun:
     """One cart run under moycore. Same shape as LuaCartRun."""
 
@@ -189,6 +198,7 @@ class MoycoreRun:
     AUDIO_MAX = 32
 
     _h = 0             # the run's row (run_begin's handle), 0 once closed
+    pmem_saves = False # it saves its pmem while it plays (_pmem_to)
 
     def __init__(self, ws, ns, src):
         if _moycore is None:
@@ -275,6 +285,7 @@ class MoycoreRun:
             getattr(tilemap, "w", 0) or 0, getattr(tilemap, "h", 0) or 0,
             self.snap, self.aq, self.pmem_img, cfg, flags, True,
             ns.get("_moy_app") if hasattr(ns, "get") else None)
+        self.pmem_saves = _pmem_to(pmem)
         # The superset, on top of libmoy's table and BEFORE the cart runs.
         # Anything callable in the namespace that libmoy did not already
         # install: registering a name libmoy owns would shadow the C verb with
@@ -1134,6 +1145,7 @@ class WasmRun(MoycoreRun):
             getattr(tilemap, "cells", None),
             getattr(tilemap, "w", 0) or 0, getattr(tilemap, "h", 0) or 0,
             self.snap, self.aq, self.pmem_img, cfg, flags, False, None)
+        self.pmem_saves = _pmem_to(pmem)
         self.snap[_moycore.SNAP_PLAYERS] = 1
         # The cart's reads and its written files (moy-spec SPEC.md 16.12) are
         # moycore's C over the kernel's volume, inside the board's bus gate

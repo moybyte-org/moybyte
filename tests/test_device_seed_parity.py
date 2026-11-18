@@ -392,7 +392,7 @@ def test_seed_builtins_overwrites_when_version_is_newer(tmp_path):
 
 
 def test_seed_builtins_preserves_saves_and_config_across_version_bump(tmp_path):
-    # A re-seed replaces code/art but keeps the kid's data: pmem.json (high scores /
+    # A re-seed replaces code/art but keeps the kid's data: pmem.bin (high scores /
     # save state) and config.json (Make-it-mine tuning) survive the bump.
     from runtime import moy_carts
 

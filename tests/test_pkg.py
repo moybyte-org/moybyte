@@ -539,11 +539,11 @@ def test_install_and_remove_hold_no_frame_for_more_than_one_store_unit(tmp_path,
     repo.add("dm", version=2, name="Dungeon", moybyte={"permissions": ["internet"]})
     inst._net = MemNet(repo.routes())
     assert done(p.update()) == 0
-    (tmp_path / "carts" / "dm.moy" / "pmem.json").write_text("{}")
+    (tmp_path / "carts" / "dm.moy" / "pmem.bin").write_text("{}")
     units.frames = []
     assert units.run(p.upgrade(yes=True)) == 0, err
     assert max(units.frames) <= 1, units.frames
-    assert (tmp_path / "carts" / "dm.moy" / "pmem.json").exists(), "the saves are carried"
+    assert (tmp_path / "carts" / "dm.moy" / "pmem.bin").exists(), "the saves are carried"
     assert not os.listdir(tmp_path / "install"), "the old copy is deleted"
     units.frames = []
     assert units.run(p.remove(["dm"])) == 0

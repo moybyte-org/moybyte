@@ -252,3 +252,10 @@ CONFIG_LWIP_SNTP_STARTUP_DELAY=n
 # would have the bootloader lock IDF's layout on core 0 first, and a P4 lock
 # holds until reset (no Smepmp); the app call it gates is replaced too.
 CONFIG_BOOTLOADER_REGION_PROTECTION_ENABLE=n
+
+# The speaker's I2S interrupt stays armed while an internal-flash write has
+# the cache off, so the DMA ring (moy_aud_out.c's DMA_DESC x DMA_FRAMES) keeps
+# playing through a store write on internal flash; with the interrupt masked,
+# the audio the ring played during the write was lost. Its callbacks must be
+# in IRAM (moy_aud_out.c's on_ovf).
+CONFIG_I2S_ISR_IRAM_SAFE=y

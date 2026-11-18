@@ -17,7 +17,7 @@ streamed through one chunk), all under one top folder:
   store.ver          the store's stamp
   carts/<cart>.moy   every cart that is not a built-in, and each built-in that
                      carries a kid's work: an edit's journal or a save
-                     (pmem.json) -- whole, journal included
+                     (pmem.bin) -- whole, journal included
   files/...          the user files, their trash and history; not Backups/,
                      where archives land
   apps/<id>/...      what each compiled cart wrote
@@ -50,7 +50,7 @@ BACKUPS = "Backups"
 NAME = "moybyte-backup.zip"
 RECORD = "installed.json"
 _JOURNAL = "journal"
-_SAVES = "pmem.json"
+_SAVES = "pmem.bin"
 
 
 def _firmware():

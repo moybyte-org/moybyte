@@ -50,6 +50,8 @@ _SIGS = (
     ("moy_fs_root", [_P], c.c_int),
     ("moy_fs_roots_clear", [], None),
     ("moy_fs_publish", [_P, _P, _S], c.c_int),
+    ("moy_pmem_read", [_P, c.POINTER(c.c_int32)], c.c_int),
+    ("moy_save_pmem", [_P, c.POINTER(c.c_int32)], c.c_int),
     ("moy_fs_publish_bak", [_P, _P, _S], c.c_int),
     ("moy_fs_publish_mark", [_P, _P, _S], c.c_int),
     ("moy_fs_write", [_P, _P, _S], c.c_int),
@@ -370,6 +372,22 @@ def binding():
     publish_mark = _publish(lambda: _lib().moy_fs_publish_mark)
     write = _publish(lambda: _lib().moy_fs_write)
     write_bytes = _publish(lambda: _lib().moy_fs_write_bytes)
+
+    def pmem_read(path):
+        cells = (c.c_int32 * 256)()
+        _lib().moy_pmem_read(_path(path), cells)
+        return list(cells)
+
+    def pmem_save(path, cells):
+        """The saver's verb (native/moy_store/moy_save.h) with no saver task,
+        as the threadless tiers have it: the record written at once."""
+        buf = (c.c_int32 * 256)()
+        for i, v in enumerate(cells[:256]):
+            buf[i] = ((int(v) + 0x80000000) & 0xFFFFFFFF) - 0x80000000
+        _ok(_lib().moy_save_pmem(_path(path), buf))
+
+    def save_wait(path=None):
+        """Nothing is ever in flight here: pmem_save wrote it."""
 
     def read_recover(path, at=None):
         lib, buf = _lib(), _Buf()

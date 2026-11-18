@@ -561,7 +561,7 @@ def test_the_two_faces_seed_the_same_tree(tmp_path):
                     m["version"] = 0
                     with open(man, "w") as f:
                         json.dump(m, f)
-                    with open(os.path.join(root, name, "pmem.json"), "w") as f:
+                    with open(os.path.join(root, name, "pmem.bin"), "w") as f:
                         f.write("[1, 2, 3]")
                     with open(os.path.join(root, name, "config.json"), "w") as f:
                         f.write('{"kid": "tuned"}')

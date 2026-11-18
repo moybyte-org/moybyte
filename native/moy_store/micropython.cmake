@@ -9,6 +9,8 @@ target_sources(usermod_moy_store INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_vol.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_kvfs.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_fs.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_pmem.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_save.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_cat.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_seed.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_journal.c

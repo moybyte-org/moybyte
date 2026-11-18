@@ -82,7 +82,8 @@
     X(SH, "moy_sh", MOY_SH_RUN_STACK, MOY_TASK_CALLER, MOY_TASK_CALLER, 1) \
     X(TTY, NULL, MOY_TASK_GIVEN, 1, 0, 1) \
     X(PAKE, "moy_pake", MOY_PAKE_STACK, 1, 0, 1) \
-    X(ELF, "moy_elf", MOY_TASK_GIVEN, MOY_TASK_GIVEN, MOY_TASK_GIVEN, 1)
+    X(ELF, "moy_elf", MOY_TASK_GIVEN, MOY_TASK_GIVEN, MOY_TASK_GIVEN, 1) \
+    X(SAVE, "moy_save", 6144, ESP_TASK_PRIO_MIN + 1, 0, 1)
 
 typedef enum {
     #define MOY_TASK_ID(id, name, stack, prio, core, psram) MOY_TASK_##id,

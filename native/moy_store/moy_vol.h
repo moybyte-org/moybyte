@@ -87,6 +87,7 @@ enum {
     MOY_VOL_READ = 1,
     MOY_VOL_WRITE = 2,          // created, or truncated
     MOY_VOL_APPEND = 3,         // created, or written at its end
+    MOY_VOL_UPDATE = 4,         // created, or read and written in place (seek)
     MOY_VOL_HELD = 0x10,        // or'd in: the file outlives the call (below)
 };
 
@@ -111,7 +112,7 @@ int moy_vol_open(const moy_vol_t *v, const char *path, int mode,
 int moy_vol_read(moy_vol_file_t *f, void *buf, size_t n, size_t *got);
 int moy_vol_write(moy_vol_file_t *f, const void *buf, size_t n);
 int moy_vol_size(moy_vol_file_t *f, uint32_t *n);
-int moy_vol_seek(moy_vol_file_t *f, uint32_t at);   // the next read's offset
+int moy_vol_seek(moy_vol_file_t *f, uint32_t at);   // the next read's or write's offset
 int moy_vol_close(moy_vol_file_t *f);           // frees f; the first error wins
 void moy_vol_unwind(void);                      // close every file still open
 // A file opened with MOY_VOL_HELD is its opener's: made from moy_store_keep and

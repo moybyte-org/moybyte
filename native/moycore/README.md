@@ -65,7 +65,7 @@ each other row on a P4 a hop on the VM's queue.
 | canvas | the DeviceCanvas framebuffer itself (libmoy takes a caller-owned `pix` and a caller-supplied wire table, so the panel's byte order stays out of the cart contract) |
 | input, time, pointer | a SNAPSHOT array filled before each tick -- by the Player from the input table and the pointer the console publishes, by the host's shim from its own input -- so `btn()` sixty times a frame costs zero crossings |
 | audio | a command QUEUE (int32) played after each tick in its order -- by the Player straight into the run's audio session |
-| pmem | a C array with a dirty flag, the shape the device already defers it to (#66) |
+| pmem | a C array with a dirty flag for the console and an unsaved flag for the run's own in-play save (`moycore_run_pmem_tick`, `native/moy_store/moy_save.h`) |
 | config | a C table of `key\0value\0` pairs COPIED in at `run_begin` (`lua_ext.cfg_blob`), so a compiled cart's session reads it on its own thread with no VM asked |
 | tile flags | 512 bytes COPIED in at `run_begin` (SPEC.md 3.5) -- the one buffer here that is not the caller's, because C writes it (`fset`, a poke to `0x3000`, the p8 shim's `__moy_map_flags`) and the caller may hand over a plain `bytes` |
 

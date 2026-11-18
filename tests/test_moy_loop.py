@@ -657,9 +657,11 @@ def test_loop_is_the_periods_average_frame_by_stage(loop):
     assert int(f["n"]) > 0
     for s in DIAG_STAGES:
         assert f[s] != "-", (s, line)
-    assert list(f)[:2] == ["n", "ms"] and list(f)[2:-2] == list(DIAG_STAGES)
+    assert list(f)[:2] == ["n", "ms"] and list(f)[2:-3] == list(DIAG_STAGES)
+    assert list(f)[-3:] == ["sleep", "other", "max"], line
     assert 9.5 <= float(f["frame"]) <= 11.0, line
     assert float(f["sleep"]) >= 0 and float(f["other"]) >= 0
+    assert int(f["max"]) >= int(float(f["ms"])), line
 
 
 def test_a_job_asked_for_again_while_it_runs_outlives_its_false_answer():

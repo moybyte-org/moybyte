@@ -54,6 +54,8 @@
 #include "moy_seed.h"
 #include "moy_shelf.h"
 #include "moy_removed.h"
+#include "moy_pmem.h"
+#include "moy_save.h"
 
 // -- the allocator -------------------------------------------------------------
 //
@@ -1589,6 +1591,70 @@ static mp_obj_t mod_lock_stats(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_lock_stats_obj, 0, 1, mod_lock_stats);
 
+// A cart's pmem (moy_pmem.h) through THE SAVER (moy_save.h).
+// pmem_read(path) -> the 256 cells of its newest valid record, all zero with
+// none. pmem_save(path, cells) hands a list of up to 256 ints (the rest zero)
+// to the saver, which queues it or writes it now. save_wait(path=None) waits,
+// the VM let go, until no save of `path` (of any) is queued or being written.
+// save_stats(reset=False) -> (saves, errors, replaced, last us, longest us,
+// saves written on the caller's task, busy slots).
+static mp_obj_t mod_pmem_read(mp_obj_t path) {
+    const char *p = path_arg(path);
+    int32_t cells[MOY_PMEM_CELLS];
+    GUARD_BEGIN
+    table_sync(0);
+    moy_pmem_read(p, cells);
+    GUARD_END
+    mp_obj_t l = mp_obj_new_list(MOY_PMEM_CELLS, NULL);
+    mp_obj_t *items = ((mp_obj_list_t *)MP_OBJ_TO_PTR(l))->items;
+    for (int i = 0; i < MOY_PMEM_CELLS; i++) {
+        items[i] = mp_obj_new_int(cells[i]);
+    }
+    return l;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_pmem_read_obj, mod_pmem_read);
+
+static mp_obj_t mod_pmem_save(mp_obj_t path, mp_obj_t cells) {
+    const char *p = path_arg(path);
+    size_t n;
+    mp_obj_t *items;
+    mp_obj_get_array(cells, &n, &items);
+    int32_t c[MOY_PMEM_CELLS] = { 0 };
+    for (size_t i = 0; i < n && i < MOY_PMEM_CELLS; i++) {
+        c[i] = (int32_t)mp_obj_get_int_truncated(items[i]);
+    }
+    int rc = 0;
+    GUARD_BEGIN
+    table_sync(0);
+    rc = moy_save_pmem(p, c);
+    GUARD_END
+    if (rc) {
+        raise_rc(rc);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_pmem_save_obj, mod_pmem_save);
+
+static mp_obj_t mod_save_wait(size_t n_args, const mp_obj_t *args) {
+    const char *p = n_args > 0 && args[0] != mp_const_none ? path_arg(args[0]) : NULL;
+    MP_THREAD_GIL_EXIT();
+    moy_save_wait(p);
+    MP_THREAD_GIL_ENTER();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_save_wait_obj, 0, 1, mod_save_wait);
+
+static mp_obj_t mod_save_stats(size_t n_args, const mp_obj_t *args) {
+    moy_save_stats_t st;
+    moy_save_stats(&st, n_args > 0 && mp_obj_is_true(args[0]));
+    mp_obj_t t[7] = { mp_obj_new_int_from_uint(st.saves), mp_obj_new_int_from_uint(st.errors),
+                      mp_obj_new_int_from_uint(st.replaced), mp_obj_new_int_from_uint(st.last_us),
+                      mp_obj_new_int_from_uint(st.max_us), mp_obj_new_int_from_uint(st.now),
+                      mp_obj_new_int_from_uint(st.busy) };
+    return mp_obj_new_tuple(7, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_save_stats_obj, 0, 1, mod_save_stats);
+
 #if defined(__unix__) && !defined(__EMSCRIPTEN__) && MICROPY_PY_THREAD
 // THE TESTS' TASK: a thread of no VM working the store as a program's own task
 // does, each op inside the store's gate (tests/test_store_tasks.py).
@@ -1826,6 +1892,10 @@ static const mp_rom_map_elem_t moy_store_globals_table[] = {
     #endif
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_store) },
     { MP_ROM_QSTR(MP_QSTR_lock_stats), MP_ROM_PTR(&mod_lock_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_pmem_read), MP_ROM_PTR(&mod_pmem_read_obj) },
+    { MP_ROM_QSTR(MP_QSTR_pmem_save), MP_ROM_PTR(&mod_pmem_save_obj) },
+    { MP_ROM_QSTR(MP_QSTR_save_wait), MP_ROM_PTR(&mod_save_wait_obj) },
+    { MP_ROM_QSTR(MP_QSTR_save_stats), MP_ROM_PTR(&mod_save_stats_obj) },
     #if defined(MOY_STORE_TASK)
     { MP_ROM_QSTR(MP_QSTR_task), MP_ROM_PTR(&mod_task_obj) },
     { MP_ROM_QSTR(MP_QSTR_task_join), MP_ROM_PTR(&mod_task_join_obj) },

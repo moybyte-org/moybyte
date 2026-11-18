@@ -43,11 +43,11 @@ def _cart_version(path):
     return 0
 
 
-# The per-kid files kept across a destructive re-seed: pmem.json is the cart's
+# The per-kid files kept across a destructive re-seed: pmem.bin is the cart's
 # save state / high scores (TIC-80 pmem), config.json is the kid's "Make it mine"
 # tuning. A version bump replaces CODE + ART but restores these over the fresh
 # copy, so updating a cart never wipes a kid's progress or settings.
-_RESEED_PRESERVE = ("pmem.json", "config.json")
+_RESEED_PRESERVE = ("pmem.bin", "config.json")
 
 
 def _has_manifest(path):
@@ -104,7 +104,7 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None, ns=BUILTIN_NS):
 
     Versioning (the re-seed, #47): a cart already in the store is left as it
     is UNLESS the built-in's "version" is newer -- then its CODE + ART are
-    replaced and the kid's data (pmem.json saves, config.json tuning) stays.
+    replaced and the kid's data (pmem.bin saves, config.json tuning) stays.
     Pre-versioning carts read as version 0. A folder with no manifest that
     reads is a seed a power cut stopped, and is written again from nothing.
 

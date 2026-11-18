@@ -1208,8 +1208,8 @@ def state_json():
     except ImportError:
         st["media"] = st["media_last"] = None
     # The running cart's first pmem slots, where a fixture reports its checks:
-    # the run's flush, which hands a moved image to the console's pmem to be
-    # kept at the next boundary as the periodic flush does, then its image.
+    # the run's flush, which hands a moved image to the console's pmem for the
+    # frame's pmem save (Player._pmem_tick) to keep, then its image.
     run = getattr(_S["ws"].run.player, "lua", None)
     flush = getattr(run, "flush_pmem", None)
     if flush is not None:

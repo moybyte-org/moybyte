@@ -1,0 +1,9 @@
+{
+  "format": "moy-1",
+  "title": "Pmem Spam Lua",
+  "id": "local.pmem_spam_lua",
+  "runtime": "lua",
+  "main": "main.lua",
+  "canvas": "320x240",
+  "moybyte": {"type": "game", "permissions": ["graphics", "input", "audio"]}
+}

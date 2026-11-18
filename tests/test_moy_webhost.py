@@ -12,6 +12,7 @@ held in RAM, a store touched against a band in flight, and a path from the
 network reaching a file that is none of the browser's business.
 """
 
+import base64
 import json
 import os
 from tests import journal_files as jf
@@ -35,6 +36,9 @@ import moy_webhost as wh                                       # noqa: E402
 from runtime import net_binding as nb                           # noqa: E402
 from tools.board_config import runtime_file
 from ws_helpers import settle_badges  # noqa: E402
+
+SAVES = bytes(range(250, 256)) + b"\x00MOYP"        # a cart's pmem.bin, opaque here
+SAVES_B64 = base64.b64encode(SAVES).decode()
 
 
 @pytest.fixture(autouse=True)
@@ -70,7 +74,7 @@ def _store(tmp_path):
     # moy_fs._write_atomic's last-known-good rotations, one per file it saves.
     (root / "hop.moy" / "main.py.bak").write_text("def _draw():\n    cls(2)\n")
     (root / "hop.moy" / "manifest.json.bak").write_text('{"title": "Hop"}')
-    (root / "hop.moy" / "pmem.json").write_text("[41, 0, 0]")
+    (root / "hop.moy" / "pmem.bin").write_bytes(SAVES)
     (root / "sky.moy").mkdir()
     (root / "sky.moy" / "main.lua").write_text("function _draw() end\n")
     (root / "loose.txt").write_text("not a cart")
@@ -189,8 +193,9 @@ def test_the_atomic_write_backups_do_not_cross_the_wire(tmp_path):
 
 def test_a_kids_saves_still_cross_the_wire(tmp_path):
     """The contrast that makes the journal cut a judgement and not a diet:
-    pmem.json is their score, their pet, where they got to."""
-    assert _pull(_store(tmp_path)).get("hop.moy/pmem.json") == "[41, 0, 0]"
+    pmem.bin is their score, their pet, where they got to: it crosses as
+    its bytes."""
+    assert _pull(_store(tmp_path)).get("hop.moy/pmem.bin") == {"b": SAVES_B64}
 
 
 def test_a_carts_cover_crosses_the_wire_as_its_bytes(tmp_path):
@@ -621,7 +626,7 @@ def test_the_chunked_wire_format_is_well_formed(serving):
     mid-load with no error."""
     h = serving()
     got = _exchange(h, b"GET /carts.json HTTP/1.1\r\n\r\n")
-    assert json.loads(b"".join(_chunks(got)))["hop.moy/pmem.json"] == "[41, 0, 0]"
+    assert json.loads(b"".join(_chunks(got)))["hop.moy/pmem.bin"] == {"b": SAVES_B64}
 
 
 def test_a_post_body_split_across_packets_is_read_whole(serving):
@@ -917,7 +922,7 @@ def test_sync_apply_drains_the_feeder_once_first(tmp_path):
     before = nb._drains()
     h.handle_http("POST", "/sync", _batch(
         {"p": "hop.moy/main.py", "t": "x = 1\n"},
-        {"p": "hop.moy/pmem.json", "t": "[1]"}))
+        {"p": "hop.moy/pmem.bin", "b": SAVES_B64}))
     assert nb._drains() == before + 1
 
 

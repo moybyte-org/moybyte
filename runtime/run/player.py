@@ -86,13 +86,6 @@ except Exception:  # noqa: BLE001 -- host CPython / emitter-less build: bytecode
     NATIVE_CARTS = False
 
 
-# Deferred pmem persistence (#66): how often a DIRTY pmem persists mid-play.
-# The guaranteed saves are cart exit + crash; this only bounds progress lost to
-# a power pull. Each flush is a ~80-130ms SD write on the T-Deck (measured on
-# glass 2026-07-14, the Letter Blitz "word-event spike"), so the cadence IS the
-# hitch cadence -- keep it a minute, not seconds.
-PMEM_FLUSH_MS = 60000
-
 # The cart TYPES that run with the shell's minimal exitable bar rather than
 # owning the whole raster, and the one of them with no folder. `console.py`
 # imports both -- the two files decided this in parallel with two literal
@@ -289,7 +282,8 @@ class Player(PlayerDiag):
                                       # (ws.netplay), when this run is a linked match. It
                                       # OWNS the tick: fixed dt, and a frame the peer's
                                       # input has not reached does not simulate at all
-        self._pmem_last = 0           # #66 deferred pmem: last periodic flush (_ticks_ms)
+        self._pmem_sync = 0           # _ticks_ms a Lua run's pmem image was last read
+        self._pmem_read = None        # the Lua run's image reader (`_pmem_tick`)
         self._native_ins = None       # #67 spike: nativize's inserted-line map (crash-line fix)
         # Diagnostics for repeat-run regressions (#66 follow-up): one line on cart
         # start and rate-limited slow-logic lines while PERF DIAG is on. Kept here
@@ -642,15 +636,6 @@ class Player(PlayerDiag):
         _os_log.end(self.pid)
         _moybyte.end(self.pid)
         self.pid = None
-        # Deferred pmem (#66): the dying run's last save, BEFORE the world drops
-        # (self.run.project still points at this run's Project here -- both exit call
-        # sites run release_world ahead of replacing/slimming it).
-        pm = getattr(self.ws.run.project, "pmem", None)
-        if pm is not None:
-            try:
-                pm.flush()
-            except Exception:  # noqa: BLE001
-                pass
         # The dead run's `view(w, h)` must not outlive it: every fullscreen
         # surface shares viewport(), and a lingering view would crop chrome.
         self.run.view = None
@@ -737,6 +722,11 @@ class Player(PlayerDiag):
         # ...and the radio goes down with it.
         self.release_radio()
         self._close_lua()          # #67: the dead run's Lua heap goes with its world
+        # The dying run's last save, once a Lua or compiled run's close has
+        # handed its image to the Pmem and BEFORE the world drops
+        # (self.run.project still points at this run's Project here -- both exit
+        # call sites run release_world ahead of replacing/slimming it).
+        self._pmem_flush()
         rl = getattr(self.run.canvas, "reclaim_layers", None)
         if rl is not None:
             try:
@@ -1049,7 +1039,7 @@ class Player(PlayerDiag):
         self._t_reclaim = _ticks_diff(_ticks_ms(), t0)
         self._sram_run = None          # #211: whatever it reported was the LAST
                                        # run's; a Python cart must not inherit it
-        self._pmem_last = t0           # periodic pmem flush counts from this run's start
+        self._pmem_sync = t0
         self._slow_logic_next = 0
         # #75: cache the bar-visibility-by-type rule for this run (see __init__).
         cart = project.cart
@@ -1630,6 +1620,10 @@ class Player(PlayerDiag):
                   self.cart_error)
             return False
         self.lua = lua
+        # Its pmem image, read every Pmem.SAVE_MS by the frame's save -- unless
+        # the run saves it itself (moycore_glue's `pmem_saves`) or has none.
+        self._pmem_read = (None if getattr(lua, "pmem_saves", False)
+                           else getattr(lua, "flush_pmem", None))
         relayout = getattr(lua, "layout", None)
         if lay is not None and relayout is not None:
             self._app_layout = relayout
@@ -1942,36 +1936,53 @@ class Player(PlayerDiag):
         # cart exception whose __str__ itself raises would otherwise
         # escape here -> the silent device hang the panel exists to prevent.
         print("Moybyte frame error:", self.cart_error)
-        # Deferred pmem (#66): the crash must not eat saved progress --
-        # the cart stops ticking now, so this is its last chance to
-        # persist. Guarded: the panel must paint even if SD is gone.
-        pm = getattr(ws.run.project, "pmem", None)
-        if pm is not None:
-            try:
-                pm.flush()
-            except Exception:  # noqa: BLE001
-                pass
+        # The crash must not eat saved progress -- the cart stops ticking
+        # now, so this is its last chance to persist. Guarded: the panel must
+        # paint even if SD is gone.
+        self._pmem_flush()
         ws.reset_canvas_state()
         if ws.web.parked:
             return ws.crash_to_code()
         return False
 
+    def _pmem_flush(self):
+        """Save the run's pmem now and wait out any save in flight: exit,
+        pause and a crash. A live Lua or compiled run's image is read first.
+        Never raises: the exit and the crash panel go on without the card."""
+        pm = getattr(self.ws.run.project, "pmem", None)
+        if pm is None:
+            return
+        try:
+            sync = getattr(self.lua, "flush_pmem", None)
+            if sync is not None:
+                sync()
+            pm.flush()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _pmem_tick(self, ws):
+        """The frame boundary's pmem save (widgets.Pmem.tick): handed to the
+        store's saver at most every Pmem.SAVE_MS while it moved. A Lua or
+        compiled run that saves itself (moycore_glue's `pmem_saves`) is left
+        to; one that does not has its image read every Pmem.SAVE_MS."""
+        pm = getattr(ws.run.project, "pmem", None)
+        if pm is None:
+            return
+        now = _ticks_ms()
+        if self.lua is not None:
+            read = self._pmem_read
+            if read is None or _ticks_diff(now, self._pmem_sync) < pm.SAVE_MS:
+                return
+            self._pmem_sync = now
+            read()
+        pm.tick(now)        # a method call, never a bound one: a frame allocates nothing
+
     def _tick_tail(self, ws, render):
-        """After the cart's frame: the periodic pmem flush, a quit() exit,
-        the text-mode sync, the canvas-state reset and the chrome a drawn
-        frame paints over the cart."""
-        # Deferred pmem periodic flush (#66, the Letter Blitz attribution): a
-        # dirty pmem persists at most once per PMEM_FLUSH_MS while the cart
-        # plays -- the guaranteed saves are exit (release_world) and the crash
-        # capture above. Running here, after the frame's update/draw, the
-        # ~100ms SD write lands at a frame boundary (one bounded hitch per
-        # minute) instead of inside the logic slice on every pmem() call.
+        """After the cart's frame: the pmem save, a quit() exit, the text-mode
+        sync, the canvas-state reset and the chrome a drawn frame paints over
+        the cart."""
         if self.cart_error is None:
-            if _ticks_diff(_ticks_ms(), self._pmem_last) >= PMEM_FLUSH_MS:
-                self._pmem_last = _ticks_ms()
-                pm = getattr(ws.run.project, "pmem", None)
-                if pm is not None:
-                    pm.flush()
+            self._pmem_tick(ws)
         # A cart ENDS ITSELF by calling quit() (make_api), which sets input.cart_quit.
         # Honor it now that this frame's _update has run: pop to the run caller and stop
         # (screen leaves "desktop", so this cart won't tick again -- skip the

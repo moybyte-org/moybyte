@@ -929,7 +929,7 @@ def test_pmem_round_trips_and_persists_to_pmem_json(tmp_path):
     pm.cell(0, 1234)
     assert pm.flush() is False and len(writes) == 1
 
-    # Persist for real + reload sees it (no pmem.json existed before).
+    # Persist for real + reload sees it (no pmem.bin existed before).
     moy_carts.save_pmem(cart, pm.cells)
     reloaded = moy_carts.load_pmem(cart["path"])
     assert reloaded[0] == 1234 and reloaded[255] == 7
@@ -957,7 +957,7 @@ def test_pmem_persists_through_workstation_open(tmp_path):
     _open_cart(ws, "Counter")
     assert ws.screen == "desktop" and ws.cart_error is None
     assert ws.run.project.pmem.cell(0) == 1                  # _init bumped it once
-    # It persisted to pmem.json: reopening loads the saved value and bumps again.
+    # It persisted to pmem.bin: reopening loads the saved value and bumps again.
     ws.open()                                    # re-open the same selected cart
     assert ws.run.project.pmem.cell(0) == 2
 

@@ -1245,7 +1245,7 @@ def _fake_compiled_cart(tmp_path, wasm=b"\0asm\1\0\0\0 demo", chip="esp32s3"):
 
 def test_the_stale_modules_are_every_module_of_main_the_push_does_not_carry():
     there = ["main.wasm", "main.esp32s3.f2.aot", "main.esp32s3.f1.aot",
-             "main.esp32p4.f2.aot", "pmem.json", "teapot.obj",
+             "main.esp32p4.f2.aot", "pmem.bin", "teapot.obj",
              "other.esp32s3.f2.aot", "main.esp32s3.aot"]
     stale = push_cart.stale_modules
     assert stale("main.wasm", ["main.wasm", "main.esp32s3.f2.aot"], there) == [
@@ -1276,7 +1276,7 @@ def test_a_compiled_push_leaves_only_the_modules_it_carries(monkeypatch, tmp_pat
         d + "/" + name: b"the release's module",
         d + "/main.esp32s3.f0.aot": b"an older format's module",
         d + "/main.esp32p4.f%s.aot" % wm.format_version(): b"another chip's",
-        d + "/pmem.json": b"{}"})
+        d + "/pmem.bin": b"{}"})
     monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
     assert push_cart.main([cart, "--board", "tdeck"]) == 0
     with open(os.path.join(cart, name), "rb") as f:
@@ -1285,7 +1285,7 @@ def test_a_compiled_push_leaves_only_the_modules_it_carries(monkeypatch, tmp_pat
         d + "/main.wasm": b"\0asm\1\0\0\0 demo",
         d + "/manifest.json": open(os.path.join(cart, "manifest.json"), "rb").read(),
         d + "/" + name: module,
-        d + "/pmem.json": b"{}"}
+        d + "/pmem.bin": b"{}"}
     out = capsys.readouterr().out
     assert "main.esp32s3.f0.aot" in out and "removed" in out
 

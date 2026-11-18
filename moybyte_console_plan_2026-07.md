@@ -225,7 +225,7 @@ my_cart.moy/
   config.json       kid-tunable values (edited by cards; re-seed-preserving)
   sprites.moygfx    PICO-8 __gfx__-style indexed sprite sheet
   map.moymap        (optional) tilemap
-  pmem.json         (optional) persistent kid data / saves
+  pmem.bin          (optional) persistent kid data / saves
 ```
 
 - **Cart types:** app / wallpaper / widget / game / story / animation / lesson / tool / theme / (hardware_project / web_project later).

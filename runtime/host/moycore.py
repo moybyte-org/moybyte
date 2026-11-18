@@ -242,6 +242,13 @@ def get_global_len(name):
     return r.get_global_len(name) if r is not None else None
 
 
+def pmem_to(path):
+    """Where the run saves its pmem while it plays: False, the host's runs
+    have no saver in their library (native/moycore/moycore_run.h), so the
+    console's frame reads the image and saves it."""
+    return False
+
+
 def pmem_image(out):
     """Fill `out` (256 int32) with the run's pmem; whether it moved."""
     r = _cur()

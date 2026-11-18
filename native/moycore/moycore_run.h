@@ -57,7 +57,10 @@ typedef struct {
     moy_map map;
     int32_t *snap;              // SNAP_LEN slots, the caller's
     int32_t pmem[256];
-    int pmem_dirty;
+    int pmem_dirty;             // moved since the console last read the image
+    int pmem_unsaved;           // moved since the run's last save
+    uint32_t pmem_saved_ms;
+    char pmem_path[224];        // where the run saves while it plays, or ""
     int32_t *aq;                // the caller's
     int aq_cap;                 // in int32s
     uint8_t flags[MOY_FLAGS];   // SPEC.md 3.5
@@ -104,6 +107,16 @@ const char *moycore_run_cfg(const moycore_run_t *c, const char *key);
 // The pmem image out (and whether it moved since the last ask), and in.
 int moycore_run_pmem_image(moycore_run_t *c, int32_t *out, int n);
 void moycore_run_pmem_load(moycore_run_t *c, const int32_t *in, int n);
+// The run's pmem.bin while it plays (moy_save.h, THE SAVER): with a path
+// set, moycore_run_pmem_tick hands the image to the saver at most every
+// MOYCORE_PMEM_SAVE_MS (widgets.Pmem.SAVE_MS) while it moved, from the frame
+// the run ends with -- a run in the kernel's front included, where no console
+// frame runs. A path this task does not reach (the VM's own internal mount,
+// from the front's task) is dropped at the first try, and the console saves
+// at the run's end.
+#define MOYCORE_PMEM_SAVE_MS 10000u
+int moycore_run_pmem_to(moycore_run_t *c, const char *path);   // 1: it saves itself
+void moycore_run_pmem_tick(moycore_run_t *c);
 // What the cart last declared with view(): 1 and its size, or 0.
 int moycore_run_view(const moycore_run_t *c, int *w, int *h);
 // The config freed; `c` is no longer the current run.

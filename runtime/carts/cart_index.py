@@ -217,7 +217,7 @@ GATE = 4 + 26 + 65535 + 65535
 # again from where it begins.
 TAIL_SLACK = 256
 
-SAVES = "pmem.json"           # always carried across an update
+SAVES = "pmem.bin"            # always carried across an update
 CONFIG = "config.json"        # carried when the kid changed it
 
 # What the kid reads when an install stops. The detail goes to serial.

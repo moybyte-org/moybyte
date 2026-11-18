@@ -187,7 +187,7 @@ def test_seed_preserves_scenes_are_replaced_but_pmem_kept(tmp_path):
           "scenes": {"main": MAIN_SCENE}, "scene_order": ["main"]}
     moy_carts.seed_builtins([v1], root)
     path = root + "/moybyte.reseed.moy"
-    (Path(path) / "pmem.json").write_text(json.dumps([42] + [0] * 255))  # a "save"
+    moy_carts.save_pmem({"path": path}, [42])                           # a "save"
 
     v2 = dict(v1, version=2, scenes={"main": LEVEL2_SCENE})              # scene changed
     moy_carts.seed_builtins([v2], root)

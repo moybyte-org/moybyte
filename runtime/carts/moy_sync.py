@@ -119,8 +119,9 @@ What deliberately does NOT sync, recorded so it is not read as a gap:
     manifest, assets and `src/` cross like any cart's and its module does not,
     so a compiled cart does NOT sync between a browser and a board. It plays
     where its module was put (native/moy_wasm/README.md). The binary
-    files that DO cross are a cart's cover, `cover.png` (SPEC.md 3.6,
-    BINARY_FILES), and a theme package's fonts and sheets, `*.fnt` and
+    files that DO cross are a cart's cover, `cover.png` (SPEC.md 3.6), and
+    its saves, `pmem.bin` (native/moy_store/moy_pmem.h), by name
+    (BINARY_FILES), and a theme package's fonts and sheets, `*.fnt` and
     `*.moygfx` (BINARY_SUFFIXES; docs/history/theming_2026-09.md §9 phase 6 step 2):
     as base64, `"b"` where text rides as `"t"`. The apps root is the one
     root whose every file crosses so (`Root.binary`).
@@ -240,7 +241,7 @@ BATCH_BUDGET = 32 * 1024
 # rule has two more copies, each pinned to this one by its test:
 # native/moy_net/moy_sync_apply.c and moy_webhost.c (tests/test_moy_sync.py,
 # tests/test_moy_webhost.py).
-BINARY_FILES = ("cover.png",)
+BINARY_FILES = ("cover.png", "pmem.bin")
 BINARY_SUFFIXES = (".fnt", ".moygfx")
 BINARY_PART = PART_MAX * 3 // 4
 

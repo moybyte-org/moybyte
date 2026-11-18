@@ -299,7 +299,7 @@ def test_a_newer_image_replaces_a_seed_cart_and_keeps_its_saves(tmp_path, monkey
     mod.CARTS_Z = [("Hop", 1, gen.pack_cart(cart))]
     assert zero_host.seed_carts(root) == 1
     hop = root + "/moybyte.hop.moy"
-    with open(hop + "/pmem.json", "w") as f:
+    with open(hop + "/pmem.bin", "w") as f:
         f.write("[7]")
     with open(hop + "/main.py", "w") as f:
         f.write("the kid's own")
@@ -308,7 +308,7 @@ def test_a_newer_image_replaces_a_seed_cart_and_keeps_its_saves(tmp_path, monkey
     mod.CARTS_Z = [("Hop", 2, gen.pack_cart(dict(cart, version=2, src="NEW")))]
     assert zero_host.seed_carts(root) == 1
     assert moy_carts._read(hop + "/main.py") == "NEW"
-    assert moy_carts._read(hop + "/pmem.json") == "[7]"
+    assert moy_carts._read(hop + "/pmem.bin") == "[7]"
 
 
 def test_a_warm_boot_reads_no_seed_cart_s_manifest(tmp_path, monkeypatch, capsys):
@@ -405,7 +405,7 @@ def test_a_replacement_the_reserve_stops_keeps_the_cart(tmp_path, monkeypatch):
     cart = {"title": "Hop", "type": "game", "version": 1, "src": "OLD",
             "cfg": {}, "edit": []}
     moy_carts.seed_packed([("Hop", 1, gen.pack_cart(cart))], root)
-    with open(root + "/moybyte.hop.moy/pmem.json", "w") as f:
+    with open(root + "/moybyte.hop.moy/pmem.bin", "w") as f:
         f.write("[7]")
     asked = []
 
@@ -415,7 +415,7 @@ def test_a_replacement_the_reserve_stops_keeps_the_cart(tmp_path, monkeypatch):
     newer = [("Hop", 2, gen.pack_cart(dict(cart, version=2, src="NEW")))]
     assert moy_carts.seed_packed(newer, root, room=room) == 1
     assert moy_carts._read(root + "/moybyte.hop.moy/main.py") == "NEW"
-    assert moy_carts._read(root + "/moybyte.hop.moy/pmem.json") == "[7]"
+    assert moy_carts._read(root + "/moybyte.hop.moy/pmem.bin") == "[7]"
 
 
 # -- the build wiring ------------------------------------------------------

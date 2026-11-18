@@ -116,7 +116,7 @@ nor those docs will warn you about:
   (`moy_seed.seed_folders`, the worker's `seedLocal` only moving the bytes):
   one the store has never had (a new app, a new seed game) is seeded whole,
   and one whose bundled manifest `version` is newer replaces the store's copy,
-  its `pmem.json` and `config.json` kept, by the board's own `_make_room`. Without the first, nobody who had visited
+  its `pmem.bin` and `config.json` kept, by the board's own `_make_room`. Without the first, nobody who had visited
   before a system cart shipped would ever see it; without the second, an app
   kept from an older console runs its old manifest on the new one (Notes'
   `files:docs` after the folders took their names: no `files`, a NameError).
