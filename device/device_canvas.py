@@ -813,7 +813,8 @@ class DeviceCanvas:
     def reset_state(self):
         # Draw any queued sprites FIRST: they were spr_tile()'d under the current
         # camera/clip/pal/palt, so they must be emitted before that state is wiped (#63).
-        self.flush_batch()
+        if self._batch_arr[0] > 4:
+            self.flush_batch()
         # #155: effective offset + BUFFER-space clip (identities without a viewport).
         self._user_cam_x = 0
         self._user_cam_y = 0
@@ -854,7 +855,8 @@ class DeviceCanvas:
         self._sync_gate_state()
 
     def camera(self, x=0, y=0):
-        self.flush_batch()             # queued sprites belong to the OLD camera (#63)
+        if self._batch_arr[0] > 4:
+            self.flush_batch()             # queued sprites belong to the OLD camera (#63)
         prev = (self._user_cam_x, self._user_cam_y)
         self._user_cam_x = int(x)
         self._user_cam_y = int(y)
@@ -864,7 +866,8 @@ class DeviceCanvas:
         return prev
 
     def clip(self, x=None, y=None, w=None, h=None):
-        self.flush_batch()             # queued sprites belong to the OLD clip (#63)
+        if self._batch_arr[0] > 4:
+            self.flush_batch()             # queued sprites belong to the OLD clip (#63)
         if x is None:
             self._clip_x0 = self._ox
             self._clip_y0 = self._oy
@@ -935,7 +938,8 @@ class DeviceCanvas:
         # NOT applied to pixels already on the canvas: that pass measured half
         # a frame on every board (#218), which is why the spec composes.
         if p == 1 and c0 is not None:
-            self.flush_batch()         # queued sprites belong to the OLD table (#63)
+            if self._batch_arr[0] > 4:
+                self.flush_batch()         # queued sprites belong to the OLD table (#63)
             sp = self._spal
             if sp is None:
                 sp = self._spal = bytearray(_PAL_IDENTITY)
@@ -958,7 +962,8 @@ class DeviceCanvas:
         # the trampoline crossing itself measured 0.07us -- the cost was always
         # this body). Invariant: _gate_pal mirrors _pal_map after every mutation;
         # tests/test_gate_pal_sync.py pins it against the full rebuild.
-        self.flush_batch()             # queued sprites belong to the OLD pal map (#63)
+        if self._batch_arr[0] > 4:
+            self.flush_batch()             # queued sprites belong to the OLD pal map (#63)
         pm = self._pal_map
         gp = self._gate_pal
         if c0 is None:
@@ -1003,7 +1008,8 @@ class DeviceCanvas:
             self._sync_gate_pal()
 
     def palt(self, c=None, on=None):
-        self.flush_batch()             # queued sprites belong to the OLD palt (#63)
+        if self._batch_arr[0] > 4:
+            self.flush_batch()             # queued sprites belong to the OLD palt (#63)
         pt = self._palt
         if c is None:
             if self._palt_delta:
@@ -1281,7 +1287,8 @@ class DeviceCanvas:
     def cls(self, c=0):
         # Full-surface reset: ignores camera/clip (like TIC-80) but honours pal.
         self.clears += 1
-        self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        if self._batch_arr[0] > 4:
+            self.flush_batch()             # #63: a non-spr primitive breaks the batch
         self._gfx.layer_drain(self._lrs)   # #54 St.2: a predicted restore in flight
                                           # for a frame that ISN'T drawing the layer
                                           # (screen switch) -- drain, don't race
@@ -1306,7 +1313,8 @@ class DeviceCanvas:
         # camera-relative. Flush the pending sprite batch first so a WRITE keeps
         # draw order and a READ never samples a stale pixel under a
         # queued-but-unblitted sprite (#63).
-        self.flush_batch()
+        if self._batch_arr[0] > 4:
+            self.flush_batch()
         x = int(x) - self._cam_x
         y = int(y) - self._cam_y
         if c is None:
@@ -1333,7 +1341,8 @@ class DeviceCanvas:
             return self._shape(_MG_LINE, x1, y1, x2, y2, 0, 0, c)
         # Bresenham through _put so camera+clip+pal apply (matches the host rasterizer
         # pixel-for-pixel; framebuf.line can't clip to an arbitrary rect).
-        self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        if self._batch_arr[0] > 4:
+            self.flush_batch()             # #63: a non-spr primitive breaks the batch
         x0 = int(x1); y0 = int(y1); xe = int(x2); ye = int(y2)
         col = self._col(c)
         self._gfx.line(self._buf, self._stride, self._bh, x0, y0, xe, ye,
@@ -1616,7 +1625,8 @@ class DeviceCanvas:
             return
         # An ungated canvas (the host's kernel has no gates): fill_spans takes
         # buffer/camera/clip as plain args like circ/line.
-        self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        if self._batch_arr[0] > 4:
+            self.flush_batch()             # #63: a non-spr primitive breaks the batch
         col = -1 if c < 0 else self._col(c)
         self._gfx.fill_spans(self._buf, self._stride, self._bh, arr,
                              -1 if n is None else n, ox, oy, col,
@@ -1644,7 +1654,8 @@ class DeviceCanvas:
             return self._shape(_MG_CIRC, cx, cy, r, 0, 0, 0, c)
         # TIC-80 circ = FILLED circle. Native (#43): one moy_gfx.circ call rasterizes
         # the scanline spans in C (was 2r+1 MP->C _fill calls); else the Python path.
-        self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        if self._batch_arr[0] > 4:
+            self.flush_batch()             # #63: a non-spr primitive breaks the batch
         cx = int(cx); cy = int(cy); r = int(r)
         col = self._col(c)
         self._gfx.circ(self._buf, self._stride, self._bh, cx, cy, r, col,
@@ -1657,7 +1668,8 @@ class DeviceCanvas:
             return self._shape(_MG_CIRCB, cx, cy, r, 0, 0, 0, c)
         # TIC-80 circb = circle outline. Native (#43): one moy_gfx.circb call runs the
         # Bresenham midpoint circle in C (was ~8r MP->C _put calls); else Python.
-        self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        if self._batch_arr[0] > 4:
+            self.flush_batch()             # #63: a non-spr primitive breaks the batch
         cx = int(cx); cy = int(cy); r = int(r)
         col = self._col(c)
         self._gfx.circb(self._buf, self._stride, self._bh, cx, cy, r, col,
@@ -1673,7 +1685,8 @@ class DeviceCanvas:
         # span ARITHMETIC was the cost, not the fill. Geometry is line-for-line
         # libmoy's, which is what the conformance golden pins. Fallback: the old
         # spans + fill_rects lane. Host twin: runtime/canvas.py Canvas.tri.
-        self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        if self._batch_arr[0] > 4:
+            self.flush_batch()             # #63: a non-spr primitive breaks the batch
         self._gfx.tri(self._buf, self._stride, self._bh,
                       int(x1), int(y1), int(x2), int(y2), int(x3), int(y3),
                       self._col(c), self._cam_x, self._cam_y,
@@ -1683,7 +1696,8 @@ class DeviceCanvas:
         if self._fillp:
             return self._shape(_MG_TRIB, x1, y1, x2, y2, x3, y3, c)
         # TIC-80 trib = triangle outline (three lines, like rectb's four fills).
-        self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        if self._batch_arr[0] > 4:
+            self.flush_batch()             # #63: a non-spr primitive breaks the batch
         self.line(x1, y1, x2, y2, c)
         self.line(x2, y2, x3, y3, c)
         self.line(x3, y3, x1, y1, c)
@@ -1727,7 +1741,8 @@ class DeviceCanvas:
         `line` in one composition; `ring_lo` makes the ring a bevel (`ring`
         top and left). `mask` 1 draws only the fully covered pixels, 2 only
         the partly covered ones."""
-        self.flush_batch()
+        if self._batch_arr[0] > 4:
+            self.flush_batch()
         line = int(line) if ring is not None else 0
         opts = (int(corners) & 15) | (16 if stepped else 0) | ((int(mask) & 3) << 5) \
             | ((line & 255) << 8)
@@ -1789,7 +1804,8 @@ class DeviceCanvas:
         at `alpha` (0..255), blurred `blur` pixels either side of its edge
         (0: a hard shadow), offset (dx, dy). `hole` (x, y, w, h, r) is left
         alone: the caster's body, drawn over it."""
-        self.flush_batch()
+        if self._batch_arr[0] > 4:
+            self.flush_batch()
         return self._gfx.shadow(self._buf, self._stride, int(x), int(y), int(w), int(h),
                                 int(r), int(blur), int(dx), int(dy), self._col(c),
                                 int(alpha), stepped, hole, self._cam_x, self._cam_y,
@@ -1807,7 +1823,8 @@ class DeviceCanvas:
         """Fill the path whose points `pts` (an array('i') of x, y pairs)
         make contours ending at `ends` (an array('i')) in colour `c`. The
         pixels touched."""
-        self.flush_batch()
+        if self._batch_arr[0] > 4:
+            self.flush_batch()
         return self._gfx.path_fill(self._buf, self._stride, pts, ends, self._col(c),
                                    self._cam_x, self._cam_y, self._clip_x0, self._clip_y0,
                                    self._clip_x1, self._clip_y1)
@@ -1815,7 +1832,8 @@ class DeviceCanvas:
     def face_text(self, face, size, x, y, s, c):
         """`s` in outline face `face` at em `size`, its baseline's left end at
         (x, y). The advance."""
-        self.flush_batch()
+        if self._batch_arr[0] > 4:
+            self.flush_batch()
         return self._gfx.path_text(self._buf, self._stride, int(face), int(size), int(x),
                                    int(y), s, self._col(c), self._cam_x, self._cam_y,
                                    self._clip_x0, self._clip_y0, self._clip_x1,
@@ -1831,7 +1849,8 @@ class DeviceCanvas:
         words as bytes (console.splash_pal), `permille` the track's fill
         (-1 none), `status` its line. The kernel's first light is the same
         C. The draws that failed."""
-        self.flush_batch()
+        if self._batch_arr[0] > 4:
+            self.flush_batch()
         self._gfx.layer_drain(self._lrs)
         return self._gfx.splash(self._buf, self._stride, self._ox, self._oy, self.w, self.h,
                                 PAL565_WIRE is not PAL565, pal, int(permille), status)
@@ -1867,7 +1886,8 @@ class DeviceCanvas:
         # native call (mg_shape, see its note in moy_gfx_kernels.h) instead of a
         # patterned twin of each verb, so a solid draw stays exactly the call it
         # was. getattr because a board on older firmware has moy_gfx without it.
-        self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        if self._batch_arr[0] > 4:
+            self.flush_batch()             # #63: a non-spr primitive breaks the batch
         col = self._col(c)
         hole = self._fillp_col
         self._gfx.shape(self._buf, self._stride, self._bh, kind,
@@ -1887,7 +1907,8 @@ class DeviceCanvas:
         # 36ms/op at 20x20 on the S3 bench (#66), 90us/PIXEL, which is why the
         # kernel exists. Fallback: that Python lane, kept as the no-moy_gfx
         # path. Host twin: runtime/canvas.py Canvas.sspr.
-        self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        if self._batch_arr[0] > 4:
+            self.flush_batch()             # #63: a non-spr primitive breaks the batch
         sx = int(sx); sy = int(sy); sw = int(sw); sh = int(sh)
         dx = int(dx); dy = int(dy)
         dw = sw if dw is None else int(dw)
@@ -1909,7 +1930,8 @@ class DeviceCanvas:
         # for a source rect inside the bitmap, resolved once per source pixel
         # rather than per destination pixel. Camera, clip, pal and palt apply as
         # they do to sspr; a source rect past the bitmap draws nothing there.
-        self.flush_batch()
+        if self._batch_arr[0] > 4:
+            self.flush_batch()
         scale = int(scale)
         sw = int(sw); sh = int(sh)
         if sw <= 0 or sh <= 0 or scale <= 0:
@@ -1932,7 +1954,8 @@ class DeviceCanvas:
         # so no per-pixel modulo -- (a+n*b) mod T == ((a mod T)+n*(b mod T))
         # mod T). Reference: moy-spec moycore/canvas.py tline; the conformance
         # scene provisional_tline is what holds all three lanes identical.
-        self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        if self._batch_arr[0] > 4:
+            self.flush_batch()             # #63: a non-spr primitive breaks the batch
         x0 = int(x0); y0 = int(y0); x1 = int(x1); y1 = int(y1)
         u = int(u); v = int(v); du = int(du); dv = int(dv)
         ck = int(colorkey)
@@ -1954,7 +1977,8 @@ class DeviceCanvas:
         # palt are baked into the cached RGB565 copy (re-baked when _palgen changes).
         # An Image blit is NOT part of an auto-batch (#63): flush any pending sheet-tile
         # run first (so it lands underneath), then draw this one immediately.
-        self.flush_batch()
+        if self._batch_arr[0] > 4:
+            self.flush_batch()
         x = int(x) - self._cam_x
         y = int(y) - self._cam_y
         scale = int(scale)
@@ -2122,7 +2146,8 @@ class DeviceCanvas:
             sx=0, sy=0, colorkey=-1, scale=1, layers=0, flags=None):
         # TIC-80 map(): blit a w x h cell region of the tilemap over `sheet` to
         # screen (sx, sy), rastered by libmoy's moy_map_draw every call.
-        self.flush_batch()             # #63: map() is a non-spr primitive -> break batch
+        if self._batch_arr[0] > 4:
+            self.flush_batch()             # #63: map() is a non-spr primitive -> break batch
         mx = int(mx); my = int(my); scale = int(scale)
         if scale < 1:
             scale = 1
@@ -2296,7 +2321,8 @@ class DeviceCanvas:
         # the INDEX sheet through libmoy's moy_spr (#97), so there is nothing to bake
         # and nothing to invalidate on a paint edit -- N per-sprite MP->C blits still
         # collapse to one call, which is the whole point of the verb.
-        self.flush_batch()             # #63: emit any auto-batched run first (z-order)
+        if self._batch_arr[0] > 4:
+            self.flush_batch()             # #63: emit any auto-batched run first (z-order)
         scale = int(scale)
         if scale < 1:
             scale = 1
@@ -2341,7 +2367,8 @@ class DeviceCanvas:
         out (a story's picture with a clear background); camera and clip
         honoured; pal() does not apply, because direct colour has no index to
         remap. A cart's cover is drawn this way (runtime/shell/cover_cache.py)."""
-        self.flush_batch()
+        if self._batch_arr[0] > 4:
+            self.flush_batch()
         w = int(w)
         h = int(h)
         scale = int(scale)
@@ -2421,7 +2448,8 @@ class DeviceCanvas:
         shapes are laid out on, in this canvas's pixels (a bar's strip takes
         its rows of the screen's). The shapes drawn, or -1 where `rec` is
         malformed and the fill alone is drawn."""
-        self.flush_batch()
+        if self._batch_arr[0] > 4:
+            self.flush_batch()
         col = self._col(c)
         g = self._gfx
         if img is not None:
@@ -2441,7 +2469,8 @@ class DeviceCanvas:
         as `blit565`) scaled to tw x th at (x, y): nearest-neighbour at any
         ratio, opaque, camera and clip honoured. One kernel call: the home's
         cards at their scale (docs/theme_and_shell_2026-11.md §8.10)."""
-        self.flush_batch()
+        if self._batch_arr[0] > 4:
+            self.flush_batch()
         w = int(w)
         h = int(h)
         tw = int(tw)
@@ -2470,7 +2499,8 @@ class DeviceCanvas:
         covers in part is the picture over what is there, one it misses is
         left. Camera and clip honoured; one kernel call (moy_shape.h). The
         pixels written."""
-        self.flush_batch()
+        if self._batch_arr[0] > 4:
+            self.flush_batch()
         return self._gfx.cover(self._buf, self._stride, int(x), int(y), int(w), int(h),
                                buf, int(sw), int(sx), int(sy), int(cw), int(ch), int(r),
                                stepped, self._cam_x, self._cam_y, self._clip_x0,
@@ -2488,7 +2518,8 @@ class DeviceCanvas:
         the one-pixel edge ring `ring` `rrect` draws with no fill (None:
         none). Camera and clip honoured; one kernel call (moy_shape.h's
         mg_face). The pixels written."""
-        self.flush_batch()
+        if self._batch_arr[0] > 4:
+            self.flush_batch()
         return self._gfx.face(self._buf, self._stride, x, y, w, h, layer._buf, layer.w, fy,
                               buf, sw, cw, ch, 0 if fill is None else self._col(fill), quads,
                               r, stepped, -1 if ring is None else self._col(ring), self._cam_x,
@@ -2538,7 +2569,8 @@ class DeviceCanvas:
         honoured, colour `c` over every pixel at `alpha` -- the pixels the
         dimmed picture blitted 1:1 would leave, without the picture between.
         The pixels written."""
-        self.flush_batch()
+        if self._batch_arr[0] > 4:
+            self.flush_batch()
         w = int(w)
         h = int(h)
         bx = int(x) - self._cam_x
@@ -2564,7 +2596,8 @@ class DeviceCanvas:
         # bake (#63 Fold 3): one native moy_gfx.blit_indices call turns a paint-app image into
         # pixels instead of thousands of rect() replays. Meant for cart load (off the per-frame
         # hot path). Opaque; bounds-clamped; per-pixel memoryview fallback when moy_gfx absent.
-        self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        if self._batch_arr[0] > 4:
+            self.flush_batch()             # #63: a non-spr primitive breaks the batch
         x = int(x)
         y = int(y)
         iw = int(iw)
@@ -2671,7 +2704,8 @@ class DeviceCanvas:
         # #63: flush BOTH sides -- this canvas's queued sprites (drawn, then overwritten
         # by the opaque copy, exactly as immediate mode) and the source layer's, so its
         # pixels are complete before we read them.
-        self.flush_batch()
+        if self._batch_arr[0] > 4:
+            self.flush_batch()
         _dirty = getattr(layer, "_batch_arr", None)
         _dirty = _dirty is not None and _dirty[0] > 4    # layer edited THIS frame
         if _dirty:
@@ -2693,7 +2727,8 @@ class DeviceCanvas:
         # key=-1 (fully opaque) -- the same C kernel the sprite path uses, clamped to the
         # framebuffer in C; else a memoryview row-copy fallback (mirrors the host index
         # copy + the parity stub). Ignores camera/clip (it's chrome over a finished frame).
-        self.flush_batch()             # #63: emit this canvas's queued sprites first
+        if self._batch_arr[0] > 4:
+            self.flush_batch()             # #63: emit this canvas's queued sprites first
         if hasattr(layer, "flush_batch"):   # (a getattr of a method allocates it)
             layer.flush_batch()        # ... and complete the source strip's pixels
         dst_x = int(dst_x)
@@ -2713,7 +2748,8 @@ class DeviceCanvas:
         # only the rect's bytes are copied (the opaque lane memcpys the clipped
         # span per row); rows outside the clip are one compare each. Fallback:
         # the blit_strip row loop with the extra bounds.
-        self.flush_batch()             # #63: emit this canvas's queued sprites first
+        if self._batch_arr[0] > 4:
+            self.flush_batch()             # #63: emit this canvas's queued sprites first
         ba = getattr(layer, "_batch_arr", None)    # a data read: no bound method made
         if ba is not None and ba[0] > 4:
             layer.flush_batch()
@@ -2758,7 +2794,8 @@ class DeviceCanvas:
         fenced by shift_fence(), and by anything that reads or presents this
         buffer; until then the caller writes no row the shift writes
         (docs/theme_and_shell_2026-11.md §9.6)."""
-        self.flush_batch()
+        if self._batch_arr[0] > 4:
+            self.flush_batch()
         cs = self._comp_shift
         if cs is not None:
             return cs(x, y, w, h, dx, dy)
@@ -2790,7 +2827,8 @@ class DeviceCanvas:
         # the caller repaints the band; ignores camera/clip/pal). Native via the
         # moy_gfx.scroll_rect row-memmove kernel; else a bytearray row loop
         # (slice reads copy, so overlap is safe -- vertical order follows dy).
-        self.flush_batch()             # #63: emit queued sprites into the buffer first
+        if self._batch_arr[0] > 4:
+            self.flush_batch()             # #63: emit queued sprites into the buffer first
         dx = int(dx)
         dy = int(dy)
         if dx == 0 and dy == 0:
@@ -2870,7 +2908,8 @@ class SystemCanvas(DeviceCanvas):
         if fs <= 1:
             DeviceCanvas.print(self, s, x, y, c)
             return
-        self.flush_batch()             # a non-spr primitive breaks the batch
+        if self._batch_arr[0] > 4:
+            self.flush_batch()             # a non-spr primitive breaks the batch
         self._gate_state[_ST_N_TEXT] += 1
         # _stride/_bh, NOT w/h: the kernel wants the BUFFER geometry, and the
         # two diverge the moment a viewport is set (#155) -- which is exactly
@@ -2897,7 +2936,8 @@ class SystemCanvas(DeviceCanvas):
         """The display type: `s` at `scale` (a whole number, NOT the font
         scale), one op through the one UI text path -- what
         chrome._print_scaled draws a heading with."""
-        self.flush_batch()             # a non-spr primitive breaks the batch
+        if self._batch_arr[0] > 4:
+            self.flush_batch()             # a non-spr primitive breaks the batch
         self._gate_state[_ST_N_TEXT] += 1
         self._gfx_text(self._buf, self._stride, self._bh, _text_bytes(s),
                        int(x), int(y), self._col(c), _FONT8, _FONT8_FIRST,
@@ -2934,7 +2974,8 @@ class SystemCanvas(DeviceCanvas):
         fb = getattr(gc, "flush_batch", None)
         if fb is not None:
             fb()
-        self.flush_batch()
+        if self._batch_arr[0] > 4:
+            self.flush_batch()
         self._gfx.blit565_scale(self._buf, sw, sh, int(ox), int(oy),
                                 gc._buf, gw, gh, int(scale))
 
