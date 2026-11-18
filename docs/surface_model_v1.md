@@ -388,9 +388,10 @@ used to live beside `web_view` + `page_tail.js`).
   frames skip it entirely — the whole 0.2ms-vs-70ms idle/drag cliff.
   Allocation is a lever only ACROSS the 16KB cliff, not gradually — which is
   exactly what §4 skip-draw provides (a drag frame ships only the moving
-  window). Shipped policy: `web_boot` raises the threshold to 6MB and the
-  worker lands collects on idle (3 quiet frames) with a bounded periodic
-  guard. Measured on the wasm desktop: window drag 70.15 → **0.54ms/frame**
+  window). Shipped policy: `web_boot` raises the threshold to megabytes, the
+  worker lands collects on idle (3 quiet frames, none while a stream plays),
+  and through sustained activity the threshold's own collect bounds the heap
+  (`worker.js`, IDLE_QUIET_FRAMES). Measured on the wasm desktop: window drag 70.15 → **0.54ms/frame**
   (p95 0.63, no collects in 120 drag frames); content drag 137 → 8ms mean.
 - **Drop-recovery (the review's A7/F2):** the push transports drop frames by
   design (bandwidth cap on device; the page keeps only the newest frame on

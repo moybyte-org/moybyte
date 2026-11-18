@@ -292,15 +292,24 @@ function shipPCM(f) {
 // static files anyone can host (GitHub Pages included).
 let fbPool = [];
 const FRAME_MS = 1000 / 60;
-// GC scheduling (the surface-model gate-0 finding): web_boot raises the GC
-// trigger from the port's 16KB (which made EVERY painted frame pay a full
-// ~67ms collect at this boundary) to megabytes, so the WORKER now owns WHEN
-// collects land: on the 3rd consecutive quiet frame (idle -- the hitch is
-// invisible), or after COLLECT_MAX_FRAMES of sustained activity (a game that
-// never idles must still collect eventually; one bounded hitch beats heap
-// growth -- SPLIT_HEAP_AUTO grows the heap rather than collecting).
-const IDLE_QUIET_FRAMES = 3, COLLECT_MAX_FRAMES = 600;
-let quietStreak = 0, framesSinceCollect = 0, idleCollected = false;
+// GC scheduling (the surface-model gate-0 finding): web_boot raises the VM's
+// collect trigger from the port's 16KB (which made EVERY painted frame pay a
+// full ~67ms collect at this boundary) to megabytes of allocation, and the
+// worker lands one collect of its own on the 3rd consecutive quiet frame (idle
+// -- the hitch is invisible), once per quiet streak. While a stream plays no
+// frame is quiet (STREAM_FRAMES since its last samples): its frames ship
+// nothing only while the sink's count is late, its lead at its lowest.
+// Through sustained activity the VM's trigger is what bounds the heap:
+// SPLIT_HEAP_AUTO grows the heap instead of collecting only inside one call,
+// and the trigger's collect lands as the call that crossed it returns. The
+// worker adds no periodic collect of its own: a frame path that allocates
+// meets the trigger anyway (a playing station's desk does, every few
+// seconds), one that does not has nothing to free, and a pause is the mark of
+// the live set plus the sweep of the heap whatever the garbage, taken out of
+// the sink's lead while a stream plays. Asking the VM how much it allocated
+// (gc.mem_alloc walks the heap's table) costs about what a collect does.
+const IDLE_QUIET_FRAMES = 3, STREAM_FRAMES = 30;
+let quietStreak = 0, idleCollected = false, sincePcm = STREAM_FRAMES;
 // Worker-side perf accounting, reported every WP_MS and printed by the page's
 // plog line: step mean/max, painted frames, >20ms stalls, and the cost of the
 // out-of-band calls (assets/collect/input) that block this same loop.
@@ -2414,22 +2423,21 @@ function loop() {
         if (LOOP) longest("step", _d);
         if (s) { WP.painted++; WP.bytes += s.length; }
         if (s) {
-            if (s.indexOf('"pcm"') >= 0) shipPCM(JSON.parse(s));
+            if (s.indexOf('"pcm"') >= 0) { shipPCM(JSON.parse(s)); sincePcm = 0; }
             shipFrame(s);
         }
-        // GC scheduling (see the constants above). A painted frame re-arms the
-        // idle collect; the periodic guard fires regardless of quiet.
-        framesSinceCollect++;
-        if (s) { quietStreak = 0; idleCollected = false; } else { quietStreak++; }
-        if (idleCollect && ((quietStreak >= IDLE_QUIET_FRAMES && !idleCollected)
-            || framesSinceCollect >= COLLECT_MAX_FRAMES)) {
+        // GC scheduling (see IDLE_QUIET_FRAMES). A painted frame re-arms the
+        // idle collect.
+        if (sincePcm < STREAM_FRAMES) sincePcm++;
+        if (s || sincePcm < STREAM_FRAMES) { quietStreak = 0; idleCollected = false; }
+        else { quietStreak++; }
+        if (idleCollect && quietStreak >= IDLE_QUIET_FRAMES && !idleCollected) {
             const _g0 = performance.now();
             idleCollect();               // the collect lands as this call returns
             const _g = performance.now() - _g0;
             WP.gc += _g; WP.gcN++;
             if (LOOP) longest("gc", _g);
             idleCollected = true;
-            framesSinceCollect = 0;
         }
         syncPump();
         gpioPump();

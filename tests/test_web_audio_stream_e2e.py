@@ -145,6 +145,9 @@ def test_a_live_station_plays_a_minute_at_the_sinks_rate_with_no_underrun(tmp_pa
     assert media["rate"] == 44100 and media["state"] == "playing", media
     # nothing lost, skipped, repeated or refused between the pull and the speaker
     assert sink["under"] == 0 and sink["dry"] == 0, (sink, b["loop"])
+    # the worker's own collect waits for the stream to end (worker.js,
+    # STREAM_FRAMES): its pause would come out of the sink's lead
+    assert b["loop"]["gc"] == 0, b["loop"]
     assert sink["gap"] == 0 and sink["dup"] == 0 and sink["over"] == 0, sink
     assert sink["got"] == pcm["sent"] or pcm["sent"] - sink["got"] < rate // 10, (sink, pcm)
     # the decoder never ran dry, and its samples are the sink's, one for one

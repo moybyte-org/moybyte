@@ -272,8 +272,10 @@ def boot(carts_root=web_vfs.CARTS, cart=None, width=320, height=240,
     # ~67ms against its live set, i.e. the entire 70ms-vs-2.8ms window-drag gap
     # (quiet frames stay under 16KB and skip it, which is why idle was always
     # free). Raise the trigger so collects are RARE, and let the worker land
-    # them on IDLE frames via idle_collect() below (SPLIT_HEAP_AUTO grows the
-    # heap instead of collecting, so somebody must still collect eventually).
+    # them on IDLE frames via idle_collect() below. Through sustained activity
+    # the trigger itself bounds the heap: SPLIT_HEAP_AUTO grows the heap
+    # instead of collecting only inside one call, and the trigger's collect
+    # lands as the call that crossed it returns.
     #
     # 4MB (revised 2026-07-31 after measuring the collect itself). Earlier cuts
     # of this knob guessed in both directions and one regressed play: 24MB is
@@ -1477,8 +1479,8 @@ def term_state(state, n=0):
 
 def idle_collect():
     """Run the deferred split-heap collect NOW -- called by the worker on a
-    quiet streak (and as a bounded periodic guard), so the full mark+sweep
-    lands on an idle frame instead of mid-gesture. Under GC_SPLIT_HEAP_AUTO
+    quiet streak, so the full mark+sweep lands on an idle frame instead of
+    mid-gesture. Under GC_SPLIT_HEAP_AUTO
     gc.collect() only sets the pending flag; the real collect executes when
     THIS call returns to JS (the top level) -- exactly the boundary we chose."""
     import gc

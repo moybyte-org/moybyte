@@ -435,5 +435,8 @@ nor those docs will warn you about:
   loop's longest frame, step, collect, send and count (`__moyState().loop`),
   each with the play time it ended at, so an underrun names the side that
   stalled; `tests/test_web_audio_stream_e2e.py` plays a live station a
-  minute on both sinks.
+  minute on both sinks. The loop's own collect waits for a stream to end
+  (`worker.js`, IDLE_QUIET_FRAMES): what a playing frame allocates the VM's
+  threshold collects, and a pause the worker added would come out of the
+  sink's lead.
 
