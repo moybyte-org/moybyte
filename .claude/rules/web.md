@@ -137,12 +137,18 @@ nor those docs will warn you about:
   Settings choice always wins and booting on the scheme saves nothing; `?start=1`
   skips the play button; `?edit=<cart>&tab=code` opens that cart in the Editor
   (`web_boot.start_edit`, without the First Steps badge) from whatever the
-  browser's store holds, so a visitor's edits are kept. The framed player posts
+  browser's store holds, so a visitor's edits are kept, and on the desk as a
+  window unless this browser left it full screen; `&play=1` presses its Play,
+  which on the desk runs the cart in the Editor's Game pane (the site's
+  Desktop tab passes it, its Handheld tab does not). The framed player posts
   `{moyChrome}` and, at its first painted frame, `{moyLive}`.
   `tests/test_web_first_run_e2e.py` drives them. The hero's two stills (Night,
   Day) are CAPTURED by `site/build.py` from the player it ships, through
-  `browsershot.mjs` (node 22 + Chrome, which pages.yml installs): a capture that
-  fails fails the build.
+  `browsershot.mjs` (node 22 + Chrome, which pages.yml installs), on a frame
+  whose game is not mid catch-flash: a capture that fails fails the build. The
+  site's scheme is one attribute, `<html data-scheme>` (the visitor's switch in
+  the top bar, else the system's), which the page's colours, the still and the
+  console's `?scheme=` all read; a flip restarts a running console.
 - **The journal lives with the STORE OF RECORD** (owner call) — there is one
   durable journal per cart, where the cart durably lives, so a kid gets undo on
   both ends without a byte of history on the wire. **The wire predicate itself

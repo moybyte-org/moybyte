@@ -809,6 +809,66 @@ def channel_banner(channel):
             % (" &middot; ".join(bits), ch["note"]))
 
 
+# The page's colour scheme is ONE attribute, <html data-scheme="dark|light">,
+# and everything with a scheme reads it: the page's roles (the CSS), the still
+# shown before the start (its <picture>'s night source) and the console's
+# ?scheme= (startQuery). It is the visitor's switch where they flipped it,
+# remembered in this browser, else the system's scheme, followed live. Without
+# script the CSS and the <picture> follow the system's scheme alone. SCHEME_HEAD
+# runs before the first paint, so a remembered Day never flashes Night.
+SCHEME_KEY = "moybyte-site-scheme"
+SCHEME_HEAD = r"""<script>
+(function () {
+  var s = null;
+  try { s = localStorage.getItem("%s"); } catch (e) {}
+  if (s !== "dark" && s !== "light")
+    s = window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches
+      ? "light" : "dark";
+  document.documentElement.dataset.scheme = s;
+})();
+</script>""" % SCHEME_KEY
+
+# The switch in the top bar: it names the scheme it switches to. A flip back to
+# the system's scheme forgets the choice, so the page follows the system again.
+# Each change is announced as a `moyscheme` event (the console reloads on it).
+SCHEME_JS = r"""// THE COLOUR SCHEME (see SCHEME_HEAD in site/build.py).
+var schemeBtn = document.getElementById("scheme");
+var systemLight = window.matchMedia ? matchMedia("(prefers-color-scheme: light)") : null;
+function systemScheme() { return systemLight && systemLight.matches ? "light" : "dark"; }
+function scheme() { return document.documentElement.dataset.scheme; }
+function showScheme() {
+  var night = scheme() === "dark";
+  var to = night ? "Day" : "Night";
+  schemeBtn.textContent = (night ? "☀ " : "☾ ") + to;
+  schemeBtn.setAttribute("aria-label", "Switch to " + to.toLowerCase() + " colours");
+  var src = document.getElementById("still-night");
+  if (src) src.media = night ? "all" : "not all";
+}
+function setScheme(s) {
+  if (s === scheme()) return;
+  document.documentElement.dataset.scheme = s;
+  showScheme();
+  document.dispatchEvent(new Event("moyscheme"));
+}
+schemeBtn.addEventListener("click", function () {
+  var s = scheme() === "dark" ? "light" : "dark";
+  try {
+    if (s === systemScheme()) localStorage.removeItem("%s");
+    else localStorage.setItem("%s", s);
+  } catch (e) {}
+  setScheme(s);
+});
+if (systemLight && systemLight.addEventListener)
+  systemLight.addEventListener("change", function () {
+    var kept = null;
+    try { kept = localStorage.getItem("%s"); } catch (e) {}
+    if (kept !== "dark" && kept !== "light") setScheme(systemScheme());
+  });
+schemeBtn.hidden = false;
+showScheme();
+""" % (SCHEME_KEY, SCHEME_KEY, SCHEME_KEY)
+
+
 # The script that runs the console in the hero; emitted only when there is a
 # player to run.
 CONSOLE_JS = r"""// THE CONSOLE. Nothing of it is loaded until the visitor starts it: the stage
@@ -827,13 +887,13 @@ var tabs = [].slice.call(document.querySelectorAll(".tab:not(.exp)"));
 // (the visitor's click was this page's), and opens Star Catcher on its Code tab
 // in either tier. On the desk the Editor is a window with the game playing in
 // its Game pane, the picture the still shows; the handheld's Play would cover
-// the code, so its tab starts on the code alone. The colour scheme rides along
-// so a first-run console wears Moy Night or Moy Day to match this page.
+// the code, so its tab starts on the code alone. The page's colour scheme rides
+// along so a first-run console wears Moy Night or Moy Day to match this page,
+// and a flip of the page's switch restarts a running console in the new one.
 function startQuery(tab) {
-  var dark = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches;
   return "&start=1&edit=moybyte.star_catcher.moy&tab=code"
     + (tab.dataset.tier === "desktop" ? "&play=1" : "")
-    + "&scheme=" + (dark ? "dark" : "light");
+    + "&scheme=" + document.documentElement.dataset.scheme;
 }
 // The stage is the console's aspect ratio PLUS the height the player page needs
 // besides its canvas (title, the saved-in-this-browser bar): the player reports
@@ -889,6 +949,12 @@ function show(tab) {
   stage.appendChild(f);
 }
 tabs.forEach(function (t) { t.addEventListener("click", function () { show(t); }); });
+document.addEventListener("moyscheme", function () {
+  if (stage.classList.contains("idle")) return;
+  var on = tabs.filter(function (t) { return t.classList.contains("on"); })[0] || tabs[0];
+  stage.classList.remove("live");
+  show(on);
+});
 function start() {
   if (stage.classList.contains("idle")) show(tabs[0]);
 }
@@ -942,7 +1008,7 @@ STILL_ALT = ("The Moybyte desktop with Star Catcher open in the editor's window,
 
 def page(pal, has_player, cards, channel=None, stills=False):
     still_html = (
-        '<picture><source media="(prefers-color-scheme: dark)" '
+        '<picture><source id="still-night" media="(prefers-color-scheme: dark)" '
         'srcset="media/console-night.png"><img src="media/console-day.png" '
         'width="1024" height="600" alt="%s"></picture>' % STILL_ALT)
     tabs = "\n".join(
@@ -1006,10 +1072,12 @@ def page(pal, has_player, cards, channel=None, stills=False):
 <title>%(title_pre)smoybyte &mdash; a small operating system for ESP32 boards</title>
 %(robots)s
 <meta name="description" content="A small operating system for ESP32 boards. Its software is cartridges you can open, change and run on the board itself. Try it in the browser.">
+%(scheme_head)s
 <style>
 /* Every colour below is a role of the OS's Moy theme, read from
-   native/moy_ui/themes/moy.json: Night (dark) is the default, Day (light)
-   follows the visitor's scheme. See SITE_ROLES in site/build.py. */
+   native/moy_ui/themes/moy.json: Night (dark) is the default, Day (light) is
+   html[data-scheme=light] (SCHEME_HEAD in site/build.py), or the system's
+   light scheme where no script set the attribute. See SITE_ROLES. */
 :root{%(roles_dark)s
   %(night)s
   --w:70rem;
@@ -1017,8 +1085,9 @@ def page(pal, has_player, cards, channel=None, stills=False):
   --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
 }
 @media (prefers-color-scheme: light){
-  :root{%(roles_light)s}
+  :root:not([data-scheme]){%(roles_light)s}
 }
+:root[data-scheme="light"]{%(roles_light)s}
 %(font)s
 *{box-sizing:border-box}
 [hidden]{display:none !important}
@@ -1037,6 +1106,10 @@ nav .brand em{font-style:normal;color:var(--accent)}
 nav .sp{flex:1}
 nav a.l{color:var(--body);text-decoration:none;font-size:14px}
 nav a.l:hover{color:var(--accent)}
+nav .scheme{appearance:none;border:1px solid var(--line);background:var(--surface);
+  color:var(--ink);font:14px/1 var(--sans);padding:6px 10px;cursor:pointer;white-space:nowrap}
+nav .scheme:hover{border-color:var(--accent);color:var(--accent)}
+nav .scheme:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 /* Narrow: the section anchors are one scroll away anyway, and keeping them
    pushed the GitHub link off the edge. */
 @media (max-width:640px){nav a.l:not(:last-of-type){display:none}}
@@ -1254,6 +1327,7 @@ footer a{margin-right:4px}
   <a class="l" href="#runs">Runs on</a>
   <a class="l" href="#build">Build</a>
   <a class="l" href="https://github.com/moybyte-org/moybyte">GitHub &#8599;</a>
+  <button class="scheme" id="scheme" type="button" hidden></button>
 </div></nav>
 
 <div class="wrap" id="top">
@@ -1358,6 +1432,7 @@ firmware/web_runner/build.sh &amp;&amp; make site</pre>
   </footer>
 </div></section>
 <script>
+%(scheme_js)s
 %(console_js)s
 // The flash section's device dropdown: one board card at a time. The browser
 // keeps the choice across a reload, so apply whatever it restored.
@@ -1381,6 +1456,7 @@ pickDevice();
         "targets": targets, "boards": boards, "device_options": device_options, "flash_js": flash_js,
         "flash_hint": flash_hint, "stage": stage,
         "console_js": CONSOLE_JS if has_player else "",
+        "scheme_head": SCHEME_HEAD, "scheme_js": SCHEME_JS,
         "title_pre": "[dev] " if channel else "",
         "robots": '<meta name="robots" content="noindex,nofollow">' if channel else "",
         "chbar": channel_banner(channel) if channel else "",
@@ -1400,12 +1476,33 @@ pickDevice();
 # than shipping.
 STILLS = (("night", "dark"), ("day", "light"))
 STILL_QUERY = "?desktop=1&start=1&edit=moybyte.star_catcher.moy&tab=code&play=1"
-# What the console reports for the still (`__moyState`): the Editor's tab, the
-# theme and its variant, whether the Editor's window leaves the desk in sight,
-# and whether its game plays.
-STILL_STATE = ("window.__moyState().then(s => 'STILL ' + JSON.stringify("
+# Whether the game's frame (the docked game's rect, `__stillRect`) is a clean
+# one: Star Catcher whites out its whole screen for 0.18 s on a catch, and a
+# still of that is a blank pane. Clean is under a quarter of the frame near
+# white; the game's own backdrop is black in either scheme.
+STILL_CLEAN = r"""window.__stillClean = function () {
+  var r = window.__stillRect, c = document.getElementById("cv");
+  var o = document.createElement("canvas");
+  o.width = r[2]; o.height = r[3];
+  var g = o.getContext("2d");
+  g.drawImage(c, r[0], r[1], r[2], r[3], 0, 0, r[2], r[3]);
+  var d = g.getImageData(0, 0, r[2], r[3]).data, white = 0;
+  for (var i = 0; i < d.length; i += 4)
+    if (d[i] > 200 && d[i + 1] > 200 && d[i + 2] > 200) white++;
+  return white * 4 < r[2] * r[3];
+}; 'ok'"""
+# Polled before the shot: the game plays and its frame is clean.
+STILL_WAIT = ("window.__moyState().then(s => { window.__stillRect = s.wins.desktop;"
+              " return window.__stillClean(); })")
+# Asked right after the shot, the frame first (a flash outlasts the gap from the
+# check before to here, so clean on both sides means a clean shot), then what
+# the console reports (`__moyState`): the Editor's tab, the theme and its
+# variant, whether the Editor's window leaves the desk in sight, and whether
+# its game plays.
+STILL_STATE = ("(c => window.__moyState().then(s => 'STILL ' + JSON.stringify("
                "[s.edit.tab, s.theme.name, s.theme.variant,"
-               " s.wins.menu[2] < 1024, 'desktop' in s.wins]))")
+               " s.wins.menu[2] < 1024, 'desktop' in s.wins, c])))"
+               "(window.__stillClean())")
 
 
 def capture_stills(player, media):
@@ -1426,14 +1523,16 @@ def capture_stills(player, media):
                 json.dump({"query": STILL_QUERY, "scheme": scheme,
                            "boot_ms": 60000, "steps": [
                     {"wait": 2500},
-                    {"js": STILL_STATE},
-                    {"shot": "still"}]}, f)
+                    {"js": STILL_CLEAN},
+                    {"waitFor": STILL_WAIT, "timeout": 20000},
+                    {"shot": "still"},
+                    {"js": STILL_STATE}]}, f)
             r = subprocess.run(
                 ["node", "browsershot.mjs", scenario, tmp], cwd=runner,
                 env=dict(os.environ, MOY_DIST=player), capture_output=True,
                 text=True, timeout=300)
             m = re.search(r'STILL (\[.*?\])', r.stdout.replace('\\"', '"'))
-            want = ["code", "moy", scheme, True, True]
+            want = ["code", "moy", scheme, True, True, True]
             if r.returncode != 0 or not m or json.loads(m.group(1)) != want:
                 sys.exit("!! capturing the %s still failed (wanted %s, the console "
                          "said %s):\n%s\n%s" % (name, want, m and m.group(1),

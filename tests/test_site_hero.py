@@ -66,14 +66,14 @@ def test_the_stills_are_captured_from_the_player_the_build_ships(tmp_path, monke
     for name in ("night", "day"):
         assert os.path.exists(os.path.join(out, "media", "console-%s.png" % name))
     # Night under a dark scheme, Day (the <img>) otherwise.
-    assert re.search(r'<source media="\(prefers-color-scheme: dark\)" '
+    assert re.search(r'<source id="still-night" media="\(prefers-color-scheme: dark\)" '
                      r'srcset="media/console-night.png">', html)
     assert 'src="media/console-day.png"' in html
 
 
 def test_no_player_is_loaded_before_the_click(tmp_path, monkeypatch):
     _, html = _site(tmp_path, monkeypatch, _fake_capture([]))
-    markup, script = html.split("<script>", 1)
+    markup, script = html.split("<body>", 1)[1].split("<script>", 1)
     assert "<iframe" not in markup and "player/" not in markup
     assert 'id="try"' not in html, "the Try it section is folded into the hero"
     # The start is a button (Enter works) and the tabs wait for it.
@@ -94,8 +94,10 @@ def test_the_console_starts_as_the_stills_were_taken(tmp_path, monkeypatch):
     assert 'data-tier="desktop" data-q="?desktop=1"' in html
     assert build.STILL_QUERY == ("?desktop=1&start=1&edit=moybyte.star_catcher.moy"
                                  "&tab=code&play=1")
-    # The capture fails unless the Editor is a window and its game plays.
+    # The capture fails unless the Editor is a window, its game plays and the
+    # game's frame is clean on both sides of the shot (no catch flash).
     assert "s.wins.menu[2] < 1024" in build.STILL_STATE
+    assert "__stillClean()" in build.STILL_STATE and "__stillClean()" in build.STILL_WAIT
     assert "'desktop' in s.wins" in build.STILL_STATE
 
 
@@ -108,3 +110,24 @@ def test_a_failed_capture_stops_the_build(tmp_path, monkeypatch):
 
 def test_the_hero_gif_is_gone():
     assert not os.path.exists(os.path.join(ROOT, "site", "hero.gif"))
+
+
+def test_one_scheme_drives_the_page_the_still_and_the_console(tmp_path, monkeypatch):
+    """The page's scheme is <html data-scheme>, set before the first paint
+    from the visitor's remembered switch or the system's scheme; the CSS, the
+    still's night source and the console's ?scheme= all read it, and the
+    switch's flip restarts a running console. Without script the CSS and the
+    still follow the system's scheme alone."""
+    _, html = _site(tmp_path, monkeypatch, _fake_capture([]))
+    head = html.split("<style>", 1)[0]
+    assert "documentElement.dataset.scheme = s" in head
+    assert build.SCHEME_KEY in head
+    assert ':root[data-scheme="light"]{' in html
+    assert "@media (prefers-color-scheme: light){\n  :root:not([data-scheme]){" in html
+    assert '<button class="scheme" id="scheme" type="button" hidden>' in html
+    body = html.split("<body>", 1)[1]
+    assert '"&scheme=" + document.documentElement.dataset.scheme' in body
+    assert 'getElementById("still-night")' in body
+    assert 'document.addEventListener("moyscheme"' in body
+    # The system's scheme is read in one place, the scheme script's.
+    assert body.count("matchMedia(") == 1
