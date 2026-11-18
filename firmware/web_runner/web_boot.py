@@ -48,7 +48,9 @@ JS contract (see worker.js):
     gpio_poll_json() / gpio_ack_json(ok, text) / gpio_off()
 """
 
+import gc
 import json
+from array import array
 
 import console
 import host_api
@@ -96,7 +98,8 @@ class _RunnerPump(PcmPump):
     Nothing is rendered while nothing sounds; the first chunk after that is
     `fresh`, a stream starting, not one the sink ran dry under. A frame's
     samples wait in `_buf` (`n` of them) for step_frame_json to hand the
-    worker their address."""
+    worker their address. A frame's pull allocates nothing: it runs every
+    frame a stream plays."""
 
     def __init__(self):
         PcmPump.__init__(self, _MIX_RATE_HZ)
@@ -109,7 +112,12 @@ class _RunnerPump(PcmPump):
         self.n = 0
         self.idle = True
         self.fresh = False
-        self._buf = bytearray(int(self.rate * _AUDIO_MAX_STEP) * 2 + 64)
+        self.at = 0                 # the samples take() handed over: the first's index
+        self.starts = False         # and whether they start a stream
+        self._target = int(out * _AUDIO_TARGET)
+        self._cap = int(out * _AUDIO_MAX_STEP)
+        self._buf = bytearray(self._cap * 2 + 64)
+        self._mv = memoryview(self._buf)
 
     def tick(self, dt):
         na = self._na
@@ -117,10 +125,9 @@ class _RunnerPump(PcmPump):
             self.idle = True
             return
         if self.played >= 0:
-            n = int(self.rate * _AUDIO_TARGET) - (self.sent + self.n - self.played)
-            cap = int(self.rate * _AUDIO_MAX_STEP)
-            if n > cap:
-                n = cap
+            n = self._target - (self.sent + self.n - self.played)
+            if n > self._cap:
+                n = self._cap
         else:
             n = self.frames(dt)
         room = len(self._buf) // 2 - self.n
@@ -131,20 +138,24 @@ class _RunnerPump(PcmPump):
         if self.idle:
             self.idle = False
             self.fresh = True
-        na.render_out(memoryview(self._buf)[self.n * 2:(self.n + n) * 2], n)
+        mv = self._mv
+        na.render_out(mv if self.n == 0 else mv[self.n * 2:], n)
         self.n += n
         self.rendered += n
 
     def take(self):
-        """This frame's samples for the sink: (count, first's index, fresh),
-        None when there are none or no sink."""
-        n, self.n = self.n, 0
+        """This frame's samples for the sink: their count, 0 when there are
+        none or no sink; `at` is the first's index and `starts` whether they
+        start a stream."""
+        n = self.n
+        self.n = 0
         if n <= 0 or self.played < 0:
-            return None
-        at = self.sent
+            return 0
+        self.at = self.sent
         self.sent += n
-        fresh, self.fresh = self.fresh, False
-        return n, at, fresh
+        self.starts = self.fresh
+        self.fresh = False
+        return n
 
 
 _MEDIA = []
@@ -459,6 +470,9 @@ def boot(carts_root=web_vfs.CARTS, cart=None, width=320, height=240,
     # publishes, so this is the single place the two tiers differ downstream.
     _S["canvas"] = sysc
     _S["driver"] = driver
+    au = ws.audio_out
+    _S["pump"] = au if isinstance(au, _RunnerPump) else None
+    _S["pcm_buf"] = None
     _S["sink"] = _PointerSink(driver)
     _S["root"] = carts_root
     _S["exit"] = ws.spine.exit_to_caller     # the real exit (reload_cart uses it)
@@ -660,12 +674,15 @@ def page_boot(carts_root, query_json, coarse=False, scheme=""):
       ?size=WxH    override the desk's panel size (1024x600)
       ?cart=NAME   that cart; a bundle of one cart names it without asking
       ?desktop=1   the desk even with a cart named
+      ?meter=1     the VM heap's allocation counted each frame (`_METER`)
     A single ?cart=<name> still implies handheld: that url is the one-cart
     player (moy export / the gallery), where a desk around one game is chrome
     nobody asked for. The served carts are the bundle's
     (`moy_sync.served_carts`), else the shelf's."""
     import moy_sync
     q = json.loads(query_json)
+    if q.get("meter"):
+        _METER[0] = 1
     names = moy_sync.served_carts()
     if names is None:
         names = json.loads(moy_sync.folders_json(carts_root))
@@ -990,48 +1007,103 @@ def fb_len():
     return len(_S["canvas"]._buf)
 
 
+# The VM heap's allocation, counted on a page that asks (?meter=1) for a
+# harness to read (`state_json`'s `alloc`): `step` the bytes the frames'
+# steps allocated over `frames` of them, `loop` what the worker's loop
+# allocated between two steps (its pumps, the store's sweep, the answers it
+# hands in) over `gaps` of them. An interval a collection ran in shrinks the
+# heap and is not counted. Off, it costs a list read a frame: each count is
+# a walk of the heap's allocation table (gc.mem_alloc).
+_METER = [0]
+_ALLOC = {"step": 0, "frames": 0, "loop": 0, "gaps": 0, "at": 0}
+
+
 def step_frame_json(dt, played=-1):
+    """Advance the console one frame (`_step`), metered where `_METER`."""
+    if not _METER[0]:
+        return _step(dt, played)
+    m = _ALLOC
+    a0 = gc.mem_alloc()
+    if m["at"] and a0 >= m["at"]:
+        m["loop"] += a0 - m["at"]
+        m["gaps"] += 1
+    r = _step(dt, played)
+    a1 = gc.mem_alloc()
+    if a1 >= a0:
+        m["step"] += a1 - a0
+        m["frames"] += 1
+    m["at"] = a1
+    return r
+
+
+def _step(dt, played):
     """Advance the console one frame.
 
     Returns "" when the console skipped the redraw (#44 dirty gate: nothing
-    moved) and there are no samples to ship -- the page then simply keeps the
-    pixels it already has. Otherwise a small JSON string carrying what does not
-    live in the framebuffer: whether it painted, the cart title, the input
-    hint, and this frame's samples: `pcm` of them at heap address `pa`, `at`
-    the first's index in the stream and `fresh` whether it starts one
-    (_RunnerPump.take). `played` is the page's sink's count of samples
-    played (-1 = no sink): _RunnerPump tops its depth up from it.
+    moved) -- the page then simply keeps the pixels it already has. Otherwise
+    a small JSON string carrying what does not live in the framebuffer:
+    whether it painted, the cart title and the input hint. `played` is the
+    page's sink's count of samples played (-1 = no sink): _RunnerPump tops
+    its depth up from it.
 
-    The PIXELS and the SAMPLES are not in here. The worker reads them from
-    fb_addr()/fb_len() when `paint` is set, and from `pa` when `pcm` is.
+    The PIXELS and the SAMPLES are not in here. The worker reads the pixels
+    from fb_addr()/fb_len() when `paint` is set, and this frame's samples
+    from the four numbers at pcm_addr() (`_PCM`): how many, their index in
+    the stream, whether they start one and their heap address. A frame that
+    only moves samples (a station playing on behind a still desk) returns ""
+    and allocates nothing here.
     """
     ws = _S["ws"]
-    au = getattr(ws, "audio_out", None)
-    if au is not None and hasattr(au, "played"):
+    au = _S.get("pump")
+    if au is not None:
         au.played = int(played)
+        pulled = au.rendered
     painted_before = ws.frame_state.frames_drawn
-    pulled = au.rendered if au is not None and hasattr(au, "rendered") else None
     _feed_events()
     _S["driver"].frame(dt)
     painted = ws.frame_state.frames_drawn != painted_before
-    if pulled is not None and au.rendered == pulled and _media_open():
-        # The media stream sounds with no Player pulling the mix (the shell,
-        # an app): a board's feeder task pulls it, the page's frame here.
-        au.tick(dt)
-    took = au.take() if (au is not None and hasattr(au, "take")) else None
-    if not painted and took is None:
+    pcm = _PCM
+    pcm[0] = 0
+    if au is not None:
+        if au.rendered == pulled and _media_open():
+            # The media stream sounds with no Player pulling the mix (the
+            # shell, an app): a board's feeder task pulls it, the page's
+            # frame here.
+            au.tick(dt)
+        n = au.take()
+        if n:
+            pcm[0] = n
+            pcm[1] = au.at
+            pcm[2] = 1 if au.starts else 0
+            pcm[3] = _pcm_buf(au)
+    if not painted:
         return ""
-    out = {
-        "paint": 1 if painted else 0,
+    return json.dumps({
+        "paint": 1,
         "cart": _cart_title(),
         "input": web_input.effective_input_kinds(ws),
-    }
-    if took is not None:
+    })
+
+
+# This frame's samples, as step_frame_json leaves them for the worker: their
+# count (0: none), the first's index in the stream, 1 where they start one,
+# and the heap address they wait at (_RunnerPump._buf). Doubles, so a count
+# of samples past 2**31 reads true.
+_PCM = array("d", (0, 0, 0, 0))
+
+
+def pcm_addr():
+    """Where `_PCM` lives in the heap, for the worker to read each frame."""
+    import uctypes
+    return uctypes.addressof(_PCM)
+
+
+def _pcm_buf(au):
+    a = _S.get("pcm_buf")
+    if a is None:
         import uctypes
-        out["pcm"], out["at"] = took[0], took[1]
-        out["fresh"] = 1 if took[2] else 0
-        out["pa"] = uctypes.addressof(au._buf)
-    return json.dumps(out)
+        a = _S["pcm_buf"] = uctypes.addressof(au._buf)
+    return a
 
 
 def _edit_state(ws):
@@ -1085,8 +1157,9 @@ def state_json():
     the store's sync (`sync`: the batches its far end has taken, and whether
     one is on its way), the Terminal's grid as lines (`term`, None before
     it first opens), the media stream's `now()` (`media`, None with no run)
-    and how its last run ended (`media_last`, dev_media.last), for a harness
-    driving the page
+    and how its last run ended (`media_last`, dev_media.last), the heap's
+    allocation where the page meters it (`alloc`, step_frame_json's), for a
+    harness driving the page
     (`window.__moyState()`)."""
     import dev_channel
     st = dev_channel._remote_state(_S["ws"])
@@ -1107,6 +1180,7 @@ def state_json():
     au = getattr(_S["ws"], "audio_out", None)
     st["pcm"] = {"rate": au.rate, "sent": au.sent, "played": au.played} \
         if hasattr(au, "sent") else None
+    st["alloc"] = dict(_ALLOC) if _METER[0] else None
     try:
         import dev_media
         st["media"] = dev_media.now()

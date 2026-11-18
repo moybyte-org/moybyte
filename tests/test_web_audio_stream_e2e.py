@@ -14,6 +14,9 @@ next paint, samples and all, and the pull, steered by a depth that did not
 count them, drained the decoder faster than real time until a live stream's
 lead ran out.
 
+And metered (?meter=1), the station's frames and the loop around them
+allocate no more than a stated bound of the VM's heap.
+
 What is read: the sink's counters (`__moyState().sink`), the pull's
 (`state.pcm`: samples sent, the sink's played), the decoder's (`media`:
 `decoded`, `pulled`, `starved`), and the page's output itself, tapped after
@@ -104,7 +107,7 @@ def _music_station(url):
                            " && s.sink && s.sink.played > 0)", "timeout": 20000}])
 
 
-def _run(tmp_path, name, steps, page_sink):
+def _run(tmp_path, name, steps, page_sink, query="?dev=1&desktop=1"):
     station = web_station.LiveStation()
     server, base = web_e2e.serve(web_e2e.DIST, web_e2e.free_port())
     env = None
@@ -113,7 +116,7 @@ def _run(tmp_path, name, steps, page_sink):
         env = {"MOY_CHROME_ARGS": json.dumps(["--host-resolver-rules=MAP %s 127.0.0.1" % INSECURE])}
     try:
         out, js = web_e2e.run(
-            tmp_path, name, "?dev=1&desktop=1",
+            tmp_path, name, query,
             [{"wait": 2500}] + _music_station(station.base + "/live") + [{"js": TAP}]
             + steps(station),
             base, tmp_path / "chrome", boot_ms=40000,
@@ -199,3 +202,38 @@ def test_a_page_sink_starved_on_purpose_plays_silence_and_counts_the_underrun(tm
     assert b["sink"]["dup"] == 0 and b["sink"]["gap"] == 0, b["sink"]
     # and the wait it starved through is its longest
     assert b["sink"]["lull"] >= 500 and a["sink"]["lull"] < 500, (a["sink"], b["sink"])
+
+
+# The VM heap's allocation while the station plays on behind the desk, as the
+# page meters it (?meter=1, web_boot.step_frame_json). A frame's step (the
+# console's frame, the pull, the media face's pump) keeps what the boards'
+# own frame keeps nothing of: the browser's VM boxes every float, the face's
+# status is a tuple each pump, and the key and pointer routing over the desk's
+# windows answers in objects. The worker's loop around the steps is the
+# store's sweep once a second (moy_sync.StoreWatcher.sweep: every file's name
+# and stat, its bytes read only where they changed) and what its pumps hand
+# across. The bounds keep the VM's 4 MB collect threshold half a minute away.
+STEP_ALLOC_MAX = 768            # bytes a frame
+LOOP_ALLOC_MAX = 160 * 1024     # bytes a second
+
+
+def test_a_station_playing_on_behind_the_desk_allocates_within_its_bounds(tmp_path):
+    """Twenty seconds of the station playing behind a still desk, metered:
+    the frames' steps allocate at most STEP_ALLOC_MAX each and the loop
+    around them LOOP_ALLOC_MAX a second."""
+    snap = ("__moyState().then(s => 'SNAP ' + JSON.stringify({t: performance.now() / 1000,"
+            " alloc: s.alloc, media: s.media, sink: s.sink}))")
+    steps = lambda station: [                                   # noqa: E731
+        {"wait": 3000}, {"js": snap}, {"wait": 20000}, {"js": snap}]
+    out, snaps = _run(tmp_path, "alloc", steps, False, "?dev=1&desktop=1&meter=1")
+    assert len(snaps) == 2, out[-3000:]
+    a, b = snaps[0]["alloc"], snaps[1]["alloc"]
+    assert snaps[1]["media"]["state"] == "playing", snaps[1]["media"]
+    wall = snaps[1]["t"] - snaps[0]["t"]
+    frames = b["frames"] - a["frames"]
+    step = (b["step"] - a["step"]) / max(frames, 1)
+    loop = (b["loop"] - a["loop"]) / wall
+    print("%d frames in %.1f s: a step %.0f B, the loop %.0f B/s" % (frames, wall, step, loop))
+    assert frames > 5 * wall, (frames, wall)
+    assert step <= STEP_ALLOC_MAX, (step, a, b)
+    assert loop <= LOOP_ALLOC_MAX, (loop, a, b)

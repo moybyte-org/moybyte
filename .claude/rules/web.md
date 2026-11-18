@@ -291,6 +291,15 @@ nor those docs will warn you about:
   - **The page's frame pulls the mix while a stream plays** (`web_boot`'s
     step ticks `_RunnerPump` when no Player did): a board's feeder task
     pulls it whatever runs, and on the web nothing else would.
+  - **A station playing on behind a still desk allocates little a frame**:
+    the step leaves the frame's samples as four numbers at `pcm_addr()`
+    (`web_boot._PCM`) and returns "" unless it painted, the pull and the
+    media face's feed reuse their buffers, and the page's reader finds a
+    segment's growth by reading it, not by a stat. The browser's VM boxes
+    every float, which a board's does not. `?meter=1` counts the heap's
+    allocation each frame (`__moyState().alloc`), and
+    `tests/test_web_audio_stream_e2e.py` holds a station's frames and the
+    loop around them to a stated bound.
   - **A station without CORS headers cannot be read**, and from the page
     that looks like no network; a `no-cors` fetch that answers tells them
     apart, and the face fails the entry with EACCES. A page on https asks

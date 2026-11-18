@@ -267,18 +267,27 @@ function longest(k, ms) {
     LOOP[k + "At"] = sinkRate ? Math.round(Math.max(0, played) * 1000 / sinkRate) / 1000 : 0;
 }
 // A frame's samples, read out of the wasm heap where the pull rendered them,
-// to the sink.
-function shipPCM(f) {
-    if (!sink) return;
-    const n = f.pcm, b = new Int16Array(n);
-    new Uint8Array(b.buffer).set(mp._module.HEAPU8.subarray(f.pa, f.pa + 2 * n));
-    const c = { p: b, at: f.at, fresh: f.fresh }, now = performance.now();
-    if (f.fresh) LOOP = { frame: 0, frameAt: 0, step: 0, stepAt: 0, gc: 0, gcAt: 0,
+// to the sink: step_frame_json leaves their count, the first's index, whether
+// they start a stream and their address at `pcmAt` (web_boot._PCM, four
+// doubles), so a frame that only moves samples crosses back with no string.
+// Answers whether there were any.
+let pcmAt = 0;
+function shipPCM() {
+    const heap = mp._module.HEAPU8;
+    const r = new Float64Array(heap.buffer, pcmAt, 4);
+    const n = r[0];
+    if (!n) return false;
+    if (!sink) return true;
+    const at = r[1], fresh = r[2], pa = r[3], b = new Int16Array(n);
+    new Uint8Array(b.buffer).set(heap.subarray(pa, pa + 2 * n));
+    const c = { p: b, at: at, fresh: fresh }, now = performance.now();
+    if (fresh) LOOP = { frame: 0, frameAt: 0, step: 0, stepAt: 0, gc: 0, gcAt: 0,
                           ship: 0, shipAt: 0, heard: 0, heardAt: 0 };
     else if (LOOP) longest("ship", now - waitFrom.ship);
     waitFrom.ship = now;
     if (sink === "page") self.postMessage(Object.assign({ t: "pcm" }, c), [b.buffer]);
     else sink.postMessage(c, [b.buffer]);
+    return true;
 }
 // Framebuffer ping-pong. A painted frame is copied out of the wasm heap into a
 // plain ArrayBuffer and TRANSFERRED to the page (zero-copy handoff); the page
@@ -1445,9 +1454,10 @@ async function init(search, coarse, channel, scheme, signin, rate) {
         + "update_poll_json, update_wants_poll, update_ack_json, update_off, "
         + "services_json, carts_poll_json, carts_event_json, "
         + "import_p8_json, import_archive_json, export_cart, drop_kind, "
-        + "edit_cart, open_cart, state_json, "
+        + "edit_cart, open_cart, state_json, pcm_addr, "
         + "term_enable, term_poll_json, term_feed, term_state");
     step = mp.globals.get("step_frame_json");
+    pcmAt = mp.globals.get("pcm_addr")();
     applyEvents = mp.globals.get("apply_events_json");
     assets = mp.globals.get("assets_json");
     reload = mp.globals.get("reload_cart");
@@ -2421,14 +2431,12 @@ function loop() {
         WP.n++; WP.sum += _d; if (_d > WP.max) { WP.max = _d; WP.maxB = s ? s.length : 0; }
         if (_d > 20) WP.slow++;
         if (LOOP) longest("step", _d);
-        if (s) { WP.painted++; WP.bytes += s.length; }
-        if (s) {
-            if (s.indexOf('"pcm"') >= 0) { shipPCM(JSON.parse(s)); sincePcm = 0; }
-            shipFrame(s);
-        }
+        const sounded = shipPCM();
+        if (s) { WP.painted++; WP.bytes += s.length; shipFrame(s); }
         // GC scheduling (see IDLE_QUIET_FRAMES). A painted frame re-arms the
-        // idle collect.
-        if (sincePcm < STREAM_FRAMES) sincePcm++;
+        // idle collect, and so does one within STREAM_FRAMES of shipped samples.
+        if (sounded) sincePcm = 0;
+        else if (sincePcm < STREAM_FRAMES) sincePcm++;
         if (s || sincePcm < STREAM_FRAMES) { quietStreak = 0; idleCollected = false; }
         else { quietStreak++; }
         if (idleCollect && quietStreak >= IDLE_QUIET_FRAMES && !idleCollected) {

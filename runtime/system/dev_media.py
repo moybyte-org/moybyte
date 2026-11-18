@@ -136,7 +136,7 @@ _STEP = _N is not None and getattr(_N, "TASK", 1) == 0     # no task: the C's jo
 # The run the face follows and what the face's wake holds for it.
 _s = {"pid": 0, "wake": None, "every": 0, "file": None, "gen": 0, "eof": False,
       "sized": False, "fed": False, "radio": 0}
-_buf = [None]
+_buf = [None]                   # the feed's buffer, a memoryview made once
 _HEARD = [None]                 # the console's fn(), told when the face finds a run
 
 
@@ -452,16 +452,18 @@ def _feed(gen, room, at):
         _s["file"] = net.open(src, at) if at else net.open(src)
     if _s["eof"] or _s["file"] is None:
         return
-    if _buf[0] is None:
-        _buf[0] = bytearray(FEED_MAX)
-    mv = memoryview(_buf[0])
+    mv = _buf[0]
+    if mv is None:
+        mv = _buf[0] = memoryview(bytearray(FEED_MAX))
     f = _s["file"]
-    for _ in range(4):
+    k = 4
+    while k:
+        k -= 1
         want = min(FEED_MAX, room)
         if want <= 0:
             return
         try:
-            n = f.readinto(mv[:want])
+            n = f.readinto(mv if want == FEED_MAX else mv[:want])
         except OSError as e:
             _ended(gen, (e.args[0] if e.args and isinstance(e.args[0], int) else 0) or EIO)
             return
@@ -480,11 +482,11 @@ def _feed(gen, room, at):
             icy = getattr(f, "icy", None)
             if icy is not None:
                 _N.feed_icy(gen, icy[0], icy[1] or "")
-        k = _N.feed(gen, mv[:n])
-        room -= max(k, 0)
-        if k < n:
-            if k >= 0 and hasattr(f, "seek"):
-                f.seek(k - n, 1)
+        took = _N.feed(gen, mv if n == FEED_MAX else mv[:n])
+        room -= max(took, 0)
+        if took < n:
+            if took >= 0 and hasattr(f, "seek"):
+                f.seek(took - n, 1)
             return
 
 
