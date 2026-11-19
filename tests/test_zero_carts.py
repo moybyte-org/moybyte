@@ -287,6 +287,33 @@ def test_a_boot_clears_the_stage_an_install_a_reset_cut_left(tmp_path):
     assert zero_host.recover_installs(str(carts)) == 0
 
 
+def test_a_boot_holds_the_record_to_the_folders_a_page_s_delete_left(tmp_path):
+    """The page's delete over the sync wire (moy_sync_apply.c's `dc`) records
+    the removal and leaves `installed.json` as it was; the Zero's next boot
+    holds the record to the carts folder, as a console's boot does
+    (moy_seed.keep_record), so the add-on's entry does not outlive it."""
+    import zero_host
+    from runtime.moy_sync import apply_ops
+    carts = tmp_path / "moy" / "carts"
+    root = str(carts)
+    addon = web_addon.PREFIX + "0123456789ab.moy"
+    for folder in (addon, "pong.moy"):
+        (carts / folder).mkdir(parents=True)
+        (carts / folder / "manifest.json").write_text("{}")
+    entry = {"id": "x", "index": "", "name": "x", "version": 1, "module": "",
+             "files": {}}
+    ci.save_record(root, {addon: dict(entry), "pong.moy": dict(entry)})
+
+    applied, errors, _ = apply_ops(root, [{"p": addon, "dc": 1}])
+    assert (applied, errors) == (1, [])
+    assert moy_carts.addon_removed(root)
+    assert sorted(ci.load_record(root)) == ["pong.moy", addon]
+
+    zero_host.sweep_carts(root)
+    assert sorted(ci.load_record(root)) == ["pong.moy"]
+    assert moy_carts.addon_removed(root), "the removal holds"
+
+
 # -- the page's half: Get Carts asking the board ------------------------------------
 
 
