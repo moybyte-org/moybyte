@@ -199,7 +199,9 @@ library over that wait. Three kernel pieces carry it, every tier's alike:
   is a wake: from a poll of its event descriptor's return to its next poll
   of it, less what its calls waited for the VM's task (a WASI command's
   session calls, an ELF service's hops); a suspended program's poll waits
-  unserved until it is resumed. A compiled service's wake that never polls
+  unserved until it is resumed. A program with a screen the console shows
+  (a WASI or native app in the Player) is struck by aborts alone: its wakes
+  are the frames the console asks for. A compiled service's wake that never polls
   again is struck by a watchdog (`moy_os_watch`, `moy_wasi_watch`: on a
   board a job of the kernel loop's once a frame while a service lives, at
   the scheduler's poll elsewhere), once for each

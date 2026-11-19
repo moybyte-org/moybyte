@@ -13,8 +13,13 @@
 //   MOY_SUPER_STRIKES strikes  the process is SUSPENDED: its tier serves none
 //                              of its wakes until moy_super_resume
 //
-// The system (pid 0 and 1) is never struck. A charge within the slice and
-// not aborted is not a call a tier makes: it changes nothing. The rows are
+// The system (pid 0 and 1) is never struck. A program whose screen the
+// console shows (moy_screen_slot.h: a WASI or native app in the Player) is
+// struck only by its tier's aborts: each of its wakes draws a frame the
+// console asked for, a frame of the console's pace and not a background
+// callback, and its time on the clock is the time its task was given, which
+// a loaded console takes from it. A charge within the slice and not
+// aborted is not a call a tier makes: it changes nothing. The rows are
 // keyed by pid, the oldest forgotten when MOY_SUPER_ROWS are taken; a new
 // start is a new pid, so its rungs start afresh. Any task may call.
 

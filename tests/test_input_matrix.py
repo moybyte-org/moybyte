@@ -660,6 +660,32 @@ def test_a_linked_toolkit_lends_no_bar_beside_an_open_lua_run(tmp_path, monkeypa
         pytest.skip("no WASI or ELF build here")
 
 
+def test_an_app_on_screen_is_not_struck_for_slow_frames(tmp_path, monkeypatch, built):
+    """A WASI or native app's wake is a frame the console asked for, so its
+    wakes over the supervisor's slice (native/moy_kernel/moy_super.h),
+    which a loaded host gives an interpreted frame, neither strike nor
+    suspend it: a suspended app takes no input, and its page stands."""
+    from runtime import moy_evq
+    ran = 0
+    for layer in ("wasm_app", "elf_app"):
+        if isinstance(built[(layer, "dialog")], Exception):
+            continue
+        rig = Rig(tmp_path / layer, layer, "dialog", monkeypatch, built)
+        try:
+            pid = rig.ws.run.player.pid
+            for _ in range(4):          # a warning, then the three strikes that suspend
+                moy_evq.charge(pid, 30000, False)
+            assert not moy_evq.held(pid), layer
+            before = rig.shot()
+            gesture(rig, "desk_kbd", "choose")
+            assert rig.shot() != before, "%s: the dialog took no choose" % layer
+        finally:
+            rig.ws.spine.exit()
+        ran += 1
+    if not ran:
+        pytest.skip("no WASI or ELF build here")
+
+
 @pytest.mark.parametrize("layer,row,col", CELLS, ids=["-".join(c) for c in CELLS])
 def test_cell(tmp_path, monkeypatch, built, layer, row, col):
     what = GESTURES[row][col]
