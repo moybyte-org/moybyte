@@ -253,6 +253,9 @@ class _Hosted:
         try:
             h.draw_next = draw
             h.update(dt)
+            show = getattr(h, "draw", None) if draw else None
+            if show is not None:
+                show()          # a run that shows its frame apart (a native one)
         finally:
             ws.run = back
             if q is not getattr(inp, "cart_quit", False):

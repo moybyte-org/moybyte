@@ -233,7 +233,11 @@ def test_settings_switch_runs_the_native_module_and_remembers(tmp_path):
         ws.spine.exit()
 
 
-def test_sakura_c_is_a_wallpaper_on_both_targets(tmp_path):
+def test_sakura_c_is_a_wallpaper_on_both_targets(tmp_path, monkeypatch):
+    import elf_run
+    shown = []
+    draw = elf_run.ElfGame._draw
+    monkeypatch.setattr(elf_run.ElfGame, "_draw", lambda g: (shown.append(g._shown), draw(g)))
     ws = _ws(tmp_path, SAKURA, "moybyte.sakura_c.moy")
     try:
         drv = make_drv(ws)
@@ -246,6 +250,8 @@ def test_sakura_c_is_a_wallpaper_on_both_targets(tmp_path):
                 seen.add(bytes(ws.wallpaper._wp_run.run.canvas._buf))
             assert type(ws.wallpaper._wp_run.h).__name__ == kind
             assert len(seen) > 1                    # the petals fall
+            assert all(len(set(px)) > 16 for px in seen)    # over the tree's picture
+            assert (True in shown) == opted     # the native frame reaches the canvas
             ws.look.select_wallpaper(None, persist=False)
             assert ws.wallpaper._wp_run is None
             assert ws.run.player.cart_error is None if ws.run.player else True
