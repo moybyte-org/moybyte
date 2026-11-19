@@ -270,7 +270,8 @@ typedef struct {
     moy_tick_t *tick;
     uint32_t flags;
     uint32_t start_ms;
-    int32_t ptr[3];                 // x, y, the touch() flags
+    int32_t ptr[3];                 // x, y, the touch() flags; the press edge
+                                    // (4) kept until a tick reads it
     int32_t face;                   // the console's: how its ui frame draws
     int32_t room[4];                // the console's: an app's ui frame (w 0: the canvas)
     uint32_t upc0[MOY_UPC_CLASSES];
@@ -531,7 +532,9 @@ int moy_play_input(uint32_t run, const moy_play_in_t *in) {
     }
     r->ptr[0] = in->x;
     r->ptr[1] = in->y;
-    r->ptr[2] = in->touch;
+    // A paced run takes no tick on some frames: the press edge such a frame
+    // carries waits for the next tick, as a button's does (moy_input_tick_edges).
+    r->ptr[2] = in->touch | (r->ptr[2] & 4);
     r->face = in->face;
     memcpy(r->room, in->room, sizeof(r->room));
     return MOY_PLAY_OK;
@@ -685,6 +688,7 @@ int moy_play_frame(uint32_t run, uint8_t ticks, float dt, bool render, uint32_t 
         if (snap != NULL) {
             refresh(r, snap);
         }
+        r->ptr[2] &= ~4;                // one tick reads one press edge
         if (r->reseed) {
             moy_match_t *mm = moy_match_kernel();
             if (mm != NULL && mm->s.live) {
@@ -1044,7 +1048,7 @@ int moy_play_front_frame(uint32_t now, uint32_t dt_us) {
         bool in = F.ops->map(F.ops->ctx, &x, &y);
         r->ptr[0] = x;
         r->ptr[1] = y;
-        r->ptr[2] = (in && smp.down ? 3 : 0) | (in && smp.edge ? 4 : 0);
+        r->ptr[2] = (in && smp.down ? 3 : 0) | (in && smp.edge ? 4 : 0) | (r->ptr[2] & 4);
     }
     // The ticks: the match's clock, the tick model's plan, or the loop's.
     float dt = (float)dt_us / 1000000.0f;

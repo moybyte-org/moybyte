@@ -65,7 +65,8 @@
 // a paced run notes its costs into; `open` asks the row whether its runtime
 // is open. `frame` runs the ticks the tick model planned: each takes the
 // latched press edges (a paced run), fills the snapshot the cart reads from
-// the input table and the pointer `input` published, runs the row's tick,
+// the input table and the pointer `input` published (its press edge kept
+// until a tick reads it, so a frame that runs none loses no tap), runs the row's tick,
 // notes its update half, and plays the audio it queued straight into the
 // session; a quit() ends the frame where it stands. `end` closes the books:
 // the run's upcalls by class since its launch, kept with its info for `state`,

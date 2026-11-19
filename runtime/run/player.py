@@ -184,6 +184,7 @@ class Player(PlayerDiag):
     ws.run.player.update/... is byte-for-byte unchanged; they are reset per run in start()."""
 
     play = None                      # the run's frame in C: Pace.bind
+    press_owed = False               # a pointer press waiting for a logic tick
     stack_pre = None                  # the task's stack mark before the open: start
     # The task manager's accounting (runtime/shell/procs.py, `Procs.account`):
     # the microseconds this run's `_update` and `_draw` took since the last
@@ -1429,14 +1430,26 @@ class Player(PlayerDiag):
         if play is not None:
             if self.keyp_latch:
                 self.keyp_latch = 0
-            if n:
-                play(n, dt, draw)
+            # A frame with no tick still hands the run the pointer, whose
+            # press edge then waits for the next tick (native/moy_play).
+            play(n, dt, draw if n else False)
             return
         upd = self.update
         lua = self.lua
         fs = self._lua_split
         te = self.tick_edges
         inp = self.ws.input
+        # The pointer's press edge on a frame with no tick waits for the next
+        # one, as moy_play's latch keeps it where the kernel drives the run.
+        gp = getattr(inp, "game_pointer", None)
+        if not n:
+            if gp is not None and gp[2]:
+                self.press_owed = True
+            return
+        if self.press_owed:
+            self.press_owed = False
+            if gp is not None and not gp[2]:
+                inp.game_pointer = (gp[0], gp[1], True, len(gp) > 3 and gp[3])
         sched = self.sched
         i = 0
         while i < n:

@@ -871,6 +871,24 @@ def _player_with(lua, fused_cost):
     return p
 
 
+def test_a_press_on_a_frame_with_no_tick_waits_for_the_next_tick():
+    """A paced run takes no tick on some of the console's frames: the press
+    a frame like that publishes reaches the next tick, and that tick alone
+    (the Player's own ticks; native/moy_play keeps it where the kernel's
+    Player drives the run)."""
+    p = _player_with(None, fused_cost=0)
+    inp = p.ws.input
+    seen = []
+    p.update = lambda dt: seen.append(inp.game_pointer[2])
+    inp.game_pointer = (60, 70, True, True)
+    p._run_ticks(0, 1 / 30.0, True)
+    inp.game_pointer = (60, 70, False, True)
+    p._run_ticks(1, 1 / 30.0, True)
+    inp.game_pointer = (60, 70, False, True)
+    p._run_ticks(2, 1 / 30.0, True)
+    assert seen == [True, False, False]
+
+
 def test_a_fused_runtime_reports_its_LOGIC_half_to_the_scheduler():
     """The bug this pins, measured on a T-Deck 2026-09-10. moycore runs
     _update and _draw inside one call, so the loop's clock reads logic PLUS

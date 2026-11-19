@@ -570,6 +570,10 @@ int hl_play_frame(uint32_t run, int ticks, float dt, int render, int x, int y, i
         *out = 0;
         return rc;
     }
+    if (ticks <= 0) {
+        *out = 0;                       /* the pointer alone (modmoy_play.c's frame) */
+        return MOY_PLAY_OK;
+    }
     return moy_play_frame(run, (uint8_t)ticks, dt, render != 0, out);
 }
 
