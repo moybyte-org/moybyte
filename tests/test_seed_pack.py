@@ -289,6 +289,37 @@ def test_a_seed_cart_the_kid_removed_stays_out_and_a_lost_one_comes_back(
     assert os.path.exists(root + "/" + lost + "/manifest.json")
 
 
+def test_the_zeros_boot_retires_the_folders_a_console_retires(tmp_path, monkeypatch):
+    """The Zero opens its store through the consoles' door (sweep_store): a
+    retired seed's folder goes once, before the seed, and a removal's record
+    and a kid's own cart stay."""
+    zero_host = _zero_host(tmp_path, monkeypatch)
+    mod = _fake_roster(monkeypatch)
+    root = str(tmp_path / "carts")
+    for folder in ("moybyte.moy_night.moy", "my_game.moy"):
+        os.makedirs(root + "/" + folder)
+        with open(root + "/" + folder + "/manifest.json", "w") as f:
+            f.write("{}")
+    assert "moybyte.moy_night.moy" in moy_seed.RETIRED_FOLDERS
+    kept = [n for n in (moy_carts.cart_folder(t, moy_carts.BUILTIN_NS)
+                        for t, _v, _b in mod.CARTS_Z) if moy_carts.removable(n)][0]
+    assert moy_carts.note_removed(root, kept)
+
+    assert zero_host.sweep_carts(root) == 1
+    assert zero_host.seed_carts(root) == len(mod.CARTS_Z) - 1
+    assert not os.path.exists(root + "/moybyte.moy_night.moy")
+    assert os.path.exists(root + "/my_game.moy/manifest.json")
+    assert moy_carts.load_removed(root) == [kept]
+    assert not os.path.exists(root + "/" + kept)
+    assert moy_seed.load_store_version(root) == (moy_seed.STORE_FORMAT,
+                                                 moy_seed.RETIRED_GEN)
+    os.makedirs(root + "/moybyte.moy_night.moy")
+    assert zero_host.sweep_carts(root) == 0, "once per generation"
+    import inspect
+    boot = inspect.getsource(zero_host.serve)
+    assert boot.index("sweep_carts(") < boot.index("seed_carts(")
+
+
 def test_a_newer_image_replaces_a_seed_cart_and_keeps_its_saves(tmp_path, monkeypatch):
     zero_host = _zero_host(tmp_path, monkeypatch)
     mod = _fake_roster(monkeypatch)

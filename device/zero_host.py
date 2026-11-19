@@ -1,5 +1,6 @@
 # Map (grep -n a name to jump there):
 #   identity                    this board's name and write PIN (/moy/zero.json)
+#   sweep_carts                 the store's door, as a console opens its store: retired seeds taken
 #   seed_carts                  the image's carts seeded as a console seeds them; seed_room
 #   recover_installs            an install a reset cut short, finished before the seed
 #   connect                     join the first saved network that answers
@@ -237,6 +238,28 @@ def _read_stamp(path):
             return f.read()
     except OSError:
         return None
+
+
+def sweep_carts(root=CARTS_DIR):
+    """The store opened as a console opens its own (moy_seed.sweep_store, the
+    one door): a store behind this image's format stepped, the folders of
+    retired seeds (moy_seed.RETIRED_FOLDERS, and the image's roster's bare
+    folders) taken once per generation, the board stamp checked. It writes no
+    line to `system/removed`. Returns the folders removed; a store it cannot
+    sweep is served as it is and swept on the next boot."""
+    try:
+        from carts_data import CARTS_Z
+    except ImportError:
+        CARTS_Z = None
+    try:
+        import moy_carts
+        gone = moy_carts.sweep_store(root, CARTS_Z)
+    except Exception as exc:             # noqa: BLE001 -- the store serves regardless
+        print("ZERO sweep: the store was not swept:", exc)
+        return 0
+    if gone:
+        print("ZERO sweep: %d retired folders removed" % gone)
+    return gone
 
 
 def seed_carts(root=CARTS_DIR):
@@ -976,6 +999,7 @@ def serve():
     # AP, and the first page served after that form is answered has carts behind
     # it rather than an empty shelf.
     recover_installs(CARTS_DIR)
+    sweep_carts(CARTS_DIR)
     seed_carts(CARTS_DIR)
     me = identity()
     name = me.get("name") or HOSTNAME

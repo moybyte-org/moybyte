@@ -158,7 +158,9 @@ them back on the next visit — but anything that existed *only* here is.
   console seeds its own (`zero_host.seed_carts`): present unless the kid
   removed one (`system/removed`, which the page's delete and Get Carts'
   remove write), a newer one in a new image replacing the store's with its
-  saves and config kept. The other system carts, but the test fixtures,
+  saves and config kept. Before the seed the store opens through the
+  consoles' door (`zero_host.sweep_carts`, `moy_seed.sweep_store`), which
+  takes the folders of retired seeds once per generation. The other system carts, but the test fixtures,
   are official carts the release publishes in `carts-xiao_zero.json`, which the page this board
   serves installs (`/official`, beside moybyte-org/carts'); after an update the board brings the ones
   it holds to the new release (`runtime/carts/web_addon.py`). The website's
