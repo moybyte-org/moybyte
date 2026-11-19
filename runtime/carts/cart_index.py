@@ -200,8 +200,19 @@ INDEX_KEYS = None             # the keys an index verifies against; None: the im
 # moybyte-org/carts' review key: ((modulus_hex, exponent), ...), the public
 # half of the key its CI signs index.json with (`tools/ota_sign.py
 # sign-index`); `tools/ota_sign.py keygen --out FILE` makes one and prints
-# its public half. Empty: no index is reviewed by it.
-REVIEW_KEYS = ()
+# its public half. The key itself is the CI secret MOYBYTE_REVIEW_KEY there.
+REVIEW_KEYS = (
+    (
+        'accd6a20281504cdd055ea6ad08414b31621608ddd9ee538af48c63394b81829'
+        'a27dc2d34f954d7b44a75a4c009de764fc28585de1e29fff0620c8f6b7421c13'
+        'fc602fbd80fcc37b47ecd901761fe385712c334d49ed1950b17c9d0fd1fbcae2'
+        'a3f4a758e7edf3dd820a66a595183d1243c8532e161a9c06b9ef70796b68f234'
+        '9410a174bebcd154474fbc610c64e86570332736786af0f2f0c20cee6e016bf7'
+        '61a50fc8827f29c2d2898a506419b9454a5b84590d0cc45d6655f27ec9b03cb0'
+        '7a2da538d4abd045233fa29f1f9d9cf546f2ca5050bedd2c02598262a201b09d'
+        'ec42c4bbef67d2565281a72cd2742979383d6f5b3926db2951ff1adff9ce068d',
+        65537),
+)
 STAGE_DIR = "install"
 RUNTIMES = ("wasm", "lua", "theme", "web")
 # The runtimes whose carts need no engine of this console's: a theme is data
