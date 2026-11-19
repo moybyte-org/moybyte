@@ -7,9 +7,10 @@
 //   the folders      a kind is the layer's name for one folder of `files/`:
 //                    drawings `Pictures/`, sprites `Pictures/Sprites/`, docs
 //                    `Documents/`, stories `Documents/Stories/`, music
-//                    `Music/`, recordings `Recordings/`. A kind's name is what
-//                    every verb and every caller takes; its folder is where it
-//                    lives on disk (moy_store_base.FILE_KIND_DIRS restates it).
+//                    `Music/`, recordings `Recordings/`, downloads
+//                    `Downloads/`. A kind's name is what every verb and every
+//                    caller takes; its folder is where it lives on disk
+//                    (moy_store_base.FILE_KIND_DIRS restates it).
 //   the kinds        drawings (.moyimg), docs (.md), sprites (.moygfx), music
 //                    (.moysong), and recordings and stories, one FOLDER an
 //                    item. Every verb validates its kind against them: another
@@ -17,6 +18,13 @@
 //                    loads, saves (its item made on need) and deletes (unkept)
 //                    by that name, and the item lists, renames, duplicates and
 //                    goes to the trash whole.
+//   a whole kind     downloads holds any file under its own WHOLE name, any
+//                    extension: a name is kept as it is given, never slugged,
+//                    and refused where it is no one file's (a `/` or `\`, a
+//                    leading dot, a control character, a store backup's
+//                    `.bak` or `.tmp`); a collision takes `_2` before its
+//                    extension. What a console nearby beamed lands there
+//                    (runtime/run/link_beam.py).
 //   the vault        docs holds notes and more: a `.py`, `.lua`, `.txt` or
 //                    `.json` is listed and addressed by its WHOLE name, a `.md`
 //                    by its stem, so `todo.txt` and `todo` never shadow each
@@ -80,7 +88,7 @@
 #define MOY_UF_NONE (-1)
 #define MOY_UF_BAD (-2)
 #define MOY_UF_NAME_MAX 255u        // a stored name's bytes
-#define MOY_UF_KINDS 6
+#define MOY_UF_KINDS 7
 #define MOY_UF_TRASH_KEEP 50u
 #define MOY_UF_HISTORY_KEEP 32u
 // The layout's names: the default root, and the folders and suffixes under it.
@@ -98,8 +106,8 @@
 
 // -- the kinds and the vault ------------------------------------------------------
 
-// Kind `i` (0 .. MOY_UF_KINDS - 1): its name, its extension ("" for the folder
-// kind), whether an item is a folder, its auto-name base. NULL past the last.
+// Kind `i` (0 .. MOY_UF_KINDS - 1): its name, its extension ("" for a folder
+// kind and the whole kind), whether an item is a folder, its auto-name base. NULL past the last.
 const char *moy_uf_kind(int i);
 const char *moy_uf_kind_ext(int i);
 int moy_uf_kind_folder(int i);

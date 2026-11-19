@@ -9,13 +9,17 @@
 """Files -- the kid file manager system app (#108), drawn with the public UI
 API's verbs (docs/ui_api_2026-10.md) and nothing under them.
 
-Places down the side (Projects, the shared folders Documents, Pictures and
-Music as they are named on disk, Themes once there are any, and the Trash),
-and the place's files in columns: each file's picture
+Places down the side (Projects, the shared folders Documents, Pictures,
+Music and Downloads as they are named on disk, Themes once there are any,
+and the Trash), and the place's files in columns: each file's picture
 (an icon by what it is; a project's cover, else its generated one), its
 Name (a project's title) and its Kind (docs/media/look_2026-10/DESIGN.md,
-Files). No paths and no extensions. The handheld shows the places, then a
-place's files, one page at a time; the desk shows both. A file's verbs
+Files). No paths, and no extensions outside Downloads, whose files keep the
+whole names they arrived under (a beam from a console nearby lands there,
+runtime/run/link_beam.py) and show their type as their Kind: one opens in
+the app that takes its type, as any file does, and nothing there runs. The
+handheld shows the places, then a place's files, one page at a time; the
+desk shows both. A file's verbs
 ride a foot bar under the list, at its right, the one Enter does last: OPEN
 in the owning app (Enter, or a second tap on the current row, does the
 same), OPEN WITH (the "open with" menu of the apps whose manifest opens the
@@ -55,6 +59,7 @@ THEMES = "themes"
 DOCUMENTS = "documents"
 PICTURES = "pictures"
 MUSIC = "music"
+DOWNLOADS = "downloads"
 TRASH = "trash"
 
 # The places, in the sidebar's order: key, label, icon, and the store kinds
@@ -66,6 +71,7 @@ PLACES = (
     (DOCUMENTS, "Documents", "notes", ("docs",)),
     (PICTURES, "Pictures", "paint", ("drawings", "sprites")),
     (MUSIC, "Music", "music", ("music", "recordings")),
+    (DOWNLOADS, "Downloads", "arrow_down", ("downloads",)),
     (THEMES, "Themes", "wallpaper", ()),
     (TRASH, "Trash", "trash", ()),
 )
@@ -77,6 +83,20 @@ KIND_OF = {
     "sprites": ("Sprites", "sprite"),
     "music": ("Song", "music"),
     "recordings": ("Recording", "music"),
+    "downloads": ("File", "doc"),
+}
+# A download's, by its extension: our formats and the vault's by name, any
+# other by its extension in capitals (KIND_OF's "File" where it has none).
+DOWNLOAD_KIND = {
+    ".md": ("Note", "notes"),
+    ".txt": ("Text", "doc"),
+    ".json": ("Data", "doc"),
+    ".py": ("Script", "cart_py"),
+    ".lua": ("Script", "cart_lua"),
+    ".moyimg": ("Drawing", "art"),
+    ".moygfx": ("Sprites", "sprite"),
+    ".moysong": ("Song", "music"),
+    ".png": ("Image", "art"),
 }
 # A project's, by its cart type.
 CART_KIND = {
@@ -112,6 +132,19 @@ def _cap(word):
     """`word` with its first letter in capitals: MicroPython's str has no
     `capitalize`."""
     return word[:1].upper() + word[1:]
+
+
+def kind_of(kind, name):
+    """What a `kind` file named `name` is called in the Kind column, and its
+    picture: a download's by its extension."""
+    if kind == DOWNLOADS:
+        ext = _modes.ext_of(name)
+        got = DOWNLOAD_KIND.get(ext)
+        if got is not None:
+            return got
+        if ext:
+            return ext[1:].upper()[:6], "doc"
+    return KIND_OF.get(kind, (_cap(kind), "doc"))
 
 
 def _folder_of(cart):
@@ -226,13 +259,16 @@ class FilesAppLayer(ListShellApp):
     # the other thing you do with one.
     SCRIPT_ACTIONS = ("RUN", "OPEN", "WITH", "NAME", "COPY", "DEL")
     PLAIN_ACTIONS = ("WITH", "NAME", "COPY", "DEL")     # kinds the shell opens no door to
+    # An arrival is opened (the door its type takes, through "open with";
+    # never RUN, whatever it is), sent on, or deleted to the Trash.
+    DOWNLOAD_ACTIONS = ("OPEN", "WITH", "DEL")
     PROJECT_ACTIONS = ("OPEN", "PLAY")
     THEME_ACTIONS = ("OPEN",)
     TRASH_ACTIONS = ("RESTORE", "EMPTY")
     # The kinds a row's SEND offers to a console nearby where this console
     # can beam (runtime/run/link_beam.py): a project as its cart, a file as
     # it is; recordings and stories are folders, which a beam does not carry.
-    SEND_KINDS = (PROJECTS, "docs", "drawings", "sprites", "music")
+    SEND_KINDS = (PROJECTS, "docs", "drawings", "sprites", "music", "downloads")
 
     def __init__(self, ctx, names):
         self.ctx = ctx
@@ -333,7 +369,7 @@ class FilesAppLayer(ListShellApp):
                 out.append((shown_name(folder), THEMES, "Theme", "wallpaper", folder))
         elif key == TRASH:
             for kind, name in self.trash:
-                label, icon = KIND_OF.get(kind, (_cap(kind), "doc"))
+                label, icon = kind_of(kind, name)
                 out.append((name, kind, label, icon, None))
         else:
             for k, _label, _icon, kinds in PLACES:
@@ -344,7 +380,7 @@ class FilesAppLayer(ListShellApp):
                     if err is not None:
                         continue
                     for name in names or ():
-                        label, icon = KIND_OF.get(kind, (_cap(kind), "doc"))
+                        label, icon = kind_of(kind, name)
                         if kind == "docs" and _modes.is_script(name):
                             label = "Script"
                             icon = "cart_lua" if name.endswith(".lua") else "cart_py"
@@ -417,6 +453,8 @@ class FilesAppLayer(ListShellApp):
         if self.place == TRASH:
             return self.TRASH_ACTIONS
         kind = self.sel_kind()
+        if kind == DOWNLOADS:
+            return self.DOWNLOAD_ACTIONS
         if kind == "drawings":
             return self.PICTURE_ACTIONS
         if kind == "docs":

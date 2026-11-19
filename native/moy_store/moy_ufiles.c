@@ -21,14 +21,15 @@ static const moy_htab_mem_t STORE_MEM = { moy_store_alloc, moy_store_free };
 
 static const struct {
     const char *name, *ext, *base, *dir;
-    uint8_t folder;
+    uint8_t folder, whole;
 } KINDS[MOY_UF_KINDS] = {
-    { "drawings", ".moyimg", "drawing", "Pictures", 0 },
-    { "docs", MOY_UF_DOC_EXT, "doc", "Documents", 0 },
-    { "sprites", ".moygfx", "sheet", "Pictures/Sprites", 0 },
-    { "music", ".moysong", "song", "Music", 0 },
-    { "recordings", "", "recording", "Recordings", 1 },
-    { "stories", "", "story", "Documents/Stories", 1 },
+    { "drawings", ".moyimg", "drawing", "Pictures", 0, 0 },
+    { "docs", MOY_UF_DOC_EXT, "doc", "Documents", 0, 0 },
+    { "sprites", ".moygfx", "sheet", "Pictures/Sprites", 0, 0 },
+    { "music", ".moysong", "song", "Music", 0, 0 },
+    { "recordings", "", "recording", "Recordings", 1, 0 },
+    { "stories", "", "story", "Documents/Stories", 1, 0 },
+    { "downloads", "", "download", "Downloads", 0, 1 },
 };
 #define DOCS 1
 
@@ -185,18 +186,49 @@ static int has_alnum(const char *s) {
     return 0;
 }
 
-// The extension a whole-named vault item keeps: its length, 0 for another
-// kind or name.
+// The extension a whole-named item keeps: its length, 0 for another kind or
+// name. A vault item's is one of VAULT_EXTS; a whole kind's is any, from its
+// last dot (a leading dot is none).
 static size_t whole_ext(int kind, const char *name) {
-    return kind == DOCS ? moy_uf_vault_ext(name) : 0u;
+    if (kind == DOCS) {
+        return moy_uf_vault_ext(name);
+    }
+    if (kind >= 0 && KINDS[kind].whole) {
+        const char *dot = strrchr(name, '.');
+        return dot != NULL && dot != name ? strlen(dot) : 0u;
+    }
+    return 0u;
+}
+
+// A whole kind's item name: one file's own name, never a path, a hidden name
+// or a control character.
+static int whole_name_ok(const char *name, size_t n) {
+    if (n == 0 || name[0] == '.' || moy_store_skip(name, n, 0)) {
+        return 0;
+    }
+    for (size_t i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)name[i];
+        if (c < 32u || c == 127u || c == '/' || c == '\\') {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 // A title slugged the kind's way into `out` (MOY_UF_NAME_MAX + 1): the
-// vault extension kept. BAD for a name too long.
+// vault extension kept; a whole kind's title kept as it is. BAD for a name
+// too long, or a whole kind's that names no one file.
 static int slug_item(int kind, const char *title, char *out) {
     size_t n = strlen(title), e = whole_ext(kind, title);
     if (n > MOY_UF_NAME_MAX) {
         return MOY_UF_BAD;
+    }
+    if (kind >= 0 && KINDS[kind].whole) {
+        if (!whole_name_ok(title, n)) {
+            return MOY_UF_BAD;
+        }
+        memcpy(out, title, n + 1u);
+        return 0;
     }
     size_t k = slug_into(title, n - e, out);
     memcpy(out + k, title + n - e, e);
@@ -621,6 +653,31 @@ static int ends_any(const char *name, size_t n, size_t nexts) {
     return 0;
 }
 
+// Whether listing entry `n` (`nl` bytes, a folder where `dir`) is an item of
+// `kind`, and the length of the name it is listed by (`*keep`).
+static int kind_item(int kind, const char *n, size_t nl, int dir, size_t *keep) {
+    const char *ext = KINDS[kind].ext;
+    size_t en = strlen(ext);
+    *keep = nl;
+    if (KINDS[kind].folder) {
+        return dir;
+    }
+    if (dir) {
+        return 0;
+    }
+    if (KINDS[kind].whole) {
+        return whole_name_ok(n, nl);
+    }
+    if (kind == DOCS && ends_any(n, nl, NVAULT)) {
+        return 1;
+    }
+    if (nl > en && memcmp(n + nl - en, ext, en) == 0) {
+        *keep = nl - en;
+        return 1;
+    }
+    return 0;
+}
+
 // The kind's items in `dir` with their mtimes from its listing,
 // sorted newest first, each entry's kind `kind`.
 static int kind_entries(const char *dir, int kind, entries_t *out) {
@@ -631,21 +688,11 @@ static int kind_entries(const char *dir, int kind, entries_t *out) {
     if (rc != 0 || missing) {
         return rc;
     }
-    const char *ext = KINDS[kind].ext;
-    size_t en = strlen(ext), nwhole = kind == DOCS ? NVAULT : 0u;
     for (size_t i = 0; i < raw.n && rc == 0; i++) {
         const char *n = raw.e[i].name;
-        size_t nl = strlen(n);
-        int dir = raw.e[i].dir;
-        int64_t mt = raw.e[i].mtime;
-        if (KINDS[kind].folder) {
-            if (dir) {
-                rc = entries_add(out, n, nl, mt, kind);
-            }
-        } else if (ends_any(n, nl, nwhole) && !dir) {
-            rc = entries_add(out, n, nl, mt, kind);
-        } else if (nl > en && memcmp(n + nl - en, ext, en) == 0 && !dir) {
-            rc = entries_add(out, n, nl - en, mt, kind);
+        size_t keep;
+        if (kind_item(kind, n, strlen(n), raw.e[i].dir, &keep)) {
+            rc = entries_add(out, n, keep, raw.e[i].mtime, kind);
         }
     }
     entries_free(&raw);
@@ -834,17 +881,10 @@ int moy_uf_count(const char *root, const char *kind, uint32_t *count) {
     int missing;
     rc = list_dir(d, &raw, &missing);
     if (rc == 0 && !missing) {
-        const char *ext = KINDS[k].ext;
-        size_t en = strlen(ext), nwhole = k == DOCS ? NVAULT : 0u;
-        for (size_t i = 0; i < raw.n && rc == 0; i++) {
+        for (size_t i = 0; i < raw.n; i++) {
+            size_t keep;
             const char *n = raw.e[i].name;
-            size_t nl = strlen(n);
-            if (KINDS[k].folder) {
-                *count += raw.e[i].dir;
-            } else if (ends_any(n, nl, nwhole)
-                       || (nl > en && memcmp(n + nl - en, ext, en) == 0)) {
-                (*count)++;
-            }
+            *count += (uint32_t)kind_item(k, n, strlen(n), raw.e[i].dir, &keep);
         }
         entries_free(&raw);
     }

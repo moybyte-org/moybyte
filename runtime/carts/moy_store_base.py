@@ -165,10 +165,12 @@ def _sibling_path(root, name):
 # (docs/os_2026-11/between_apps.md section 2); `files:<folder>` names one in
 # lower case. tests/test_userfiles_parity.py holds these to the C.
 FILES_DIR = "files"
-FILE_KIND_NAMES = ("drawings", "docs", "sprites", "music", "recordings", "stories")
+FILE_KIND_NAMES = ("drawings", "docs", "sprites", "music", "recordings", "stories",
+                   "downloads")
 FILE_KIND_DIRS = {
     "drawings": "Pictures", "docs": "Documents", "sprites": "Pictures/Sprites",
     "music": "Music", "recordings": "Recordings", "stories": "Documents/Stories",
+    "downloads": "Downloads",
 }
 SHARED_FOLDERS = ("Documents", "Pictures", "Music", "Recordings", "Downloads")
 

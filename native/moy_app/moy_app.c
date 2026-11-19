@@ -174,8 +174,9 @@ static const char *const TOKEN_NAMES[MOY_APP_TOKENS] = {
 #define TOKEN_BAND_LIGHT 32
 
 // The shared folders a grant is made for, each by its name and its own kind;
-// then every kind in one (moy_store_base.FILE_KIND_DIRS, which
-// tests/test_moy_app.py holds this to).
+// then the kinds in each (moy_store_base.FILE_KIND_DIRS). `downloads` is in
+// none, so a grant made for a folder never reaches it
+// (tests/test_files_app.py, test_no_folder_grant_reaches_downloads).
 static const char *const FOLDER_NAMES[MOY_APP_KINDS] = {
     "documents", "pictures", "music", "recordings",
 };
