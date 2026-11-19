@@ -1113,7 +1113,7 @@ from moy_docs import (_load_store_json, WIFI_STORE_NAME, wifi_store_path,
                       SYSTEM_DIR, SETTINGS_NAME, system_store_path, parse_settings,
                       settings_text, load_system, save_system, save_system_steps)
 from moy_pack import (save_package, rename_package, pack_skip, pack, unpack, adopt,
-                      import_archive, import_base, import_target)
+                      import_archive, import_base, import_target, install_staged)
 from moy_seed import (
     seed_builtins, seed_folders,
     _SEED_WBITS, unpack_seed, seed_packed, is_packed,

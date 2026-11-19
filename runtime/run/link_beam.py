@@ -1,3 +1,19 @@
+# Map (grep -n a name to jump there):
+#   size_text        a byte count as a person reads it
+#   about            a time left as a person reads it
+#   safe_name        a received file's name made safe for the store
+#   free_name        a name no file in the folder holds yet
+#   rel_ok           a path in a beam's head: relative, no empty, . or .. part, not skipped
+#   listing          a cart's files as the beam sends them, walked as moy_pack.c walks
+#   head_of          the head a beam opens with: MOYB, a length, the folder and its files
+#   read_head        a head's folder and files, or None for a bad one
+#   Beam             the console's half of a beam: offer, accept, stream, land
+#   Beam.send        offer a cart, its files as they are
+#   Beam.send_file   offer one file
+#   Beam.receive     listen for an offer
+#   Beam.stop        end the beam either way
+#   Beam.stats       the link's beam counters
+#   Beam.tend        one frame of the beam: one store op, the link polled
 """Beaming a file to a console nearby (docs/netplay_v1.md §7): the console's
 half of the beam the C link carries (native/moy_play/moy_match.h, BEAMING A
 FILE). The link moves the bytes through a ring of a fixed size and checks
@@ -6,9 +22,8 @@ the person on the receiving console, puts what arrived in its place and says
 every step on whatever screen is up (`Notices.notice`).
 
 A beam is one of two things a person starts. SEND offers a cart (a card's
-verb, `HomeDetails.card_verbs`, or a project's in Files) as its `.moy`
-archive, packed into the store's install folder (`moy_carts.pack`, the
-browser's export), or one of the person's files (Files' Send, through
+verb, `HomeDetails.card_verbs`, or a project's in Files) as its files, each
+as it is, or one of the person's files (Files' Send, through
 `intents.Intents.send`) as it is. RECEIVE NEARBY in the system menu opens the
 receive state, outside which an offer is never heard. An offer the store has
 no room for is refused before anything is asked or written, and its sender
@@ -16,17 +31,28 @@ told why; any other is asked about with the console's one dialog
 (`DeleteConfirm.ask_close`): its title, the console it comes from and its
 size.
 
-THE STORE, A BLOCK A FRAME. A frame's look reads at most one BLOCK of the
-file into the ring where the ring has that much room (or the file's last
-bytes), and writes at most one BLOCK the ring holds in order into the
-arrival's temporary (`install/beam-in`), each a store op at a block-aligned
-offset (`ws.carts.store.call`: on the T-Deck that is the SD gate), so a beam
-costs the frame one sector-aligned write or read at most and its RAM is the
-link's ring and this one block, whatever the size.
+A CART CROSSES AS ITS FILES. The bytes on the air are one stream the link
+hashes whole: for a file, the file; for a cart, a HEAD (MAGIC, its length,
+then JSON naming the cart's folder and each file's path and size, in the
+order the store's packer walks it: `moy_carts.pack_skip`'s rule, DEPTH
+folders deep) and then each file's bytes in that order, read from where they
+lie. Nothing is packed and nothing unpacked: the receiver checks each path
+in the head (`rel_ok`) and writes each file straight into its staged folder
+(`install/beam-in/`), which lands whole, by one rename, once the hash
+passes (`moy_carts.install_staged`, the adopt a dropped `.moy` lands by).
 
-WHAT LANDS. Once the C's streamed hash passes, a cart's archive is imported
-onto the shelf as a dropped `.moy` is (`moy_carts.import_archive`), so it
-arrived as files and its first run asks (`Notices.ask_first`,
+THE STORE, ONE OP A FRAME. A frame's look is one store op
+(`ws.carts.store.call`: on the T-Deck that is the SD gate, which waits for
+the panel's flush, so it is taken once): it reads BLOCKs into the ring while
+the ring has room for one (or for a file's last bytes), or writes the BLOCKs
+the ring holds in order, each at a block-aligned offset of its file, until
+the ring is full or empty or STORE_MS has passed. The file being read or
+written stays open from one frame to the next. A beam's RAM is the link's
+ring, one BLOCK and a cart's head, whatever the size.
+
+WHAT LANDS. Once the C's streamed hash passes, a cart's staged folder is
+adopted onto the shelf as a dropped `.moy`'s is (`moy_carts.install_staged`),
+so it arrived as files and its first run asks (`Notices.ask_first`,
 docs/os_2026-11/processes.md §2); a file goes into the shared folder
 Downloads (docs/os_2026-11/between_apps.md §2) under its own name made safe
 (`safe_name`), as `name_2.ext` where that name is taken, and nothing runs
@@ -44,8 +70,10 @@ finished and after a no said to a console that offered or was bound, so a
 peer that missed every DONE or NO hears it at its next frame.
 """
 
+import json
+
 import moy_carts as _carts
-from moy_store_base import _sibling_path, files_root
+from moy_store_base import _is_dir, _rmtree, _sibling_path, files_root, store_path
 from moy_fs import _exists, _mkdir, _remove
 
 try:
@@ -60,11 +88,14 @@ CART, FILE = 1, 2                 # moy_match.h's MOY_BEAM_CART, _FILE
 WAIT_MS = 60000                   # ...its MOY_MATCH_BEAM_WAIT_MS
 KEEP_MS = 3000                    # ...its MOY_MATCH_BEAM_KEEP_MS
 PART_MS = 300                     # the radio stays up this long after a beam ends
-BLOCK = 4096                      # one store op's bytes, at a block-aligned offset
+BLOCK = 8192                      # one read or write, at a block-aligned offset
+STORE_MS = 24                     # a frame's store op moves bytes for at most this long
 SAY_MS = 1000                     # the progress line, at most this often
 RESERVE = 65536                   # free space an arrival leaves the store
-OUT = "beam-out.moy"              # a cart being sent, packed, in the install folder
 IN = "beam-in"                    # an arrival on its way, in the install folder
+MAGIC = b"MOYB"                   # a cart's stream: MAGIC, the head's length (4), its JSON
+HEAD_MAX = 65536                  # a cart's head, at most
+DEPTH = 6                         # folders under a cart's, as the store's packer walks
 ARRIVALS = "Downloads"            # where a received file lands, under files/
 NAME_MAX = 64
 ROW = "Receive nearby"            # the system menu's row (shell_cards._BEAM_ROW)
@@ -180,6 +211,72 @@ def free_bytes(root):
         return None
 
 
+def rel_ok(rel):
+    """Whether `rel` may name a file in a cart's staged folder: no empty,
+    `.` or `..` part, nothing absolute, no backslash, nothing the store's
+    packer skips, at most DEPTH folders deep."""
+    if type(rel) is not str or not rel or "\\" in rel or rel[0] == "/":
+        return False
+    parts = rel.split("/")
+    if len(parts) > DEPTH + 1:
+        return False
+    for s in parts:
+        if not s or s == "." or s == ".." or _carts.pack_skip(s):
+            return False
+    return True
+
+
+def listing(path):
+    """The cart folder at `path` as the store's packer takes it: (its files'
+    paths under it, each size), in name order, DEPTH folders deep."""
+    out = []
+
+    def walk(d, rel, depth):
+        if depth > DEPTH:
+            return
+        for n in sorted(os.listdir(d)):
+            if _carts.pack_skip(n):
+                continue
+            p = d + "/" + n
+            st = os.stat(p)
+            if st[0] & 0x4000:
+                walk(p, rel + n + "/", depth + 1)
+            else:
+                out.append((rel + n, st[6]))
+    walk(path, "", 0)
+    return out
+
+
+def head_of(folder, files):
+    """A cart's stream head: MAGIC, the JSON's length (4, little-endian),
+    the JSON naming `folder` and `files` ((path, size) pairs)."""
+    body = json.dumps({"folder": folder, "files": [[r, n] for r, n in files]}).encode()
+    return MAGIC + len(body).to_bytes(4, "little") + body
+
+
+def read_head(head, size):
+    """A received head (the whole of it) as (folder, files), or None where it
+    is not one: a bad path, a size that is not a count, or files and head
+    together not the stream's `size`."""
+    try:
+        d = json.loads(bytes(head[8:]))
+        folder, files = d["folder"], d["files"]
+    except (ValueError, KeyError, TypeError):
+        return None
+    if type(folder) is not str or type(files) is not list or not rel_ok(folder) \
+            or "/" in folder:
+        return None
+    total = len(head)
+    out = []
+    for f in files:
+        if type(f) is not list or len(f) != 2 or not rel_ok(f[0]) \
+                or type(f[1]) is not int or f[1] < 0:
+            return None
+        out.append((f[0], f[1]))
+        total += f[1]
+    return (folder, out) if total == size else None
+
+
 def _op(ws, fn):
     """`fn` as one store op (the SD gate on the T-Deck); None where it failed."""
     try:
@@ -193,6 +290,14 @@ def _stage(ws):
     return _sibling_path(ws.carts_root, "install")
 
 
+def _gone(path):
+    """The file or folder at `path` removed, where there is one."""
+    if _is_dir(path):
+        _rmtree(path)
+    else:
+        _remove(path)
+
+
 class Beam:
     """The console's side of one link's beams: what it holds, the block
     between the ring and the store, and what the person was asked."""
@@ -204,15 +309,22 @@ class Beam:
         self.part_ms = PART_MS
         self.buf = bytearray(BLOCK)
         self.mv = memoryview(self.buf)
+        self.fh = None              # the file being read or written, open across frames
         self._clear()
 
     def _clear(self):
         self.answer = None          # the person's answer to the offer held
         self.asked = None           # the question as the dialog titles it
-        self.src = None             # send: the file the bytes come from
-        self.tmp = None             # the temporary this beam owns
+        self.what = FILE
+        self.tmp = None             # receive: the temporary (a file's, a cart's folder)
+        self.head = b""             # a cart's head: built (send), as it arrives (receive)
+        self.files = None           # (path, size) of each file the stream carries, in order
+        self.k = 0                  # ...the one being read or written
+        self.off = 0                # ...and the bytes of it done
+        self.folder = None          # receive: the cart's folder name, from its head
+        self.bad = False            # receive: what came is no cart's head
         self.size = 0
-        self.pos = 0                # bytes read (send) or written (receive)
+        self.pos = 0                # bytes of the stream read (send) or written (receive)
         self.roomy = False          # receive: the offer's room was checked
         self.t0 = self.d0 = None    # the progress's first look: tick and bytes
         self.said_at = None
@@ -280,8 +392,7 @@ class Beam:
 
         def _go():
             _mkdir(stage)
-            _remove(stage + "/" + IN)
-            _remove(stage + "/" + OUT)
+            _gone(stage + "/" + IN)
             return True
         return _op(ws, _go)
 
@@ -297,32 +408,29 @@ class Beam:
         return why
 
     def send(self, ws, cart):
-        """Offer `cart` (a cart dict with its folder's `path`), packed, to
-        whichever console nearby is receiving. False where it could not
+        """Offer `cart` (a cart dict with its folder's `path`), as its files,
+        to whichever console nearby is receiving. False where it could not
         start, said."""
         cart = cart or {}
-        path = cart.get("path")
+        path = str(cart.get("path") or "").rstrip("/")
         if not path:
             _say(ws, "CAN'T SEND", "Nothing to send", "warn")
             return False
         if self._start(ws, "SEND") is not None:
             return False
         title = _short(cart.get("title"))
-        tmp = _stage(ws) + "/" + OUT
-
-        def _pack():
-            _remove(_stage(ws) + "/" + IN)
-            _remove(tmp)
-            _mkdir(_stage(ws))
-            _carts.pack(path, tmp)
-            return os.stat(tmp)[6]
-        size = _op(ws, _pack)
-        if not size:
-            _op(ws, lambda: _remove(tmp))
+        self._sweep(ws)
+        files = _op(ws, lambda: listing(path))
+        if not files:
             self._let_go(ws)
-            _say(ws, "CAN'T SEND", "%s would not pack" % title, "warn")
+            _say(ws, "CAN'T SEND", "%s can't be read" % title, "warn")
             return False
-        return self._offer(ws, CART, cart.get("title") or title, tmp, size, tmp)
+        head = head_of(path[path.rfind("/") + 1:], files)
+        size = len(head)
+        for _r, n in files:
+            size += n
+        return self._offer(ws, CART, cart.get("title") or title, size, head,
+                           [(path + "/" + r, n) for r, n in files])
 
     def send_file(self, ws, path):
         """Offer the person's file at `path` as it is. False where it could
@@ -340,19 +448,18 @@ class Beam:
             self._let_go(ws)
             _say(ws, "CAN'T SEND", "%s can't be read" % _short(name), "warn")
             return False
-        return self._offer(ws, FILE, name, path, size, None)
+        return self._offer(ws, FILE, name, size, b"", [(path, size)])
 
-    def _offer(self, ws, what, title, src, size, tmp):
+    def _offer(self, ws, what, title, size, head, files):
         m = self.link._m
         rc = m.beam_send(title, what, size, self.link._ticks_ms())
         if rc != 0:
             m.beam_end()
-            if tmp:
-                _op(ws, lambda: _remove(tmp))
             self._let_go(ws)
             _say(ws, "CAN'T SEND", "%s can't be sent" % _short(title), "warn")
             return False
-        self.src, self.tmp, self.size, self.pos = src, tmp, size, 0
+        self.what, self.size, self.pos = what, size, 0
+        self.head, self.files, self.k, self.off = head, files, 0, 0
         _say(ws, "Sending %s" % _short(title), "Other console: " + ROW, ms=WAIT_MS)
         return True
 
@@ -411,7 +518,7 @@ class Beam:
         if state == OFFERED:
             if not self.roomy:
                 self.roomy = True
-                need = (2 * size if what == CART else size) + RESERVE
+                need = size + RESERVE
                 free = _op(ws, lambda: free_bytes(ws.carts_root))
                 if free is not None and free < need:
                     m.beam_refuse(ROOM)
@@ -424,9 +531,10 @@ class Beam:
         self._close_question(ws)
         if state == MOVING:
             if not (self._feed(ws, m) if role == SEND else self._drain(ws, m, size)):
+                bad = self.bad
                 self._end(ws)
                 _say(ws, "SEND FAILED" if role == SEND else "RECEIVE FAILED",
-                     "The store failed", "warn")
+                     _RECEIVE_WHY[DAMAGED][1] if bad else "The store failed", "warn")
                 return
             self._progress(ws, role, short, size, done)
             return
@@ -442,49 +550,131 @@ class Beam:
             if words is not None:
                 _say(ws, words[0], words[1].format(t=short, p=peer), "warn")
 
+    def _next(self):
+        """The bytes the stream's next piece is: the head's next BLOCK, else
+        the next BLOCK of the file at `k` (its last bytes at its end), past
+        every file of none. 0 once the stream is done."""
+        if self.pos < len(self.head):
+            return min(BLOCK, len(self.head) - self.pos)
+        files = self.files
+        while self.k < len(files) and self.off >= files[self.k][1]:
+            self.k += 1
+            self.off = 0
+        if self.k >= len(files):
+            return 0
+        return min(BLOCK, files[self.k][1] - self.off)
+
+    def _file(self, mode):
+        """The file at `k`, open: opened (the one before closed) where it is
+        not the one open."""
+        fh = self.fh
+        if fh is not None and fh[0] == self.k:
+            return fh[1]
+        self._shut()
+        f = open(self.files[self.k][0], mode)
+        self.fh = (self.k, f)
+        return f
+
+    def _shut(self):
+        """The open file closed, where one is."""
+        fh, self.fh = self.fh, None
+        if fh is not None:
+            fh[1].close()
+
+    def _moved(self, n):
+        self.pos += n
+        if self.pos > len(self.head) and self.files is not None:
+            self.off += n
+            if self.off >= self.files[self.k][1]:
+                self._shut()
+
     def _feed(self, ws, m):
-        """One BLOCK of the file into the ring, where the ring has room for
-        it or for the file's last bytes."""
-        room = m.beam_room()
-        left = self.size - self.pos
-        if room <= 0 or left <= 0 or (room < BLOCK and room < left):
+        """The ring filled from the stream, BLOCK by BLOCK, while it has room
+        for the next piece and STORE_MS has not passed: one store op."""
+        n = self._next()
+        if n == 0 or m.beam_room() < n:
             return True
-        n = min(BLOCK, room, left)
-        src, at, mv = self.src, self.pos, self.mv
+        clock = self.link._ticks_ms
+        t0 = clock()
 
         def _read():
-            f = open(src, "rb")
-            try:
-                f.seek(at)
-                return f.readinto(mv[:n])
-            finally:
-                f.close()
-        got = _op(ws, _read)
-        if not got:
-            return False
-        self.pos += m.beam_fill(self.buf, got)
-        return True
+            n = self._next()
+            while n and m.beam_room() >= n and 0 <= clock() - t0 < STORE_MS:
+                if self.pos < len(self.head):
+                    got = m.beam_fill(self.head[self.pos:self.pos + n], n, clock())
+                else:
+                    if self._file("rb").readinto(self.mv[:n]) != n:
+                        return False        # the file shrank since its listing
+                    got = m.beam_fill(self.buf, n, clock())
+                if got != n:
+                    return False
+                self._moved(n)
+                n = self._next()
+            return True
+        return bool(_op(ws, _read))
 
     def _drain(self, ws, m, size):
-        """One BLOCK the ring holds in order into the arrival's temporary,
-        or the file's last bytes."""
+        """What the ring holds in order written into the stream's files,
+        BLOCK by BLOCK, until it holds less than the next piece or STORE_MS
+        has passed: one store op. A cart's head is read first, and its
+        files made."""
         held = m.beam_held()
-        if held <= 0 or (held < BLOCK and self.pos + held < size):
+        if held <= 0:
             return True
-        n = m.beam_take(self.buf, self.link._ticks_ms())
-        tmp, at, mv = self.tmp, self.pos, self.mv
+        if self.files is not None and held < self._next():
+            return True
+        clock = self.link._ticks_ms
+        t0 = clock()
 
         def _write():
-            f = open(tmp, "r+b" if at else "wb")
-            try:
-                f.seek(at)
-                f.write(mv[:n])
-            finally:
-                f.close()
+            while 0 <= clock() - t0 < STORE_MS:
+                if self.files is None:
+                    if not self._take_head(m, clock()):
+                        self.bad = True
+                        return False
+                    if self.files is None:
+                        return True
+                    continue
+                n = self._next()
+                if n == 0 or m.beam_held() < n:
+                    return True
+                got = m.beam_take(self.mv[:n], clock())
+                self._file("wb").write(self.mv[:got])
+                self._moved(got)
             return True
-        if not _op(ws, _write):
+        return bool(_op(ws, _write))
+
+    def _take_head(self, m, now):
+        """A cart's head taken in as it arrives; once whole, read, and its
+        folder and its empty files made. False where it is not a head."""
+        h = self.head
+        want = 8 if len(h) < 8 else int.from_bytes(h[4:8], "little") + 8
+        if want > HEAD_MAX or (len(h) >= 4 and h[:4] != MAGIC):
             return False
-        self.pos += n
+        n = min(want - len(h), m.beam_held(), BLOCK)
+        if n > 0:
+            got = m.beam_take(self.mv[:n], now)
+            self.head = h = h + bytes(self.mv[:got])
+            self.pos += got
+        if len(h) < 8 or len(h) < int.from_bytes(h[4:8], "little") + 8:
+            return len(h) < 4 or h[:4] == MAGIC
+        got = read_head(h, self.size)
+        if got is None:
+            return False
+        self.folder, rels = got
+        root = self.tmp
+        _mkdir(root)
+        files = []
+        for rel, n in rels:
+            p = root
+            for part in rel.split("/")[:-1]:
+                p += "/" + part
+                _mkdir(p)
+            path = store_path(root, rel)
+            files.append((path, n))
+            if n == 0:
+                open(path, "wb").close()
+        self.files, self.k, self.off = files, 0, 0
         return True
 
     def _progress(self, ws, role, short, size, done):
@@ -509,10 +699,19 @@ class Beam:
                  ms=3 * SAY_MS)
 
     def _discard(self, ws):
-        """This beam's temporary gone, where it has one."""
+        """This beam's open file closed and its temporary gone, where it
+        has them."""
         tmp = self.tmp
-        if tmp:
-            _op(ws, lambda: _remove(tmp))
+
+        def _go():
+            try:
+                self._shut()
+            finally:
+                if tmp:
+                    _gone(tmp)
+            return True
+        if tmp or self.fh is not None:
+            _op(ws, _go)
 
     def _end(self, ws):
         m = self.link._m
@@ -536,14 +735,16 @@ class Beam:
 
             def _prep():
                 _mkdir(_stage(ws))
-                _remove(tmp)
+                _gone(tmp)
                 return True
             if not _op(ws, _prep):
                 self._end(ws)
                 _say(ws, "RECEIVE FAILED", "The store failed", "warn")
                 return
             if m.beam_accept(self.link._ticks_ms()) == 0:
-                self.tmp, self.pos, self.size = tmp, 0, size
+                self.tmp, self.pos, self.size, self.what = tmp, 0, size, what
+                self.head, self.k, self.off = b"", 0, 0
+                self.files = None if what == CART else [(tmp, size)]
                 _say(ws, "Receiving %s" % short, "From %s" % peer)
             return
         if self.answer is False:
@@ -595,18 +796,21 @@ class Beam:
         dropped `.moy`, a file into Downloads under a name of its own."""
         root, tmp = ws.carts_root, self.tmp
         self.tmp = None             # landed or removed here, either way
+        whole = self.pos == size and self._next() == 0
+        folder = self.folder
+        _op(ws, self._shut)
 
         def _whole():
             try:
-                return os.stat(tmp)[6] == size
+                return whole and os.stat(tmp)[6] == size
             except OSError:
                 return False
         if what == CART:
             def _install():
                 try:
-                    return _carts.import_archive(tmp, root) if _whole() else None
+                    return _carts.install_staged(tmp, folder, root) if whole else None
                 finally:
-                    _remove(tmp)
+                    _gone(tmp)
             got = _op(ws, _install)
             if got is None:
                 _say(ws, "RECEIVE FAILED", "%s wasn't added" % short, "warn")

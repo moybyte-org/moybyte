@@ -317,7 +317,7 @@ static void ring_walk(long rounds) {
     uint8_t *buf = malloc(CAP);
     moy_link_ring_t r;
     moy_link_ring_init(&r, buf, CAP);
-    uint8_t q[MODEL][MOY_LINK_MAX + 7];
+    uint8_t q[MODEL][MOY_LINK_MAX + 6];
     uint32_t qn[MODEL];
     int qh = 0, qc = 0;
     uint32_t drops = 0;

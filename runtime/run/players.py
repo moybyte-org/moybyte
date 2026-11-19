@@ -361,11 +361,12 @@ BEACON_MS = 400
 PEER_TTL_MS = 2000
 START_TRIES = 12
 # The radio's recipe (T-Deck <-> Guition): rxbuf BEFORE active()
-# (a live change desyncs the ring for good); 32768, not the default 526 (64 of
-# 200 messages arrived at the default while every send said True); RATE_54M
+# (a live change desyncs the ring for good); not the default 526 (64 of 200
+# messages arrived at the default while every send said True), and room for a
+# bound beam's whole window between two polls (MOY_MATCH_BEAM_DRAIN); RATE_54M
 # (a 48 KB payload went from 1680 ms to 65 ms); power save off only while
 # linked (it halves the latency tail and costs battery).
-RXBUF = 32768
+RXBUF = 163840
 DRAIN_MAX = 24
 
 

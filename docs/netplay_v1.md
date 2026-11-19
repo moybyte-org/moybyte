@@ -396,9 +396,11 @@ what is carried, any file and not only a cart, as fast as the link allows,
 and both consoles showing how far along it is and the time left, either side
 able to stop it at any moment.
 
-**What crosses is one file**: a cart's `.moy` archive, packed into the
-store's install folder by the store's packer (`moy_carts.pack`, the
-browser's export), or a person's file as it is. One frame type, `T_BEAM` (8),
+**What crosses is one stream**: a person's file as it is, or a cart's
+files, each as it is, behind a head naming each one's path and size in the
+order the store's packer walks the folder (2026-11-19: a cart is no longer
+packed into a `.moy` archive first, which held a multi-megabyte cart's
+frame for seconds and needed its size free twice on each side). One frame type, `T_BEAM` (8),
 carries the beam's six kinds; like `T_PORT` it left `MOY_MATCH_PROTO` at 3,
 since no release carried the first cut's layout, and a console without it
 drops the frames as an unknown type. Every frame is broadcast, and every one
@@ -407,17 +409,25 @@ but the offer names its destination in the payload, as the handshake does
 receiver's free space, checked before it asks: an offer it has no room for
 is refused with a NO that carries why, and its sender says so.
 
-**The bytes go through a window, a block a frame.** Each side's link holds
-one ring of `MOY_MATCH_BEAM_WINDOW` chunks whatever the size; the sender's
-console reads the file into it a `link_beam.BLOCK` at a time as room opens
-and the receiver's writes what it holds in order into the arrival's
-temporary, each one store op at a block-aligned offset, so a beam's RAM is
-fixed and a frame pays one block's read or write at most.
+**The bytes go through a window, one store op a frame.** Each side's link
+holds one ring of `MOY_MATCH_BEAM_WINDOW` chunks whatever the size; the
+sender's console reads into it, and the receiver's writes what it holds in
+order into the arrival's temporary (a file's, or the cart's staged folder),
+`link_beam.BLOCK` at a time at block-aligned offsets of each file, in one
+store op a frame that ends when the ring is full (or empty) or after
+`link_beam.STORE_MS`, the file it is on held open from frame to frame. A
+beam's RAM is fixed: the ring, one block and a cart's head. **A chunk is as
+long as both links carry**: a beam's frames are the only ones longer than
+250 bytes, ESP-NOW v2's 1470 between two consoles whose radio is the chip's
+own (`moy_link_frame_max`); the offer names the sender's chunk and the
+receiver takes the smaller of it and its own, so a P4, whose C6 shim carries
+v1 frames, sends and takes chunks that fit 250 bytes.
 
 **The receiver drives completion, because the ack lies** (§4). The sender
 offers on the air until a console answers; the receiver's yes binds the two
 by address and beam id, and from then on it reports, every
-`MOY_MATCH_BEAM_NEED_MS`, the lowest chunk it lacks, the top of what it
+`MOY_MATCH_BEAM_NEED_MS` and as soon as its console has taken a quarter of
+the window's room, the lowest chunk it lacks, the top of what it
 holds, the end of its room and which of the window's chunks it lacks. The
 sender sends what its console filled up to that room, then again what a
 report names lost. **The pace is found**: it starts at
@@ -436,8 +446,12 @@ signed nor encrypted (§2), so an offer is heard only while a person on the
 receiving console has opened the receive state (the system menu's RECEIVE
 NEARBY), and is asked about in the console's one dialog ("Receive
 <title>?", the console it comes from and its size, No and Receive) before a
-byte is written. A cart lands on the shelf as a dropped `.moy` does
-(`moy_carts.import_archive`): a cart that arrived as files, whose first run
+byte is written. The receiver checks every path a cart's head names
+(`link_beam.rel_ok`: nothing outside the cart's folder, nothing the packer
+skips) before it writes a byte of it, and a head that fails reads as a
+damaged copy. A cart lands on the shelf by the adopt a dropped `.moy` lands
+by (`moy_carts.install_staged`), its staged folder moved whole by one
+rename once the hash passes: a cart that arrived as files, whose first run
 asks with the install prompt's lines (`docs/os_2026-11/processes.md` §2), so
 a received cart never runs before its person says yes. A file lands in the
 shared folder Downloads (`docs/os_2026-11/between_apps.md` §2) under its own
@@ -480,7 +494,10 @@ seconds in, until the console's watchdog restarted it. A game's stop takes its c
 nobody to the last game.
 
 `tests/test_link_beam.py` is the net: two consoles over a lossy, reordering
-air, a file of several megabytes against the beam's fixed RAM, a damaged
+air, a file of several megabytes against the beam's fixed RAM and one
+store op a frame, a cart's folders and empty files crossing with nothing
+packed, a head naming a path outside the cart, a chunk as long as both
+links carry, a damaged
 chunk, a receiver with no room, a name already taken, a stop from either
 side, a stale temporary, a refusing send queue and the pace, the lost DONEs
 over forty seeds, a console not receiving, a decline, a sender gone

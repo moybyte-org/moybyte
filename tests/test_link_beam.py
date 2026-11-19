@@ -287,6 +287,83 @@ def test_a_damaged_chunk_fails_the_hash_and_leaves_nothing(tmp_path, what):
     assert wsa.notices.said[-1][:2] == ("SEND FAILED", "It arrived damaged")
 
 
+def _tree(folder):
+    out = {}
+    for d, _dirs, names in os.walk(folder):
+        for n in names:
+            p = os.path.join(d, n)
+            out[os.path.relpath(p, folder)] = _bytes(p)
+    return out
+
+
+def test_a_cart_crosses_as_its_files_never_packed(tmp_path, monkeypatch):
+    """A cart's files cross each as it is, its folders and its empty files
+    too, and what the store's packer leaves out stays behind: nothing is
+    packed on the sender or unpacked on the receiver."""
+    air, clock, a, b, wsa, wsb = _setup(tmp_path, _BadAir(seed=8))
+    cart = _cart(wsa, size=70000)
+    os.makedirs(cart["path"] + "/levels/deep")
+    with open(cart["path"] + "/levels/deep/one.txt", "w") as f:
+        f.write("level one")
+    open(cart["path"] + "/levels/empty.txt", "w").close()
+    os.makedirs(cart["path"] + "/thumbs")
+    with open(cart["path"] + "/thumbs/t.png", "wb") as f:
+        f.write(b"thumb")
+    with open(cart["path"] + "/main.py.bak", "w") as f:
+        f.write("old")
+
+    def no(*k, **kw):
+        raise AssertionError("packed or unpacked")
+    monkeypatch.setattr(moy_carts, "pack", no)
+    monkeypatch.setattr(moy_carts, "unpack", no)
+    monkeypatch.setattr(moy_carts, "import_archive", no)
+    b.beam_receive(wsb)
+    assert a.beam_send(wsa, cart)
+    _offered(a, b, wsa, wsb, clock)
+    wsb.confirm.yes()
+    assert _run(a, b, wsa, wsb, clock, 30000, until=_both_done(a, b))
+    got = _tree(wsb.carts_root + "/local.pong.moy")
+    want = _tree(cart["path"])
+    for left_out in ("thumbs/t.png", "main.py.bak"):
+        del want[left_out]
+    assert got == want and got["levels/empty.txt"] == b""
+    assert wsb.notices.said[-1][:2] == ("Got Pong", "From Ada, on your shelf")
+    _parted(a, b, wsa, wsb, clock)
+    assert _stage(wsa) == [] and _stage(wsb) == []
+
+
+@pytest.mark.parametrize("bad", ["../evil.txt", "/abs.txt", "a//b.txt", "thumbs/x.png",
+                                 "a/b/c/d/e/f/g/h.txt"])
+def test_a_head_naming_a_path_outside_the_cart_lands_nothing(tmp_path, monkeypatch, bad):
+    air, clock, a, b, wsa, wsb = _setup(tmp_path)
+    cart = _cart(wsa)
+    real = link_beam.head_of
+
+    def head_of(folder, files):
+        return real(folder, [(bad, files[0][1])] + list(files[1:]))
+    monkeypatch.setattr(link_beam, "head_of", head_of)
+    before = _shelf(wsb)
+    b.beam_receive(wsb)
+    assert a.beam_send(wsa, cart)
+    _offered(a, b, wsa, wsb, clock)
+    wsb.confirm.yes()
+    assert _run(a, b, wsa, wsb, clock, 30000, until=_both_done(a, b))
+    assert _shelf(wsb) == before and wsb.carts.rescanned == []
+    _parted(a, b, wsa, wsb, clock)
+    assert _stage(wsb) == []
+    assert not os.path.exists(os.path.dirname(wsb.carts_root) + "/evil.txt")
+    assert wsb.notices.said[-1][:2] == ("RECEIVE FAILED", "Arrived damaged: nothing kept")
+    assert wsa.notices.said[-1][:2] == ("SEND FAILED", "Bo stopped receiving")
+
+
+def test_a_received_path_is_checked_as_the_packer_walks():
+    ok = ["main.py", "levels/one.txt", "a/b/c/d/e/f/g.txt"]
+    bad = ["", "/x", "..", "a/../b", "./a", "a\\b", "a//b", "x.bak", "thumbs/a", "journal/x",
+           "a/b/c/d/e/f/g/h.txt", 3, None]
+    assert all(link_beam.rel_ok(r) for r in ok)
+    assert not any(link_beam.rel_ok(r) for r in bad)
+
+
 def test_a_console_not_receiving_ignores_the_offer(tmp_path):
     air, clock, a, b, wsa, wsb = _setup(tmp_path)
     b._up()                            # its radio up, as a port would hold it
@@ -702,12 +779,15 @@ def test_a_live_match_refuses_a_beam_in_c(tmp_path):
 
 def test_a_file_larger_than_any_ram_the_beam_owns_crosses_byte_identical(tmp_path):
     """Several megabytes cross a lossy air into Downloads while each side's
-    beam holds the same few tens of KB it holds for a small file, the store
-    reached a block at a time at block-aligned offsets."""
+    beam holds the same RAM it holds for a small file, the store reached in
+    one op a frame, a block at a time at block-aligned offsets, the file
+    opened once."""
     air, clock, a, b, wsa, wsb = _setup(tmp_path, _BadAir(drop=0.05, hold=0.05, seed=9))
     src = _file(wsa, "film.bin", size=3 * 1024 * 1024 + 123)
     rams = set()
     writes = []
+    opened = []
+    ops = {"a": wsa.carts.store.ops, "b": wsb.carts.store.ops, "most": 0}
     real_open = open
 
     def watch():
@@ -715,6 +795,12 @@ def test_a_file_larger_than_any_ram_the_beam_owns_crosses_byte_identical(tmp_pat
             info = lk._m.beam_info() if lk._m is not None else None
             if info is not None and info[1] == link_beam.MOVING:
                 rams.add((info[0], info[12]))
+        moving = all(lk._m.beam_info() is not None
+                     and lk._m.beam_info()[1] == link_beam.MOVING for lk in (a, b))
+        for k, ws in (("a", wsa), ("b", wsb)):
+            if moving:
+                ops["most"] = max(ops["most"], ws.carts.store.ops - ops[k])
+            ops[k] = ws.carts.store.ops
     b.beam_receive(wsb)
     assert a.beam_send_file(wsa, src)
     _offered(a, b, wsa, wsb, clock)
@@ -726,12 +812,8 @@ def test_a_file_larger_than_any_ram_the_beam_owns_crosses_byte_identical(tmp_pat
         def __init__(self, f):
             self.f = f
 
-        def seek(self, at):
-            self.at = at
-            return self.f.seek(at)
-
         def write(self, data):
-            writes.append((self.at, len(data)))
+            writes.append((self.f.tell(), len(data)))
             return self.f.write(data)
 
         def __getattr__(self, name):
@@ -739,6 +821,8 @@ def test_a_file_larger_than_any_ram_the_beam_owns_crosses_byte_identical(tmp_pat
 
     def spy(path, mode="r", *k, **kw):
         f = real_open(path, mode, *k, **kw)
+        if "beam-in" in str(path) or str(path) == src:
+            opened.append(str(path))
         return _File(f) if "beam-in" in str(path) else f
     link_beam.open = spy
     try:
@@ -750,12 +834,45 @@ def test_a_file_larger_than_any_ram_the_beam_owns_crosses_byte_identical(tmp_pat
     assert wsb.notices.said[-1][:2] == ("Got film.bin", "In Downloads, from Ada")
     # Fixed RAM: each side's beam held one size the whole way, the ring's.
     assert {role for role, _r in rams} == {link_beam.SEND, link_beam.RECEIVE}
-    assert len({r for _role, r in rams}) == 1 and next(iter(rams))[1] < 40000
-    # The store, a block a frame: every write but the last a whole BLOCK at a
-    # BLOCK-aligned offset, in order.
+    assert len({r for _role, r in rams}) == 1 and next(iter(rams))[1] < 130000
+    # The store, one op a frame on each side, each file opened once: every
+    # write but the last a whole BLOCK at a BLOCK-aligned offset, in order.
+    assert ops["most"] == 1
+    assert sorted(opened) == sorted([src, os.path.dirname(wsb.carts_root) + "/install/beam-in"])
     assert all(at % link_beam.BLOCK == 0 for at, _n in writes)
     assert all(n == link_beam.BLOCK for _at, n in writes[:-1])
     assert [at for at, _n in writes] == sorted(at for at, _n in writes)
+
+
+class _FrameAir(tel._Air):
+    """The air, its frames' lengths noted."""
+
+    def __init__(self):
+        super().__init__()
+        self.longest = 0
+
+    def carry(self, src, dst, payload):
+        self.longest = max(self.longest, len(payload))
+        return super().carry(src, dst, payload)
+
+
+@pytest.mark.parametrize("frames, longest", [((1470, 1470), 1470), ((1470, 250), 250),
+                                             ((250, 1470), 250), ((250, 250), 250)])
+def test_a_chunk_is_as_long_as_both_links_carry(tmp_path, frames, longest):
+    """Two consoles whose radios take ESP-NOW v2's frames beam in them; a
+    console whose link carries only v1's (a P4 through its C6) takes and
+    sends chunks that fit a v1 frame, either way round."""
+    air, clock, a, b, wsa, wsb = _setup(tmp_path, _FrameAir())
+    a._m.set_frame(frames[0])
+    b._m.set_frame(frames[1])
+    src = _file(wsa, "film.bin", size=400000 + 7)
+    b.beam_receive(wsb)
+    assert a.beam_send_file(wsa, src)
+    _offered(a, b, wsa, wsb, clock)
+    wsb.confirm.yes()
+    assert _run(a, b, wsa, wsb, clock, 30000, until=_both_done(a, b))
+    assert _bytes(os.path.dirname(wsb.carts_root) + "/files/Downloads/film.bin") == _bytes(src)
+    assert air.longest == longest
 
 
 def test_the_beam_holds_the_same_ram_for_a_small_and_a_large_file(tmp_path):
@@ -843,7 +960,9 @@ def test_a_stop_from_either_side_mid_transfer_leaves_nothing(tmp_path, who):
     wsb.confirm.yes()
     assert _run(a, b, wsa, wsb, clock, 5000,
                 until=lambda: b._m.beam_info()[6] > 3 * link_beam.BLOCK)
-    assert _stage(wsb) == ["beam-in"] and _stage(wsa) == ["beam-out.moy"]
+    # The receiver stages the cart's folder; the sender stages nothing.
+    assert _stage(wsb) == ["beam-in"] and _stage(wsa) == []
+    assert os.path.isdir(os.path.dirname(wsb.carts_root) + "/install/beam-in")
     if who == "sender":
         a.beam_stop(wsa)
     else:
@@ -862,9 +981,14 @@ def test_a_stale_temporary_is_swept_when_a_beam_starts(tmp_path):
     air, clock, a, b, wsa, wsb = _setup(tmp_path)
     stage = os.path.dirname(wsb.carts_root) + "/install"
     os.makedirs(stage)
-    for n in (link_beam.IN, link_beam.OUT):
-        with open(stage + "/" + n, "wb") as f:
-            f.write(b"left by a reset")
+    with open(stage + "/" + link_beam.IN, "wb") as f:
+        f.write(b"left by a reset")
+    b.beam_receive(wsb)
+    assert _stage(wsb) == []
+    os.makedirs(stage + "/" + link_beam.IN + "/levels")
+    with open(stage + "/" + link_beam.IN + "/levels/one.txt", "wb") as f:
+        f.write(b"a cart's folder half staged")
+    a.beam_send(wsa, _cart(wsa))
     b.beam_receive(wsb)
     assert _stage(wsb) == []
 

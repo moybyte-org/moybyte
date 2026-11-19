@@ -10,6 +10,7 @@
 
 #if defined(MOY_NET_LINK) && MOY_NET_LINK
 
+#include "sdkconfig.h"
 #include "esp_heap_caps.h"
 #include "esp_now.h"
 #include "esp_wifi.h"
@@ -100,6 +101,14 @@ int moy_link_add_peer(const uint8_t mac[6]) {
     memcpy(p.peer_addr, mac, 6);
     p.ifidx = WIFI_IF_STA;
     return esp_now_add_peer(&p);
+}
+
+uint32_t moy_link_frame_max(void) {
+#if defined(ESP_NOW_MAX_DATA_LEN_V2) && CONFIG_SOC_WIFI_SUPPORTED
+    return ESP_NOW_MAX_DATA_LEN_V2;
+#else
+    return ESP_NOW_MAX_DATA_LEN;
+#endif
 }
 
 int moy_link_send(const uint8_t mac[6], const uint8_t *data, size_t len) {

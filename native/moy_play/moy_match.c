@@ -20,6 +20,7 @@ static bool beam_holds_channel(const moy_match_t *m);
 static bool beam_hears(const moy_match_t *m, uint32_t now);
 static bool beam_keeps(const moy_match_t *m, uint32_t now);
 static bool beam_listens(const moy_match_t *m);
+static bool beam_takes(const moy_match_t *m);
 static int beam_rests(moy_match_t *m, uint32_t now);
 
 static void say(moy_match_t *m, const char *fmt, ...) {
@@ -648,8 +649,14 @@ void moy_match_init(moy_match_t *m, const moy_match_io_t *io, const char *name,
     copy_str(m->cfg, sizeof(m->cfg), "{}", 2);
     m->ports_budget.credit = MOY_MATCH_PORTS_BURST * 1000u;
     m->rng = entropy ? entropy : 0x6D6F7962u;
+    m->frame_max = MOY_MATCH_FRAME;
     tape_clear(m->s.mine_f);
     tape_clear(m->s.theirs_f);
+}
+
+void moy_match_set_frame(moy_match_t *m, uint32_t n) {
+    m->frame_max = (uint16_t)(n < MOY_MATCH_FRAME ? MOY_MATCH_FRAME
+                              : n > MOY_MATCH_FRAME_MAX ? MOY_MATCH_FRAME_MAX : n);
 }
 
 void moy_match_start(moy_match_t *m, const uint8_t mac[6]) {
@@ -1090,8 +1097,9 @@ static void on_port(moy_match_t *m, const uint8_t mac[6], const uint8_t *msg, si
 
 void moy_match_dispatch(moy_match_t *m, const uint8_t mac[6], const uint8_t *msg,
                         size_t n, uint32_t now) {
-    if (n < 2 || msg[0] != MOY_MATCH_PROTO) {
-        return;
+    if (n < 2 || msg[0] != MOY_MATCH_PROTO
+            || (n > MOY_MATCH_FRAME && msg[1] != MOY_MATCH_T_BEAM)) {
+        return;                         // only a beam's chunk is longer than a frame
     }
     switch (msg[1]) {
         case MOY_MATCH_T_INPUT:
@@ -1152,9 +1160,9 @@ int moy_match_drain_input(moy_match_t *m, uint32_t now, int budget) {
         return 0;
     }
     int n = 0;
-    uint8_t mac[6], buf[MOY_MATCH_FRAME];
+    uint8_t mac[6], *buf = m->frame;
     for (int i = 0; i < budget; i++) {
-        int len = m->io->recv(m->io->ctx, mac, buf, sizeof(buf));
+        int len = m->io->recv(m->io->ctx, mac, buf, sizeof(m->frame));
         if (len == -1) {
             break;
         }
@@ -1170,6 +1178,8 @@ int moy_match_drain_input(moy_match_t *m, uint32_t now, int budget) {
             if (from_partner(m, mac)) {
                 moy_lockstep_packet(m, buf, (size_t)len, now, true);
             }
+        } else if (len > MOY_MATCH_FRAME) {
+            m->drops++;                 // a beam's chunk: no beam runs beside a match
         } else if (m->defer_n < MOY_MATCH_DEFER) {
             memcpy(m->defer_mac[m->defer_n], mac, 6);
             memcpy(m->defer[m->defer_n], buf, (size_t)len);
@@ -1272,9 +1282,10 @@ int moy_match_poll(moy_match_t *m, uint32_t now) {
     }
     m->defer_n = 0;
     if (m->io != NULL && m->io->recv != NULL) {
-        uint8_t mac[6], buf[MOY_MATCH_FRAME];
-        for (int i = 0; i < MOY_MATCH_DRAIN_MAX; i++) {
-            int len = m->io->recv(m->io->ctx, mac, buf, sizeof(buf));
+        uint8_t mac[6], *buf = m->frame;
+        int most = beam_takes(m) ? MOY_MATCH_BEAM_DRAIN : MOY_MATCH_DRAIN_MAX;
+        for (int i = 0; i < most; i++) {
+            int len = m->io->recv(m->io->ctx, mac, buf, sizeof(m->frame));
             if (len == -1) {
                 break;
             }
@@ -1516,16 +1527,19 @@ size_t moy_match_offset_s(void) {
 
 #define W MOY_MATCH_BEAM_WINDOW
 #define CHUNK MOY_MATCH_BEAM_CHUNK
+#define RING MOY_MATCH_BEAM_RING
 
 typedef struct moy_beam {
     uint8_t role, state, why, what;
     bool bound, has_sent, has_ring, has_sum, summing, limited, looked;
     uint8_t peer[6];                    // the offer's sender, else the bound receiver
     uint32_t id, size, chunks, hash, sum;
+    uint32_t chunk, w;                  // a chunk's bytes, and the ring's chunks at that size
     // send: the lowest chunk the receiver lacks, the next never sent and the
     // end of the receiver's room; receive: the lowest chunk it lacks and one
     // past the highest it holds.
     uint32_t base, next, limit, top;
+    uint32_t said;                      // receive: the room's end its last NEED reported
     uint32_t bytes;                     // send: filled by the console; receive: taken by it
     uint32_t holes, since, refused_since;  // send: the pace's last report
     uint32_t sent, resent, refused, rate;
@@ -1534,6 +1548,7 @@ typedef struct moy_beam {
     char name[24];                      // the peer's console name
     moy_match_budget_t budget;
     uint8_t bits[W / 8];                // a ring slot's chunk: pending (send), held (receive)
+    uint8_t frame[MOY_MATCH_FRAME_MAX]; // send: the DATA frame being said
     uint8_t ring[];                     // MOY_MATCH_BEAM_RING bytes once it has one
 } moy_beam_t;
 
@@ -1558,20 +1573,36 @@ static void slot_put(moy_beam_t *b, uint32_t i, bool on) {
 }
 
 static uint32_t chunk_len(const moy_beam_t *b, uint32_t i) {
-    uint32_t left = b->size - i * CHUNK;
-    return left < CHUNK ? left : CHUNK;
+    uint32_t left = b->size - i * b->chunk;
+    return left < b->chunk ? left : b->chunk;
 }
 
 // The byte where chunk `i` ends, past the file's end on none.
-static uint64_t chunk_end(uint32_t i) {
-    return (uint64_t)(i + 1u) * CHUNK;
+static uint64_t chunk_end(const moy_beam_t *b, uint32_t i) {
+    return (uint64_t)(i + 1u) * b->chunk;
 }
 
-// `n` bytes between the ring at byte `at` of the file and `p`, either way.
+// The beam's chunk `chunk` bytes long: as many of them as the ring holds,
+// and the count the size is.
+static void beam_chunk(moy_beam_t *b, uint32_t chunk) {
+    b->chunk = chunk;
+    b->w = RING / chunk < W ? RING / chunk : W;
+    b->chunks = (uint32_t)(((uint64_t)b->size + chunk - 1) / chunk);
+}
+
+// The chunk a console's link carries whole: its largest frame's, at least a
+// frame's and at most BEAM_CHUNK_MAX.
+static uint32_t own_chunk(const moy_match_t *m) {
+    uint32_t c = m->frame_max > MOY_MATCH_BEAM_HDR ? (uint32_t)(m->frame_max - MOY_MATCH_BEAM_HDR) : 0u;
+    return c < CHUNK ? CHUNK : c > MOY_MATCH_BEAM_CHUNK_MAX ? MOY_MATCH_BEAM_CHUNK_MAX : c;
+}
+
+// `n` bytes between the ring at byte `at` of the file and `p`, either way:
+// byte `at` lives at `at` % RING whatever the chunk.
 static void ring_copy(moy_beam_t *b, uint32_t at, uint8_t *p, size_t n, bool in) {
     while (n) {
-        uint32_t o = at % MOY_MATCH_BEAM_RING;
-        size_t k = MOY_MATCH_BEAM_RING - o;
+        uint32_t o = at % RING;
+        size_t k = RING - o;
         if (k > n) {
             k = n;
         }
@@ -1671,6 +1702,12 @@ static bool beam_listens(const moy_match_t *m) {
     return m->beam != NULL && m->beam->state == MOY_BEAM_LISTENING;
 }
 
+// A bound receiver: its poll drains a window's chunks, not DRAIN_MAX frames.
+static bool beam_takes(const moy_match_t *m) {
+    return m->beam != NULL && m->beam->role == MOY_BEAM_RECEIVE
+           && m->beam->state == MOY_BEAM_MOVING;
+}
+
 // The beam's peer was heard on this channel within BEAM_HERE_MS.
 static bool beam_hears(const moy_match_t *m, uint32_t now) {
     return beam_holds_channel(m) && (int32_t)(now - m->beam->heard) < MOY_MATCH_BEAM_HERE_MS;
@@ -1678,7 +1715,7 @@ static bool beam_hears(const moy_match_t *m, uint32_t now) {
 
 static moy_beam_t *beam_new(moy_match_t *m, uint8_t role, bool ring, uint32_t now) {
     moy_match_beam_end(m);
-    moy_beam_t *b = moy_kalloc(sizeof(moy_beam_t) + (ring ? MOY_MATCH_BEAM_RING : 0u),
+    moy_beam_t *b = moy_kalloc(sizeof(moy_beam_t) + (ring ? RING : 0u),
                                MOY_KMEM_PSRAM | MOY_KMEM_ZERO);
     if (b != NULL) {
         b->role = role;
@@ -1690,26 +1727,26 @@ static moy_beam_t *beam_new(moy_match_t *m, uint8_t role, bool ring, uint32_t no
 }
 
 static uint32_t beam_ram(const moy_beam_t *b) {
-    return (uint32_t)sizeof(moy_beam_t) + (b->has_ring ? MOY_MATCH_BEAM_RING : 0u);
+    return (uint32_t)sizeof(moy_beam_t) + (b->has_ring ? RING : 0u);
 }
 
 // -- the receiver ---------------------------------------------------------------
 
 // The first chunk the console has not taken whole: the window's foot.
 static uint32_t taken_chunks(const moy_beam_t *b) {
-    return b->bytes == b->size ? b->chunks : b->bytes / CHUNK;
+    return b->bytes == b->size ? b->chunks : b->bytes / b->chunk;
 }
 
 static uint32_t room_end(const moy_beam_t *b) {
-    uint32_t end = taken_chunks(b) + W;
+    uint32_t end = taken_chunks(b) + b->w;
     return end < b->chunks ? end : b->chunks;
 }
 
 // The receiver's report: the lowest chunk it lacks (the count: all in), the
-// top of what it holds, the end of its room and which of the WINDOW chunks
-// from the lowest it lacks.
+// top of what it holds, the end of its room, which of the WINDOW chunks from
+// the lowest it lacks and the chunk it takes.
 static void beam_need(moy_match_t *m, moy_beam_t *b, uint32_t now) {
-    uint8_t t[12 + W / 8] = {0};
+    uint8_t t[14 + W / 8] = {0};
     put32(t, b->base);
     put32(t + 4, b->top);
     put32(t + 8, room_end(b));
@@ -1720,7 +1757,10 @@ static void beam_need(moy_match_t *m, moy_beam_t *b, uint32_t now) {
             bit_put(t + 12, k, true);
         }
     }
+    t[12 + W / 8] = (uint8_t)b->chunk;
+    t[13 + W / 8] = (uint8_t)(b->chunk >> 8);
     beam_say(m, b, MOY_MATCH_BEAM_NEED, b->peer, t, sizeof(t));
+    b->said = room;
     b->sent_at = now;
     b->has_sent = true;
 }
@@ -1756,11 +1796,12 @@ static void beam_verdict(moy_match_t *m, moy_beam_t *b, uint32_t now) {
 // read from "name|board|title".
 static void beam_heard_offer(moy_beam_t *b, const uint8_t mac[6], const uint8_t *msg,
                              size_t n, uint32_t now) {
-    if (n < 12) {
+    if (n < 14) {
         return;
     }
     uint32_t id = get32(msg + 3), size = get32(msg + 7);
     uint8_t what = msg[11];
+    uint32_t chunk = (uint32_t)msg[12] | ((uint32_t)msg[13] << 8);
     if (b->state == MOY_BEAM_OFFERED) {
         if (id == b->id && memcmp(mac, b->peer, 6) == 0) {
             b->heard = now;
@@ -1768,10 +1809,11 @@ static void beam_heard_offer(moy_beam_t *b, const uint8_t mac[6], const uint8_t 
         return;
     }
     if (b->state != MOY_BEAM_LISTENING || size == 0 || size > MOY_MATCH_BEAM_MAX
-            || (what != MOY_BEAM_CART && what != MOY_BEAM_FILE)) {
+            || (what != MOY_BEAM_CART && what != MOY_BEAM_FILE)
+            || chunk < CHUNK || chunk > MOY_MATCH_BEAM_CHUNK_MAX) {
         return;
     }
-    const char *s = (const char *)msg + 12, *e = (const char *)msg + n;
+    const char *s = (const char *)msg + 14, *e = (const char *)msg + n;
     const char *bar = s;
     while (bar < e && *bar != '|') {
         bar++;
@@ -1788,7 +1830,7 @@ static void beam_heard_offer(moy_beam_t *b, const uint8_t mac[6], const uint8_t 
     b->id = id;
     b->size = size;
     b->what = what;
-    b->chunks = (uint32_t)(((uint64_t)size + CHUNK - 1) / CHUNK);
+    beam_chunk(b, chunk);               // the sender's; the accept takes the smaller
     b->heard = now;
     b->state = MOY_BEAM_OFFERED;
 }
@@ -1812,7 +1854,8 @@ static void beam_heard_data(moy_match_t *m, moy_beam_t *b, const uint8_t *msg, s
     if (i < taken_chunks(b) || i >= room_end(b) || slot_of(b, i)) {
         return;
     }
-    memcpy(b->ring + (i % W) * CHUNK, msg + MOY_MATCH_BEAM_HDR, n - MOY_MATCH_BEAM_HDR);
+    ring_copy(b, i * b->chunk, (uint8_t *)msg + MOY_MATCH_BEAM_HDR, n - MOY_MATCH_BEAM_HDR,
+              true);
     slot_put(b, i, true);
     if (i + 1u > b->top) {
         b->top = i + 1u;
@@ -1831,7 +1874,7 @@ uint32_t moy_match_beam_held(const moy_match_t *m) {
     if (b == NULL || b->role != MOY_BEAM_RECEIVE || b->state != MOY_BEAM_MOVING) {
         return 0;
     }
-    uint64_t end = (uint64_t)b->base * CHUNK;
+    uint64_t end = (uint64_t)b->base * b->chunk;
     if (end > b->size) {
         end = b->size;
     }
@@ -1855,14 +1898,19 @@ size_t moy_match_beam_take(moy_match_t *m, uint8_t *out, size_t n, uint32_t now)
         slot_put(b, i, false);
     }
     beam_verdict(m, b, now);
+    if (b->state == MOY_BEAM_MOVING && room_end(b) >= b->said + b->w / 4u) {
+        beam_need(m, b, now);           // a quarter of the ring's room taken: offered at once
+    }
     return n;
 }
 
 // -- the sender ----------------------------------------------------------------
 
+static void beam_send_chunks(moy_match_t *m, moy_beam_t *b, uint32_t now);
+
 // Chunk `i` is whole in the ring.
 static bool filled(const moy_beam_t *b, uint32_t i) {
-    return b->bytes == b->size || chunk_end(i) <= b->bytes;
+    return b->bytes == b->size || chunk_end(b, i) <= b->bytes;
 }
 
 uint32_t moy_match_beam_room(const moy_match_t *m) {
@@ -1871,14 +1919,14 @@ uint32_t moy_match_beam_room(const moy_match_t *m) {
             || (b->state != MOY_BEAM_OFFERING && b->state != MOY_BEAM_MOVING)) {
         return 0;
     }
-    uint64_t end = (uint64_t)(b->base + W) * CHUNK;
+    uint64_t end = (uint64_t)(b->base + b->w) * b->chunk;
     if (end > b->size) {
         end = b->size;
     }
     return end > b->bytes ? (uint32_t)(end - b->bytes) : 0u;
 }
 
-int moy_match_beam_fill(moy_match_t *m, const uint8_t *p, size_t n) {
+int moy_match_beam_fill(moy_match_t *m, const uint8_t *p, size_t n, uint32_t now) {
     moy_beam_t *b = m->beam;
     if (b == NULL || b->role != MOY_BEAM_SEND
             || (b->state != MOY_BEAM_OFFERING && b->state != MOY_BEAM_MOVING)) {
@@ -1891,15 +1939,20 @@ int moy_match_beam_fill(moy_match_t *m, const uint8_t *p, size_t n) {
     ring_copy(b, b->bytes, (uint8_t *)p, n, true);
     b->hash = moy_lockstep_hash(b->hash, p, n);
     b->bytes += (uint32_t)n;
+    if (b->state == MOY_BEAM_MOVING) {
+        beam_send_chunks(m, b, now);    // what it filled leaves now, not at the next poll
+    }
     return (int)n;
 }
 
 static void beam_offer_frame(moy_match_t *m, moy_beam_t *b, uint32_t now) {
-    uint8_t t[5 + sizeof(m->name) + sizeof(m->board) + MOY_MATCH_CART + 2];
+    uint8_t t[7 + sizeof(m->name) + sizeof(m->board) + MOY_MATCH_CART + 2];
     put32(t, b->size);
     t[4] = b->what;
-    int n = snprintf((char *)t + 5, sizeof(t) - 5, "%s|%s|%s", m->name, m->board, b->title);
-    size_t len = 5 + (n < 0 ? 0u : (size_t)n >= sizeof(t) - 5 ? sizeof(t) - 6 : (size_t)n);
+    t[5] = (uint8_t)b->chunk;
+    t[6] = (uint8_t)(b->chunk >> 8);
+    int n = snprintf((char *)t + 7, sizeof(t) - 7, "%s|%s|%s", m->name, m->board, b->title);
+    size_t len = 7 + (n < 0 ? 0u : (size_t)n >= sizeof(t) - 7 ? sizeof(t) - 8 : (size_t)n);
     if (len > MOY_MATCH_FRAME - 7) {
         len = MOY_MATCH_FRAME - 7;
     }
@@ -1937,10 +1990,15 @@ static void beam_pace(moy_beam_t *b, uint32_t holes) {
 // nothing else is left to send), and sets the pace.
 static void beam_heard_need(moy_match_t *m, moy_beam_t *b, const uint8_t mac[6],
                             const uint8_t *msg, size_t n, uint32_t now) {
-    if (n < 25 + W / 8) {
+    if (n < 27 + W / 8) {
         return;
     }
+    uint32_t chunk = (uint32_t)msg[25 + W / 8] | ((uint32_t)msg[26 + W / 8] << 8);
     if (b->state == MOY_BEAM_OFFERING) {
+        if (chunk < CHUNK || chunk > b->chunk) {
+            return;                     // a chunk this sender never offered
+        }
+        beam_chunk(b, chunk);           // the receiver's: what its link carries
         memcpy(b->peer, mac, 6);
         b->bound = true;
         const moy_match_peer_t *p = peer_of(m, mac);
@@ -1956,6 +2014,9 @@ static void beam_heard_need(moy_match_t *m, moy_beam_t *b, const uint8_t mac[6],
     if (memcmp(mac, b->peer, 6) != 0) {
         uint8_t why = MOY_BEAM_WHY_STOPPED;
         beam_say(m, b, MOY_MATCH_BEAM_NO, mac, &why, 1);
+        return;
+    }
+    if (chunk != b->chunk) {
         return;
     }
     b->heard = now;
@@ -2022,7 +2083,7 @@ static void beam_send_chunks(moy_match_t *m, moy_beam_t *b, uint32_t now) {
     if (burst < MOY_MATCH_BEAM_BURST) {
         burst = MOY_MATCH_BEAM_BURST;
     }
-    uint8_t t[4 + CHUNK];
+    uint8_t *f = b->frame, *t = f + beam_head(f, b->id, MOY_MATCH_BEAM_DATA, b->peer);
     for (;;) {
         uint32_t i = b->base;
         while (i < b->next && !slot_of(b, i)) {
@@ -2041,8 +2102,8 @@ static void beam_send_chunks(moy_match_t *m, moy_beam_t *b, uint32_t now) {
         }
         uint32_t len = chunk_len(b, i);
         put32(t, i);
-        memcpy(t + 4, b->ring + (i % W) * CHUNK, len);
-        if (!beam_say(m, b, MOY_MATCH_BEAM_DATA, b->peer, t, 4 + len)) {
+        ring_copy(b, i * b->chunk, t + 4, len, false);
+        if (!broadcast(m, f, (size_t)(t - f) + 4 + len)) {
             b->refused++;
             b->refused_since++;
             return;
@@ -2233,7 +2294,7 @@ int moy_match_beam_send(moy_match_t *m, const char *title, uint8_t what, uint32_
     }
     b->size = size;
     b->what = what;
-    b->chunks = (uint32_t)(((uint64_t)size + CHUNK - 1) / CHUNK);
+    beam_chunk(b, own_chunk(m));        // the receiver's first NEED may take it smaller
     b->hash = MOY_LOCKSTEP_HASH0;
     b->rate = MOY_MATCH_BEAM_RATE;
     copy_str(b->title, sizeof(b->title), title, title != NULL ? strlen(title) : 0);
@@ -2265,13 +2326,15 @@ int moy_match_beam_accept(moy_match_t *m, uint32_t now) {
     if (rc != 0) {
         return rc;
     }
-    moy_beam_t *g = moy_krealloc(b, sizeof(moy_beam_t) + MOY_MATCH_BEAM_RING, MOY_KMEM_PSRAM);
+    moy_beam_t *g = moy_krealloc(b, sizeof(moy_beam_t) + RING, MOY_KMEM_PSRAM);
     if (g == NULL) {
         beam_fail(m, b, MOY_BEAM_WHY_ROOM, true);
         return MOY_BEAM_E_ROOM;
     }
     m->beam = b = g;
     b->has_ring = true;
+    uint32_t own = own_chunk(m);
+    beam_chunk(b, b->chunk < own ? b->chunk : own);
     memset(b->bits, 0, sizeof(b->bits));
     b->base = b->top = b->bytes = 0;
     b->hash = MOY_LOCKSTEP_HASH0;
@@ -2324,7 +2387,7 @@ bool moy_match_beam_info(moy_match_t *m, moy_match_beam_info_t *out) {
     if (b->role == MOY_BEAM_RECEIVE) {
         out->done = b->bytes;
     } else {
-        uint64_t d = (uint64_t)b->base * CHUNK;
+        uint64_t d = (uint64_t)b->base * b->chunk;
         out->done = d > b->size ? b->size : (uint32_t)d;
     }
     out->sent = b->sent;
@@ -2339,3 +2402,4 @@ bool moy_match_beam_info(moy_match_t *m, moy_match_beam_info_t *out) {
 
 #undef W
 #undef CHUNK
+#undef RING

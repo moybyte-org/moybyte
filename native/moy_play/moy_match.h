@@ -67,8 +67,9 @@
 // sends only while it is open and within its SEND BUDGET (below); port 0 has
 // none, its sends being the game's.
 //
-// BEAMING A FILE. A console sends one file -- a cart's `.moy` archive or a
-// person's file -- as bytes to one console nearby that is not playing a match
+// BEAMING A FILE. A console sends one stream of bytes -- a person's file, or
+// a cart's files behind a head that names them (runtime/run/link_beam.py) --
+// to one console nearby that is not playing a match
 // (T_BEAM, BEAM_* below). The sender OFFERS it on the air (its id, size,
 // what it is, its console's name and the item's title) every BEAM_OFFER_MS
 // (never from a probe channel: a console that took it there would answer
@@ -79,14 +80,18 @@
 // NEED, which binds the two by MAC and beam id.
 //   THE BYTES MOVE THROUGH A WINDOW. Each side holds a ring of BEAM_WINDOW
 // chunks and nothing else, whatever the size: the sender's console fills it
-// from its store as room opens (moy_match_beam_room, _fill) and the
-// receiver's empties it into its store (moy_match_beam_held, _take), so a
-// beam's RAM is fixed. The receiver drives completion, because the ack lies:
-// every BEAM_NEED_MS it sends the lowest chunk it lacks, the top of what it
-// holds, the end of its room (the window past what its console took) and a
-// bitmap of the BEAM_WINDOW chunks from the lowest; the sender sends what it
-// has filled up to that room, then again the chunks a NEED reports lost
-// below the top (everything the receiver lacks once nothing else is left).
+// from its store as room opens (moy_match_beam_room, _fill: what it fills
+// leaves at once, within the pace) and the receiver's empties it into its
+// store (moy_match_beam_held, _take), so a beam's RAM is fixed. The receiver
+// drives completion, because the ack lies: every BEAM_NEED_MS, and at once
+// when its console has taken a quarter of the window's room since the last,
+// it sends the lowest chunk it lacks, the top of what it holds, the end of
+// its room (the window past what its console took) and a bitmap of the
+// BEAM_WINDOW chunks from the lowest; the sender sends what it has filled up
+// to that room, then again the chunks a NEED reports lost below the top
+// (everything the receiver lacks once nothing else is left). A bound
+// receiver's poll drains up to BEAM_DRAIN frames, a window's worth, where
+// any other poll drains DRAIN_MAX.
 //   THE PACE IS FOUND, not fixed: a beam starts at BEAM_RATE chunks a second
 // and each NEED adjusts it -- down by a quarter where a send was refused
 // since the last one (THE SEND BUDGET's queue on a P4) or the receiver's
@@ -205,6 +210,7 @@ enum {
 #define MOY_MATCH_START_TRIES 12
 #define MOY_MATCH_PEERS 8
 #define MOY_MATCH_FRAME 250             // ESP-NOW's frame
+#define MOY_MATCH_FRAME_MAX 1470        // ...ESP-NOW v2's, which only a beam's chunk uses
 #define MOY_MATCH_MSG_MAX 240           // a net.send payload
 #define MOY_MATCH_CFG 100               // the host's tuning carried by START
 #define MOY_MATCH_CART 120              // the title START carries
@@ -244,17 +250,24 @@ enum {
 #define MOY_MATCH_LIVE_BURST 1
 enum { MOY_MATCH_FROM_ANY = 0, MOY_MATCH_FROM_MATCH = 1 };
 // BEAMING A FILE. Every frame is [proto, 8, kind, id (4)] and, but for the
-// offer, the destination (6); a chunk follows its index (4) and fills the
-// frame. The payloads: OFFER size (4), what (1), "name|board|title"; NEED
-// lowest lacked (4), top (4), room's end (4), the bitmap (BEAM_WINDOW bits);
-// DATA index (4), the bytes; NO why (1); DONE good (1); SUM hash (4). A size
-// and a chunk's index are 32 bits, so a beam carries up to BEAM_MAX bytes and
-// what bounds one is the receiver's free space. Each side's ring is
-// BEAM_RING bytes.
+// offer, the destination (6); a chunk follows its index (4). The payloads:
+// OFFER size (4), what (1), the sender's chunk (2), "name|board|title"; NEED
+// lowest lacked (4), top (4), room's end (4), the bitmap (BEAM_WINDOW bits),
+// the chunk (2); DATA index (4), the bytes; NO why (1); DONE good (1); SUM
+// hash (4). A size and a chunk's index are 32 bits, so a beam carries up to
+// BEAM_MAX bytes and what bounds one is the receiver's free space.
+//   A CHUNK IS AS LONG AS BOTH LINKS CARRY. Each console's link says the
+// largest frame it carries (moy_match_set_frame: MOY_MATCH_FRAME unless its
+// radio takes ESP-NOW v2's FRAME_MAX); the offer names the sender's chunk,
+// the receiver's accept takes the smaller of it and its own and every NEED
+// names that, which the sender adopts at its first. Each side's ring is
+// BEAM_RING bytes whatever the chunk -- the stream's byte `b` lives at `b` %
+// BEAM_RING -- so it holds BEAM_RING / chunk chunks, BEAM_WINDOW at most.
 #define MOY_MATCH_BEAM_MAX 0xFFFF0000u  // the size field's ceiling
 #define MOY_MATCH_BEAM_HDR 17
-#define MOY_MATCH_BEAM_CHUNK (MOY_MATCH_FRAME - MOY_MATCH_BEAM_HDR)
-#define MOY_MATCH_BEAM_WINDOW 128
+#define MOY_MATCH_BEAM_CHUNK (MOY_MATCH_FRAME - MOY_MATCH_BEAM_HDR)      // every link's
+#define MOY_MATCH_BEAM_CHUNK_MAX (MOY_MATCH_FRAME_MAX - MOY_MATCH_BEAM_HDR)
+#define MOY_MATCH_BEAM_WINDOW 512
 #define MOY_MATCH_BEAM_RING (MOY_MATCH_BEAM_WINDOW * MOY_MATCH_BEAM_CHUNK)
 #define MOY_MATCH_BEAM_OFFER_MS 100     // an offer's resend
 #define MOY_MATCH_BEAM_NEED_MS 200      // a receiver's report, and a sender's SUM
@@ -265,9 +278,10 @@ enum { MOY_MATCH_FROM_ANY = 0, MOY_MATCH_FROM_MATCH = 1 };
 #define MOY_MATCH_BEAM_HERE_MS 1500     // a free station stays where its beam's peer was heard
 #define MOY_MATCH_BEAM_RATE 60          // chunks/s a beam starts at
 #define MOY_MATCH_BEAM_RATE_MIN 20
-#define MOY_MATCH_BEAM_RATE_MAX 2000
+#define MOY_MATCH_BEAM_RATE_MAX 4000
 #define MOY_MATCH_BEAM_BURST 6          // the bucket's floor, chunks
-#define MOY_MATCH_BEAM_BURST_MS 50      // ...and its depth in time at the rate
+#define MOY_MATCH_BEAM_BURST_MS 100     // ...and its depth in time at the rate
+#define MOY_MATCH_BEAM_DRAIN (MOY_MATCH_BEAM_WINDOW + 32)  // a bound receiver's poll, frames
 #define MOY_MATCH_BEAM_DONES 3          // a receiver's DONE and either side's NO, sent this many times
 enum { MOY_MATCH_BEAM_OFFER = 1, MOY_MATCH_BEAM_NEED = 2, MOY_MATCH_BEAM_DATA = 3,
        MOY_MATCH_BEAM_NO = 4, MOY_MATCH_BEAM_DONE = 5, MOY_MATCH_BEAM_SUM = 6 };
@@ -505,6 +519,8 @@ typedef struct {
     bool away;                          // ...which left it on a probe channel
     moy_match_budget_t ports_budget;    // every port's sends together
     struct moy_beam *beam;              // the beam under way, NULL none (BEAMING A FILE)
+    uint16_t frame_max;                 // the largest frame the link carries (moy_match_set_frame)
+    uint8_t frame[MOY_MATCH_FRAME_MAX]; // the frame a drain or a poll took last
     // The last beam this console received to its end, whose SUM it answers
     // for BEAM_KEEP_MS: its id, sender and verdict (1 whole, 2 damaged) -- or
     // the last it said NO to once bound or offered (3, and the why), which it
@@ -525,6 +541,10 @@ void moy_match_init(moy_match_t *m, const moy_match_io_t *io, const char *name,
 // The radio is up (the caller started it with the measured recipe): the link
 // takes `mac` as its own and listens. Idempotent.
 void moy_match_start(moy_match_t *m, const uint8_t mac[6]);
+// The largest frame this console's link carries, MOY_MATCH_FRAME (every
+// link's, and the default) up to MOY_MATCH_FRAME_MAX: what a beam's chunk
+// may be (BEAMING A FILE). Clamped to that range.
+void moy_match_set_frame(moy_match_t *m, uint32_t n);
 // The match ends and the peers are forgotten; the caller takes the radio down.
 void moy_match_stop(moy_match_t *m);
 // What this console sits on: `cart` ("" at the launcher) and `state` (0 idle,
@@ -601,7 +621,7 @@ const moy_match_peer_t *moy_match_candidate(const moy_match_t *m, const char *ca
 int moy_match_beam_send(moy_match_t *m, const char *title, uint8_t what, uint32_t size,
                         uint32_t now);
 uint32_t moy_match_beam_room(const moy_match_t *m);
-int moy_match_beam_fill(moy_match_t *m, const uint8_t *p, size_t n);
+int moy_match_beam_fill(moy_match_t *m, const uint8_t *p, size_t n, uint32_t now);
 // The receiver's: the receive state opened (LISTENING), and its person's yes
 // to the offer it holds (OFFERED -> MOVING), or the offer refused with `why`
 // (MOY_BEAM_WHY_*, its sender told). 0, or MOY_BEAM_E_*.

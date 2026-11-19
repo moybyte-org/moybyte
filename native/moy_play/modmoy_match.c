@@ -17,7 +17,7 @@
 //   pending(now), due(now), advance(held[, now]) -> 1|0|-1, resend(),
 //   packet(data[, now]) -> bool, tps(now), expand(f16),
 //   beam_send(title, what, size, now), beam_listen(now), beam_accept(now),
-//   beam_refuse(why) -> 0|code, beam_room(), beam_fill(buf, n) -> taken,
+//   beam_refuse(why) -> 0|code, beam_room(), beam_fill(buf, n, now) -> taken,
 //   beam_held(), beam_take(buf, now) -> count, beam_end(),
 //   beam_info() -> (role, state, why, title, peer, size, done, what, sent,
 //   resent, refused, rate, ram)|None
@@ -249,15 +249,16 @@ static mp_obj_t mt_beam_room(mp_obj_t self) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mt_beam_room_obj, mt_beam_room);
 
-// fill(buf, n): the first `n` bytes of `buf` offered; the count taken.
-static mp_obj_t mt_beam_fill(mp_obj_t self, mp_obj_t data, mp_obj_t n) {
+// fill(buf, n, now): the first `n` bytes of `buf` offered; the count taken.
+static mp_obj_t mt_beam_fill(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
     mp_buffer_info_t b;
-    mp_get_buffer_raise(data, &b, MP_BUFFER_READ);
-    mp_int_t k = mp_obj_get_int(n);
+    mp_get_buffer_raise(a[1], &b, MP_BUFFER_READ);
+    mp_int_t k = mp_obj_get_int(a[2]);
     size_t len = k < 0 ? 0u : (size_t)k > b.len ? b.len : (size_t)k;
-    return MP_OBJ_NEW_SMALL_INT(moy_match_beam_fill(M(self), b.buf, len));
+    return MP_OBJ_NEW_SMALL_INT(moy_match_beam_fill(M(a[0]), b.buf, len, now_of(a[3])));
 }
-static MP_DEFINE_CONST_FUN_OBJ_3(mt_beam_fill_obj, mt_beam_fill);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mt_beam_fill_obj, 4, 4, mt_beam_fill);
 
 static mp_obj_t mt_beam_listen(mp_obj_t self, mp_obj_t now) {
     return MP_OBJ_NEW_SMALL_INT(moy_match_beam_listen(M(self), now_of(now)));

@@ -763,6 +763,7 @@ _MSIGS = (
     ("moy_match_init", [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_char_p,
                         ctypes.c_char_p, _U32], None),
     ("moy_match_start", [ctypes.c_void_p, ctypes.c_char_p], None),
+    ("moy_match_set_frame", [ctypes.c_void_p, ctypes.c_uint32], None),
     ("moy_match_stop", [ctypes.c_void_p], None),
     ("moy_match_announce", [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int], None),
     ("moy_match_set_config", [ctypes.c_void_p, ctypes.c_char_p], None),
@@ -815,7 +816,8 @@ _MSIGS = (
     ("moy_match_beam_send", [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint8, _U32, _U32],
      ctypes.c_int),
     ("moy_match_beam_room", [ctypes.c_void_p], _U32),
-    ("moy_match_beam_fill", [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t], ctypes.c_int),
+    ("moy_match_beam_fill", [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t, ctypes.c_uint32],
+     ctypes.c_int),
     ("moy_match_beam_listen", [ctypes.c_void_p, _U32], ctypes.c_int),
     ("moy_match_beam_accept", [ctypes.c_void_p, _U32], ctypes.c_int),
     ("moy_match_beam_refuse", [ctypes.c_void_p, ctypes.c_uint8], ctypes.c_int),
@@ -984,6 +986,10 @@ class Match:
         s.arr_f[f & 63] = f
         s.arr_t[f & 63] = int(t) & 0xFFFFFFFF
 
+    def set_frame(self, n):
+        """The largest frame this console's link carries (a beam's chunk)."""
+        self._d.moy_match_set_frame(self._p, int(n))
+
     def start(self, mac):
         self._d.moy_match_start(self._p, bytes(mac)[:6].ljust(6, b"\0"))
 
@@ -1084,10 +1090,10 @@ class Match:
     def beam_room(self):
         return self._d.moy_match_beam_room(self._p)
 
-    def beam_fill(self, buf, n):
+    def beam_fill(self, buf, n, now):
         """The first `n` bytes of `buf` offered: the count taken."""
         n = max(0, min(int(n), len(buf)))
-        return self._d.moy_match_beam_fill(self._p, bytes(buf[:n]), n)
+        return self._d.moy_match_beam_fill(self._p, bytes(buf[:n]), n, int(now) & 0xFFFFFFFF)
 
     def beam_listen(self, now):
         return self._d.moy_match_beam_listen(self._p, int(now) & 0xFFFFFFFF)

@@ -20,10 +20,11 @@
 #include "py/mpconfig.h"
 #endif
 
-// The most a frame carries (ESP_NOW_MAX_DATA_LEN, v1 frames).
-#define MOY_LINK_MAX 250u
-// The bytes a ring record costs beyond its payload: its length and its MAC.
-#define MOY_LINK_REC 7u
+// The most a frame carries (ESP_NOW_MAX_DATA_LEN_V2: ESP-NOW v2 frames; a
+// v1 frame carries 250).
+#define MOY_LINK_MAX 1470u
+// The bytes a ring record costs beyond its payload: its length (2) and its MAC.
+#define MOY_LINK_REC 8u
 
 typedef struct {
     uint8_t *buf;
@@ -66,9 +67,9 @@ static inline int moy_link_ring_put(moy_link_ring_t *r, const uint8_t mac[6],
         return 0;
     }
     uint32_t tail = r->head + r->used;
-    uint8_t n = (uint8_t)len;
-    moy_link_copy_in(r, tail, &n, 1);
-    moy_link_copy_in(r, tail + 1, mac, 6);
+    uint8_t n[2] = { (uint8_t)len, (uint8_t)(len >> 8) };
+    moy_link_copy_in(r, tail, n, 2);
+    moy_link_copy_in(r, tail + 2, mac, 6);
     moy_link_copy_in(r, tail + MOY_LINK_REC, data, len);
     r->used += need;
     r->rx++;
@@ -78,20 +79,21 @@ static inline int moy_link_ring_put(moy_link_ring_t *r, const uint8_t mac[6],
     return 1;
 }
 
-// The oldest record's payload length, its MAC into `mac` and its payload into
-// `data` (at most `cap` bytes; the rest goes with it), or -1 when empty.
+// The oldest record's MAC into `mac` and its payload into `data`: the bytes
+// copied (at most `cap`; the rest goes with it), or -1 when empty.
 static inline int moy_link_ring_get(moy_link_ring_t *r, uint8_t mac[6], uint8_t *data,
                       uint32_t cap) {
     if (r->used == 0) {
         return -1;
     }
-    uint8_t n;
-    moy_link_copy_out(r, r->head, &n, 1);
-    moy_link_copy_out(r, r->head + 1, mac, 6);
+    uint8_t b[2];
+    moy_link_copy_out(r, r->head, b, 2);
+    uint32_t n = (uint32_t)b[0] | ((uint32_t)b[1] << 8);
+    moy_link_copy_out(r, r->head + 2, mac, 6);
     moy_link_copy_out(r, r->head + MOY_LINK_REC, data, n < cap ? n : cap);
     r->head = (r->head + MOY_LINK_REC + n) % r->cap;
     r->used -= MOY_LINK_REC + n;
-    return n;
+    return (int)(n < cap ? n : cap);
 }
 
 #if defined(MOY_NET_LINK) && MOY_NET_LINK
@@ -113,6 +115,11 @@ int moy_link_rate(int rate);
 int moy_link_channel(int set);
 int moy_link_add_peer(const uint8_t mac[6]);
 int moy_link_send(const uint8_t mac[6], const uint8_t *data, size_t len);
+// The longest frame this board's radio sends and takes: ESP-NOW v2's where
+// the radio is the chip's own, 250 (v1) through the Waveshare and Guition
+// P4s' C6, whose shim carries v1 frames; the one place a P4 says more once
+// its slave image carries v2.
+uint32_t moy_link_frame_max(void);
 int moy_link_recv(uint8_t mac[6], uint8_t *data, uint32_t cap);
 void moy_link_stats(moy_link_stats_t *s);
 

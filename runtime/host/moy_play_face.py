@@ -293,6 +293,8 @@ class moy_match_t(_c.Structure):
         ("away", _c.c_bool),
         ("ports_budget", moy_match_budget_t),
         ("beam", _c.c_void_p),
+        ("frame_max", _c.c_uint16),
+        ("frame", _c.c_uint8 * 1470),
         ("kept_id", _c.c_uint32),
         ("kept_at", _c.c_uint32),
         ("kept_said", _c.c_uint32),

@@ -60,6 +60,7 @@ moy_match_t *moy_match_kernel_make(const char *name, const char *board, uint32_t
             return NULL;
         }
         moy_match_init(m, &K_IO, name, board, entropy);
+        moy_match_set_frame(m, moy_link_frame_max());
         g_kernel = m;
     }
     return g_kernel;
