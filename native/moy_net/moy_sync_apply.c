@@ -68,12 +68,16 @@ static int is_shelf(const char *name) {
     return 0;
 }
 
-// runtime/carts/moy_sync.py's is_binary: a cart's cover by name, a theme package's
-// fonts and sheets by suffix.
+// moy_pmem.h's (weak: an image without the pmem record links none).
+void moy_pmem_forget(const char *path);
+#pragma weak moy_pmem_forget
+
+// runtime/carts/moy_sync.py's is_binary: a cart's cover and its saves by name, a
+// theme package's fonts and sheets by suffix.
 static int is_binary(const char *name) {
     static const char *const suffixes[] = {".fnt", ".moygfx"};
     size_t n = strlen(name);
-    if (strcmp(name, "cover.png") == 0) {
+    if (strcmp(name, "cover.png") == 0 || strcmp(name, "pmem.bin") == 0) {
         return 1;
     }
     for (size_t i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); i++) {
@@ -479,6 +483,10 @@ static int apply_one(op_t *o, const char *op, const char *op_end, int *shelf,
         new_item = !moy_fs_exists(o->a);
     }
     const char *last = last_seg(o);
+    if (o->root == MOY_SYNC_CARTS && strcmp(last, "pmem.bin") == 0
+        && moy_pmem_forget != NULL) {
+        moy_pmem_forget(full);          // the file written or deleted is the pmem now
+    }
     if (truthy(op, op_end, "d")) {
         moy_fs_remove(full);
         *shelf = o->root == MOY_SYNC_CARTS && is_shelf(last);

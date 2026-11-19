@@ -21,7 +21,7 @@ from array import array
 
 import moy_evq as _E
 import moybyte as _moybyte
-from elf_run import IN_WORDS, LinkedUi, fill_words, key_ring, key_sent, read_buttons, sent
+from elf_run import IN_WORDS, LinkedUi, key_ring, key_sent, sent
 
 # The longest a tick waits for a present (elf_run.WAIT_US_MAX's).
 WAIT_MS_MAX = 50
@@ -92,11 +92,8 @@ class WasiApp(LinkedUi):
     def _update(self, dt):
         if not self._live:
             return
-        out = self._masks
-        read_buttons(self._ws.input, self._mask_of, out)
-        self._pressed |= out[1]
+        out = self._input()
         self._shown = False             # the call lets the last frame go
-        fill_words(self._ws, self._words, self._ptr, self._keys, self._lay, self.pid)
         tick = int(dt * 1000)
         self._ms += tick
         got = _E.screen_frame(self.pid, out[0], self._pressed, self._ms,

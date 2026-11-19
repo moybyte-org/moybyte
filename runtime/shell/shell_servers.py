@@ -519,6 +519,22 @@ class InstallServer:
         firmware (the browser console add-on's), or None."""
         return self.__ws.cart_own
 
+    def locked(self, g):
+        """Whether the console has a password (`passwd`), which accepting an
+        unreviewed Python cart's warning takes (runtime/shell/pkg.py's
+        `gated`); on a page a console with no screen serves, whether that
+        console has one (it checks the password itself)."""
+        board = self.__ws.cart_board
+        if board is not None:
+            return bool(getattr(board, "locked", False))
+        import ssh_service
+        return ssh_service.is_set(self.__ws)
+
+    def unlock(self, g, password):
+        """Whether `password` is the console's (`locked`'s)."""
+        import ssh_service
+        return ssh_service.is_password(self.__ws, password)
+
     def can_pick(self, g):
         """True where the player can hand this console a file of their own."""
         return self.__ws.cart_pick is not None

@@ -285,12 +285,14 @@ def install(m, lib, tokens):
         b = bytes(items)
         _check(lib.moy_ui_status(c.byref(s), box_of(rect), b, len(b), int(count), s.fs))
 
-    def hints(cv, look, rect, items, desk, draw):
+    def hints(cv, look, rect, items, desk, draw, answer=True):
         s = sink(cv, look)
         b = bytes(items)
         spans = (c.c_int16 * 32)()
         n = lib.moy_ui_hints_at(c.byref(s), box_of(rect), b, len(b), s.fs, int(desk),
                                 int(bool(draw)), spans, 16)
+        if not answer:
+            return None
         return tuple((spans[2 * k], spans[2 * k + 1]) for k in range(min(n, 16)))
 
     def game_btn(cv, rect, label, fill):
@@ -334,10 +336,13 @@ def install(m, lib, tokens):
         n = lib.moy_ui_frame_buttons(box_of(rect), int(title_h), sp, int(btns), int(fs), out)
         return tuple((b.id, b.box.x, b.box.y, b.box.w, b.box.h, b.right) for b in out[:n])
 
-    def frame_icon(rect, title_h, btns):
+    def frame_icon(rect, title_h, btns, into=None):
         out = _Box()
         if not lib.moy_ui_frame_icon(box_of(rect), int(title_h), int(btns), c.byref(out)):
             return None
+        if into is not None:
+            into[0], into[1], into[2], into[3] = out.x, out.y, out.w, out.h
+            return into
         return (out.x, out.y, out.w, out.h)
 
     def bar_part(cv, look, part, rect, on, fill=None):

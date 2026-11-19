@@ -67,24 +67,15 @@ ICON_SET = os.path.join(ROOT, "native", "moy_ui", "icons", "smooth", "default")
 # of the frame to take instead of its centre, and cart functions to "mute" on
 # top of MUTE.
 #  - Bullet Storm has no storm yet at FRAMES.
-#  - Tap The Coin's whole frame is an empty field with one coin in it, so its
-#    cover is that coin, at twice its size.
 #  - Brick Siege's right strip is its HUD (title, score, lives, base), so its
 #    cover is the 240 x 240 battlefield.
 #  - Letter Blitz's HUD is a band across rows 20..48 (the wanted letter, the
 #    streak); its cover is the maze below it.
-#  - Pixel Pet's FOOD and JOY meters are `_bar`; without them the room is
-#    empty purple, so its cover is the pet on its ground, pixel for pixel.
-#  - Tap The Red's miss pips sit in the top-right corner; its cover starts
-#    below them.
 PICKS = {
     "moybyte.bullet_storm": {"frames": 200},
-    "moybyte.tap_game": {"crop": (34, 160, 64)},
     "moybyte.brick_siege": {"crop": (0, 0, 240)},
     "moybyte.brick_siege_lua": {"crop": (0, 0, 240)},
     "moybyte.letter_blitz": {"crop": (64, 48, 192)},
-    "moybyte.pixel_pet": {"mute": ("_bar",), "crop": (96, 104, 128)},
-    "moybyte.tap_only_red": {"crop": (50, 20, 220)},
 }
 # Cart globals every capture silences: the HUD's text.
 MUTE = ("print",)

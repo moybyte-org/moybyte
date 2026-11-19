@@ -23,7 +23,7 @@
 //                        (pointer: coarse), `channel` its MOY_CHANNEL, `rate`
 //                        its AudioContext's sample rate (0: none), the output's
 //   {t:"input", json}    an {"events":[...]} batch, applied before the next step
-//   {t:"sink", port?}    where a frame's samples go: the worklet's MessagePort,
+//   {t:"sink", port?, rate}  where a frame's samples go: the worklet's MessagePort,
 //                        which reports its counters back on it, or (no port)
 //                        the page, which reports them as {t:"played", s}
 //   {t:"played", s}      the page's sink's counters (page_core.html, THE SINK)
@@ -78,7 +78,8 @@
 //                        fetch from `host`: the page asks the player for theirs
 //   {t:"unpick", id}     ...and the question is over
 //   {t:"installed", folder, d}  an install reached the browser's store
-//   {t:"state", json}    the answer to {t:"state"}
+//   {t:"state", json, sink, loop}  the answer to {t:"state"}, with the sink's
+//                        counters and the loop's longest waits
 import { loadMicroPython } from "./micropython.mjs";
 import * as store from "./moy_store.mjs";
 
@@ -237,21 +238,56 @@ let running = false, inbox = [];
 // The audio sink (page_core.html, THE SINK): null before the page names it,
 // "page", or the worklet's port; `played` its count of samples played, -1
 // with no sink, which the console's pull tops its depth up from.
-let sink = null, sinkStats = null, played = -1;
-function sinkSet(port) {
+let sink = null, sinkStats = null, played = -1, sinkRate = 0;
+function sinkSet(port, rate) {
     sink = port || "page";
+    sinkRate = +rate || 0;
     played = 0;
-    if (port) port.onmessage = (e) => { sinkStats = e.data; played = e.data.played; };
+    if (port) port.onmessage = (e) => { sinkHeard(e.data); };
+}
+function sinkHeard(s) {
+    const now = performance.now();
+    if (LOOP && waitFrom.heard) longest("heard", now - waitFrom.heard);
+    waitFrom.heard = now;
+    sinkStats = s;
+    played = s.played;
+}
+// The loop's longest waits since the stream that plays began (its `fresh`
+// chunk), for `__moyState().loop`, each in ms with the sink's play time in s
+// (`played` as this worker last heard it) when it ended: `frame` between two
+// frames, `step` one step of the console (a collection the VM's allocation
+// triggers lands in it), `gc` the loop's own collect, `ship` between two
+// chunks sent to the sink, `heard` between two of the sink's counts arriving.
+// Set against the sink's `lull` they say which side a stall was on.
+let LOOP = null;
+const waitFrom = { frame: 0, ship: 0, heard: 0 };
+function longest(k, ms) {
+    if (ms <= LOOP[k]) return;
+    LOOP[k] = Math.round(ms);
+    LOOP[k + "At"] = sinkRate ? Math.round(Math.max(0, played) * 1000 / sinkRate) / 1000 : 0;
 }
 // A frame's samples, read out of the wasm heap where the pull rendered them,
-// to the sink.
-function shipPCM(f) {
-    if (!sink) return;
-    const n = f.pcm, b = new Int16Array(n);
-    new Uint8Array(b.buffer).set(mp._module.HEAPU8.subarray(f.pa, f.pa + 2 * n));
-    const c = { p: b, at: f.at, fresh: f.fresh };
+// to the sink: step_frame_json leaves their count, the first's index, whether
+// they start a stream and their address at `pcmAt` (web_boot._PCM, four
+// doubles), so a frame that only moves samples crosses back with no string.
+// Answers whether there were any.
+let pcmAt = 0;
+function shipPCM() {
+    const heap = mp._module.HEAPU8;
+    const r = new Float64Array(heap.buffer, pcmAt, 4);
+    const n = r[0];
+    if (!n) return false;
+    if (!sink) return true;
+    const at = r[1], fresh = r[2], pa = r[3], b = new Int16Array(n);
+    new Uint8Array(b.buffer).set(heap.subarray(pa, pa + 2 * n));
+    const c = { p: b, at: at, fresh: fresh }, now = performance.now();
+    if (fresh) LOOP = { frame: 0, frameAt: 0, step: 0, stepAt: 0, gc: 0, gcAt: 0,
+                          ship: 0, shipAt: 0, heard: 0, heardAt: 0 };
+    else if (LOOP) longest("ship", now - waitFrom.ship);
+    waitFrom.ship = now;
     if (sink === "page") self.postMessage(Object.assign({ t: "pcm" }, c), [b.buffer]);
     else sink.postMessage(c, [b.buffer]);
+    return true;
 }
 // Framebuffer ping-pong. A painted frame is copied out of the wasm heap into a
 // plain ArrayBuffer and TRANSFERRED to the page (zero-copy handoff); the page
@@ -265,15 +301,24 @@ function shipPCM(f) {
 // static files anyone can host (GitHub Pages included).
 let fbPool = [];
 const FRAME_MS = 1000 / 60;
-// GC scheduling (the surface-model gate-0 finding): web_boot raises the GC
-// trigger from the port's 16KB (which made EVERY painted frame pay a full
-// ~67ms collect at this boundary) to megabytes, so the WORKER now owns WHEN
-// collects land: on the 3rd consecutive quiet frame (idle -- the hitch is
-// invisible), or after COLLECT_MAX_FRAMES of sustained activity (a game that
-// never idles must still collect eventually; one bounded hitch beats heap
-// growth -- SPLIT_HEAP_AUTO grows the heap rather than collecting).
-const IDLE_QUIET_FRAMES = 3, COLLECT_MAX_FRAMES = 600;
-let quietStreak = 0, framesSinceCollect = 0, idleCollected = false;
+// GC scheduling (the surface-model gate-0 finding): web_boot raises the VM's
+// collect trigger from the port's 16KB (which made EVERY painted frame pay a
+// full ~67ms collect at this boundary) to megabytes of allocation, and the
+// worker lands one collect of its own on the 3rd consecutive quiet frame (idle
+// -- the hitch is invisible), once per quiet streak. While a stream plays no
+// frame is quiet (STREAM_FRAMES since its last samples): its frames ship
+// nothing only while the sink's count is late, its lead at its lowest.
+// Through sustained activity the VM's trigger is what bounds the heap:
+// SPLIT_HEAP_AUTO grows the heap instead of collecting only inside one call,
+// and the trigger's collect lands as the call that crossed it returns. The
+// worker adds no periodic collect of its own: a frame path that allocates
+// meets the trigger anyway (a playing station's desk does, every few
+// seconds), one that does not has nothing to free, and a pause is the mark of
+// the live set plus the sweep of the heap whatever the garbage, taken out of
+// the sink's lead while a stream plays. Asking the VM how much it allocated
+// (gc.mem_alloc walks the heap's table) costs about what a collect does.
+const IDLE_QUIET_FRAMES = 3, STREAM_FRAMES = 30;
+let quietStreak = 0, idleCollected = false, sincePcm = STREAM_FRAMES;
 // Worker-side perf accounting, reported every WP_MS and printed by the page's
 // plog line: step mean/max, painted frames, >20ms stalls, and the cost of the
 // out-of-band calls (assets/collect/input) that block this same loop.
@@ -314,7 +359,9 @@ function say(s) { self.postMessage({ t: "status", s: s }); }
 // with the same marshalling, blit, read and traps. This is moy-spec's web
 // player's adapter (runner/cart.js) on this worker's VM. A compiled app's
 // "moybyte.app" imports are the same adapters over the app ABI's rows
-// (moy_web_app_natives, native/moy_app/moy_app_wasm.h). The two modules have
+// (moy_web_app_natives, native/moy_app/moy_app_wasm.h), and so are a cart's
+// imports from Moybyte's own extensions (moy_web_ext_natives,
+// native/moycore/moycore_wasm_ext.h). The two modules have
 // separate memories, so a pointer the cart hands over is an offset into ITS
 // memory: where a row says '*~' -- a pointer and the length it covers -- the
 // range is bounds-checked against the cart's memory, copied into the VM's,
@@ -402,8 +449,10 @@ export function installCartEngine(M) {
             return 1;
         },
     };
-    // One import per row of a table (`natives`: the "moy" table's, or the app
-    // extension's "moybyte.app" rows), each an adapter over the row's C.
+    // One import per row of a table (`natives`: the "moy" table's, the app
+    // extension's "moybyte.app" rows, or one of Moybyte's own extensions'
+    // modules, native/moycore/moycore_wasm_ext.h), each an adapter over the
+    // row's C.
     function adapters(natives) {
         const cp = C.malloc(4);
         const base = natives(cp);
@@ -468,6 +517,8 @@ export function installCartEngine(M) {
                 if (!imports) {
                     imports = { moy: adapters(C.natives) };
                     if (C.appNatives) imports["moybyte.app"] = adapters(C.appNatives);
+                    for (let i = 0; C.extModule && C.extModule(i); i++)
+                        imports[cstr(C.extModule(i))] = adapters((cp) => C.extNatives(i, cp));
                 }
                 instance = new WebAssembly.Instance(module, imports);
             } catch (e) {
@@ -1409,9 +1460,10 @@ async function init(search, coarse, channel, scheme, signin, rate) {
         + "update_poll_json, update_wants_poll, update_ack_json, update_off, "
         + "services_json, carts_poll_json, carts_event_json, "
         + "import_p8_json, import_archive_json, export_cart, drop_kind, "
-        + "edit_cart, open_cart, state_json, "
+        + "edit_cart, open_cart, state_json, pcm_addr, "
         + "term_enable, term_poll_json, term_feed, term_state");
     step = mp.globals.get("step_frame_json");
+    pcmAt = mp.globals.get("pcm_addr")();
     applyEvents = mp.globals.get("apply_events_json");
     assets = mp.globals.get("assets_json");
     reload = mp.globals.get("reload_cart");
@@ -1538,8 +1590,8 @@ async function probeUpdate() {
     }
 }
 
-// Does the console that served this page install its official carts when
-// the page asks (a console with no screen)? One GET, before the console
+// Does the console that served this page install carts when the page asks
+// (a console with no screen)? One GET, before the console
 // exists, so Get Carts either asks it or says the console gets its own.
 async function probeOfficial() {
     try {
@@ -2347,6 +2399,7 @@ function loop() {
     // that lateness EVERY frame and the game ran fast (~1.5x with an 8ms step).
     // Real elapsed is correct by construction: simulated time tracks the clock.
     const dt = lastStep ? Math.min(0.1, (now - lastStep) / 1000) : 1 / 60;
+    if (LOOP && lastStep) longest("frame", now - lastStep);
     lastStep = now;
     simTime += dt;
     if (!wallFrom) wallFrom = now;
@@ -2383,22 +2436,22 @@ function loop() {
         // what the browser does -- measure where it actually runs).
         WP.n++; WP.sum += _d; if (_d > WP.max) { WP.max = _d; WP.maxB = s ? s.length : 0; }
         if (_d > 20) WP.slow++;
-        if (s) { WP.painted++; WP.bytes += s.length; }
-        if (s) {
-            if (s.indexOf('"pcm"') >= 0) shipPCM(JSON.parse(s));
-            shipFrame(s);
-        }
-        // GC scheduling (see the constants above). A painted frame re-arms the
-        // idle collect; the periodic guard fires regardless of quiet.
-        framesSinceCollect++;
-        if (s) { quietStreak = 0; idleCollected = false; } else { quietStreak++; }
-        if (idleCollect && ((quietStreak >= IDLE_QUIET_FRAMES && !idleCollected)
-            || framesSinceCollect >= COLLECT_MAX_FRAMES)) {
+        if (LOOP) longest("step", _d);
+        const sounded = shipPCM();
+        if (s) { WP.painted++; WP.bytes += s.length; shipFrame(s); }
+        // GC scheduling (see IDLE_QUIET_FRAMES). A painted frame re-arms the
+        // idle collect, and so does one within STREAM_FRAMES of shipped samples.
+        if (sounded) sincePcm = 0;
+        else if (sincePcm < STREAM_FRAMES) sincePcm++;
+        if (s || sincePcm < STREAM_FRAMES) { quietStreak = 0; idleCollected = false; }
+        else { quietStreak++; }
+        if (idleCollect && quietStreak >= IDLE_QUIET_FRAMES && !idleCollected) {
             const _g0 = performance.now();
             idleCollect();               // the collect lands as this call returns
-            WP.gc += performance.now() - _g0; WP.gcN++;
+            const _g = performance.now() - _g0;
+            WP.gc += _g; WP.gcN++;
+            if (LOOP) longest("gc", _g);
             idleCollected = true;
-            framesSinceCollect = 0;
         }
         syncPump();
         gpioPump();
@@ -2425,12 +2478,12 @@ self.onmessage = async (ev) => {
         } else if (m.t === "input") {
             inbox.push(m.json);
         } else if (m.t === "sink") {
-            sinkSet(m.port);
+            sinkSet(m.port, m.rate);
         } else if (m.t === "played") {
-            sinkStats = m.s;
-            played = m.s.played;
+            sinkHeard(m.s);
         } else if (m.t === "state") {
-            self.postMessage({ t: "state", json: stateJson ? stateJson() : "null", sink: sinkStats });
+            self.postMessage({ t: "state", json: stateJson ? stateJson() : "null", sink: sinkStats,
+                               loop: LOOP });
         } else if (m.t === "run") {
             // lastStep too: a (re)start must begin with a clean 1/60 dt, not a
             // clamped jump measured from whenever the loop last ran.

@@ -4,6 +4,7 @@ shell's screen face in the console, over the host binding of the session
 does, Tab, the history, Ctrl-C at the prompt and inside a run, and that an
 idle frame makes nothing."""
 
+import os
 import time
 
 import pytest
@@ -87,8 +88,8 @@ def _command(root, cid, perms):
 def test_a_first_run_asks_at_the_prompt_and_the_next_line_answers(tmp_path):
     """A command nobody consented to asks as the shell's prompt, the rest of
     its line held; the next line typed answers, and the line runs again with
-    it (all of it: dash parses a line as one command). No run waits on the
-    terminal for it."""
+    it (all of it: dash parses a line as one command), showing only what
+    follows the answer. No run waits on the terminal for it."""
     from runtime.host_app import build_workstation
     root = tmp_path / "carts"
     _command(root, "local.greet", ["http"])
@@ -104,7 +105,8 @@ def test_a_first_run_asks_at_the_prompt_and_the_next_line_answers(tmp_path):
         assert ws.consent.get("local.greet") is None
         run(app, "y")
         got = plain(app)
-        assert got[-4:] == ["Open it? [y/N] y", "before", "ran one", "after"], got
+        assert got[-3:] == ["Open it? [y/N] y", "ran one", "after"], got
+        assert got.count("before") == 1, "the re-run's output before its answer was shown"
         assert app.face.prompt() == "$ "
         assert ws.consent.get("local.greet") == {"perms": ["http"], "off": []}
         run(app, "greet two")
@@ -170,6 +172,95 @@ def test_tab_completes_an_argument_with_no_folder_from_the_working_one(term):
     f.set_line("cat ")
     f.key(9)
     assert f.line() == "cat " and "w/" in f.cands()
+
+
+def _type(app, text):
+    for ch in text:
+        app.face.key(ord(ch))
+
+
+def test_pkg_asks_the_console_s_password_unseen_and_its_install_question_at_the_prompt(tmp_path):
+    """An unreviewed Python cart on a console with a password: `pkg install`
+    asks for the password as the shell's prompt, a secret question whose
+    answer the prompt row shows a `*` a character and the grid and the
+    history never hold; the line runs again with it and asks `Install?`,
+    whose `y` installs the cart. The build is downloaded once, kept from
+    run to run of the line, and the transcript holds each line once."""
+    from cart_store_fixtures import MemNet
+    from test_python_trust import _python_repo
+    from runtime import cart_index as ci, ssh_service
+    from runtime.host_app import build_workstation
+    ws = build_workstation(str(tmp_path / "carts"))
+    repo = _python_repo()
+    ci.save_sources(ws.carts_root, [repo.url("index.json")])
+    ws.cart_net = MemNet(repo.routes())
+    system = ssh_service.system_dir(ws)
+    os.makedirs(system, exist_ok=True)
+    with open(system + "/" + ssh_service.PASSWORD, "w") as f:
+        f.write(ssh_service.hashed("hunter22", "ab" * 16) + "\n")
+    app = ws.app("terminal")
+    app.open()
+    f = app.face
+    try:
+        run(app, "pkg install snake")
+        assert f.prompt() == "The console's password: " and not f.busy(), plain(app)
+        _type(app, "hunter22")
+        f.key(0x08)
+        _type(app, "2")
+        assert f.prompt_row() == "\x1b[2mThe console's password: \x1b[0;36m********\x1b[0m"
+        f.key(9)
+        f.recall(-1)
+        assert f.line() == "hunter22", "no completion, no history while it is asked"
+        f.key(0x0D)
+        settle(app)
+        assert f.prompt() == "Install? [y/N] ", plain(app)
+        assert "The console's password:" in [ln.rstrip() for ln in plain(app)], plain(app)
+        run(app, "y")
+        got = plain(app)
+        assert any(ln.startswith("snake 1 installed") for ln in got), got
+        assert not any("hunter2" in ln for ln in got), got
+        assert not any("hunter2" in ln for ln in f.history()), f.history()
+        assert [u.endswith(".zip") for u in ws.cart_net.opened].count(True) == 1, \
+            ws.cart_net.opened
+        assert got.count("Getting snake 1 (1 KB)") == 1, got
+        assert got.count("Moybyte has not checked this cart.") == 1, got
+        assert got.index("The console's password:") < got.index("Install? [y/N] y"), got
+        assert os.path.exists(ws.carts_root + "/snake.moy/manifest.json")
+        f.recall(-1)
+        assert f.line() == "y" and f.prompt() == "$ "
+    finally:
+        app.close_session()
+
+
+def test_ctrl_c_at_pkg_s_question_drops_the_build_it_kept(tmp_path):
+    """The build a gated install checked waits for the line's next run; a
+    Ctrl-C at the question (the question over: moy_sh.h's `unask`) deletes
+    it, so the next `pkg install` downloads it afresh."""
+    from cart_store_fixtures import MemNet
+    from test_python_trust import _python_repo
+    from runtime import cart_index as ci, pkg, ssh_service
+    from runtime.host_app import build_workstation
+    ws = build_workstation(str(tmp_path / "carts"))
+    repo = _python_repo()
+    ci.save_sources(ws.carts_root, [repo.url("index.json")])
+    ws.cart_net = MemNet(repo.routes())
+    system = ssh_service.system_dir(ws)
+    os.makedirs(system, exist_ok=True)
+    with open(system + "/" + ssh_service.PASSWORD, "w") as f:
+        f.write(ssh_service.hashed("hunter22", "ab" * 16) + "\n")
+    app = ws.app("terminal")
+    app.open()
+    try:
+        run(app, "pkg install snake")
+        assert app.face.prompt() == "The console's password: " and len(pkg._KEPT) == 1
+        app.face.key(3)
+        assert pkg._KEPT == {} and app.face.prompt() == "$ "
+        run(app, "pkg install snake")
+        assert [u.endswith(".zip") for u in ws.cart_net.opened].count(True) == 2
+        app.face.key(3)
+        assert pkg._KEPT == {}
+    finally:
+        app.close_session()
 
 
 def test_up_and_down_walk_the_lines_run_before(term):

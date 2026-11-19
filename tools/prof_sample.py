@@ -172,7 +172,12 @@ def main():
         print(msg, flush=True)
 
     board = P4Board(port=a.port, board_dir=bdir, log=lambda s: None)
+    pushed = []
     if a.cart:
+        import push_cart
+        # a test fixture (Brick Siege Lua), which no image carries, is pushed
+        # for the run and removed after it
+        pushed = push_cart.push_fixtures(board, bdir, [a.cart])
         board.leave_cart()
         if board.cmd("run %s" % a.cart, wait_for="REMOTE run", timeout=25.0) is None:
             sys.exit("board never acknowledged `run %s`" % a.cart)
@@ -201,6 +206,8 @@ def main():
         board.pyval("__import__('moy_prof').free()", timeout=25)
         if a.cart:
             board.leave_cart(settle=0.5)
+        if pushed:
+            push_cart.drop_folders(board, pushed)
     if not tally:
         sys.exit("no samples -- is moy_prof in this image?")
 

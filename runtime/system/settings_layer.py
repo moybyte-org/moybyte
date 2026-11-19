@@ -192,6 +192,9 @@ def say(label):
 # The text sizes the Text size row names, by font scale (appearance FONT_SCALES).
 _SIZES = {1: "Medium", 2: "Large", 3: "Largest"}
 _STABLE_BETA = ("Stable", "Beta")
+# The Home style row's words: THEME (the layout's `home`), then each of the
+# home's arrangements (appearance HOME_STYLES).
+_HOME_WORDS = ("Theme", "Carousel", "Grid", "Icons")
 
 # A board's name in About, by its OTA id (each board.toml's [board] ota):
 # the name a reader knows it by.
@@ -204,7 +207,7 @@ _PAGE_TITLES = {"achievements": "Achievements", "licences": "Licences", "log": "
 # Power's.
 _GROUPS = (
     ("General", ("wifi", "bluetooth", "appearance", "font_scale", "layout_theme",
-                 "volume", "brightness", "tz", "name", "usb_drive")),
+                 "home_style", "volume", "brightness", "tz", "name", "usb_drive")),
     ("Play", ("two_player", "steady", "crisp_pixels", "show_fps")),
     ("Power", ()),
     ("Updates", ("webhost", "paired", "ota_channel", "update_online", "update", "update_c6")),
@@ -314,6 +317,9 @@ class SettingsLayer(Layer):
         # ONE appearance surface); this row deep-links to it.
         ("appearance", "APPEARANCE", "action"),
         ("font_scale", "FONT SIZE", "font"),
+        # HOME STYLE: the home's arrangement, THEME the theme layout's own
+        # (docs/theme_and_shell_2026-11.md §8.10).
+        ("home_style", "HOME STYLE", "home"),
         # VOLUME applies the console's level, BRIGHTNESS the panel light's
         # top; NAME is stored in system/settings and applied by nothing yet.
         ("volume", "VOLUME", "level"),
@@ -1426,6 +1432,9 @@ class SettingsLayer(Layer):
         if kind == "layout":                    # LAYOUT: THEME / a package's bars
             ws.look.cycle_layout_theme(d)
             return
+        if kind == "home":                      # HOME STYLE: THEME / an arrangement
+            ws.look.cycle_home_style(d)
+            return
         if kind == "level":                     # VOLUME / BRIGHTNESS
             self.set_level(key, self.level(key)[0] + d)
 
@@ -1588,6 +1597,9 @@ class SettingsLayer(Layer):
             if pick is not None and pick not in vals:
                 vals = vals + (pick,)
             return (vals.index(pick), vals)
+        if kind == "home":
+            pick = ws.look.home_style()
+            return 0 if pick is None else ws.look.HOME_STYLES.index(pick) + 1
         if kind == "idle":
             lad = ws.idle_ladder
             steps = lad.steps()
@@ -1692,6 +1704,11 @@ class SettingsLayer(Layer):
             got = _ui.cycle(s, ["Theme" if c is None else _capital(str(c)) for c in vals], cur)
             if got != cur:
                 ws.look.cycle_layout_theme(got - cur)
+        elif kind == "home":
+            self._kinds[s] = "cycle"
+            got = _ui.cycle(s, _HOME_WORDS, v)
+            if got != v:
+                ws.look.cycle_home_style(got - v)
         elif kind == "idle":
             self._kinds[s] = "cycle"
             lad = ws.idle_ladder

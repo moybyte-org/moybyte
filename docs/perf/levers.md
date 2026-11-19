@@ -87,12 +87,14 @@ and `PERF` lines split it by stage, `HITCH` names the stage of a frame over
 | Flush-bounce scale fold | a small-canvas game is upscaled inside the bounce bands instead of composited | `1a5f1133f` 2026-08-11 (#190) | `native/moy_flush/moy_fold.c` |
 | Map-lookup cache | the index re-aimed for REPR_C, 512 slots on every console board; neither half moves a frame alone, and 1024 buys nothing over 512 | `9462e52d3` 2026-09-21 (#77) | each board's `mpconfigboard.h`; `docs/perf_native_gap_v1.md` §6 |
 | `gc_alloc` run hints | a free-run hint per size class (2–32 blocks), so a multi-block allocation stops re-walking every hole; allocations over 32 blocks still walk, by design | `f4180be09` 2026-09-23 (#66, #77) | `tools/patch_gc_run_hints.py` |
+| Map growth at three quarters full | a hash map above twelve slots grows while a quarter of it is empty, so a lookup that misses (a method on an instance, a builtin in a module) stops within a few probes; every console board and the browser console, the Zeros decline it for its heap | 2026-11-18 (#77) | `tools/patch_map_load.py`; `docs/perf_native_gap_v1.md` §6 |
 | Cart-VM collector on the generational schedule | Lua's incremental collector paced itself into one frame; the generational one does not | `4be6cd4de` 2026-09-20 (#107) | `native/moycore/moycore_lua.c` |
 | A stream's decoder in internal SRAM | while a stream plays, the media task's stack (minimp3's scratch) and decoder state are internal SRAM where the heap keeps `MOY_MEDIA_SRAM_FLOOR` free, else PSRAM; nothing is held while no stream plays (the owner's lever over QIO flash and an IRAM decoder copy, 2026-11-10) | `28c6bea20` 2026-11-10 (#66) | `native/moy_media/moy_media.h` |
 
-What is left in `mp_map_lookup` after the two map-lookup levers is the kid
+What is left in `mp_map_lookup` after the map-lookup levers is the kid
 idiom's miss-before-hit, a VM question: do not re-price it as a cache size
-(`docs/perf_native_gap_v1.md` §6, 2026-09-23).
+(`docs/perf_native_gap_v1.md` §6, 2026-09-23). The map growth shortens each
+miss; a method cache keyed by (type, name) is what would remove it.
 
 ## Tried and reverted (do not retry without reading this)
 

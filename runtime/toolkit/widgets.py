@@ -127,20 +127,40 @@ def rotate_indices(pix, w, h, deg, transparent):
 TOAST_MS = 2600          # how long the unlock banner stays on screen
 
 
+# --- persistence --------------------------------------------------------------
+
 class Pmem:
     """A cart's persistent memory: 256 x SIGNED 32-bit ints, TIC-80 pmem().
 
     Backend-agnostic (host + device share this). The Workstation builds one per
     cart from moy_carts.load_pmem and injects its `cell` accessor into make_api as
-    `pmem(i[, v])`: read pmem(i) -> int, write pmem(i, v) -> RAM + a dirty mark.
-    Persistence is DEFERRED to flush() (#66, measured on glass 2026-07-14: the
-    old per-write SD save was Letter Blitz's 81-130ms mid-play hitch on every
-    letter pop -- a FAT-over-SD write can't be made fast, only moved off the
-    play path). The Player guarantees a flush on cart exit + crash and runs a
-    periodic one while dirty; a no-change write never dirties, so a cart calling
-    pmem(i, v) with the same value every frame stays clean."""
+    `pmem(i[, v])`: read pmem(i) -> int, write pmem(i, v) -> RAM + a dirty mark,
+    never a write to the store -- a no-change write does not even dirty it, so
+    a cart writing the same value every frame stays clean.
+
+    A save never stalls play, however often the cart writes (owner,
+    2026-11-18). The Player's frame tail calls `tick`, which hands the cells
+    to the store's saver (native/moy_store/moy_save.h) at most once per
+    SAVE_MS while they moved: many writes collapse into one save. On a card
+    the hand-over returns at once and the saver's task writes the record:
+    one slot of pmem.bin (native/moy_store/moy_pmem.h), a few sectors written
+    in place; the frame never waits for a save in flight. On internal flash,
+    whose writes turn the cache off on both cores whatever task makes them,
+    the saver writes then, at this frame boundary: one record appended to the
+    pmem log (native/moy_store/moy_plog.h) where the board has one, written
+    back into pmem.bin at an idle desk frame (moy_carts.tidy_pmem). Exit,
+    pause and a crash call `flush`, which saves now and waits for whatever is
+    in flight. A save the store refuses loses that one snapshot, never retried
+    per frame.
+
+    `saver` is the store side: later(cells) (handed over), now(cells) (on the
+    medium when it returns), wait(). `on_write(cells)` is a plain synchronous
+    writer, the same thing for a caller with no saver. `path` names the
+    pmem.bin a Lua or compiled run saves itself to while it plays
+    (device/moycore_glue.py)."""
 
     CELLS = 256
+    SAVE_MS = 10000
     # A slot holds a SIGNED 32-bit integer -- exactly what SPEC.md 4.2 makes a Lua
     # integer, which is where every value comes from and goes back to. Storing
     # unsigned (as this did) meant pmem(i, -1) read back 4294967295: wrong for a
@@ -149,14 +169,17 @@ class Pmem:
     MASK = 0xFFFFFFFF
     SIGN = 0x80000000
 
-    def __init__(self, cells=None, on_write=None):
+    def __init__(self, cells=None, on_write=None, saver=None, path=None):
         # `cells` is the loaded list (already 256 long from moy_carts.load_pmem);
         # default to all-zero so an embedded/non-SD cart still gets working RAM.
         if cells is None:
             cells = [0] * self.CELLS
         self.cells = cells
         self._on_write = on_write   # called(cells) to persist; None = volatile
+        self._saver = saver
+        self.path = path
         self._dirty = False
+        self._last = None           # _ticks_ms of the last save `tick` made
 
     def cell(self, index, value=None):
         i = int(index)
@@ -172,15 +195,40 @@ class Pmem:
             self._dirty = True
         return v
 
+    def tick(self, now):
+        """The frame's save, if one is due: True when the cells were handed over."""
+        if not self._dirty:
+            return False
+        saver = self._saver
+        if saver is None and self._on_write is None:
+            return False
+        last = self._last
+        if last is not None and _ticks_diff(now, last) < self.SAVE_MS:
+            return False
+        self._last = now
+        self._dirty = False
+        if saver is None:
+            self._on_write(self.cells)
+        else:
+            saver.later(self.cells)
+        return True
+
     def flush(self):
-        """Persist the cells IF a write changed them since the last flush.
-        Returns True when a save actually ran (the PMEM diag line's cadence).
-        Cleared before writing: a failed save loses that one snapshot (the
-        pre-#66 semantics), never retries per frame."""
-        if not self._dirty or self._on_write is None:
+        """Persist the cells now IF a write changed them since the last save,
+        and wait for any save still in flight. True when a save ran. Cleared
+        before writing: a failed save loses that one snapshot."""
+        saver = self._saver
+        if not self._dirty:
+            if saver is not None:
+                saver.wait()
+            return False
+        if saver is None and self._on_write is None:
             return False
         self._dirty = False
-        self._on_write(self.cells)
+        if saver is not None:
+            saver.now(self.cells)
+        else:
+            self._on_write(self.cells)
         return True
 
 

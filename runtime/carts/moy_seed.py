@@ -26,7 +26,8 @@ import json
 from moy_fs import (_exists, _mkdir, _read, _read_bytes, _read_recover,
                     _remove, _write, _write_atomic, _write_bytes)
 from moy_store_base import (CARTS_DIR, _has, _listing, _rmtree, _sibling_path, cart_path,
-                            cart_folder, store_path, BUILTIN_NS, CART_EXT, VENDOR_KEY)
+                            cart_folder, store_path, BUILTIN_NS, CART_EXT, VENDOR_KEY,
+                            unseeded)
 from moy_fs import _native as _store
 
 
@@ -43,11 +44,11 @@ def _cart_version(path):
     return 0
 
 
-# The per-kid files kept across a destructive re-seed: pmem.json is the cart's
+# The per-kid files kept across a destructive re-seed: pmem.bin is the cart's
 # save state / high scores (TIC-80 pmem), config.json is the kid's "Make it mine"
 # tuning. A version bump replaces CODE + ART but restores these over the fresh
 # copy, so updating a cart never wipes a kid's progress or settings.
-_RESEED_PRESERVE = ("pmem.json", "config.json")
+_RESEED_PRESERVE = ("pmem.bin", "config.json")
 
 
 def _has_manifest(path):
@@ -104,7 +105,7 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None, ns=BUILTIN_NS):
 
     Versioning (the re-seed, #47): a cart already in the store is left as it
     is UNLESS the built-in's "version" is newer -- then its CODE + ART are
-    replaced and the kid's data (pmem.json saves, config.json tuning) stays.
+    replaced and the kid's data (pmem.bin saves, config.json tuning) stays.
     Pre-versioning carts read as version 0. A folder with no manifest that
     reads is a seed a power cut stopped, and is written again from nothing.
 
@@ -192,7 +193,8 @@ def seed_folders(src, root=CARTS_DIR, record=True):
     each cart's manifest last, "removed": those a re-seed removed, "served":
     every cart folder `src` holds, taken or not}. A store of `record` takes
     every cart only on its first visit; one that is a cache of the built-ins
-    (the host's, as a board's) takes every cart every time."""
+    (the host's, as a board's) takes every cart every time. An unseeded
+    cart (`"moybyte": {"seed": false}`) is none `src` serves."""
     have = _listing(root) or {}
     first = not any(have[n] and n.endswith(CART_EXT) for n in have)
     wrote, removed, served = [], [], []
@@ -204,8 +206,8 @@ def seed_folders(src, root=CARTS_DIR, record=True):
             man = json.loads(_read(src + "/" + name + "/manifest.json"))
         except (OSError, ValueError):
             continue                  # not a manifest anything reads: not a cart
-        if not isinstance(man, dict):
-            continue
+        if not isinstance(man, dict) or unseeded(man):
+            continue                  # an official cart only its index offers
         served.append(name)
         d = cart_path(root, name)
         there = _exists(d)
@@ -429,11 +431,21 @@ RETIRED = ("Ray Test", "Ray Lua", "Layer Test", "Battle City", "Bubble Trouble",
 # (bd4d890a9, 2026-11-08), and nothing reads it. The generation lives in the
 # store's stamp (`store.ver`, below); `retired.ver`, which held it alone
 # before the stamp, is a sibling the sweep takes.
+# Generation 9 takes, by folder, the seven carts cut from the seed set on
+# 2026-11-18. The test fixtures left every image that day too, and they stay:
+# a store keeps the copy it was seeded, edited or not (tests/fixtures/
+# store_trial's Bench), as it keeps any cart, and a tool that runs one pushes
+# it over that copy. Generation 10 takes Tap Game, which Tap Only Red, rebuilt
+# in blocks, replaced on 2026-11-18. An official cart no store is seeded with
+# (`"seed": false`, Bullet Storm) is no retired one: a store that holds it
+# keeps it.
 RETIRED_FOLDERS = tuple("moybyte.%s.moy" % s for s in (
     "ocean", "pet", "platformer", "scroll_demo", "tap_red", "theme_picker",
-    "wallpaper_space", "wifi", "mesh"))
+    "wallpaper_space", "wifi", "mesh",
+    "hop_quest", "pixel_pet", "sky_run", "tiny_runner", "ocean_desktop",
+    "open_machine", "moy_night", "tap_game"))
 RETIRED_SIBLINGS = ("written", "retired.ver")
-RETIRED_GEN = 8
+RETIRED_GEN = 10
 # -- the store's format and its one door (docs/refactor_2026-11.md, phase 13) --
 #
 # A store carries a FORMAT STAMP: the sidecar `store.ver` beside the carts
@@ -665,16 +677,21 @@ def stamp_board(root, me):
 
 # -- the official carts: core, optional, and a removal's record ---------------
 #
-# Every seed cart is an OFFICIAL cart: its release publishes it in the board's
-# own index (tools/web_pack.py), beside the browser console add-on. CORE is
+# Every seed cart but a test fixture is an OFFICIAL cart: its release
+# publishes it in the board's own index (tools/web_pack.py), beside the
+# browser console add-on. A test fixture (`"moybyte": {"fixture": true}`:
+# Bench and the others the perf ledger and the suites run) is seeded on the
+# host alone: no console image carries one and no index lists one, so a tool
+# that runs one on a board pushes it for the run and removes what it pushed.
+# CORE is
 # what a console cannot work without and never offers to remove, by the ids
 # the shell opens or names: Get Carts (the way back to everything else),
 # Files, Appearance (Settings' APPEARANCE row and Files open it by id),
 # Achievements (the kernel's notify rows name it), the Wallpaper slot a
-# drawing is copied into (Files' and Paint's WALL), and Moy Night, the first
-# wallpaper and so the default backdrop (appearance.Appearance.
-# _default_wallpaper). Settings and the update screen are the shell's own and
-# no cart. tests/test_official_carts.py holds each reason to the code.
+# drawing is copied into (Files' and Paint's WALL). No wallpaper cart is core:
+# a theme that names no wallpaper shows its backdrop or its fill
+# (appearance.Appearance.theme_wallpaper). Settings and the update screen are
+# the shell's own and no cart. tests/test_official_carts.py holds each reason to the code.
 #
 # Every other seed cart is OPTIONAL: a console removes it like any cart, and
 # the removal is RECORDED in `system/removed` beside the carts folder, one
@@ -696,7 +713,7 @@ def stamp_board(root, me):
 # never fetches it again (runtime/carts/web_addon.py's AddonStep); installing
 # one drops the line. `recorded` is what a removal writes a line for.
 CORE = ("moybyte.achievements", "moybyte.appearance", "moybyte.files",
-        "moybyte.get_carts", "moybyte.moy_night", "moybyte.wallpaper")
+        "moybyte.get_carts", "moybyte.wallpaper")
 REMOVED_NAME = "system/removed"
 ADDON_LINE = "web_console"
 ADDON_PREFIX = "web_console_"

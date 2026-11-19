@@ -38,7 +38,8 @@ class HomeDetails:
         """The selected card's verbs beyond its tap, the ONE list every
         input reaches them by: the system menu's card group, a long press
         on the card, a gamepad's X, the desk's buttons. Its favourite star,
-        then CHANGE with COPY beside it, then DEL, where
+        then CHANGE with COPY beside it, then SEND where the console has a
+        radio link (runtime/run/link_beam.py), then DEL, where
         the active tab has them (`zone_verbs`)."""
         zone = self.zone_verbs()
         out = []
@@ -47,6 +48,11 @@ class HomeDetails:
         if "change" in zone:
             out.append("change")
             out.append("copy")
+        link = getattr(self.ws, "link", None)
+        if link is not None and link.usable():
+            it = self.grid.selected()
+            if it and it.get("path") and it.get("type") not in PSEUDO_TILE_TYPES:
+                out.append("send")
         for v in zone:
             if v == "delete":
                 out.append(v)
@@ -54,7 +60,8 @@ class HomeDetails:
 
     def _desk_verbs(self):
         """The desk home's buttons (step 18): the active tab's tap verb,
-        then the card's verbs but its star (the hero wears that). On Make
+        then the card's verbs but its star (the hero wears that) and SEND
+        (its menu's alone). On Make
         a real card's are its own, CHANGE first: NEW makes another cart,
         which the shelf's + tile and N keep. None off the desk."""
         if not (self._carousel() and self.grid.desk()):
@@ -62,7 +69,7 @@ class HomeDetails:
         zone = self.zone_verbs()
         out = [] if "change" in zone and self.grid.tab == "make" else \
             [v for v in zone[:1] if v in ("play", "open", "new")]
-        out.extend(v for v in self.card_verbs() if v != "favourite")
+        out.extend(v for v in self.card_verbs() if v not in ("favourite", "send"))
         return out
 
     def _desk_button_top(self):

@@ -165,10 +165,12 @@ def _sibling_path(root, name):
 # (docs/os_2026-11/between_apps.md section 2); `files:<folder>` names one in
 # lower case. tests/test_userfiles_parity.py holds these to the C.
 FILES_DIR = "files"
-FILE_KIND_NAMES = ("drawings", "docs", "sprites", "music", "recordings", "stories")
+FILE_KIND_NAMES = ("drawings", "docs", "sprites", "music", "recordings", "stories",
+                   "downloads")
 FILE_KIND_DIRS = {
     "drawings": "Pictures", "docs": "Documents", "sprites": "Pictures/Sprites",
     "music": "Music", "recordings": "Recordings", "stories": "Documents/Stories",
+    "downloads": "Downloads",
 }
 SHARED_FOLDERS = ("Documents", "Pictures", "Music", "Recordings", "Downloads")
 
@@ -242,7 +244,7 @@ VENDOR_KEY = "moybyte"
 VENDOR_FIELDS = ("type", "system", "order", "permissions", "required", "handles", "receives",
                  "achievements", "config", "edit", "targets", "app", "assets",
                  "graduated", "glass", "pictures", "animates", "native", "audio_ring",
-                 "entries", "wasi")
+                 "entries", "wasi", "fixture", "seed")
 
 
 def vendor(man):
@@ -250,6 +252,13 @@ def vendor(man):
     an object)."""
     v = man.get(VENDOR_KEY) if isinstance(man, dict) else None
     return v if isinstance(v, dict) else {}
+
+
+def unseeded(man):
+    """Whether the system cart whose manifest is `man` is one no store is
+    seeded with (`"moybyte": {"seed": false}`): an official cart a console
+    gets from its release's index alone (tools/gen_device_carts.is_unseeded)."""
+    return vendor(man).get("seed") is False
 
 
 def _id_part(s):

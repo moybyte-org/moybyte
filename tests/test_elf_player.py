@@ -97,6 +97,27 @@ def test_it_takes_its_buttons(ws):
     assert y == 16 and x >= 16 + 4 * 2, (x, y)
 
 
+def test_held_aside_it_reads_no_buttons(ws):
+    """A run held aside (runtime/shell/procs.py) is muted, as every tier's
+    run is: its frames carry no buttons until it is given back."""
+    p = _start(ws)
+    p.lua.mute(True)
+    src = ws.input.source("kbd")
+    src.set_button("right", True)
+    for _ in range(4):
+        ws.input.begin_frame()
+        ws.frame(DT)
+    assert _square(ws) == (16, 16)
+    p.lua.mute(False)
+    for _ in range(4):
+        ws.input.begin_frame()
+        ws.frame(DT)
+    src.set_button("right", False)
+    _frames(ws, 3)
+    x, y = _square(ws)
+    assert y == 16 and x > 16, (x, y)
+
+
 def test_a_pause_holds_it_and_resume_goes_on(ws):
     p = _start(ws)
     pid = p.lua.pid
@@ -148,7 +169,9 @@ def test_a_trap_shows_the_stop_card(ws):
     assert p.cart_error is not None and "SIGSEGV" in p.cart_error, p.cart_error
     card = ws.pause
     assert card.open and card.stopped
-    assert card.rows == (card.RESTART, card.HOME), "a native cart has no code to see"
+    # its src/ to read, its trap's text under Details, and no See why: a
+    # native trap has no line to open
+    assert card.rows == (card.RESTART, card.SEE_CODE, card.HOME, card.DETAILS)
     from runtime import elf_binding
     assert elf_binding.info(pid) is None
     card.choose_row(card.RESTART)
@@ -198,7 +221,8 @@ def test_a_game_built_for_another_chip_gets_the_chip_notice(tmp_path, built):
     assert p.notice_title == en["strings"]["say.chip"]
     _frames(ws, 2)
     card = ws.pause
-    assert card.rows == (card.HOME,), "a notice, not a stop: nothing to restart"
+    assert card.rows == (card.HOME, card.DETAILS), "a notice, not a stop: nothing to restart"
+    assert p.notice_detail == "no main.host.elf"
 
 
 def test_a_command_has_no_screen_to_present_to(tmp_path):
@@ -333,9 +357,11 @@ dt = 1 / 30
 for _ in range(20):
     upd(dt)
     drw()
+# Every name the window stores is bound before it opens: a script's first
+# store of a global can grow the script's own globals table.
+i = a0 = a1 = 0
 gc.collect()
 gc.disable()
-i = 0
 a0 = gc.mem_alloc()
 while i < 200:
     upd(dt)

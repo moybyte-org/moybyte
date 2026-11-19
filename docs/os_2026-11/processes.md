@@ -199,7 +199,9 @@ library over that wait. Three kernel pieces carry it, every tier's alike:
   is a wake: from a poll of its event descriptor's return to its next poll
   of it, less what its calls waited for the VM's task (a WASI command's
   session calls, an ELF service's hops); a suspended program's poll waits
-  unserved until it is resumed. A compiled service's wake that never polls
+  unserved until it is resumed. A program with a screen the console shows
+  (a WASI or native app in the Player) is struck by aborts alone: its wakes
+  are the frames the console asks for. A compiled service's wake that never polls
   again is struck by a watchdog (`moy_os_watch`, `moy_wasi_watch`: on a
   board a job of the kernel loop's once a frame while a service lives, at
   the scheduler's poll elsewhere), once for each
@@ -737,8 +739,10 @@ Player (`MOY_PLAY_RUNS`, `native/moy_play/moy_play.h`), so a Lua game joins
 the running set as a Python one does, held aside reading no input
 (`moy_play_mute`) (P5.3, 2026-11-07). A compiled run is a session of its
 own on a board's engine and the host's (`native/moy_wasm/moy_wasm_session.h`),
-so compiled games join the running set too, and the share decides whether
-two fit; the browser's engine holds one session, so there a compiled game
+so compiled games join the running set too, held aside reading no input
+as a Lua run is (`mute`: the kernel's where its Player runs the frames, and
+a native run's or a WASI app's frame message, `elf_run.LinkedUi`), and the share
+decides whether two fit; the browser's engine holds one session, so there a compiled game
 runs alone and admission names everything running to close
 (`player_fit.shares_runtime`). Each run takes one of four
 owner tags (`cart`, `cart2`..`cart4`) for its layer loans and its audio

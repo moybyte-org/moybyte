@@ -42,7 +42,8 @@ collision with a built-in or an installed name is refused at install naming
 the holder, and `<id>/<name>` always runs a specific one (owner,
 2026-11-03). Two kinds: **line programs** (`argv`, `stdin`, `stdout`,
 `stderr` as byte streams over kernel pipe buffers, an exit code; a Python
-cart's `main(argv)` in the shell's VM, a wasm command's WASI `_start`
+cart's `main(argv)` in the shell's VM, a Lua cart's `main(argv)` in a Lua
+state of its own, a wasm command's WASI `_start`
 (`tiers.md` §3), an ELF's `main(argc, argv)` over the POSIX rows (`tiers.md`
 §1)) and **full-screen text apps** (`top`, an editor, a mesh chat) over the shell's
 **terminal emulation**: an ANSI/VT100 subset (below), so full-screen apps, a
@@ -60,7 +61,12 @@ holding the permissions its consent grants, its `print` and `input` the
 session's streams over the door, its exit code `main`'s answer, under the
 scheduler's guard for 30 s at most. A command run with `&` runs to its end
 before the prompt returns, its output into the log under its pid, and `wait`
-reads its code. A compiled (`"runtime": "wasm"`) command is its module's
+reads its code. A Lua (`"runtime": "lua"`) command is the same process row
+and streams, its scripts run as a Lua service of its own
+(`native/moycore/moycore_svc.h`), `print` and `input` its console calls and
+its exit code `main`'s answer; its chunks run under the 30 s a Python
+command has, of CPU, a console call's wait apart (a service's own start
+keeps its 2 s, `MOYCORE_SVC_STOP_MS`). A compiled (`"runtime": "wasm"`) command is its module's
 WASI `_start` (`native/moy_wasm/moy_wasi.h`), crossing the same door and
 holding the same process row and guard: its stdio the session's own
 descriptors, its args and exported variables the shell's, its files the
@@ -511,9 +517,26 @@ holds the verbs and the checks over `runtime/carts/cart_index.py` (with the
 (`runtime/apps/getcarts_app.py`) is its GUI face, making the same checks
 (`pkg.blocker`, `pkg.install_check`) and the same removal (`pkg.removed`).
 
-**The index** is moy-spec's (`cartindex.py`, version 1), read as it is, with
-two additions read here: an entry's `depends`, a list of cart ids, and the
-signature. **An index is signed as OTA manifests are** (the same keys,
+**A Zero installs too** (owner, 2026-11-18). A board with no screen is its
+store's one writer, so the page it serves asks it (the sealed `/official`,
+`runtime/carts/web_addon.py`'s `OfficialCarts`): the board reads the indexes
+`cart_index.load_indexes` gives it (its `system/sources`, else
+moybyte-org/carts, and its own release's), signatures checked, and lists
+each entry with where it stands in its store and the store's room. The page
+makes the checks of the console it is (`pkg.blocker`, whose room is the
+board's), shows an external file's licence, which the board fetches, and the
+install prompt over the manifest of the build the board checked
+(`pkg.manifest_check`), and records the consent; the board installs through
+the same `cart_index.Install`, refusing before any download a cart and
+external files its store has no room for, with the sizes ("Not enough room:
+needs …, … free.", `cart_index.room_why`), and a version its index revoked.
+A Python cart from an index that is not reviewed lands only on a yes that
+carries the board's password (`OfficialCarts`' `agree`).
+
+**The index** is moy-spec's (its `cartindex` module, version 1), read as it is, with
+three additions read here: an entry's `depends`, a list of cart ids; the
+document's `revoked`, `{"<id>": [<version>, ...]}`, the versions it withdrew
+(a malformed one reads as none); and the signature. **An index is signed as OTA manifests are** (the same keys,
 RSA-2048 PKCS#1 v1.5 over SHA-256): `tools/ota_sign.py sign-index` appends
 `, "sig": "<hex>"}` in place of the document's closing brace, covering
 `moybyte-index-v1\n` and the document as it was, so neither side
@@ -523,13 +546,31 @@ read. A board verifies in the kernel (`moy_net.ota_verify`), the host through
 its twin; the browser has no verifier and needs none, its fetch checking the
 server's certificate.
 
+**Review and revocation** (owner, 2026-11-18, #261). A signature verifies
+against the image's keys or moybyte-org/carts' review keys
+(`cart_index.REVIEW_KEYS`, the public half of the key its CI signs
+`index.json` with), and an index signed by either is REVIEWED: its Python
+carts install as trusted apps. In the browser moybyte-org/carts' url is. A
+Python cart from any other index installs behind the unreviewed warning
+(`app_perms.UNREVIEWED`), whose yes takes the console's password where one is
+set (`pkg.gated`, the install role's `locked` and `unlock`) and is kept in the
+cart's consent record (`unreviewed`, the index it came from), so an update
+from that index asks again only when it adds a permission. A revoked version
+is refused at install (`cart_index.REVOKED`); reading an index marks the
+carts installed from it at a version it revoked (`pkg.revocations`, the
+consent record's `revoked`), which then refuse every launch until an update
+or a removal writes the record again. An index revokes only what was
+installed from it.
+
 **`system/sources`** names the repositories, one index URL a line (`#`
 comments); absent or empty, the console reads moybyte-org/carts. A legacy
 `indexes.json` reads as absent. A page served from a static host writes the
 host's `indexes.json` there at boot. A board reads its own release's index
 last (`carts-<board>.json` beside its update manifest): the browser console
-add-on and every seed cart of that build as an OFFICIAL cart, the one place
-an entry in the built-ins' namespace or a Python cart installs from, with
+add-on and every seed cart of that build but a test fixture as an OFFICIAL
+cart (`"moybyte": {"fixture": true}`, `docs/app_api_v1.md` §2), those no
+store is seeded with (`"seed": false`) among them, the one place
+an entry in the built-ins' namespace installs from, with
 the signature verified (`.claude/rules/carts.md`).
 
 **The verbs** (the shell's `pkg`, `runtime/shell/sh_roles.py`):

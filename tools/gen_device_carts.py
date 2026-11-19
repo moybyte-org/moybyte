@@ -1,4 +1,21 @@
 #!/usr/bin/env python3
+# Map (grep -n a name to jump there):
+#   read_manifests        every system cart as (folder, manifest), in seed order
+#   cart_order            the seed / embedded-fallback order
+#   title_to_folder       {title: folder}
+#   roster                the carts that ship on a target: no unseeded cart, a fixture on the host
+#   is_fixture            a test fixture, which no release publishes
+#   is_unseeded           an official cart no store is seeded with
+#   in_image              a seed cart every image carries
+#   app_decls             the system-app declarations, in registration order
+#   build_carts           the CARTS structure: no unseeded cart, a fixture only when asked
+#   render_module         a freezable carts_data.py source
+#   pack_cart             one cart's JSON, raw-deflated
+#   build_packed          the packed roster [(title, version, blob)]
+#   render_packed_module  a freezable PACKED carts_data.py
+#   render_app_decls      a freezable runtime/shell/app_decls.py source
+#   as_module             an in-memory carts_data (for host tests)
+#   main                  CLI: write the module (or stdout)
 """Generate the device's embedded fallback carts from `system_carts/`, and read
 the SYSTEM-CART DECLARATIONS every other consumer of that folder needs.
 
@@ -31,6 +48,18 @@ Phase 5, 2026-08-19). A system cart declares, in its own `manifest.json`'s
     "app": {...}            -- optional; a SYSTEM APP (docs/app_api_v1.md):
                                id / entry ("module:Class") / order
                                (registration precedence) / min_size.
+    "fixture": true         -- optional; a TEST FIXTURE (the perf ledger's,
+                               the on-glass suites', the tests'): the host
+                               seeds it from this folder, but no console
+                               image, browser bundle or release index carries
+                               it (`is_fixture`); a tool that runs one on a
+                               board pushes it for the run.
+    "seed": false           -- optional; an official cart no store is seeded
+                               with (`is_unseeded`): its release's index lists
+                               it, and a console gets it from there alone; no
+                               image, browser bundle or host store carries it,
+                               and a tool that runs one on a board pushes it
+                               for the run as it does a fixture.
 
 Five hand-maintained lists used to hold that same information -- `CART_ORDER`
 here, the title->folder map in tests/test_device_seed_parity.py, the web
@@ -64,20 +93,6 @@ thing between `system_carts/` and a board, with no C module to compile, no
 `[native]` entry to deny, and no generated translation unit. The frozen
 bytes land in ROM either way (`frozen_content.c` emits them as a `static const
 mp_obj_str_t`), which is the property that actually mattered.
-
-  read_manifests(dir) -> [(folder, manifest)]  every system cart, in seed order
-  cart_order(dir) -> [folder]      the seed / embedded-fallback order
-  title_to_folder(dir) -> {title: folder}
-  roster(dir, target) -> [folder]  the carts that ship on `target`
-  app_decls(dir) -> [dict]         the system-app declarations, in reg. order
-  build_carts(dir) -> list[dict]   the CARTS structure (what gets frozen)
-  render_module(carts) -> str      a freezable carts_data.py source
-  pack_cart(cart) -> bytes         one cart's JSON, raw-deflated
-  build_packed(dir) -> [(title, version, blob)]   the packed roster
-  render_packed_module(packed) -> str   a freezable PACKED carts_data.py
-  render_app_decls(decls) -> str   a freezable runtime/shell/app_decls.py source
-  as_module(dir) -> ModuleType     an in-memory carts_data (for host tests)
-  main(argv)                       CLI: write the module (or stdout)
 """
 
 import base64
@@ -86,11 +101,11 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from runtime.moy_store_base import BUILTIN_NS, cart_folder, vendor  # noqa: E402
+from runtime.moy_store_base import BUILTIN_NS, cart_folder, unseeded, vendor  # noqa: E402
 
 DEFAULT_FORMAT = "moybyte-cart-v1"
 
-# Every consumer of system_carts/ reads its declarations through the four
+# Every consumer of system_carts/ reads its declarations through the
 # functions below. Adding a system cart is an edit to its OWN manifest.json --
 # there is no list here, in the tests, in the web build or in console.py to keep
 # in step with it.
@@ -174,13 +189,42 @@ def title_to_folder(system_carts_dir=None):
 
 def roster(target, system_carts_dir=None):
     """The carts that ship on `target` ("host" / "device" / "web"), in seed
-    order. A manifest with no `"targets"` ships everywhere."""
+    order. A manifest with no `"targets"` ships everywhere; a test fixture
+    ships on the host alone, and an unseeded cart nowhere."""
     out = []
     for folder, man in read_manifests(system_carts_dir):
+        if is_unseeded(man) or (target != "host" and is_fixture(man)):
+            continue
         targets = vendor(man).get("targets")
         if targets is None or "*" in targets or target in targets:
             out.append(folder)
     return out
+
+
+def is_fixture(man):
+    """Whether the seed cart whose manifest is `man` is a test fixture
+    (`"moybyte": {"fixture": true}`): the host seeds it, but no console
+    image or browser bundle carries it (`build_carts`, `roster`), no
+    release's index lists it (tools/web_pack.py) and no cable flash installs
+    it (tools/board_flash.py)."""
+    return vendor(man).get("fixture") is True
+
+
+def is_unseeded(man):
+    """Whether the seed cart whose manifest is `man` is an official cart no
+    store is seeded with (`"moybyte": {"seed": false}`,
+    moy_store_base.unseeded, which the store's seed reads too): its
+    release's index lists it (tools/web_pack.py) and a cable flash keeps a
+    store's copy current (tools/board_flash.py), but no console image,
+    browser bundle or host store is seeded with it."""
+    return unseeded(man)
+
+
+def in_image(man):
+    """Whether every console image carries the seed cart whose manifest is
+    `man`: neither a test fixture nor an unseeded cart. A board tool that
+    runs any other one pushes it for the run."""
+    return not is_fixture(man) and not is_unseeded(man)
 
 
 def app_decls(system_carts_dir=None):
@@ -217,12 +261,16 @@ def app_decls(system_carts_dir=None):
     return out
 
 
-def build_carts(system_carts_dir):
+def build_carts(system_carts_dir, fixtures=False):
     """Read each system cart and build its embedded entry (title/type/src/
     sprites?/sounds?/canvas?/permissions?/cfg/edit) -- the shape moy_runtime
-    expects (and seed_builtins writes back to SD)."""
+    expects (and seed_builtins writes back to SD). The test fixtures only
+    with `fixtures`: no image carries one. No unseeded cart: no store is
+    seeded with one."""
     carts = []
     for folder, man in read_manifests(system_carts_dir):
+        if is_unseeded(man) or (is_fixture(man) and not fixtures):
+            continue
         base = os.path.join(system_carts_dir, folder + CART_SUFFIX)
         cart = {
             "title": man["title"],
@@ -316,7 +364,7 @@ def build_carts(system_carts_dir):
                     cart["scene_order"] = keep
         blocks = os.path.join(base, "blocks.json")      # block source (#29), optional
         if os.path.exists(blocks):
-            # carry the block program so a block-authored seed (tap_game) opens in
+            # carry the block program so a block-authored seed (Tap Only Red) opens in
             # the on-device block editor, not just as compiled code.
             cart["blocks"] = json.loads(_read(blocks))
         if "canvas" in man:
@@ -410,12 +458,19 @@ def pack_cart(cart):
 def build_packed(system_carts_dir, only=()):
     """The packed roster: [(title, version, blob)], in seed order; with
     `only` (cart ids), those alone -- a Zero's image carries the set its
-    board.toml's `[roster] image` names (board_config.roster_only)."""
-    mans = read_manifests(system_carts_dir)
-    folders = [f for f, _m in mans]
-    unknown = set(only) - set(folders)
+    board.toml's `[roster] image` names (board_config.roster_only). No test
+    fixture and no unseeded cart: naming one is an error."""
+    every = read_manifests(system_carts_dir)
+    unknown = set(only) - set(f for f, _m in every)
     if unknown:
         raise ValueError("--only names no system cart: %s" % ", ".join(sorted(unknown)))
+    fixtures = set(only) & set(f for f, m in every if is_fixture(m))
+    if fixtures:
+        raise ValueError("--only names a test fixture: %s" % ", ".join(sorted(fixtures)))
+    bare = set(only) & set(f for f, m in every if is_unseeded(m))
+    if bare:
+        raise ValueError("--only names an unseeded cart: %s" % ", ".join(sorted(bare)))
+    mans = [(f, m) for f, m in every if in_image(m)]
     return [(c["title"], int(c.get("version", 0)), pack_cart(c))
             for (f, _m), c in zip(mans, build_carts(system_carts_dir))
             if not only or f in only]

@@ -4,8 +4,9 @@
 // the run and whose loop serves the hops, as a board's frame tail does. The
 // files tree is the folder MOY_SH_ROOT names. Behind the door the VM answers
 // one role, `passwd`, as runtime/system/ssh_service.py does: the hash
-// written or removed, the run started or stopped, and `rescan`, printed as a
-// RESCAN line with the cart folders it names. Every other crossing is the
+// written or removed, the run started or stopped; `pkg ask`, a secret
+// question whose answer it prints as an ANSWER line; and `rescan`, printed
+// as a RESCAN line with the cart folders it names. Every other crossing is the
 // VM's NEEDS_VM. The main thread prints the server's STATS line when
 // a connection ends, the server starts or stops listening, or its tasks
 // park. The face's socket pair is a board's: a byte one end sends crosses
@@ -28,6 +29,7 @@
 #include "moy_lease.h"
 #include "moy_loop.h"
 #include "moy_seal.h"
+#include "moy_sh.h"
 #include "moy_ssh.h"
 #include "moy_tty.h"
 
@@ -133,6 +135,20 @@ static int32_t passwd(const char *arg, size_t n) {
     return moy_ssh_run_start(s_port) == 0 ? 0 : 1;
 }
 
+// `pkg ask`: the stand-in for pkg's password question (runtime/shell/
+// sh_roles.py `_typed`), a secret question of the session's; asked again
+// with its answer, it says the answer on the harness's stdout.
+static int32_t pkg_ask(void) {
+    moy_sh_t *s = moy_sh_running();
+    const char *a = s != NULL ? moy_sh_answer(s) : NULL;
+    if (a == NULL) {
+        return s != NULL && moy_sh_ask(s, "Password: ", MOY_SH_ASK_SECRET) == 0 ? 0 : 1;
+    }
+    printf("ANSWER %s\n", a);
+    fflush(stdout);
+    return 0;
+}
+
 int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n,
                       uint8_t *ans, size_t cap) {
     (void)grant;
@@ -163,8 +179,9 @@ int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n
         fflush(stdout);
         return 0;
     }
-    // `role JOB passwd ARGS...`
+    // `role JOB passwd ARGS...`, `role JOB pkg ask`
     static const char verb[] = "role";
+    static const char pkg[] = "pkg\0ask";
     static const char name[] = "passwd";
     const char *p = (const char *)arg, *end = p + n;
     if (n < sizeof verb || memcmp(p, verb, sizeof verb) != 0) {
@@ -172,6 +189,9 @@ int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n
     }
     p += sizeof verb;
     p += strnlen(p, (size_t)(end - p)) + 1;     // the job
+    if ((size_t)(end - p) == sizeof pkg - 1 && memcmp(p, pkg, sizeof pkg - 1) == 0) {
+        return pkg_ask();
+    }
     if (p > end || (size_t)(end - p) < sizeof name - 1 || memcmp(p, name, sizeof name - 1) != 0
             || (p + sizeof name - 1 < end && p[sizeof name - 1] != 0)) {
         return MOY_LOOP_ROLE_NEEDS_VM;

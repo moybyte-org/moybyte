@@ -32,7 +32,9 @@ too, and says so. Same table, same store: nothing extra is erased and the
 store survives the flash. The coredump partition is held the same way: when
 the image's table puts it where the board's did not, its bytes are whatever
 the old table kept there, so the flash erases it and the console reads no dump
-until a panic writes one.
+until a panic writes one; and so is the pmem log's partition (`pmem`,
+native/moy_store/moy_plog.h), erased whole where the image's table places it
+anew, so no record of an old store's carts outlives the store.
 
 `--before` and `--after` come from the toml, because how a board enters and
 leaves the ROM loader is a hardware fact and not a preference. The T-Deck
@@ -171,6 +173,24 @@ def moved_coredump(board_table, image_table):
     return new if new and new != coredump_of(parse_table(board_table)) else None
 
 
+_PMEM_LABEL = "pmem"   # native/moy_store/moy_plog.h's MOY_PLOG_PART
+
+
+def pmem_of(entries):
+    """(offset, size) of a table's pmem log partition, or None."""
+    for label, typ, _sub, off, size in entries:
+        if typ == _TYPE_DATA and label == _PMEM_LABEL:
+            return (off, size)
+    return None
+
+
+def moved_pmem(board_table, image_table):
+    """The image's pmem partition when the board's table has none at that
+    place, else None."""
+    new = pmem_of(parse_table(image_table))
+    return new if new and new != pmem_of(parse_table(board_table)) else None
+
+
 def _describe_store(store):
     if store is None:
         return "none"
@@ -257,7 +277,7 @@ def flash(board_dir, port, verify=True):
     baud = fl.get("baud")
     stub = fl.get("stub")
     # 0) where the image puts the store, against where the board has it.
-    new_store = new_core = None
+    new_store = new_core = new_pmem = None
     image_table = _image_table(image, int(str(fl["offset"]), 0))
     if image_table:
         rc, board_table = _read_board_table(chip, port, baud, fl.get("before"),
@@ -275,6 +295,10 @@ def flash(board_dir, port, verify=True):
         if new_core:
             print("!! this image's partition table places the coredump partition at "
                   "%#x+%#x: it is erased" % new_core)
+        new_pmem = moved_pmem(board_table, image_table)
+        if new_pmem:
+            print("!! this image's partition table places the pmem log at "
+                  "%#x+%#x: it is erased" % new_pmem)
     # 1) otadata erase, FIRST and with no reset after -- see the module
     #    docstring for why the order is load-bearing.
     if fl.get("otadata_offset"):
@@ -288,9 +312,11 @@ def flash(board_dir, port, verify=True):
                       hex(new_store[0]), hex(STORE_ERASE), stub=stub)
         if rc:
             return rc
-    if new_core:
+    for part in (new_core, new_pmem):
+        if not part:
+            continue
         rc = _esptool(chip, port, baud, "--after", "no_reset", "erase_region",
-                      hex(new_core[0]), hex(new_core[1]), stub=stub)
+                      hex(part[0]), hex(part[1]), stub=stub)
         if rc:
             return rc
     # 2) the merged image at the board's offset.
@@ -449,17 +475,24 @@ def install_addon(board_dir, port, reset=True):
 
 SEED_DIR = ROOT / "system_carts"
 CART_SKIP = ("thumbs", "__pycache__")
-KEPT = ("pmem.json", "config.json")      # moy_seed._RESEED_PRESERVE
+KEPT = ("pmem.bin", "config.json")        # moy_seed._RESEED_PRESERVE
 
 
 def offered_carts(seeds=SEED_DIR):
-    """{folder: manifest version} of every seed cart in `seeds`, in order."""
+    """{folder: manifest version} of every official cart in `seeds`, in
+    order: the seed carts but the test fixtures, which no release publishes
+    (gen_device_carts.is_fixture). One no store is seeded with
+    (gen_device_carts.is_unseeded) is among them: a store that holds it is
+    brought to the tree's, and no board's `[roster] install` names it."""
     import json
+    from tools.gen_device_carts import is_fixture
     out = {}
     for d in sorted(Path(seeds).iterdir()):
         man = d / "manifest.json"
         if d.name.endswith(".moy") and man.is_file():
-            out[d.name] = int(json.loads(man.read_text()).get("version", 0))
+            m = json.loads(man.read_text())
+            if not is_fixture(m):
+                out[d.name] = int(m.get("version", 0))
     return out
 
 

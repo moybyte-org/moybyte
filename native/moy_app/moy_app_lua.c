@@ -1412,19 +1412,21 @@ int moy_app_lua_open_hop(lua_State *L, const struct moy_app_run *run,
     uint32_t roles = run->roles;
     int files = (roles >> MOY_ROLE_FILES) & 1u && u->kind[0] != 0;
 
-    lua_newtable(L);                    // os: every app run's clock
-    static const luaL_Reg os_clock[] = {
-        { "time", l_os_time }, { "clock", l_os_clock }, { "difftime", l_os_difftime },
-        { NULL, NULL },
-    };
-    luaL_setfuncs(L, os_clock, 0);
-    if (files) {
-        static const luaL_Reg os_files[] = {
-            { "remove", l_os_remove }, { "rename", l_os_rename }, { NULL, NULL },
+    if (!(roles & MOY_APP_RUN_GAME)) {
+        lua_newtable(L);                // os: every app run's clock
+        static const luaL_Reg os_clock[] = {
+            { "time", l_os_time }, { "clock", l_os_clock }, { "difftime", l_os_difftime },
+            { NULL, NULL },
         };
-        luaL_setfuncs(L, os_files, 0);
+        luaL_setfuncs(L, os_clock, 0);
+        if (files) {
+            static const luaL_Reg os_files[] = {
+                { "remove", l_os_remove }, { "rename", l_os_rename }, { NULL, NULL },
+            };
+            luaL_setfuncs(L, os_files, 0);
+        }
+        lua_setglobal(L, "os");
     }
-    lua_setglobal(L, "os");
 
     if (files) {
         static const luaL_Reg file_methods[] = {

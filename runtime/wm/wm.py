@@ -197,6 +197,11 @@ class FullscreenStackWM:
         not; no windows here."""
         return False
 
+    def gesture_live(self):
+        """True while a window is dragged, moved or resized, or a finger
+        scrolls or flings a window's content; no windows here."""
+        return False
+
     def refill_step(self):
         """A frame with nothing to paint brings a window's buffer up to the
         glass (the windowed WM); nothing here, no windows."""

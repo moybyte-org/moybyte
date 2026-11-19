@@ -65,7 +65,10 @@ a browser. **`.moy` is the only cart format** (the `.moyproj` SDK was deleted
   each board.toml's `[board] ota`, the name every tool takes.
 - `device/`, `native/` — the device tier and the C modules every board stages.
 - `system_carts/*.moy` — the seed carts (manifest + main + config), which each
-  release also publishes as its official carts; all but `moy_seed.CORE` are
+  release also publishes as its official carts, but for the test fixtures
+  (`"moybyte": {"fixture": true}`), which only the host seeds and a board
+  tool pushes for its run. An official cart marked `"seed": false` is
+  published but seeded nowhere; all but `moy_seed.CORE` are
   removable (`.claude/rules/carts.md`).
 
 **Where a piece belongs (owner, 2026-09-26).** What a cart author needs to make
@@ -75,7 +78,8 @@ carts live in one repo, moybyte-org/carts, each under the licence in its own
 folder (#230); user carts go through the planned store (#122–#124). How a console runs them
 stays here: boards, shell, store, OTA, per-chip compiling and signing, and the
 seed set (`system_carts/`: the shell's apps and wallpapers, Python-only games,
-and the fixtures the perf ledger and parity harness use). moy-spec is a game
+and the fixtures the perf ledger and parity harness use, which no image
+carries). moy-spec is a game
 console spec, not Moybyte's: an app feature goes in a Moybyte-side field
 (`docs/moy_cart_api.md`).
 

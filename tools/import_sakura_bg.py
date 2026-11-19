@@ -61,7 +61,7 @@ from tools import pngwrite  # noqa: E402
 MOY64 = moy64()
 
 W, H = 320, 240
-CARTS = ("moybyte.sakura", "moybyte.sakura_lua")
+CARTS = ("moybyte.sakura", "moybyte.sakura_lua", "moybyte.sakura_c")
 
 # Nearest-colour metric: plain RGB distance weighted toward how much each
 # channel carries luma, which keeps the sky's lavender ramp from snapping to

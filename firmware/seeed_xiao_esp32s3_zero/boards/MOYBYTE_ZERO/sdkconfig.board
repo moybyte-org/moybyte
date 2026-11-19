@@ -129,6 +129,18 @@ CONFIG_PM_ENABLE=
 # AES/SHA's DMA bounce.
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 
+# --- the CA bundle -----------------------------------------------------------
+# The indexes the page's Get Carts lists, and the carts it installs, are
+# fetched by this board over https (runtime/carts/web_addon.py's
+# OfficialCarts): the release's index on GitHub and moybyte-org/carts on
+# GitHub Pages. Every https request but the updater's verifies the server's
+# certificate against ESP-IDF's common bundle (esp_crt_bundle;
+# native/moy_net/moy_net_port.c), as on the consoles; MicroPython's base config
+# turns the bundle off, and a build without these lines refuses those requests
+# (moy_conn_verifies). Its flash cost is the image ledger's (docs/perf/image.md).
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y
+
 # --- Code this headless board never runs ------------------------------------
 # Every line is flash spent TWICE, once per OTA slot, on the one board whose
 # slot is 3 MB because the browser console it serves rides the image (the

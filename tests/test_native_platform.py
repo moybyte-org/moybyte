@@ -34,6 +34,10 @@ RULES = {
     "alloc": re.compile(r"\b(heap_caps_(?!get_)\w*alloc\w*|malloc|calloc|realloc|aligned_alloc)"
                         r"\s*\("),
     "task": re.compile(r"\bxTaskCreate\w*\s*\("),
+    # The caps of "internal SRAM" spelled out: on a P4 they reach the LP SRAM
+    # too (moy_kmem.h's MOY_KMEM_SRAM_CAPS).
+    "sram": re.compile(r"MALLOC_CAP_INTERNAL\s*\|\s*MALLOC_CAP_8BIT"
+                       r"|MALLOC_CAP_8BIT\s*\|\s*MALLOC_CAP_INTERNAL"),
     # A declaration made weak, the attribute after it or before it, or a macro
     # that spells the attribute (a weak DEFINITION, a default an owner may
     # replace, is the owner's own).
@@ -48,6 +52,7 @@ OWNERS = {
     "mutex": ("moy_kernel/moy_platform.h", "moy_kernel/moy_platform.c"),
     "alloc": ("moy_kernel/moy_kmem.h", "moy_kernel/moy_kmem.c"),
     "task": ("moy_kernel/moy_tasks.c",),
+    "sram": ("moy_kernel/moy_kmem.h",),
     "weak": (),
 }
 
@@ -75,6 +80,8 @@ ALLOWED = {
         "moy_platform.h brings",
     ("moy_alloc/modmoy_alloc.c", "alloc"):
         "the DMA buffer allocator: the caller's caps are the allocation",
+    ("moy_alloc/modmoy_alloc.c", "sram"):
+        "a buffer's registry node: read once a buffer, any internal heap serves it",
     ("moy_glass/modmoy_glass.c", "alloc"):
         "the canvas pixels: aligned DMA-capable blocks the PPA and the panel read",
     ("moy_kernel/moy_devbus.c", "alloc"): "a bus transfer's DMA bounce buffer",
@@ -262,3 +269,23 @@ def test_a_file_that_asks_for_psram_has_the_answer():
                    for h in includes):
             bad.append(rel)
     assert not bad, "tests MOY_HAS_PSRAM without moy_platform.h: %s" % bad
+
+
+def test_the_sram_caps_name_the_l2_sram_alone_on_a_p4():
+    """MOY_KMEM_SRAM_CAPS adds MALLOC_CAP_DMA on a P4 because IDF's P4 heap
+    table makes both L2 SRAM types DMA-capable (MALLOC_L2MEM_BASE_CAPS) and
+    the SPM not (the LP SRAM's row, below the patch's context, has no DMA
+    either). The low SRAM's row is ours, in the patch the build applies."""
+    patch = os.path.join(os.path.dirname(ROOT), "patches", "p4_heap_low_sram_priority.patch")
+    rows = {}
+    with open(patch) as fh:
+        for line in fh:
+            m = re.match(r'^([+ ])\s*\[SOC_MEMORY_TYPE_(\w+)\]\s*=\s*\{\s*"\w+",\s*\{(.*)\}\}', line)
+            if m:
+                rows.setdefault(m.group(2), m.group(3))
+    assert "MALLOC_L2MEM_BASE_CAPS" in rows["RETENT_MEM"]
+    assert "MALLOC_L2MEM_BASE_CAPS" in rows["L2MEM"]
+    assert "MALLOC_CAP_DMA" not in rows["SPM"] and "MALLOC_L2MEM_BASE_CAPS" not in rows["SPM"]
+    with open(os.path.join(ROOT, "moy_kernel", "moy_kmem.h")) as fh:
+        kmem = fh.read()
+    assert "MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT | MALLOC_CAP_DMA" in kmem

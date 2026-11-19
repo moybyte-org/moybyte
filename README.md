@@ -25,14 +25,14 @@ This repo is the reference implementation of
 cart format and its verbs.
 
 <p align="center">
-  <img src="docs/media/desktop/paint.gif"
-       alt="On the windowed desktop: drawing a smile on the pet sprite in the editor, and the running game window beside it showing the change">
-  <br><em>Paint on the sprite, and the game running beside the editor picks it up.</em>
+  <img src="docs/media/readme/hero.png" width="1024" height="600"
+       alt="The Moybyte desktop: the dock of apps on the left, and the Editor as a window on Star Catcher, its code on one side and the game playing in its Game pane on the other">
+  <br><em>The desktop, with Star Catcher open in the Editor: the code beside the game it runs.</em>
 </p>
 
-| ![The code editor as a window on the desktop](docs/media/desktop/code.gif) | ![Building a block program next to the scene it drives](docs/media/desktop/blocks.gif) |
+| ![The sprite editor beside the running game in the Editor's window](docs/media/readme/paint.png) | ![A block program beside the game it drives in the Editor's window](docs/media/readme/blocks.png) |
 |:--:|:--:|
-| The code editor | Blocks compile to the same Python |
+| The sprite editor beside the running game | Blocks compile to the same Python |
 
 ## What it runs on
 
@@ -50,9 +50,9 @@ cart format and its verbs.
 Host and device are one codebase. Each firmware build freezes copies of the
 `runtime/` modules, so the simulator runs the same code as the boards.
 
-| ![The paint editor at native 320x240](docs/media/paint.gif) | ![The code editor at native 320x240](docs/media/code.gif) |
+| ![The code editor on the 320x240 handheld](docs/media/readme/handheld_code.png) | ![The sprite editor on the 320x240 handheld](docs/media/readme/handheld_paint.png) |
 |:--:|:--:|
-| Paint on the 320×240 handheld | The code editor on the 320×240 handheld |
+| The code editor on the 320×240 handheld | The sprite editor on the 320×240 handheld |
 
 ## What's in it
 
@@ -160,9 +160,11 @@ interpreter rather than refusing it, and ESP 88 is a compiled cart besides
 Doom and Jet Teapot.
 
 - [`docs/moy_cart_api.md`](docs/moy_cart_api.md) — the verb table.
-- `system_carts/` — the 30 built-in carts, from a 70-line tap game to Brick Siege.
-- [`docs/blocks_tap_game.md`](docs/blocks_tap_game.md) — building
-  `system_carts/moybyte.tap_game.moy` in the block editor, step by step.
+- `system_carts/` — the 22 built-in carts, from a blocks game to Brick Siege,
+  and four test fixtures. Every console is seeded with 21 of them; Bullet
+  Storm is official but waits in Get Carts.
+- [`docs/blocks_tap_only_red.md`](docs/blocks_tap_only_red.md) — building
+  `system_carts/moybyte.tap_only_red.moy` in the block editor, step by step.
 
 ## The spec
 

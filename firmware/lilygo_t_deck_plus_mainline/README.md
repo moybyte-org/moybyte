@@ -42,7 +42,8 @@ rather than a cable flash. The build prints the image's headroom; nothing else
 is current. The slots are 6 MiB since 2026-11-17 (the browser console is an
 add-on cart, not in the image), and the 128 KiB coredump
 partition after them (2026-11-09: a panic's ESP-IDF core dump,
-`tools/coredump.py`) came off the vfs; the table's CSV,
+`tools/coredump.py`) came off the vfs, as did the pmem log's partition after it
+(2026-11-18, `native/moy_store/moy_plog.h`); the table's CSV,
 `boards/MOYBYTE_TDECK/partitions-moybyte-tdeck.csv`, carries why.
 
 ---
@@ -74,7 +75,7 @@ Outputs land in `dist/tdeck_mainline/`:
 |---|---|---|
 | `moybyte_tdeck.bin` | bootloader + partition table + app, merged | cable flash at **0x0** (the S3's bootloader offset; the P4's is 0x2000) |
 | `moybyte_tdeck_app.bin` | the app partition alone | what an OTA writes into the inactive slot |
-| `moybyte_tdeck_install.bin` | the merged image, then at the internal store's 0xC40000 a store holding the browser console add-on (`tools/store_image.py firmware/lilygo_t_deck_plus_mainline`) | the website's install at **0x0**: it erases the internal store, an SD card is not touched, and the first boot on a card moves the add-on there |
+| `moybyte_tdeck_install.bin` | the merged image, then at the internal store's 0xC60000 a store holding the browser console add-on (`tools/store_image.py firmware/lilygo_t_deck_plus_mainline`) | the website's install at **0x0**: it erases the internal store, an SD card is not touched, and the first boot on a card moves the add-on there |
 
 The merged image leaves `otadata` (0x1D000) erased, so the bootloader falls back
 to `ota_0` — the same effect the fork build got by erasing that region
@@ -738,7 +739,7 @@ with an A/B rather than inherited.
 | flash + PSRAM at 120MHz (#66/#169) | on, plus a vendor-gate patch | **on** (`bec713e`), with the temperature retune | it was the last cart-side gap — Brick Siege's whole `bg=` difference was a 153,600 B PSRAM fill at 2/3 the clock, measured to within 1.5% of the clock ratio (see "the render-side gap is the PSRAM clock" above). It is an EXPERIMENTAL IDF feature whose failure mode is random faults ~20 °C from boot temperature, so it ships WITH `CONFIG_SPIRAM_TIMING_TUNING_POINT_VIA_TEMPERATURE_SENSOR` and the vendor-gate patch that keeps that option from aborting this board's boot; the five flags move together or not at all (`sdkconfig.board` says which) |
 | `-O3` on moy_gfx (#77) | on (Brick Siege 33→51 fps) | inherited | it is a pragma inside the shared `moy_gfx` source, so it comes with the staged module |
 | async flush + pump (#40/#43/#66) | on | **on** (2026-08-16) | ported — see the flush section above. Was the biggest single lever here; `ASYNC_FLUSH = False` in `moy_runtime.py` reverts it |
-| GDMA async layer copy (#54 St.2 / #63) | on | **on** (2026-08-16) | `LAYER_COPY_ASYNC = True` in `moy_runtime.py`, assigned onto `device_canvas` by `run_desktop` before the first canvas, because `device_canvas.py` is staged, not ours. Safe here for the reason the fork is safe: the 2026-07-03 verdict was about a GDMA blit starving a panel DMA that read PSRAM *directly*, and `moy_lcd`'s only ever reads internal SRAM — on both flush paths, since `show()` is `kick`+`drain`. **It does NOT close the gap above and was never going to**: it is armed only for a screen-wide layer at `cam_x == 0`, so Sky Run (800 px) and the Bench carts' scroll phase (512 px) keep the sync `blit_window`, and Brick Siege has no layer at all. It pays on sakura, letter_blitz and platformer — the whole list — where the fork measured 7 ms → 0.04 ms |
+| GDMA async layer copy (#54 St.2 / #63) | on | **on** (2026-08-16) | `LAYER_COPY_ASYNC = True` in `moy_runtime.py`, assigned onto `device_canvas` by `run_desktop` before the first canvas, because `device_canvas.py` is staged, not ours. Safe here for the reason the fork is safe: the 2026-07-03 verdict was about a GDMA blit starving a panel DMA that read PSRAM *directly*, and `moy_lcd`'s only ever reads internal SRAM — on both flush paths, since `show()` is `kick`+`drain`. **It does NOT close the gap above and was never going to**: it is armed only for a screen-wide layer at `cam_x == 0`, so a world wider than the screen (the Bench carts' scroll phase, 512 px) keeps the sync `blit_window`, and Brick Siege has no layer at all. It pays on letter_blitz and sakura_lua, where the fork measured 7 ms → 0.04 ms |
 | PSRAM-direct DMA (`spi_master` patch, #43) | on | **off** | the SRAM-bounce path makes it unnecessary and it is the riskier of the two |
 
 ---

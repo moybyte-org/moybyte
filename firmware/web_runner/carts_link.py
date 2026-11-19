@@ -5,8 +5,9 @@ the worker for this VM. Only a page that keeps its own carts (site mode) gets
 them; a page a board serves shows the board's carts, and the board gets its
 own (web_boot sets `ws.cart_home` instead). A board with no screen (a Zero)
 gets its own when this page asks: `ws.cart_board` (`BoardCarts`) asks it
-through its sealed /official and, once the board has written a cart, pulls
-that cart's files into this page's copy of the store.
+through its sealed /official for the carts of its indexes, a licence, an
+install (whose prompt this page answers) or a removal, and once the board has
+written a cart, pulls that cart's files into this page's copy of the store.
 
 SHAPE: gpio_link's and update_link's. A capability reaches this VM by
 QUEUEING on the Python side while the worker does the I/O and hands the answer
@@ -318,10 +319,10 @@ LOST = "The console isn't answering."
 class BoardCarts:
     """`ws.cart_board` on a page a console with no screen serves (a Zero),
     whose webhost answers /official (device/moy_webhost.py,
-    runtime/carts/web_addon.py's OfficialCarts): the official carts of that
-    console's own release, which it installs and removes in its own store
-    when this page asks. The page asks and waits; the board fetches and
-    writes, the one writer of its carts.
+    runtime/carts/web_addon.py's OfficialCarts): the carts of the indexes
+    that console reads, which it installs and removes in its own store when
+    this page asks. The page asks and waits; the board fetches and writes,
+    the one writer of its carts.
 
     Each verb is a job the app steps a frame at a time (`BoardAsk`). An
     install ends by REFOLDING the cart: the worker pulls the board's carts
@@ -332,12 +333,24 @@ class BoardCarts:
     def __init__(self, link, root):
         self.link = link
         self.root = root
+        self.locked = False             # the board has a password: its last check said
 
     def check(self):
         return BoardAsk(self, "check", None)
 
-    def install(self, folder):
-        return BoardAsk(self, "install", folder)
+    def licence(self, cart, path):
+        """The licence text of `cart`'s external file `path`, fetched and
+        checked by the board: the job's `doc["text"]`."""
+        return BoardAsk(self, "licence", cart["folder"], _which(cart, path=path))
+
+    def install(self, cart, accepted=(), ask=None):
+        """`cart` (a listing the board's check gave) installed by the board,
+        the external files whose licence was `accepted` with it. `ask(man)`
+        is the install prompt's check of the checked build's manifest
+        (pkg.manifest_check): None goes on, lines are the question
+        (`asking`), an InstallError refuses."""
+        return BoardAsk(self, "install", cart["folder"],
+                        _which(cart, accepted=list(accepted)), ask)
 
     def remove(self, folder):
         return BoardAsk(self, "remove", folder)
@@ -390,6 +403,13 @@ class _Refold:
             self.kept = str(ev["error"]) or "the cart did not come"
 
 
+def _which(cart, **more):
+    """The POST's members naming `cart`: its index and id, and `more`."""
+    out = {"index": cart.get("index"), "id": cart.get("id")}
+    out.update(more)
+    return out
+
+
 def _read_answer(a):
     """(status, document or None) of an ended answer, which it closes."""
     try:
@@ -408,16 +428,19 @@ class BoardAsk:
     GET every POLL_MS until the board says it is done, then (an install's or
     a removal's) this page's copy brought to the board's. The face
     cart_index.Install shows Get Carts: `step()` True while it runs, `done`
-    and `total` the board's download, `path` the cart's folder here once it
-    landed, `error` the board's reason; and `doc`, a check's list."""
+    and `total` the board's download, `asking` the install prompt's question
+    until `agree()` or `cancel()`, `path` the cart's folder here once it
+    landed, `error` the board's reason; and `doc`, a check's list or a
+    licence's text."""
 
     keeping = False
-    asking = None
 
-    def __init__(self, board, action, folder):
+    def __init__(self, board, action, folder, more=None, ask=None):
         self.board = board
         self.action = action
         self.folder = folder
+        self.ask = ask
+        self.asking = None
         self.doc = None
         self.error = None
         self.path = None
@@ -428,9 +451,11 @@ class BoardAsk:
         self._at = None
         self._lost = 0
         self._refold = None
+        self._refused = None
         body = {"action": action}
         if folder is not None:
             body["folder"] = folder
+        body.update(more or {})
         self._answer = board.ask(body)
         self._posting = True
 
@@ -450,10 +475,24 @@ class BoardAsk:
             return False
         if not self.dropping:
             self.dropping = True
-            self._drop_answer()
-            self._answer = self.board.ask({"action": "cancel"})
-            self._posting = True
+            self.asking = None
+            self._post({"action": "cancel"})
         return True
+
+    def agree(self, password=None):
+        """The install prompt answered yes: the board lands the build. With
+        `password`, the board's own, which it checks before an unreviewed
+        Python cart lands (web_addon.OfficialCarts' `agree`)."""
+        self.asking = None
+        doc = {"action": "agree"}
+        if password:
+            doc["password"] = password
+        self._post(doc)
+
+    def _post(self, doc):
+        self._drop_answer()
+        self._answer = self.board.ask(doc)
+        self._posting = True
 
     def finish(self):
         pass
@@ -477,6 +516,8 @@ class BoardAsk:
     def step(self, _budget=None):
         if self.finished:
             return False
+        if self.asking is not None:
+            return True                         # the player answers; the board waits
         if self._refold is not None:
             kept = self._refold.kept
             if kept is None:
@@ -499,7 +540,7 @@ class BoardAsk:
         status, doc = _read_answer(a)
         self._at = _ticks_ms()
         if self.dropping and posted:
-            return self._end(None)              # the board stops; nothing landed
+            return self._end(self._refused)     # the board stops; nothing landed
         if posted and status == 409:
             return self._end((doc or {}).get("message") or LOST)
         if status != 200 or doc is None:
@@ -515,7 +556,11 @@ class BoardAsk:
             self.done, self.total = prog[0] or 0, prog[1] or 0
         if posted or state in ("checking", "installing", "removing"):
             return True
-        if state == "listed" and self.action == "check":
+        if state == "asking" and self.action == "install":
+            return self._prompt(doc.get("manifest"))
+        if state == "listed" and self.action in ("check", "licence"):
+            if self.action == "check":
+                self.board.locked = doc.get("locked") is True
             self.doc = doc
             return self._end(None)
         if state == "error":
@@ -528,3 +573,24 @@ class BoardAsk:
             self._refold = self.board.refold(self.folder)
             return True
         return self._end(LOST)
+
+    def _prompt(self, manifest):
+        """The board holds the checked build: the install prompt's check of
+        its manifest, asked once. Nothing to ask goes on; a refusal stops
+        the board with its reason."""
+        if self.asking is not None:
+            return True
+        lines = None
+        if self.ask is not None:
+            try:
+                lines = self.ask(manifest if isinstance(manifest, dict) else {})
+            except Exception as exc:  # noqa: BLE001 -- cart_index.InstallError
+                self._refused = getattr(exc, "text", None) or LOST
+                self.cancel()
+                return True
+            self.ask = None
+        if lines is None:
+            self._post({"action": "agree"})
+            return True
+        self.asking = lines
+        return True

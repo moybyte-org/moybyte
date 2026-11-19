@@ -59,10 +59,11 @@ typedef struct {
 // What the loop allocates once from its tier (PSRAM on a board: kernel data
 // is PSRAM by rule) -- the meters and the PERF window.
 // The LOOP window: each stage's microseconds summed over the PERF period, the
-// stages that ran in it, the frames, their work and their sleep.
+// stages that ran in it, the frames, their work, the longest one's and their
+// sleep.
 typedef struct {
     uint32_t sum[MOY_ST_COUNT];
-    uint32_t mask, n, frame_ms, sleep_ms;
+    uint32_t mask, n, frame_ms, max_ms, sleep_ms;
 } window_t;
 
 #define DIAG_HITCH 1u
@@ -653,8 +654,8 @@ int32_t moy_loop_role(uint32_t grant, uint32_t row, const uint8_t *arg, size_t n
 // Under PERF DIAG, from the stage meters: HITCH names every stage of one frame
 // whose work (`ms`) ran past MOY_LOOP_HITCH_MS, LOOP the average frame of the
 // PERF period by stage. Both cover the stages inside the frame's work (inputs to
-// tail); the pacing sleep is LOOP's `sleep`, and `other` is the work no stage
-// holds. A stage with no op on this tier was never metered and prints `-`.
+// tail); the pacing sleep is LOOP's `sleep`, `other` is the work no stage
+// holds and `max` the longest frame's work in whole milliseconds. A stage with no op on this tier was never metered and prints `-`.
 // Both go to the OS log under the kernel (moy_log.h): HITCH at warning, LOOP
 // and the PERF line at debug.
 
@@ -682,6 +683,9 @@ static void diag_frame(uint32_t elapsed, uint32_t sleep) {
     w->mask |= m->mask;
     w->n++;
     w->frame_ms += elapsed;
+    if (elapsed > w->max_ms) {
+        w->max_ms = elapsed;
+    }
     w->sleep_ms += sleep;
     if (elapsed < MOY_LOOP_HITCH_MS) {
         return;
@@ -714,7 +718,11 @@ static void diag_window(bool emit) {
             n += put_ms(h->loop + n, cap - n, "sleep", true, w->sleep_ms * 1000u / w->n);
         }
         if (n < cap) {
-            put_ms(h->loop + n, cap - n, "other", true, frame_us > staged ? frame_us - staged : 0u);
+            n += put_ms(h->loop + n, cap - n, "other", true,
+                        frame_us > staged ? frame_us - staged : 0u);
+        }
+        if (n < cap) {
+            snprintf(h->loop + n, cap - n, " max=%u", (unsigned)w->max_ms);
         }
         h->pending |= DIAG_LOOP;
         moy_loop_say("%s", h->loop);

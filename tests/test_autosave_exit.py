@@ -18,7 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
-from ws_helpers import build_ws as _ws, select_on_home
+from ws_helpers import build_ws as _ws, install_shape, select_on_home
 
 
 def _open_in_editor_by_title(ws, title):
@@ -192,7 +192,8 @@ def test_untouched_tab_switch_writes_nothing(tmp_path):
     # A cart with real assets on every tab, named rather than indexed off the
     # shelf -- and NOT one whose `_init` authors its own map (Bench msets
     # there, so its map is legitimately dirty before the walk starts).
-    _open_in_editor_by_title(ws, "Hop Quest")
+    install_shape(ws, "sky_run")
+    _open_in_editor_by_title(ws, "Sky Run")
     _switch(ws, "code")
     hits = _writes_during(ws, lambda: [_switch(ws, t)
                                        for t in ("paint", "map", "scene",

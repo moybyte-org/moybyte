@@ -17,7 +17,7 @@ dependencies = []
 dev = [
   "pytest",
   "pytest-xdist", # `make test` runs the ~2000 host tests across cores (3m25s -> ~40s)
-  "pillow",       # GIF export: tools/make_site_gifs.py + simulate_desktop.py --gif
+  "pillow",       # images: tools/readme_shots.py, make_feature_tiles.py + simulate_desktop.py --gif
   "resvg-py==0.5.0", # the icon sets' rasteriser (tools/make_icons.py): the
                      # masks are compared byte for byte under this version
   "zopfli==0.4.3", # the web console's baked .gz (tools/zopfli_gz.py, run by

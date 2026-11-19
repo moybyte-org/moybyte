@@ -432,6 +432,16 @@ class AppHost:
         is not the last one's."""
         return bool(_C.api_owes(self.ctx))
 
+    def due(self):
+        """Whether the frame after the pass begun last shows anything the
+        glass does not: its begin took input that acts after the pass
+        (`owed`), the pass owes the next (`owes`), or it moved the focus or
+        a scroll on a canvas that retains more than one buffer, so the
+        buffers the next frames paint into lag the glass (`moved`). One
+        retained buffer is the glass: a move its pass drew owes nothing."""
+        return (self.owed or bool(_C.api_owes(self.ctx))
+                or (self._hp[_HP_RETAINED] > 1 and bool(_C.api_moved(self.ctx))))
+
     def quiet(self):
         """Whether no input waits for the next frame: no button, typed key,
         repeat, wheel or press, and no frame owed."""
@@ -638,9 +648,10 @@ class Hold:
         """What the page in `rect` draws this frame under the dialog up,
         `key` what it is a function of (None with no dialog up): HOLD_PUT,
         HOLD_LAST or HOLD_DRAW; with `left`, HOLD_LEFT too, where the
-        modal then draws inside its card's band alone (`_left`). The
-        dialog's rows frame is asked first (`rows_frame`). `pages`:
-        `put`'s."""
+        modal then draws inside its card's band alone (`_left`), and its
+        HOLD_LAST has the page in this frame's buffer (`last`'s `copy`:
+        such a modal washes nothing). The dialog's rows frame is asked
+        first (`rows_frame`). `pages`: `put`'s."""
         if key is None:
             if self.key is not None:
                 self.drop()
@@ -668,7 +679,20 @@ class Hold:
             return HOLD_LEFT
         if self.put(ws, cv, rect, key, dt, pages):
             return HOLD_PUT
-        return HOLD_LAST if self.last(ws, cv, rect, dt) else HOLD_DRAW
+        return HOLD_LAST if self.last(ws, cv, rect, dt, was) else HOLD_DRAW
+
+    def drew(self, key):
+        """This frame drew the page and the modal under `key` after all:
+        the key `under` was given named where the modal's card lay the frame
+        before, and a card learns its place by drawing (none the frame
+        before its first), so the frames after compare with the place this
+        frame left it in. The page held without the card (`keep`) is held
+        under it too."""
+        if self._drew is None or self._drew_f != _PAINT[0]:
+            return
+        if self.key is not None and self.key == self._drew:
+            self.key = key
+        self._drew = key
 
     def copies(self, cv):
         """Whether the frame painted, alone on the glass, leaves the page
@@ -765,12 +789,13 @@ class Hold:
         f = ws.frame_state.frames_drawn
         self._over = f if self._shown == f - 1 and not ws.frame_state.dirty_in else -1
 
-    def last(self, ws, cv, rect, dt=0):
+    def last(self, ws, cv, rect, dt=0, copy=False):
         """Whether this frame, the first of the dialog `opened` over the
         page, takes the page in `rect` from the last frame instead of
         drawing it (else the frame draws the page). One retained buffer
         holds it already; more give the buffer that frame drew into, which
-        the wash reads (`last_buffer`), or copy it out (`copy_last`)."""
+        the wash reads (`last_buffer`), or copy it out (`copy_last`, the
+        one way with `copy`)."""
         over = self._over
         self._over = -1
         self._src = None
@@ -778,7 +803,7 @@ class Hold:
             return False
         if cv.RETAINED_FRAMES == 1:
             return True
-        lb = getattr(cv, "last_buffer", None)
+        lb = None if copy else getattr(cv, "last_buffer", None)
         src = None if lb is None else lb()
         if src is not None:
             self._src = src

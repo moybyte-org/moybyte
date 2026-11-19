@@ -51,6 +51,7 @@
 
 #include "driver/gpio.h"
 #include "driver/i2s_std.h"
+#include "esp_attr.h"
 #include "esp_task.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -147,7 +148,8 @@ void moy_aud_out_shallow(int on) {
     s_shallow_want = on;
 }
 
-static bool on_ovf(i2s_chan_handle_t h, i2s_event_data_t *e, void *ctx) {
+// In IRAM: a board with CONFIG_I2S_ISR_IRAM_SAFE runs it with the cache off.
+static bool IRAM_ATTR on_ovf(i2s_chan_handle_t h, i2s_event_data_t *e, void *ctx) {
     (void)h;
     (void)e;
     (void)ctx;

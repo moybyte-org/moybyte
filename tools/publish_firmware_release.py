@@ -1,4 +1,18 @@
 #!/usr/bin/env python3
+# Map (grep -n a name to jump there):
+#   manifest_name      a board's OTA manifest's asset name
+#   stage              copy each board's images into the release's folder
+#   read_stamp         the version and digest a board's build stamped
+#   asset_url          the download url of a release asset
+#   stage_ota_all      every board's manifest, add-on cart and carts index
+#   run_modules        the native modules each chip's board build made, by cart
+#   stage_addon_only   a board's add-on cart and index with no OTA payload
+#   stage_ota          one board's signed manifest, add-on and carts index
+#   stage_c6           a P4 manifest's C6 block and its image
+#   prune_carts        delete the official carts' assets no index names
+#   existing_source    the manifest already published for a board
+#   notes              the release notes
+#   main               the publish: stage, upload, prune
 """Publish this build's firmware images to a rolling per-CHANNEL release.
 
 The website flashes boards from images it serves itself, and it has to get them
@@ -29,7 +43,10 @@ carries its own provenance beside it:
       latest-tdeck.json            <- the OTA manifest pointing at it
       moybyte_web-<digest>.moy.zip <- the browser console add-on cart an image
                                       names; every one ever published stays
-      moybyte.<cart>-<hex>.zip     <- each seed cart, an official cart, and
+      moybyte.<cart>-<hex>.zip     <- each official cart (a seed cart but a
+                                      test fixture; a compiled one with the
+                                      native module each chip's board build
+                                      of this run made), and
       moybyte.<cart>-<hex>.png        its cover: one asset for every board,
                                       kept while an index references it
       carts-tdeck.json             <- the index listing this build's official
@@ -298,11 +315,12 @@ def stage_ota_all(tag, channel, artifacts, workdir, repo=None, refused=None,
                 print("::warning::%s built images but has no OTA_IMAGES entry "
                       "-- no OTA manifest will be published for it"
                       % entry[len(prefix):])
+    modules = run_modules(artifacts)
     out = {}
     for board in sorted(NO_OTA):
         try:
             stage_addon_only(artifacts, workdir, board,
-                             earlier(board) if earlier else None)
+                             earlier(board) if earlier else None, modules)
         except web_pack.PageError as exc:
             print("::error::%s -- its add-on stays as published" % exc)
             if refused is not None:
@@ -310,7 +328,7 @@ def stage_ota_all(tag, channel, artifacts, workdir, repo=None, refused=None,
     for board in sorted(OTA_IMAGES):
         try:
             got = stage_ota(tag, channel, artifacts, workdir, repo, board,
-                            earlier(board) if earlier else None)
+                            earlier(board) if earlier else None, modules)
         except web_pack.PageError as exc:
             print("::error::%s -- its manifest stays as published" % exc)
             if refused is not None:
@@ -321,9 +339,28 @@ def stage_ota_all(tag, channel, artifacts, workdir, repo=None, refused=None,
     return out
 
 
-def stage_addon_only(artifacts, workdir, board, earlier=None):
+def run_modules(artifacts):
+    """The official compiled carts' native modules this run's board builds
+    left (web_pack.collected_modules), named on stdout: a chip none of them
+    built a module for publishes its carts with none, and its consoles run
+    the wasm one."""
+    prefix = "moybyte-firmware-"
+    folders = []
+    if os.path.isdir(artifacts):
+        folders = [os.path.join(artifacts, e) for e in sorted(os.listdir(artifacts))
+                   if e.startswith(prefix)]
+    got = web_pack.collected_modules(folders)
+    for cid in sorted(got):
+        print("native %s: %s" % (cid, ", ".join(sorted(got[cid]))))
+    if not got:
+        print("native: no board of this run built an official cart's module")
+    return got
+
+
+def stage_addon_only(artifacts, workdir, board, earlier=None, modules=None):
     """Stage a NO_OTA board's add-on cart and its index, or nothing when this
-    run did not build the board. Raises web_pack.PageError like stage_ota."""
+    run did not build the board. Raises web_pack.PageError like stage_ota.
+    `modules` is run_modules' answer."""
     src = os.path.join(artifacts, "moybyte-firmware-%s" % board, NO_OTA[board])
     if not os.path.exists(src):
         print("%-6s no %s in this run -- add-on unchanged" % (board, NO_OTA[board]))
@@ -333,18 +370,20 @@ def stage_addon_only(artifacts, workdir, board, earlier=None):
     if version is None:
         version = read_firmware_version()
     addon = web_pack.publish_addon(page, workdir, board, version,
-                                   ota_sign.read_key(), earlier or b"")
+                                   ota_sign.read_key(), earlier or b"", modules=modules)
     print("%-6s staged %s, %d official carts and %s (no OTA)"
           % (board, addon["cart"], addon["official"], addon["index"]))
     return addon
 
 
 def stage_ota(tag, channel, artifacts, workdir, repo=None, board="tdeck",
-              earlier=None):
+              earlier=None, modules=None):
     """Stage one board's OTA app image + `latest-<board>.json`, or None, and
     beside them the add-on cart of the page the image names and the board's
-    add-on index over `earlier` (the published one's bytes). Raises
-    web_pack.PageError when the run carries no page its image names."""
+    add-on index over `earlier` (the published one's bytes), its official
+    compiled carts with the native modules `modules` (run_modules; None
+    builds them here). Raises web_pack.PageError when the run carries no page
+    its image names."""
     image = OTA_IMAGES[board]
     folder = os.path.join(artifacts, "moybyte-firmware-%s" % board)
     src = os.path.join(folder, image)
@@ -375,7 +414,7 @@ def stage_ota(tag, channel, artifacts, workdir, repo=None, board="tdeck",
     # The browser console add-on, beside the payload, named by the digest
     # the image carries: where a console installs it from.
     addon = web_pack.publish_addon(page, workdir, board, manifest["version"],
-                                   ota_sign.read_key(), earlier or b"")
+                                   ota_sign.read_key(), earlier or b"", modules=modules)
     manifest["cart"] = addon["cart"]
     print("%-6s staged %s, %d official carts and %s"
           % (board, addon["cart"], addon["official"], addon["index"]))

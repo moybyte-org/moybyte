@@ -1110,6 +1110,7 @@ static const mp_rom_map_elem_t moy_net_globals_table[] = {
     #if defined(MOY_NET_LINK) && MOY_NET_LINK
     {MP_ROM_QSTR(MP_QSTR_Link), MP_ROM_PTR(&moy_net_link_type)},
     {MP_ROM_QSTR(MP_QSTR_RATE_54M), MP_ROM_INT(WIFI_PHY_RATE_54M)},
+    {MP_ROM_QSTR(MP_QSTR_RATE_12M), MP_ROM_INT(WIFI_PHY_RATE_12M)},
     #endif
 };
 static MP_DEFINE_CONST_DICT(moy_net_globals, moy_net_globals_table);

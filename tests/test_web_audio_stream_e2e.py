@@ -14,10 +14,17 @@ next paint, samples and all, and the pull, steered by a depth that did not
 count them, drained the decoder faster than real time until a live stream's
 lead ran out.
 
+And metered (?meter=1), the station's frames and the loop around them
+allocate no more than a stated bound of the VM's heap.
+
 What is read: the sink's counters (`__moyState().sink`), the pull's
 (`state.pcm`: samples sent, the sink's played), the decoder's (`media`:
 `decoded`, `pulled`, `starved`), and the page's output itself, tapped after
-the sink's gain node: its level, its tone and its runs of silence.
+the sink's gain node: its level, its tone and its runs of silence. A failure
+prints every snapshot, so the interval that held it shows, and names the
+stall: the sink's longest wait between chunks (`lull`) beside the worker
+loop's longest frame, step, collect, send and count (`__moyState().loop`),
+each with the play time it ended at.
 
     MOYBYTE_WEB_E2E=1 .venv/bin/python -m pytest tests/test_web_audio_stream_e2e.py
 """
@@ -73,11 +80,22 @@ TAP = r"""(() => {
 
 # One snapshot of every counter, the wall clock with it.
 SNAP = ("__moyState().then(s => 'SNAP ' + JSON.stringify({t: performance.now() / 1000,"
-        " sink: s.sink, pcm: s.pcm, media: s.media, out: Object.assign({}, window.__out)}))")
+        " sink: s.sink, loop: s.loop, pcm: s.pcm, media: s.media,"
+        " out: Object.assign({}, window.__out)}))")
 
 
 def _snaps(js):
     return [json.loads(j[5:]) for j in js if isinstance(j, str) and j.startswith("SNAP ")]
+
+
+def _show(snaps):
+    """Every snapshot, one line each: pytest prints them when the test fails."""
+    for s in snaps:
+        media = s.get("media") or {}
+        print("t %.1f sink %s loop %s pcm %s starved %s out %s" % (
+            s["t"], json.dumps(s["sink"]), json.dumps(s["loop"]), json.dumps(s["pcm"]),
+            media.get("starved"), json.dumps({k: s["out"].get(k) for k in
+                                              ("silences", "silent", "longest", "sound")})))
 
 
 def _music_station(url):
@@ -89,7 +107,7 @@ def _music_station(url):
                            " && s.sink && s.sink.played > 0)", "timeout": 20000}])
 
 
-def _run(tmp_path, name, steps, page_sink):
+def _run(tmp_path, name, steps, page_sink, query="?dev=1&desktop=1"):
     station = web_station.LiveStation()
     server, base = web_e2e.serve(web_e2e.DIST, web_e2e.free_port())
     env = None
@@ -98,7 +116,7 @@ def _run(tmp_path, name, steps, page_sink):
         env = {"MOY_CHROME_ARGS": json.dumps(["--host-resolver-rules=MAP %s 127.0.0.1" % INSECURE])}
     try:
         out, js = web_e2e.run(
-            tmp_path, name, "?dev=1&desktop=1",
+            tmp_path, name, query,
             [{"wait": 2500}] + _music_station(station.base + "/live") + [{"js": TAP}]
             + steps(station),
             base, tmp_path / "chrome", boot_ms=40000,
@@ -121,16 +139,18 @@ def test_a_live_station_plays_a_minute_at_the_sinks_rate_with_no_underrun(tmp_pa
         [{"wait": 3000}, {"js": SNAP}]
         + [s for _ in range(PLAY_S // 10) for s in ({"wait": 10000}, {"js": SNAP})])
     out, snaps = _run(tmp_path, "minute", steps, page_sink)
+    _show(snaps)
     assert len(snaps) == PLAY_S // 10 + 1, out[-3000:]
     a, b = snaps[0], snaps[-1]
-    print("first", json.dumps(a))
-    print("last ", json.dumps(b))
     sink, pcm, media, tap = b["sink"], b["pcm"], b["media"], b["out"]
     rate = pcm["rate"]
     assert rate == tap["rate"], "the console mixes at the context's rate: %r" % b
     assert media["rate"] == 44100 and media["state"] == "playing", media
     # nothing lost, skipped, repeated or refused between the pull and the speaker
-    assert sink["under"] == 0 and sink["dry"] == 0, sink
+    assert sink["under"] == 0 and sink["dry"] == 0, (sink, b["loop"])
+    # the worker's own collect waits for the stream to end (worker.js,
+    # STREAM_FRAMES): its pause would come out of the sink's lead
+    assert b["loop"]["gc"] == 0, b["loop"]
     assert sink["gap"] == 0 and sink["dup"] == 0 and sink["over"] == 0, sink
     assert sink["got"] == pcm["sent"] or pcm["sent"] - sink["got"] < rate // 10, (sink, pcm)
     # the decoder never ran dry, and its samples are the sink's, one for one
@@ -157,10 +177,9 @@ def test_a_station_that_stalls_plays_silence_and_counts_it(tmp_path):
          {"js": "fetch(%s).then(() => 'stalled')" % json.dumps(station.base + "/stall?s=12")}]
         + [s for _ in range(6) for s in ({"wait": 5000}, {"js": SNAP})])
     out, snaps = _run(tmp_path, "stall", steps, False)
+    _show(snaps)
     assert len(snaps) == 7, out[-3000:]
     a, b = snaps[0], snaps[-1]
-    print("first", json.dumps(a))
-    print("last ", json.dumps(b))
     assert b["media"]["starved"] > 0, "the stall never reached the decoder: %r" % b["media"]
     assert b["out"]["silences"] >= 1 and b["out"]["silent"] > 0, b["out"]
     # the sink itself never ran dry: the silence is what the mix sent
@@ -171,14 +190,50 @@ def test_a_station_that_stalls_plays_silence_and_counts_it(tmp_path):
 def test_a_page_sink_starved_on_purpose_plays_silence_and_counts_the_underrun(tmp_path):
     """The page's own sink, its main thread held for 600 ms: what it had
     scheduled plays out, the sink runs dry, and the next chunk counts the
-    underrun and the dry samples it played as silence."""
+    underrun and the dry samples it played as silence, the wait its `lull`."""
     hold = "(() => { const e = performance.now() + 600; while (performance.now() < e); return 'held'; })()"
     steps = lambda station: [                                   # noqa: E731
         {"wait": 3000}, {"js": SNAP}, {"js": hold}, {"wait": 2000}, {"js": SNAP}]
     out, snaps = _run(tmp_path, "starve", steps, True)
+    _show(snaps)
     a, b = snaps[0], snaps[-1]
-    print("first", json.dumps(a))
-    print("last ", json.dumps(b))
     assert a["sink"]["under"] == 0, a["sink"]
     assert b["sink"]["under"] >= 1 and b["sink"]["dry"] > 0.2 * b["pcm"]["rate"], b["sink"]
     assert b["sink"]["dup"] == 0 and b["sink"]["gap"] == 0, b["sink"]
+    # and the wait it starved through is its longest
+    assert b["sink"]["lull"] >= 500 and a["sink"]["lull"] < 500, (a["sink"], b["sink"])
+
+
+# The VM heap's allocation while the station plays on behind the desk, as the
+# page meters it (?meter=1, web_boot.step_frame_json). A frame's step (the
+# console's frame, the pull, the media face's pump) keeps what the boards'
+# own frame keeps nothing of: the browser's VM boxes every float, the face's
+# status is a tuple each pump, and the key and pointer routing over the desk's
+# windows answers in objects. The worker's loop around the steps is the
+# store's sweep once a second (moy_sync.StoreWatcher.sweep: every file's name
+# and stat, its bytes read only where they changed) and what its pumps hand
+# across. The bounds keep the VM's 4 MB collect threshold half a minute away.
+STEP_ALLOC_MAX = 768            # bytes a frame
+LOOP_ALLOC_MAX = 160 * 1024     # bytes a second
+
+
+def test_a_station_playing_on_behind_the_desk_allocates_within_its_bounds(tmp_path):
+    """Twenty seconds of the station playing behind a still desk, metered:
+    the frames' steps allocate at most STEP_ALLOC_MAX each and the loop
+    around them LOOP_ALLOC_MAX a second."""
+    snap = ("__moyState().then(s => 'SNAP ' + JSON.stringify({t: performance.now() / 1000,"
+            " alloc: s.alloc, media: s.media, sink: s.sink}))")
+    steps = lambda station: [                                   # noqa: E731
+        {"wait": 3000}, {"js": snap}, {"wait": 20000}, {"js": snap}]
+    out, snaps = _run(tmp_path, "alloc", steps, False, "?dev=1&desktop=1&meter=1")
+    assert len(snaps) == 2, out[-3000:]
+    a, b = snaps[0]["alloc"], snaps[1]["alloc"]
+    assert snaps[1]["media"]["state"] == "playing", snaps[1]["media"]
+    wall = snaps[1]["t"] - snaps[0]["t"]
+    frames = b["frames"] - a["frames"]
+    step = (b["step"] - a["step"]) / max(frames, 1)
+    loop = (b["loop"] - a["loop"]) / wall
+    print("%d frames in %.1f s: a step %.0f B, the loop %.0f B/s" % (frames, wall, step, loop))
+    assert frames > 5 * wall, (frames, wall)
+    assert step <= STEP_ALLOC_MAX, (step, a, b)
+    assert loop <= LOOP_ALLOC_MAX, (loop, a, b)

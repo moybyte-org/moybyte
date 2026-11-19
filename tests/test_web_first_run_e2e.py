@@ -125,7 +125,7 @@ def test_the_start_option_works_on_the_handheld_and_leaves_to_the_home(tmp_path,
                       tier="handheld", steps=[{"key": "Escape"}, {"wait": 900}])
     assert left["screen"] == "launcher", out[-2000:]
     desk, out = _load(tmp_path, base, tmp_path / "chrome_d", EDIT, "dark", "desk_x",
-                      steps=[{"click": [998, 20]}, {"wait": 900}])
+                      steps=[{"click": [1000, 70]}, {"wait": 900}])   # the Editor window's X
     assert desk["screen"] == "desk", out[-2000:]
 
 

@@ -1008,16 +1008,18 @@ static int read_entry(rd_t *r, moy_cat_entry_t *e, moy_cart_t *c,
             e->memory.kind = moy_json_int(m.v, m.e, &e->memory.value);
             e->memory.json = m;
         }
-        e->writable = field(man, mend, "writable");
-        if (e->writable.v != NULL && *e->writable.v == '[') {
-            moy_json_iter_t it;
-            const char *x, *xe;
-            e->writable_ok = 1;
-            moy_json_iter(&it, e->writable.v, e->writable.e);
-            while (moy_json_next(&it, NULL, NULL, &x, &xe)) {
-                if (*x != '"') {
-                    e->writable_ok = 0;
-                }
+    }
+    // Every cart's (moy-spec SPEC.md 9.1): a Lua or Python cart keeps files
+    // as a compiled one does.
+    e->writable = field(man, mend, "writable");
+    if (e->writable.v != NULL && *e->writable.v == '[') {
+        moy_json_iter_t it;
+        const char *x, *xe;
+        e->writable_ok = 1;
+        moy_json_iter(&it, e->writable.v, e->writable.e);
+        while (moy_json_next(&it, NULL, NULL, &x, &xe)) {
+            if (*x != '"') {
+                e->writable_ok = 0;
             }
         }
     }
@@ -1620,7 +1622,14 @@ static void rmtree(const char *path, int depth) {
     afree(&a);
 }
 
+// moy_pmem.h's (weak: an image without the pmem record links none).
+void moy_pmem_forget(const char *path);
+#pragma weak moy_pmem_forget
+
 void moy_cat_rmtree(const char *path) {
+    if (moy_pmem_forget != NULL) {
+        moy_pmem_forget(path);      // a cart's logged pmem goes with its folder
+    }
     rmtree(path, 0);
 }
 
@@ -1658,7 +1667,7 @@ static int copy_file(const char *src, const char *dst) {
 }
 
 static int skip(const char *name, size_t n, const char *main) {
-    static const char *const names[] = { "manifest.json", "config.json", "pmem.json",
+    static const char *const names[] = { "manifest.json", "config.json", "pmem.bin",
                                          "thumbs", "journal", "journal.jsonl",
                                          "cursor.json", "s" };
     for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {

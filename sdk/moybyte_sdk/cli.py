@@ -35,8 +35,9 @@ have, so with this package installed (`pip install -e .` in moybyte puts
         native module's frames under its own symbols; --gdb opens gdb on it
 
 The tiers are the start-here table's: `wasm` is an app compiled to wasm
-(moybyte.app imports), `wasi` a WASI command or service, `c` a native (ELF)
-module.
+(moybyte.app imports), and with `--type game` a compiled cart, one C source
+that builds to main.wasm and to a native module per chip (moybyte/cart.h);
+`wasi` a WASI command or service, `c` a native (ELF) module.
 """
 
 import argparse
@@ -80,6 +81,9 @@ CHIPS = ("esp32s3", "esp32p4", "host")
 THEME = "theme"
 WASM_APP = "moybyte.app"
 WASM_OS = "moybyte.os"
+# Moybyte's own extensions a compiled cart imports from by their names
+# (native/moycore/moycore_wasm_ext.h, sdk/include/moybyte/cart.h).
+WASM_CART_EXTS = ("moybyte.scenes", "moybyte.images", "moybyte.mouse", "moybyte.prefs")
 # A WASI program's own files: WASI's path calls, which reach only the folder
 # its `files` permission names, beside its moybyte.os `files_*` rows; read
 # from its source, the C library's file calls.
@@ -102,6 +106,8 @@ STUB_FILES = {
                ("moybyte.pyi", os.path.join(STUBS, "moybyte.pyi"))),
     "lua": (("moybyte_os.lua", os.path.join(STUBS, "moybyte_os.lua")),),
     "wasm": (("include/moybyte/app.h", os.path.join(SDK_INCLUDE, "moybyte", "app.h")),
+             ("include/moybyte/cart.h", os.path.join(SDK_INCLUDE, "moybyte", "cart.h")),
+             ("include/moy_cart.h", os.path.join(SDK_INCLUDE, "moy_cart.h")),
              ("include/moybyte/os.h", os.path.join(SDK_INCLUDE, "moybyte", "os.h"))),
     "wasi": (("include/moybyte/os.h", os.path.join(SDK_INCLUDE, "moybyte", "os.h")),),
     "c": (("include/moybyte/os.h", os.path.join(SDK_INCLUDE, "moybyte", "os.h")),
@@ -147,12 +153,22 @@ def vendor(man):
     return v if isinstance(v, dict) else {}
 
 
+def is_dual(man):
+    """Whether the manifest is a compiled cart's whose C builds to a native
+    module a chip beside its wasm one (a `"runtime": "wasm"` game naming its
+    chips in `"native"`, an empty list before its first build;
+    sdk/include/moybyte/cart.h, tools/elf_cart.py's is_cart)."""
+    from tools import elf_cart
+    return isinstance(vendor(man).get("native"), list) and elf_cart.is_cart(man)
+
+
 def tier_of(man, cart):
     """The cart's tier, by the start-here table: a native cart (its chips, or
     C source and no runtime yet), a wasm app or a WASI program, else its
-    runtime, Python by default."""
+    runtime, Python by default. A compiled cart that builds a native module
+    too (`is_dual`) is wasm's: its program is checked as its wasm module."""
     ven = vendor(man)
-    if isinstance(ven.get("native"), list):
+    if isinstance(ven.get("native"), list) and not is_dual(man):
         return "c"
     if "runtime" not in man and "main" not in man and glob.glob(os.path.join(cart, "src", "*.c")):
         return "c"
@@ -345,6 +361,11 @@ def _wasm_program(prog, cart, stem, app, man):
             if module == WASI_PREVIEW1 and not app and name.startswith("path_"):
                 prog.used["%s.%s" % (module, name)] = ("files",)
                 continue
+            if module in WASM_CART_EXTS:
+                if module not in (man.get("extensions") or ()):
+                    prog.errors.append('imports %s "%s" and does not declare the extension '
+                                       '("extensions": ["%s"])' % (module, name, module))
+                continue
             if module == WASM_APP:
                 table = mods["app"]
             elif module == WASM_OS:
@@ -529,6 +550,17 @@ def check_manifest(man, cart, errors, warnings):
             else:
                 errors.append('"main" %r is no file, and src/ has nothing to build it from'
                               % (main,))
+        if is_dual(man):
+            chips = ven["native"]
+            if not chips:
+                warnings.append("not built: `%s build --chip CHIP` builds "
+                                "main.<chip>.elf beside main.wasm" % PROG)
+            elif any(c not in CHIPS for c in chips):
+                errors.append('"native" is not a list of chips (%s)' % ", ".join(CHIPS))
+            else:
+                for c in chips:
+                    if not os.path.isfile(os.path.join(cart, "main.%s.elf" % c)):
+                        errors.append('"native" names %s and main.%s.elf is missing' % (c, c))
     else:
         chips = ven.get("native")
         if chips is None:
@@ -577,7 +609,10 @@ def check_manifest(man, cart, errors, warnings):
         if r is None:
             errors.append('"%s" is no permission (native/os_calls.json): it grants nothing' % p)
         elif not any(t in r[app_perms.TIERS] for t in tiers):
-            warnings.append('"%s" is never granted on the %s tier' % (p, tier))
+            # the console refuses it at install and launch (app_perms._served)
+            errors.append('"%s" is never granted on the %s tier%s'
+                          % (p, tier, ': a cart there reaches the internet through "http"'
+                             if p == "network" else ""))
     req = ven.get("required", [])
     if not _strs(req):
         errors.append('"required" is not a list of names')
@@ -689,6 +724,11 @@ def new_cart(name, tier="python", service=None, typ=None, into="."):
         else:
             files["main" + ext] = templates.PY_APP if tier == "python" else templates.LUA_APP
             ven["permissions"] = ["prefs"]
+    elif tier == "wasm" and typ == "game":
+        man.update({"runtime": "wasm", "main": "main.wasm", "memory": 2,
+                    "canvas": "320x240", "input": ["buttons"]})
+        files["src/main.c"] = templates.CART_GAME
+        ven["native"] = []
     elif tier == "wasm":
         man.update({"runtime": "wasm", "main": "main.wasm", "memory": 2,
                     "extensions": [WASM_APP]})
@@ -728,8 +768,8 @@ def new_cart(name, tier="python", service=None, typ=None, into="."):
     return folder
 
 
-def _build_hint(folder, tier, service):
-    if tier == "c" or service == "c":
+def _build_hint(folder, tier, service, typ=None):
+    if tier == "c" or service == "c" or (tier == "wasm" and typ == "game"):
         return ["%s build %s --chip esp32s3 --chip esp32p4" % (PROG, folder)]
     if tier in ("wasm", "wasi") or service == "wasi":
         return ["%s build %s" % (PROG, folder)]
@@ -742,7 +782,7 @@ def cmd_new(a):
     except Refused as e:
         return die(str(e))
     print("wrote %s" % folder)
-    for h in _build_hint(folder, a.tier, a.service):
+    for h in _build_hint(folder, a.tier, a.service, a.type):
         print("  build: " + h)
     print("  next: %s check %s" % (PROG, folder))
     return 0
@@ -757,7 +797,8 @@ def _compiled(man, cart):
     tier = tier_of(man, cart)
     entry = scheduler.entry_of({"entries": vendor(man).get("entries")})
     etier = entry[1] if entry else None
-    return tier, tier in ("wasm", "wasi") or etier == "wasm", tier == "c" or etier == "elf"
+    return (tier, tier in ("wasm", "wasi") or etier == "wasm",
+            tier == "c" or etier == "elf" or is_dual(man))
 
 
 def _compiler_failed(e):
@@ -779,7 +820,7 @@ def build_cart(cart, chips=(), signed=True):
     for c in chips:
         if c not in CHIPS:
             raise Refused("--chip is one of %s" % ", ".join(CHIPS))
-    if elf and not chips:
+    if elf and not chips and not is_dual(man):
         raise Refused("a native module is built per chip: --chip %s" % " --chip ".join(CHIPS))
     from tools import elf_cart, wasm_cart
     out = []
@@ -797,9 +838,9 @@ def build_cart(cart, chips=(), signed=True):
                 to = os.path.join(cart, os.path.relpath(path, dst))
                 shutil.copyfile(path, to)
                 out.append((what, to))
-    if elf:
+    if elf and (chips or not is_dual(man)):
         try:
-            if tier == "c":
+            if tier == "c" or is_dual(man):
                 got = elf_cart.build(cart, cart, chips, signed=signed)
             else:
                 stem = elf_cart.service_entry(man)

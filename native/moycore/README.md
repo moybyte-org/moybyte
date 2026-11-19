@@ -65,7 +65,7 @@ each other row on a P4 a hop on the VM's queue.
 | canvas | the DeviceCanvas framebuffer itself (libmoy takes a caller-owned `pix` and a caller-supplied wire table, so the panel's byte order stays out of the cart contract) |
 | input, time, pointer | a SNAPSHOT array filled before each tick -- by the Player from the input table and the pointer the console publishes, by the host's shim from its own input -- so `btn()` sixty times a frame costs zero crossings |
 | audio | a command QUEUE (int32) played after each tick in its order -- by the Player straight into the run's audio session |
-| pmem | a C array with a dirty flag, the shape the device already defers it to (#66) |
+| pmem | a C array with a dirty flag for the console and an unsaved flag for the run's own in-play save (`moycore_run_pmem_tick`, `native/moy_store/moy_save.h`) |
 | config | a C table of `key\0value\0` pairs COPIED in at `run_begin` (`lua_ext.cfg_blob`), so a compiled cart's session reads it on its own thread with no VM asked |
 | tile flags | 512 bytes COPIED in at `run_begin` (SPEC.md 3.5) -- the one buffer here that is not the caller's, because C writes it (`fset`, a poke to `0x3000`, the p8 shim's `__moy_map_flags`) and the caller may hand over a plain `bytes` |
 
@@ -98,6 +98,16 @@ MicroPython task through `moy_wasm_on_vm` while it waits on the call, each op
 inside the board's bus gate (`moy_vol_gate_enter`; on the T-Deck the panel's
 `sd_guard`). In the browser a write and an erase are logged for the page's
 keeper, which `files_kept` drains into the worker's OPFS commits.
+
+A Lua run's files (SPEC.md §9.1, the same four verbs and `read`) are the
+same store, `moycore_files.c`: the glue binds them into the run's console
+after `run_begin` (`lua_files(path, writable)`), the row holds them, and the
+run's close lets them go. Each op runs where the Lua run calls it, inside the
+bus gate, and is logged for the browser's keeper as a compiled run's are
+(`moycore_keep_refuses`, `moycore_keep_log`). A Python cart's are the same
+store opened on its own: `CartFiles(path, writable)` (`moycore_files_open`
+and its verbs, which hold each path to libmoy's rules as libmoy's Lua verbs
+do), on the host by ctypes (`runtime/host/moycore.py`).
 
 A cart's `par` items run on the engine's lanes: moycore hands the binding
 `moy_wasm_session_lanes()` of them and their `lane_go`/`lane_wait`, and the
@@ -456,6 +466,15 @@ and the int-handle prelude in `runtime/run/lua_ext.py`. Scenes are C on both Lua
 hosts (`moycore_scene.h`): the cart's `.moyscene` texts go to the run before
 the load (`scene_put`), are parsed there into Lua row tables, and
 `draw_scene` draws the live rows, so no scene verb crosses.
+
+A compiled cart reaches the same tables, and `mouse`'s snapshot, through
+four import modules named for the extensions its manifest declares
+(`moycore_wasm_ext.h`: `moybyte.scenes`, `moybyte.images`,
+`moybyte.mouse`, and `moybyte.prefs`, the game's prefs from its run's
+grant, native/moy_app/moy_app_wasm.h), one body `moycore_wasm.c` and the host's
+`runtime/host/moyhost_wasm.c` both include; the glue hands a declaring run
+its texts with `image_put` and `scene_put` before `wasm_open`
+(`lua_ext.put_wasm_media`), and the run's close frees them as a Lua run's.
 
 What a frame calls is C (native/moy_play/moy_play.h), so a frame makes
 no crossing: `col` and `mouse` (`moycore_superset.h`, which the registration

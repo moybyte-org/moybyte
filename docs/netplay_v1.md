@@ -1,6 +1,6 @@
 # Netplay v1 — the two-console lockstep contract
 
-**Status: SHIPPED and BINDING (last amended 2026-08-27).** Two kids open the
+**Status: SHIPPED and BINDING (last amended 2026-11-18).** Two kids open the
 same cart on their own consoles; the boards hear each other over ESP-NOW inside
 a second and simulate one game on two screens from a shared 30 or 60 Hz tape of button
 masks. Being in the same room is the pairing ceremony.
@@ -23,7 +23,9 @@ by frame type and is polled from the loop's tail with no crossing into Python.
 `runtime/run/players.py` is the console's view of it: the radio's bring-up, the
 session's player slots, the cart it asks the console to open.
 `runtime/run/player.py` adopts a session, feeds it and lets go; a Lua run's
-lockstep frame is the kernel Player's (`moy_play_lockstep`).
+lockstep frame is the kernel Player's (`moy_play_lockstep`). The same link
+beams a cart from one console to another (§7); `runtime/run/link_beam.py` is
+the console's half of that.
 
 ## 2. Lockstep: what crosses the air, and when a console may simulate
 
@@ -173,7 +175,13 @@ one beacon tick in `MOY_MATCH_PROBE_EVERY` on the next channel of a probe list
 (6 and 11 first), and a pinned peer heard there is followed to its channel for
 as long as it is heard, so the match forms there with the station still
 associated. A pinned console never moves, and a live match never tunes
-(`moy_link_channel`, the io's `channel`).
+(`moy_link_channel`, the io's `channel`). A console in a beam's receive
+state (§7) has a person watching it, so while it listens it walks the list
+a channel every `MOY_MATCH_BEAM_PROBE_MS`, home each
+`MOY_MATCH_BEAM_PROBE_HOME`-th dwell, and an offer is said again every
+`MOY_MATCH_BEAM_OFFER_MS`, inside one dwell; the sender's own walk keeps the
+match's pace, which is what a free sender takes to reach a listener pinned
+to its AP's channel.
 
 **The handshake is BROADCAST, addressed in the payload** — START and JOIN carry
 the destination MAC as six bytes. Unicast was the protocol's only such frame and
@@ -224,10 +232,11 @@ link's cadence (`moy_match.h`, THE SEND BUDGET, has them and the
 arithmetic): lockstep sends at most one frame per `MOY_MATCH_LOCK_MS`, and
 the P4's transport clears one per ~10 ms in one queue with the inputs, so a
 live match lets at most one port frame sit ahead of an input. Port 0 has no
-budget. The radio is up while the game holds it or any port is open
-(`EspNowLink`'s two holders, the process's radio lease `net`); a game's end
-with a port open ends the match and leaves the radio beaconing the
-launcher's state, and the last port's close takes it down. A process holds
+budget. The radio is up while the game holds it, any port is open or a beam is under
+way (`EspNowLink`'s three holders; a process's radio lease is `net`, a
+beam's `link`); a game's end with a port open ends the match and leaves the
+radio beaconing the launcher's state, and the last holder's let-go takes it
+down. A process holds
 four ports and the console `MOY_MATCH_PORTS` (8); the process's end closes
 what it left open.
 
@@ -288,7 +297,7 @@ either field, and the kernel's loop writes both from its own match
 
 - **A restart must not stop the link.** `Player.release_world` stops it only
   when `ws.netplay` is None, and the stop leaves the radio up while a
-  process's port holds it (§2, Ports). A match forms by a peer's invite reaching a console
+  process's port or a beam holds it (§2, Ports; §7). A match forms by a peer's invite reaching a console
   already playing, which re-runs the cart from frame zero; the dying run used to
   tear down the session that caused the restart, presenting as a host frozen at
   frame 0 showing a tank nobody drove.
@@ -296,6 +305,16 @@ either field, and the kernel's loop writes both from its own match
   in BEFORE `active(True)` — reconfiguring the ring live desyncs it until a full
   activation cycle — and `RATE_54M` after. At the 526-byte default, 64 of 200
   messages arrived while `send(sync=True)` answered True for every one.
+- **At 54M a frame's delivery depends on its bytes, so a beam sends at 12M**
+  (2026-11-19, on glass, #7). A Guition S3's 54M frames reach a T-Deck and a
+  Waveshare P4 by content: a given full frame arrives nearly every time or
+  never, whatever the number of sends, and the same frames all arrive at 12M
+  and at 6M. A match never notices (its frames are small, and each carries
+  the inputs the last one did), but a beam resends the same bytes: a report
+  whose bitmap was all ones never bound its sender, and a chunk of the wrong
+  bytes would stall a file for good. `EspNowLink.phy` gives the radio
+  `RATE_12M` while a beam holds it and the match's `RATE_54M` back when a
+  game takes it; at a beam's pace the air time of 12M is not what bounds it.
 - **The receive ring is the kernel's** (`native/moy_net/moy_link.c`, since
   2026-10-07). The port's modespnow committed a record in three ring puts while
   its reader waited only for the header, so a busy drain catching one
@@ -365,9 +384,135 @@ can move. **Dividing the T-Deck's built-in keyboard between two kids shipped and
 was pulled inside a day** (owner, 2026-08-22): it worked, and that thumb
 keyboard is five centimetres wide.
 
-## 7. Where the numbers live
+## 7. Beaming a file (2026-11-18, #7; streamed 2026-11-19)
+
+A person on one console sends a cart from its shelf, or one of their files,
+to a console nearby, and a cart that crosses is one the two can then meet on
+as any two consoles do. The C carries it (`native/moy_play/moy_match.h`,
+BEAMING A FILE, which has the frames and every number), the console feeds
+and empties it, asks and lands it (`runtime/run/link_beam.py`). The owner's
+four terms (2026-11-19, #7): no size limit and RAM that does not grow with
+what is carried, any file and not only a cart, as fast as the link allows,
+and both consoles showing how far along it is and the time left, either side
+able to stop it at any moment.
+
+**What crosses is one stream**: a person's file as it is, or a cart's
+files, each as it is, behind a head naming each one's path and size in the
+order the store's packer walks the folder (2026-11-19: a cart is no longer
+packed into a `.moy` archive first, which held a multi-megabyte cart's
+frame for seconds and needed its size free twice on each side). One frame type, `T_BEAM` (8),
+carries the beam's six kinds; like `T_PORT` it left `MOY_MATCH_PROTO` at 3,
+since no release carried the first cut's layout, and a console without it
+drops the frames as an unknown type. Every frame is broadcast, and every one
+but the offer names its destination in the payload, as the handshake does
+(§2). A size and a chunk's index are 32 bits, so what bounds a beam is the
+receiver's free space, checked before it asks: an offer it has no room for
+is refused with a NO that carries why, and its sender says so.
+
+**The bytes go through a window, one store op a frame.** Each side's link
+holds one ring of `MOY_MATCH_BEAM_WINDOW` chunks whatever the size; the
+sender's console reads into it, and the receiver's writes what it holds in
+order into the arrival's temporary (a file's, or the cart's staged folder),
+`link_beam.BLOCK` at a time at block-aligned offsets of each file, in one
+store op a frame that ends when the ring is full (or empty) or after
+`link_beam.STORE_MS`, the file it is on held open from frame to frame. A
+beam's RAM is fixed: the ring, one block and a cart's head. **A chunk is as
+long as both links carry**: a beam's frames are the only ones longer than
+250 bytes, ESP-NOW v2's 1470 between two consoles whose radio carries v2
+(`moy_link_frame_max`: the chip's own, or a P4's C6 from shim 4 on); the offer
+names the sender's chunk and the receiver takes the smaller of it and its own,
+so a P4 whose C6 runs an older shim sends and takes chunks that fit 250 bytes.
+From shim 4 a P4's queued sends also leave as one SEND_BATCH RPC to its C6,
+not one RPC a frame (`native/p4/moy_c6/espnow_shim_proto.h`), and leave at the
+link's rate: the C6 is a Wi-Fi 6 chip, where `esp_wifi_config_espnow_rate`
+fails, so its shim sets the rate per peer, and below shim 4 every frame leaves
+at 1M.
+
+**The receiver drives completion, because the ack lies** (§4). The sender
+offers on the air until a console answers; the receiver's yes binds the two
+by address and beam id, and from then on it reports, every
+`MOY_MATCH_BEAM_NEED_MS` and as soon as its console has taken a quarter of
+the window's room, the lowest chunk it lacks, the top of what it
+holds, the end of its room and which of the window's chunks it lacks. The
+sender sends what its console filled up to that room, then again what a
+report names lost. **The pace is found**: it starts at
+`MOY_MATCH_BEAM_RATE` and each report moves it, down where a send was
+refused (the Waveshare P4's queue, §5) or the receiver's holes grew, up
+where the rate held the sender back. **The hash is streamed**: FNV-1a over
+the bytes as the sender's console fills them and as the receiver's takes
+them; the sender answers a report of everything in with its hash (SUM), the
+receiver says DONE, whole or damaged, and answers a SUM of that beam from
+its verdict for `MOY_MATCH_BEAM_KEEP_MS` after, so a sender whose DONEs were
+all lost still hears it. A copy that fails is dropped whole and both
+consoles say it arrived damaged.
+
+**A beam is taken only by a person who asked for one.** Frames are neither
+signed nor encrypted (§2), so an offer is heard only while a person on the
+receiving console has opened the receive state (the system menu's RECEIVE
+NEARBY), and is asked about in the console's one dialog ("Receive
+<title>?", the console it comes from and its size, No and Receive) before a
+byte is written. The receiver checks every path a cart's head names
+(`link_beam.rel_ok`: nothing outside the cart's folder, nothing the packer
+skips) before it writes a byte of it, and a head that fails reads as a
+damaged copy. A cart lands on the shelf by the adopt a dropped `.moy` lands
+by (`moy_carts.install_staged`), its staged folder moved whole by one
+rename once the hash passes: a cart that arrived as files, whose first run
+asks with the install prompt's lines (`docs/os_2026-11/processes.md` §2), so
+a received cart never runs before its person says yes. A file lands in the
+shared folder Downloads (`docs/os_2026-11/between_apps.md` §2) under its own
+name made safe (no folder, no reserved character, nothing hidden), beside
+any file of that name rather than over it, and nothing runs it. The sender's
+SEND is a verb of a cart's card (its menu: a long press, a pad's X, the
+system menu's card group) and of a project's or a file's row in Files
+(`intents.Intents.send`), wherever the console's link can come up: a link
+whose bring-up failed (the Guition P4's C6 without its shim, §5) offers
+neither, and a first attempt there refuses at once.
+
+**Nothing waits forever, and a match outranks a beam.** An offer nobody takes
+and a receive state nothing reaches end after `MOY_MATCH_BEAM_WAIT_MS`; a
+bound side that hears nothing from its peer for `MOY_MATCH_BEAM_SILENT_MS`
+ends; a beam its console stops looking at for `MOY_MATCH_BEAM_TEND_MS` (a VM
+that went away) ends and tells its peer; a no, a refusal, a stop on either
+side and a damaged copy each end both, every end is said on whatever screen
+is up, and none leaves a temporary behind (each beam's start sweeps one a
+reset left). A no is said as often as a DONE (`MOY_MATCH_BEAM_DONES`) and
+kept as a verdict is: an offering sender spends one beacon tick in
+`MOY_MATCH_PROBE_EVERY` off its channel and hears none of the copies said
+meanwhile, so for `MOY_MATCH_BEAM_KEEP_MS` the console that said no answers
+every frame of that beam its peer still sends (its next offer, a report, a
+chunk) with the no again, from the channel it said it on. The console keeps
+its radio up `link_beam.PART_MS` after a beam ends, because the Waveshare
+P4's sends are queued (§5) and a radio stopped in the same call never sends
+them, and `link_beam.KEEP_MS` after a receive it finished and after a no it
+keeps. No beam starts while a match is live or a
+game holds the radio, a beam under way ends when a match goes live (in C) or
+a game takes the radio (`EspNowLink.start`), and a beam holds the channel
+while it is bound, as a peer on the cart does (§2's probes): a free station
+stays on the channel its beam's peer was last heard on
+(`MOY_MATCH_BEAM_HERE_MS`), which is where an offer taken on a probe tick
+came from. While a bound beam's peer is heard where it rests the link
+asks the radio nothing (`tune`, 2026-11-19): on the Waveshare P4 the
+channel's read is two round trips to the C6 over the link the chunks arrive
+by, and with them a beam into that console stopped the C6 answering a few
+seconds in, until the console's watchdog restarted it. A game's stop takes its cart out of the beacon
+(`EspNowLink.stop`), so the radio a beam brings up at the home invites
+nobody to the last game.
+
+`tests/test_link_beam.py` is the net: two consoles over a lossy, reordering
+air, a file of several megabytes against the beam's fixed RAM and one
+store op a frame, a cart's folders and empty files crossing with nothing
+packed, a head naming a path outside the cart, a chunk as long as both
+links carry, a damaged
+chunk, a receiver with no room, a name already taken, a stop from either
+side, a stale temporary, a refusing send queue and the pace, the lost DONEs
+over forty seeds, a console not receiving, a decline, a sender gone
+mid-transfer, a beam nobody tends, the receive state's give-up, the game's
+precedence, an inert link, and the shell's half (the system menu's row, the
+dialog's keys, the shelf, the first-run ask, Files' Send).
+
+## 8. Where the numbers live
 
 Per-cart fps and frame ms in `docs/perf/ledger.md` (generated; the stories in
 **#66**), P4 figures in **#58**; both win over any number here. The full ledgers — latency tables, phase-by-phase P4 verdicts,
-refuted avenues, the unbuilt levers (beaming a cart, more players, range, power)
+refuted avenues, the unbuilt levers (more players, range, power)
 — stay in the campaigns above.

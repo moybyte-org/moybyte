@@ -159,6 +159,34 @@ typedef struct map {
 } map_t;
 #define MAP_HDR ((sizeof(map_t) + 15u) & ~(size_t)15u)
 
+// A game's channels (moy_os.h, A GAME'S CHANNELS), freed with its record.
+struct moycore_files;
+typedef struct {
+    int32_t sound[MOY_OS_SOUND_MAX * 3];
+    uint32_t sounds;            // verbs queued, under the table's lock
+    int32_t pmem[256];
+    uint8_t pmem_moved;
+    moy_os_snd_fn snd;          // the stream's sink, NULL for none
+    struct moycore_files *files;
+} game_ch_t;
+
+// native/moycore/moycore_files.h's, where the image links moycore.
+struct moycore_files *moycore_files_open(const char *dir, const char *writable, size_t n);
+void moycore_files_close(struct moycore_files *s);
+int32_t moycore_files_read(struct moycore_files *s, const char *name, size_t n,
+                           uint32_t offset, uint8_t *dst, uint32_t len);
+int32_t moycore_files_write(struct moycore_files *s, const char *path, size_t n,
+                            const uint8_t *data, uint32_t len);
+int32_t moycore_files_erase(struct moycore_files *s, const char *path, size_t n);
+int32_t moycore_files_list(struct moycore_files *s, const char *prefix, size_t n,
+                           uint32_t index, uint8_t *dst, uint32_t cap);
+#pragma weak moycore_files_open
+#pragma weak moycore_files_close
+#pragma weak moycore_files_read
+#pragma weak moycore_files_write
+#pragma weak moycore_files_erase
+#pragma weak moycore_files_list
+
 struct moy_os_proc {
     uint32_t magic;
     uint32_t pid;
@@ -205,6 +233,9 @@ struct moy_os_proc {
     volatile uint8_t net_held;
     uint32_t wakes, events;
     uint8_t game;               // a game's (moy_os_game): its screen is a slot, moy_screen_slot.h
+    uint8_t *data;              // a game's data, handed at its start (moy_game_data)
+    size_t data_n;
+    game_ch_t *ch;              // a game's channels (moy_os_game)
 #ifdef MOY_OS_UMODE
     moy_u_proc_t *u;            // its memory, when its module runs in U-mode
     char **uargv;               // argv and the environment, in its main thread's U area

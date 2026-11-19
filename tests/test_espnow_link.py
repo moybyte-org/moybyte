@@ -198,7 +198,7 @@ def test_start_applies_the_recipe_in_the_order_that_does_not_desync_the_ring():
                     if e[0] == "config" and "rate" in e[1]), None)
     if rate_at is not None:
         assert rate_at > first_active, "the rate is only settable once active"
-    assert lk.radio.cfg["rxbuf"] == moy_espnow.RXBUF == 32768
+    assert lk.radio.cfg["rxbuf"] == moy_espnow.RXBUF == 163840
     assert BROADCAST in lk.radio.peers, "broadcast must be a peer or discovery is mute"
 
 

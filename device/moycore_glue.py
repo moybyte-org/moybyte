@@ -64,7 +64,8 @@ from array import array
 
 from lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
                      LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES, ROLE_NAMES,
-                     install_handles, end_handles, put_scenes, layer_restore,
+                     install_handles, end_handles, put_scenes, put_wasm_media,
+                     wasm_exts, layer_restore,
                      layer_restore_end,
                      snap_slots, audio_ops, snap_shared, run_room, run_face, sync_view,
                      drain_audio, cfg_blob, wants_layout)
@@ -180,6 +181,29 @@ def _run_flags(project):
     return fl if fl is not None else getattr(project, "flags", None)
 
 
+
+def _lua_files(ws, project):
+    """The Lua run's files (moy-spec SPEC.md 9.1, native/moycore/
+    moycore_files.h): the cart's folder and its "writable" entries, the store
+    a compiled run's are kept in. A run with no folder (a harness's bare
+    project) holds none: its file verbs answer as a host with no store."""
+    to = getattr(_moycore, "lua_files", None)
+    cart = getattr(project, "cart", None) or getattr(ws, "cart", None) or {}
+    path = cart.get("path") if hasattr(cart, "get") else None
+    if to is None or not path:
+        return
+    writable = cart.get("writable") or ()
+    to(path, "\0".join(writable) if writable else None)
+
+
+def _pmem_to(pmem):
+    """Whether the run saves its own pmem while it plays, from the frame it
+    ends with (native/moycore/moycore_run.h): a cart whose pmem the console
+    persists (`Pmem.path`), on a module whose library links the saver."""
+    to = getattr(_moycore, "pmem_to", None)
+    path = getattr(pmem, "path", None) if pmem is not None else None
+    return bool(to is not None and path and to(path))
+
 class MoycoreRun:
     """One cart run under moycore. Same shape as LuaCartRun."""
 
@@ -189,6 +213,7 @@ class MoycoreRun:
     AUDIO_MAX = 32
 
     _h = 0             # the run's row (run_begin's handle), 0 once closed
+    pmem_saves = False # it saves its pmem while it plays (_pmem_to)
 
     def __init__(self, ws, ns, src):
         if _moycore is None:
@@ -275,6 +300,8 @@ class MoycoreRun:
             getattr(tilemap, "w", 0) or 0, getattr(tilemap, "h", 0) or 0,
             self.snap, self.aq, self.pmem_img, cfg, flags, True,
             ns.get("_moy_app") if hasattr(ns, "get") else None)
+        self.pmem_saves = _pmem_to(pmem)
+        _lua_files(ws, project)
         # The superset, on top of libmoy's table and BEFORE the cart runs.
         # Anything callable in the namespace that libmoy did not already
         # install: registering a name libmoy owns would shadow the C verb with
@@ -676,7 +703,7 @@ _AOT_TAMPER_EVIDENCE = ("refused: bad signature", "refused: malformed signature"
 
 # The one non-tamper refusal that names a SIGNED-vs-not cause rather than a
 # stale/foreign module: `self.interp_cause` reads this to pick the notice's
-# sub-line ("isn't signed" against "needs an update", runtime/run/player.py).
+# sub-line (`slow.unsigned` against `slow.missing`, runtime/run/player_fit.py).
 _AOT_UNSIGNED = "refused: unsigned module"
 
 # A load that stops on a helper the module calls and this firmware's runtime
@@ -1134,6 +1161,7 @@ class WasmRun(MoycoreRun):
             getattr(tilemap, "cells", None),
             getattr(tilemap, "w", 0) or 0, getattr(tilemap, "h", 0) or 0,
             self.snap, self.aq, self.pmem_img, cfg, flags, False, None)
+        self.pmem_saves = _pmem_to(pmem)
         self.snap[_moycore.SNAP_PLAYERS] = 1
         # The cart's reads and its written files (moy-spec SPEC.md 16.12) are
         # moycore's C over the kernel's volume, inside the board's bus gate
@@ -1152,13 +1180,17 @@ class WasmRun(MoycoreRun):
         app = ns.get("_moy_app")
 
         lay = ns.get("_moy_layout") if hasattr(ns, "get") else None
+        # Moybyte's extensions the cart declares (native/moycore/
+        # moycore_wasm_ext.h), and the scenes and paint images theirs read.
+        exts = wasm_exts(cart)
 
         def _open(target, target_sha, interp):
             return _moycore.wasm_open(target, head, int(pages), target_sha, path,
                                       swapped, unsigned_ok, interp, joined, ring,
-                                      app, lay)
+                                      app, lay, exts)
 
         try:
+            put_wasm_media(ns, exts, _moycore.image_put, _moycore.scene_put)
             if has_module:
                 err = _open(module, sha, False)
                 if (err and not err.startswith(_AOT_TAMPER_EVIDENCE)
@@ -1426,7 +1458,10 @@ class WasmRuntime:
         SERVICE): its `_start` on a task of its own, its argv the cart's id;
         its module chosen as `command`'s is, its app rows answered for
         `run`, the app grant compiled_run made. None, or why it did not
-        start."""
+        start: an engine with no services (the browser's, whose page has
+        one thread: native/moy_wasm_web/README.md) refuses it."""
+        if not hasattr(_moy_wasm, "service_start"):
+            return "a wasm service does not run on this console"
         app_id = cart.get("id") or ""
 
         def start(path, sha, interp, unsigned_ok):

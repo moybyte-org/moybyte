@@ -640,6 +640,52 @@ def _reference(tmp_path, row, col, monkeypatch, built):
     return _REF[key]
 
 
+def test_a_linked_toolkit_lends_no_bar_beside_an_open_lua_run(tmp_path, monkeypatch, built):
+    """An app linking its own toolkit (a WASI or native app) lends the host's
+    bar nothing, while the run's context (native/moy_ui/moy_ui_run.c) still
+    answers for a Lua app's run another workstation left open: its title
+    showed in the C app's bar."""
+    from runtime.toolkit import ui_draw
+    Rig(tmp_path / "lua", "lua_app", "button", monkeypatch, built)
+    assert ui_draw.bar_lent(ui_draw.RUN_UI) is not None, "the Lua run lends its bar"
+    ran = 0
+    for layer in ("wasm_app", "elf_app"):
+        if isinstance(built[(layer, "button")], Exception):
+            continue
+        rig = Rig(tmp_path / layer, layer, "button", monkeypatch, built)
+        assert rig.ws.run.player.face.bar_ctx() is None, layer
+        rig.ws.spine.exit()
+        ran += 1
+    if not ran:
+        pytest.skip("no WASI or ELF build here")
+
+
+def test_an_app_on_screen_is_not_struck_for_slow_frames(tmp_path, monkeypatch, built):
+    """A WASI or native app's wake is a frame the console asked for, so its
+    wakes over the supervisor's slice (native/moy_kernel/moy_super.h),
+    which a loaded host gives an interpreted frame, neither strike nor
+    suspend it: a suspended app takes no input, and its page stands."""
+    from runtime import moy_evq
+    ran = 0
+    for layer in ("wasm_app", "elf_app"):
+        if isinstance(built[(layer, "dialog")], Exception):
+            continue
+        rig = Rig(tmp_path / layer, layer, "dialog", monkeypatch, built)
+        try:
+            pid = rig.ws.run.player.pid
+            for _ in range(4):          # a warning, then the three strikes that suspend
+                moy_evq.charge(pid, 30000, False)
+            assert not moy_evq.held(pid), layer
+            before = rig.shot()
+            gesture(rig, "desk_kbd", "choose")
+            assert rig.shot() != before, "%s: the dialog took no choose" % layer
+        finally:
+            rig.ws.spine.exit()
+        ran += 1
+    if not ran:
+        pytest.skip("no WASI or ELF build here")
+
+
 @pytest.mark.parametrize("layer,row,col", CELLS, ids=["-".join(c) for c in CELLS])
 def test_cell(tmp_path, monkeypatch, built, layer, row, col):
     what = GESTURES[row][col]
@@ -756,9 +802,10 @@ def test_a_stacked_fields_cancel_gives_each_field_its_own_text(tmp_path):
 
 
 def test_a_popover_first_shows_at_its_settled_box(tmp_path):
-    """A popover with no size kept lays its body out and draws nothing, owing
-    the next frame: the first frame it shows on is the frame after it, and
-    the one after that draws the same."""
+    """A popover with no size kept shows on the frame that opens it, at the
+    box it rests at: the frame after it moves focus into it (the page's
+    field gives up its focused look, the popover's takes it) and every frame
+    after that draws the same."""
     from test_ui_linked import _pixels
     st = _Stack(tmp_path)
     base = _pixels(st.ws)
@@ -768,9 +815,6 @@ def test_a_popover_first_shows_at_its_settled_box(tmp_path):
         st.ws.mark_dirty()
         st.drv.frame(DT)
         shots.append(_pixels(st.ws))
-    shown = [i for i, s in enumerate(shots) if s != base]
-    assert shown, "the popover never showed"
-    first = shown[0]
-    assert first >= 1, "it showed on its first frame, at a size it had not measured"
-    same = shots[first] == shots[first + 1]
-    assert same, "the popover's box moved after it first showed"
+    assert shots[0] != base, "the frame that opens it shows nothing of it"
+    rest = shots[1] == shots[2] == shots[3]
+    assert rest, "the popover's box moved after it first showed"

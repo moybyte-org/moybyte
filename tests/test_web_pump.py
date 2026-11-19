@@ -56,6 +56,13 @@ def _pump(web_boot, rate=48000):
     return p
 
 
+def _take(p):
+    """take()'s samples as (count, first's index, whether they start a
+    stream), None for none."""
+    n = p.take()
+    return (n, p.at, p.starts) if n else None
+
+
 def _samples(p, n):
     b = p._buf
     return [b[2 * i] | (b[2 * i + 1] << 8) for i in range(n)]
@@ -71,7 +78,7 @@ def test_the_mix_is_made_at_the_contexts_rate(web_boot):
 def test_with_no_sink_a_frame_renders_its_share_and_hands_nothing_over(web_boot):
     p = _pump(web_boot)
     p.tick(1 / 60)
-    assert p.rendered == 800 and p.take() is None and p.sent == 0
+    assert p.rendered == 800 and _take(p) is None and p.sent == 0
 
 
 def test_the_pull_tops_the_sinks_depth_up_to_its_target(web_boot):
@@ -80,17 +87,17 @@ def test_the_pull_tops_the_sinks_depth_up_to_its_target(web_boot):
     p.played = 0
     p.tick(1 / 60)
     p.tick(1 / 60)                               # a second tick in one frame adds nothing
-    n, at, fresh = p.take()
+    n, at, fresh = _take(p)
     assert (n, at, fresh) == (target, 0, True)
     assert _samples(p, n) == list(range(n))
     p.tick(1 / 60)
-    assert p.take() is None                      # the sink played nothing: nothing more
+    assert _take(p) is None                      # the sink played nothing: nothing more
     p.played = 1000
     p.tick(1 / 60)
-    assert p.take() == (1000, target, False)     # what it played, after what it had
+    assert _take(p) == (1000, target, False)     # what it played, after what it had
     p.played = target + 1000 + 10 * p.rate       # a long stall: one frame's cap
     p.tick(1 / 60)
-    assert p.take()[0] == int(p.rate * web_boot._AUDIO_MAX_STEP)
+    assert _take(p)[0] == int(p.rate * web_boot._AUDIO_MAX_STEP)
 
 
 def test_the_first_chunk_after_a_silence_is_fresh(web_boot):
@@ -101,10 +108,10 @@ def test_the_first_chunk_after_a_silence_is_fresh(web_boot):
     p._na.on = False
     p.played = p.sent
     p.tick(1 / 60)
-    assert p.take() is None
+    assert _take(p) is None
     p._na.on = True
     p.tick(1 / 60)
-    assert p.take()[2] is True
+    assert _take(p)[2] is True
 
 
 def test_jittery_frames_take_the_stream_at_the_sinks_rate_with_no_underrun(web_boot):
@@ -123,7 +130,7 @@ def test_jittery_frames_take_the_stream_at_the_sinks_rate_with_no_underrun(web_b
         depth -= took
         played += took
         p.tick(dt)
-        c = p.take()
+        c = _take(p)
         p.played = int(played)                   # the report reaches the next frame
         if c is not None:
             n, at, _ = c

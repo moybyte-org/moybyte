@@ -482,7 +482,7 @@ class SceneEditorUI:
         # non-panning cart shows. Each edge clamped to the view rectangle.
         self._frame_world(cv, 0, 0, 320, 240, NAMES["yellow"])
         # Placed actors, list order = draw order; box every actor so a blank
-        # tile (a pure tag marker, e.g. Hop Quest's spawn) stays visible.
+        # tile (a pure tag marker, e.g. a spawn point) stays visible.
         for i, r in enumerate(se.rows):
             vx = x0 + (r["x"] - se.cam_x) * scale
             vy = y0 + (r["y"] - se.cam_y) * scale

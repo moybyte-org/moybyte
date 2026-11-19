@@ -500,6 +500,29 @@ def test_a_flash_over_the_same_coredump_partition_keeps_its_dump(monkeypatch, tm
     assert _verbs(fake.calls) == ["read_flash", "erase_region", "write_flash"]
 
 
+PMEM_6M = CORE_6M + [("pmem", 1, 0x40, 0xC30000, 0x20000)]
+
+
+def test_a_flash_that_adds_the_pmem_log_erases_it_and_moves_the_store(
+        monkeypatch, tmp_path, capsys):
+    """No record of the old store's carts outlives the store
+    (native/moy_store/moy_plog.h)."""
+    rc, fake = _flash_over(monkeypatch, tmp_path, _table(CORE_6M), PMEM_6M)
+    assert rc == 0
+    assert _verbs(fake.calls) == ["read_flash", "erase_region", "erase_region",
+                                  "erase_region", "write_flash"]
+    _read, _otadata, store, log, _write = fake.calls
+    assert store[-3:] == ["erase_region", "0xc50000", "0x2000"]
+    assert log[-3:] == ["erase_region", "0xc30000", "0x20000"]
+    assert "pmem log at 0xc30000+0x20000" in capsys.readouterr().out
+
+
+def test_a_flash_over_the_same_pmem_log_keeps_it(monkeypatch, tmp_path):
+    rc, fake = _flash_over(monkeypatch, tmp_path, _table(PMEM_6M), PMEM_6M)
+    assert rc == 0
+    assert _verbs(fake.calls) == ["read_flash", "erase_region", "write_flash"]
+
+
 ZERO = ROOT / "firmware" / "seeed_xiao_esp32s3_zero"
 C3_ZERO = ROOT / "firmware" / "esp32c3_zero"
 

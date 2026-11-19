@@ -90,6 +90,7 @@ def _console(path, desk, ships):
         hold.under = kept
         if not ships:
             hold._left = lambda *a: False
+            hold.last = lambda *a: False
     ws.editor_app.set_tab("paint")
     ws.pointer.visible = False
     _fill(ws.paint.sheet)
@@ -101,7 +102,7 @@ def _console(path, desk, ships):
 
 
 class Pair:
-    def __init__(self, tmp_path, desk, bufs):
+    def __init__(self, tmp_path, desk, bufs, settle=True):
         self.desk = desk
         self.a, self.da = _console(tmp_path / "a", desk, True)
         self.b, self.db = _console(tmp_path / "b", desk, False)
@@ -111,6 +112,8 @@ class Pair:
         root.RETAINED_FRAMES = bufs
         self.held = [bytes(root._buf)]
         self.alone = []
+        if not settle:
+            return
         for _ in range(6):
             self.frame(check=False)
         for _ in range(3):
@@ -227,6 +230,37 @@ def test_the_pickers_frames_over_the_held_page_draw_as_a_whole_draw_does(tmp_pat
     _session(p)
     assert p.a.paint_layer._pop == "pickers"
     assert p.share() > 0.6, p.alone
+
+
+@pytest.mark.parametrize("kind", ("touch", "keys"))
+@pytest.mark.parametrize("bufs", (1, 2, 3))
+@pytest.mark.parametrize("desk", (False, True), ids=("handheld", "desk"))
+def test_the_pickers_open_on_their_first_frame_over_the_page_as_it_was(tmp_path, monkeypatch,
+                                                                       desk, bufs, kind):
+    """A popover shows its card on the frame that opens it. Opened by an
+    input that changed nothing else, over a page the frame before drew
+    alone on the glass, that frame takes the page from it (`Hold.last`) and
+    draws only the hint strip, which names the pickers' keys; a desk pane
+    draws it once. Each frame after takes the page and
+    the card from the frame before and draws inside the card's band. Every
+    frame draws what a whole draw does."""
+    monkeypatch.setattr(ui_draw, "hint_kind", lambda: kind)
+    p = Pair(tmp_path, desk, bufs, settle=False)
+    pl = p.a.paint_layer
+    looks = []
+    look = pl._draw_look
+
+    def drawn(*a):
+        looks.append(p.a.frame_state.frames_drawn)
+        return look(*a)
+    pl._draw_look = drawn
+    p.frame()
+    assert pl.sheet_shown is not None
+    for _ in range(6):
+        p.frame()
+    assert pl._pop == "pickers"
+    assert len(looks) == (1 if desk else 0), looks
+    assert all(p.alone[1:]), p.alone
 
 
 @pytest.mark.parametrize("desk", (False, True), ids=("handheld", "desk"))

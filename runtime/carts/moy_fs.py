@@ -143,6 +143,10 @@ _publish_mark = _native.publish_mark
 _forget_bak = _native.forget_bak
 _claim_bak = _native.claim
 _read_recover = _native.read_recover
+_pmem_read = _native.pmem_read
+_pmem_save = _native.pmem_save
+_save_wait = _native.save_wait
+_pmem_tidy = _native.pmem_tidy
 
 
 def _copy(src, dst):

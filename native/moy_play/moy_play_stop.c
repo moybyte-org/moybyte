@@ -29,13 +29,13 @@
 // reads, then the load -- the fit checked again against the largest block,
 // the module found by name (this console's AOT module, else main.wasm on the
 // interpreter, as device/moycore_glue.py's WasmRun finds it), main.wasm's head
-// and sha256, the config as cfg() reads it, pmem from pmem.json -- through
+// and sha256, the config as cfg() reads it, pmem from pmem.bin -- through
 // moycore's C open over buffers held here, the canvas the panel's own back
 // buffer. The run is then the loop's foreground (moy_play_front) and the
 // kernel's loop steps until it ends: the hold, quit(), a Ctrl-C (SERIAL), the
 // dev channel's `end`. A refusal or a raise paints the chrome's panel and
 // waits for a press, a Ctrl-C or `end` (moy_play_panel). pmem is written
-// back (the store's crash-safe write) and everything is closed before the
+// back (moy_pmem.h's record) and everything is closed before the
 // next VM starts, the shell's session made again in its folder last.
 
 #include "moy_platform.h"
@@ -69,6 +69,8 @@
 #include "moy_lease.h"
 #include "moy_loop.h"
 #include "moy_play.h"
+#include "moy_pmem.h"
+#include "moy_save.h"
 #include "moy_tick.h"
 #include "moy_vol.h"
 #include "moycore_lua.h"
@@ -92,7 +94,6 @@
 #define AUDIO_MAX 32                // MoycoreRun.AUDIO_MAX
 #define HEAD_MAX (256u * 1024u)     // main.wasm's head: its sections to memory
 #define CFG_MAX (16u * 1024u)
-#define PMEM_MAX (8u * 1024u)
 #define END_SERIAL 5                // MOY_PLAY_END_SERIAL
 #define MOY_SH_CWD_MAX 512          // native/moy_sh's MOY_SH_PATH_MAX
 
@@ -312,6 +313,7 @@ typedef struct {
     char writable[512];
     size_t writable_len;
     uint32_t ring;
+    uint32_t exts;              // the Moybyte extensions it declares (moycore_run.h)
     uint8_t *head;
     size_t head_len;
     char title[48];
@@ -347,6 +349,7 @@ static int entry_read(void *ctx, const moy_cat_entry_t *e) {
     }
     S->ring = e->audio_ring.kind == 1 && e->audio_ring.value > 0
                   && e->audio_ring.value <= 0xFFFFFFF ? (uint32_t)e->audio_ring.value : 0u;
+    S->exts = moycore_exts_of(e->extensions.v, e->extensions.e);
     // "writable": its strings NUL-joined, as Python joined them.
     S->writable_len = 0;
     if (e->writable_ok) {
@@ -578,55 +581,28 @@ static void cfg_load(const char *path) {
     moy_buf_free(&b);
 }
 
-// pmem.json: a list of 256 signed 32-bit ints (runtime/carts/moy_carts.py's
-// load_pmem); missing or unreadable is all zero.
+// The cart's pmem.bin (moy_pmem.h): all zero with no record.
 static void pmem_load(const char *path) {
     char p[224];
-    snprintf(p, sizeof(p), "%s/pmem.json", path);
-    memset(S->pmem, 0, sizeof(S->pmem));
-    moy_buf_t b = {0};
-    if (read_all(p, PMEM_MAX, &b) != 0) {
-        return;
-    }
-    const char *s = moy_json_ws(b.p, b.p + b.n);
-    if (s < b.p + b.n && *s == '[') {
-        moy_json_iter_t it;
-        const char *k, *ke, *v, *ve;
-        moy_json_iter(&it, s, b.p + b.n);
-        for (int i = 0; i < 256 && moy_json_next(&it, &k, &ke, &v, &ve); i++) {
-            int64_t x;
-            if (moy_json_int(v, ve, &x) == 1) {
-                S->pmem[i] = (int32_t)(uint32_t)(uint64_t)x;
-            }
-        }
-    }
-    moy_buf_free(&b);
+    snprintf(p, sizeof(p), "%s/" MOY_PMEM_FILE, path);
+    int gated = moy_vol_gate_enter(p);
+    moy_pmem_read(p, S->pmem);
+    moy_vol_gate_leave(gated);
 }
 
-// The cells written back when the run moved them, as json.dumps writes a list.
+// The cells written back when the run moved them since it last saved.
 static void pmem_save(const char *path) {
     if (!moycore_RUN.open || !moycore_run_pmem_image(&moycore_RUN.c, S->pmem_out, 256)) {
         return;
     }
-    char *text = moy_kalloc(256 * 13 + 4, MOY_KMEM_PSRAM);
-    if (text == NULL) {
-        return;
-    }
-    size_t at = 0;
-    text[at++] = '[';
-    for (int i = 0; i < 256; i++) {
-        at += (size_t)snprintf(text + at, 16, i ? ", %ld" : "%ld", (long)S->pmem_out[i]);
-    }
-    text[at++] = ']';
     char p[224];
-    snprintf(p, sizeof(p), "%s/pmem.json", path);
-    int gated = moy_vol_gate_enter(p);
-    int e = moy_fs_publish(p, text, at);
-    moy_vol_gate_leave(gated);
+    snprintf(p, sizeof(p), "%s/" MOY_PMEM_FILE, path);
+    moy_save_wait(p);                   // a save the run queued lands first
+    int e = moy_save_pmem(p, S->pmem_out);
+    moy_save_wait(p);
     if (e != 0) {
         printf("STOP pmem: errno %d\n", e);
     }
-    moy_kfree(text);
 }
 
 // -- the kernel's present -----------------------------------------------------------
@@ -772,6 +748,7 @@ static int load(uint32_t run, const char *path, bool *notice) {
         .swapped = MOY_KERNEL_PANEL_SWAP, .allow_unsigned = (flags & MOY_PLAY_UNSIGNED) != 0,
         .interp = S->m.interp, .ring = S->ring,
         .app = moy_app_stopped != NULL ? moy_app_stopped() : NULL,
+        .exts = S->exts,
     };
     int rc = moycore_wasm_open_c(&o, S->err, sizeof(S->err));
     if (rc != 0 && !S->m.interp && !moycore_wasm_ran()
@@ -786,6 +763,11 @@ static int load(uint32_t run, const char *path, bool *notice) {
         o.sha = NULL;
         o.interp = 1;
         rc = moycore_wasm_open_c(&o, S->err, sizeof(S->err));
+    }
+    if (rc == 0) {
+        char p[224];
+        snprintf(p, sizeof(p), "%s/" MOY_PMEM_FILE, path);
+        moycore_run_pmem_to(&moycore_RUN.c, p);     // saved while it plays too
     }
     (void)run;
     return rc;

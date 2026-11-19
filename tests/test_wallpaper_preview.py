@@ -19,15 +19,22 @@ than trusting that "the host works, so the board must".
 from runtime import host_app
 from runtime.wallpaper import Wallpaper
 from tests import canvas_probe as probe
+from tests.ws_helpers import install_shape
 
 
 PREVIEW_RECT = (10, 10, 152, 114)
 
 
-def _ws(tmp_path, **kw):
-    ws = host_app.build_workstation(str(tmp_path / "carts"), **kw)
-    ws.look.select_wallpaper("moybyte.moy_night", persist=False)
+def _night(ws):
+    """`ws` showing the Night Glass shape cart: a static wallpaper drawn per
+    glass (tests/ws_helpers.py SHAPE_CARTS)."""
+    install_shape(ws, "night_glass")
+    ws.look.select_wallpaper("night_glass", persist=False)
     return ws
+
+
+def _ws(tmp_path, **kw):
+    return _night(host_app.build_workstation(str(tmp_path / "carts"), **kw))
 
 
 def _board_factory(ws):
@@ -62,7 +69,7 @@ def test_preview_reaches_the_monitor_panel(tmp_path):
     ws.sys_canvas.cls(0)
     ws.wallpaper.draw_preview(ws.sys_canvas, (10, 20, 500, 380), 1 / 30)
     assert probe.distinct_pixels(ws.sys_canvas) > 2   # black bezel + real art
-    # Moy's night is a black sky: what paints is its ground, moon, stars and Moy
+    # Night Glass is a black sky: what paints is its ground, moon, stars and Moy
     assert probe.painted_pixels_rect(ws.sys_canvas, 10, 20, 500, 380) > 5000
 
 
@@ -195,8 +202,7 @@ def test_the_rendered_frame_persists_as_a_valid_mct_sidecar(tmp_path):
     from runtime import moy_image
 
     carts = str(tmp_path / "carts")
-    ws = host_app.build_workstation(carts)
-    ws.look.select_wallpaper("moybyte.moy_night", persist=False)
+    ws = _night(host_app.build_workstation(carts))
     ws.wallpaper.draw_preview(ws.sys_canvas, PREVIEW_RECT, 1 / 30)
 
     cart = ws.wallpaper._wp_cart
@@ -218,15 +224,14 @@ def test_a_sidecar_written_by_one_tier_is_read_by_a_tier_that_cannot_render(
     factory still shows a preview another session computed -- which is what
     makes the sidecar worth writing at all."""
     carts = str(tmp_path / "carts")
-    ws = host_app.build_workstation(carts)
-    ws.look.select_wallpaper("moybyte.moy_night", persist=False)
+    ws = _night(host_app.build_workstation(carts))
     ws.sys_canvas.cls(0)
     ws.wallpaper.draw_preview(ws.sys_canvas, PREVIEW_RECT, 1 / 30)
     drawn = probe.painted_pixels_rect(ws.sys_canvas, *PREVIEW_RECT)
 
     ws2 = host_app.build_workstation(carts)
     ws2.make_game_canvas = None                    # cannot render anything
-    ws2.look.select_wallpaper("moybyte.moy_night", persist=False)
+    ws2.look.select_wallpaper("night_glass", persist=False)
     ws2.sys_canvas.cls(0)
     ws2.wallpaper.draw_preview(ws2.sys_canvas, PREVIEW_RECT, 1 / 30)
     assert drawn > 300                             # its stars, moon, ground, Moy
@@ -248,7 +253,7 @@ def test_a_bound_run_canvas_never_becomes_the_preview_surface(tmp_path):
     ws.wallpaper.draw_preview(ws.sys_canvas, PREVIEW_RECT, 1 / 30)
 
     assert bytes(ws.run.canvas._buf) == before         # the run's frame is untouched
-    # the preview is the glass's frame (Moy's night draws per glass), fit
+    # the preview is the glass's frame (Night Glass draws per glass), fit
     _x, _y, w, _h = PREVIEW_RECT
     assert (ws.wallpaper._wp_cart["path"], w, 600 * w // 1024) \
         in ws.wallpaper._static_cache
@@ -280,7 +285,7 @@ def test_a_cover_cropped_wallpaper_still_previews_its_cart_frame(tmp_path):
     """A wallpaper that does not draw per glass keeps the 320x240 frame and
     the runner it renders on."""
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600))
-    ws.look.select_wallpaper("moybyte.open_machine", persist=False)
+    ws.look.select_wallpaper("moybyte.space_desktop", persist=False)
     assert not ws.wallpaper._wp_cart.get("glass")
     assert ws.wallpaper._render_static(152, 114) is not None
     pv = ws.wallpaper._pv_canvas

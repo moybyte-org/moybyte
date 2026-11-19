@@ -335,7 +335,7 @@ import json
 import moy_play as _mp
 
 PROTO = 3
-T_BEACON, T_JOIN, T_START, T_INPUT, T_MSG, T_BYE, T_PORT = 1, 2, 3, 4, 5, 6, 7
+T_BEACON, T_JOIN, T_START, T_INPUT, T_MSG, T_BYE, T_PORT, T_BEAM = 1, 2, 3, 4, 5, 6, 7, 8
 # A process's port (moy_match.h, PORTS): the sender rule it opens with, and
 # what the port calls answer where they fail.
 FROM_ANY, FROM_MATCH = 0, 1
@@ -361,11 +361,12 @@ BEACON_MS = 400
 PEER_TTL_MS = 2000
 START_TRIES = 12
 # The radio's recipe (T-Deck <-> Guition): rxbuf BEFORE active()
-# (a live change desyncs the ring for good); 32768, not the default 526 (64 of
-# 200 messages arrived at the default while every send said True); RATE_54M
+# (a live change desyncs the ring for good); not the default 526 (64 of 200
+# messages arrived at the default while every send said True), and room for a
+# bound beam's whole window between two polls (MOY_MATCH_BEAM_DRAIN); RATE_54M
 # (a 48 KB payload went from 1680 ms to 65 ms); power save off only while
 # linked (it halves the latency tail and costs battery).
-RXBUF = 32768
+RXBUF = 163840
 DRAIN_MAX = 24
 
 
@@ -671,8 +672,7 @@ class _RadioIo:
         self._link = link
 
     def send(self, mac, payload):
-        self._link.radio.send(mac, payload, False)
-        return True
+        return self._link.radio.send(mac, payload, False) is not False
 
     def recv(self):
         mac, msg = self._link.radio.irecv(0)
@@ -699,12 +699,14 @@ class EspNowLink:
     """The console's half of the radio link: the radio's bring-up and
     teardown, the session's slots and the actions the C link leaves.
 
-    Two kinds of holder keep the radio up: the game in front (`start` and
-    `stop`, the Player's, around a run with the "multiplayer" permission)
-    and a process's open port (`open_port` and `close_port`, its `net`
-    handle's: runtime/system/dev_handles.py). The radio stops when the last
+    Three kinds of holder keep the radio up: the game in front (`start` and
+    `stop`, the Player's, around a run with the "multiplayer" permission),
+    a process's open port (`open_port` and `close_port`, its `net`
+    handle's: runtime/system/dev_handles.py) and a beam (`beam_send`,
+    `beam_send_file`, `beam_receive`: runtime/run/link_beam.py). The radio stops when the last
     of them lets go; a game's stop with a port open ends the match and
-    leaves the radio up, its beacon at the launcher's.
+    leaves the radio up, its beacon at the launcher's. A game's start ends
+    a beam.
 
     `radio`, `wlan` and `launch(ws, title) -> bool` are injectable; left None
     on a board, the radio is the kernel's (`moy_net.Link`'s ring) and the link
@@ -779,13 +781,38 @@ class EspNowLink:
         raise AttributeError(name)
 
     _game = False                       # the game in front holds the radio
+    _beaming = False                    # ...and a beam (link_beam.Beam)
+    _beam = None
+    _rate_match = None                  # the PHY rates the radio offers: a match's
+    _rate_beam = None                   # ...and a beam's (`phy`)
 
     # -- lifecycle --
     def start(self):
         """The game's radio up with the measured recipe. Idempotent; a board
-        with no ESP-NOW degrades to an inactive link, never a crash."""
+        with no ESP-NOW degrades to an inactive link, never a crash. A beam
+        under way ends: a game outranks it."""
         self._game = True
-        return self._up()
+        if self._beaming and self._m is not None:
+            self._m.beam_end()
+        up = self._up()
+        self.phy(False)
+        return up
+
+    def phy(self, beam):
+        """The PHY rate every frame leaves at: the match's 54M, where a
+        frame is small and a lost one is covered by the next, or a beam's
+        12M. A beam resends the same bytes, and at 54M a frame's delivery
+        depends on its bytes: from a Guition S3 some full frames never
+        arrive however often they are sent (docs/netplay_v1.md §4)."""
+        rate = self._rate_beam if beam else self._rate_match
+        if rate is None or rate == self._rate:
+            return
+        self._rate = rate
+        if self.active and self.radio is not None:
+            try:
+                self.radio.config(rate=rate)
+            except Exception as exc:  # noqa: BLE001
+                print("Moybyte espnow rate:", exc)
 
     def _up(self):
         if self.active:
@@ -806,7 +833,10 @@ class EspNowLink:
             if kernel:
                 import moy_net
                 self.radio = moy_net.Link()
-                self._rate = getattr(moy_net, "RATE_54M", None)
+                self._rate_match = getattr(moy_net, "RATE_54M", None)
+                self._rate_beam = getattr(moy_net, "RATE_12M", None)
+            if self._rate is None or self._game:
+                self._rate = self._rate_match
             try:
                 self.radio.config(rxbuf=RXBUF)      # BEFORE active(), never after
             except Exception as exc:  # noqa: BLE001
@@ -851,10 +881,13 @@ class EspNowLink:
         unless a process's port holds it."""
         self._game = False
         self.end_match(ws)
-        if self._m is not None and self._m.ports_open():
+        if self._m is not None:
+            # The beacon names no cart once its run stops: a radio a beam or
+            # a port brings up later must not invite a peer to the last game.
             self._m.announce("", 0)
-            self._m.action()            # the stopped run's request, as stop() drops it
-            return
+            if self._m.ports_open() or self._beaming:
+                self._m.action()        # the stopped run's request, as stop() drops it
+                return
         self._down()
 
     def _down(self):
@@ -892,7 +925,7 @@ class EspNowLink:
         if self._m is None:
             return PORT_ABSENT
         rc = self._m.port_close(port)
-        if not self._game and not self._m.ports_open():
+        if not self._game and not self._beaming and not self._m.ports_open():
             self._down()
         return rc
 
@@ -925,6 +958,41 @@ class EspNowLink:
     def ports_open(self):
         return 0 if self._m is None else self._m.ports_open()
 
+    # -- beaming a file (runtime/run/link_beam.py) --
+    def beamer(self):
+        b = self._beam
+        if b is None:
+            from link_beam import Beam
+            b = self._beam = Beam(self)
+        return b
+
+    def usable(self):
+        """Whether the radio can carry a beam: False once a bring-up failed
+        (a board with no ESP-NOW, the Guition P4's C6 without its shim:
+        docs/netplay_v1.md §5), which no wait would change."""
+        return self.error is None
+
+    def beam_send(self, ws, cart):
+        """Offer `cart` to a console nearby that is receiving."""
+        return self.beamer().send(ws, cart)
+
+    def beam_send_file(self, ws, path):
+        """Offer the person's file at `path` to a console nearby."""
+        return self.beamer().send_file(ws, path)
+
+    def beam_receive(self, ws):
+        """Open the receive state."""
+        return self.beamer().receive(ws)
+
+    def beam_stop(self, ws):
+        """End the beam under way, the other console told."""
+        if self._beam is not None:
+            self._beam.stop(ws)
+
+    def beam_role(self):
+        """link_beam.SEND or RECEIVE while a beam is under way, else None."""
+        return None if self._beam is None else self._beam.role()
+
     # -- the frame --
     def drain_input(self, budget=DRAIN_MAX):
         """Input-priority drain, safe mid-frame: inputs to the session, every
@@ -951,6 +1019,8 @@ class EspNowLink:
             return
         if getattr(ws, "input", None) is not None:
             self._router = getattr(ws.input, "players", None)
+        if self._beam is not None:
+            self._beam.tend(ws)
         s = self.session
         if s is not None:
             if ws.netplay is not s:
@@ -1080,6 +1150,7 @@ class EspNowLink:
                 if s.desync >= 0 else None,
             },
             "world_check": bool(m.world_check) if m is not None else None,
+            "beam": None if self._beam is None else self._beam.stats(),
         }
 
 

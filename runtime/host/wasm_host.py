@@ -36,7 +36,7 @@ Canonical home is runtime/; tests import it as runtime.wasm_host.
 """
 
 from lua_ext import (MOY_BUTTONS, snap_slots, audio_ops, snap_shared, run_room,
-                     run_face, sync_view, drain_audio)
+                     run_face, sync_view, drain_audio, wasm_exts)
 from moy_input import pointer_state
 from ticks import _since_ms
 
@@ -227,6 +227,7 @@ class WasmHostRun:
         buf = getattr(canvas, "_buf", None)
         if buf is None:
             raise RuntimeError("a compiled cart needs an RGB565 canvas")
+        exts = wasm_exts(cart)
         self._run = HostWasmRun(
             buf, canvas.w, canvas.h, cart["path"], cart.get("main", "main.wasm"),
             cart.get("memory"),
@@ -235,7 +236,10 @@ class WasmHostRun:
             wire=getattr(canvas, "_wire", None), wire_swapped=_wire_swapped(),
             flags=getattr(project, "flags", None), cfg=ns.get("_moy_cfg"),
             files=cart["path"], writable=cart.get("writable"),
-            ring=cart.get("audio_ring"), app=ns.get("_moy_app"))
+            ring=cart.get("audio_ring"), app=ns.get("_moy_app"),
+            exts=exts,
+            images=(ns.get("_moy_images") or None) if exts & 2 else None,
+            scenes=ns.get("_moy_scenes") if exts & 1 else None)
         self._ns = ns
         self._ws = ws
         self._layers = self._images = None
@@ -287,7 +291,9 @@ class WasmHostRun:
         inp = self._ws.input
         # MOY_BUTTONS: the order is lua_ext's, never restated here.
         masks = getattr(inp, "button_masks", None)
-        if masks is not None:
+        if self._muted:
+            held = pressed = 0
+        elif masks is not None:
             held, pressed = masks(MOY_BUTTONS)
         else:
             held = pressed = 0
@@ -317,6 +323,21 @@ class WasmHostRun:
 
     def _sync_view(self):
         self._view = sync_view(self._ws, self._run.view(), self._view)
+
+    _muted = False
+
+    def mute(self, on):
+        """A run held aside (runtime/shell/procs.py) reads no input while
+        `on`: its frames' snapshot has no buttons, key or pointer -- the
+        kernel's (moy_play.h) where the kernel's Player runs its frames,
+        its buttons here where `update` does."""
+        self._muted = bool(on)
+        if self._prun:
+            from runtime import moy_play
+            try:
+                moy_play.mute(self._prun, on)
+            except (RuntimeError, AttributeError):
+                pass
 
     # -- the frame in C (native/moy_play) -------------------------------------
 

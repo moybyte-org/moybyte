@@ -51,6 +51,7 @@ is the code line-height for the crash panel, imported from the code editor leaf
 test load).
 """
 
+import sys as _sys
 import chrome_ops as _ch
 
 # #65 Phase 2: the lockstep frame's local-input packer. The BUTTON ORDER comes
@@ -86,13 +87,6 @@ except Exception:  # noqa: BLE001 -- host CPython / emitter-less build: bytecode
     NATIVE_CARTS = False
 
 
-# Deferred pmem persistence (#66): how often a DIRTY pmem persists mid-play.
-# The guaranteed saves are cart exit + crash; this only bounds progress lost to
-# a power pull. Each flush is a ~80-130ms SD write on the T-Deck (measured on
-# glass 2026-07-14, the Letter Blitz "word-event spike"), so the cadence IS the
-# hitch cadence -- keep it a minute, not seconds.
-PMEM_FLUSH_MS = 60000
-
 # The cart TYPES that run with the shell's minimal exitable bar rather than
 # owning the whole raster, and the one of them with no folder. `console.py`
 # imports both -- the two files decided this in parallel with two literal
@@ -126,8 +120,57 @@ SUPPORTED_EXTENSIONS = (
     "moybyte.wifi",       # #38: the injected wifi service (permission-gated)
     "moybyte.app",        # #224: a compiled app's role imports (native/moy_app/moy_app_wasm.h)
     "moybyte.ui",         # the public UI API, a Lua cart's `ui` (native/moycore/moycore_ui.h)
+    "moybyte.mouse",      # a compiled cart's mouse import (native/moycore/moycore_wasm_ext.h)
+    "moybyte.prefs",      # a compiled game's prefs imports (native/moycore/moycore_wasm_ext.h)
 )
 APP_EXT = "moybyte.app"
+PREFS_EXT = "moybyte.prefs"
+
+
+def _game(cart, spine):
+    """A game: a cart that is no app (user, shipped or system). Its run holds
+    a grant of its own with the prefs role, which a game holds without asking
+    (docs/app_api_v1.md section 5): `prefs` in Python and Lua, the
+    "moybyte.prefs" imports in a compiled game that declares them."""
+    return (cart is not None and cart.get("type") != "app"
+            and not spine.is_user_app(cart) and not spine.is_system_app(cart))
+
+
+def _game_perms(cart, granted):
+    """The permissions a game's grant is made from: the prefs role's alone,
+    and a compiled game declaring the app extension its own beside it, for
+    its imports from that (`_wasm_ext_game`)."""
+    perms = ("prefs",)
+    if cart.get("runtime") == "wasm" and APP_EXT in (cart.get("extensions") or ()):
+        own = granted if granted is not None else (cart.get("permissions") or ())
+        perms = tuple(p for p in own if p != "prefs") + perms
+    return perms
+
+
+def _wasm_ext_game(cart, spine):
+    """A compiled game that declares the app extension: its run holds a
+    grant of its own, as a user app's does, for its imports from it --
+    award, progress, notify and the device handles -- under its
+    permissions and their consent."""
+    return (cart is not None and cart.get("runtime") == "wasm"
+            and APP_EXT in (cart.get("extensions") or ())
+            and cart.get("type") != "app" and not spine.is_system_app(cart))
+
+
+def _python_files(cart):
+    """A Python cart's files (moy-spec SPEC.md 9.1): its folder and the
+    "writable" entries its manifest declares, opened on the store a Lua and a
+    compiled run's are kept in (native/moycore/moycore_files.h, moycore's
+    CartFiles on every tier). None for a run with no folder, or where the
+    store cannot be opened: its verbs then answer as a host with none."""
+    path = cart.get("path") if cart is not None else None
+    if not path or cart.get("runtime", "python") != "python":
+        return None
+    try:
+        import moycore
+        return moycore.CartFiles(path, "\0".join(cart.get("writable") or ()) or None)
+    except (ImportError, OSError, AttributeError):
+        return None
 
 
 from ticks import _ticks_ms, _ticks_us, _ticks_diff
@@ -143,7 +186,7 @@ from player_pace import Pace
 # USER APPS (#181, ui_refactor_2026-08 Phase 7): the permission-keyed filter over
 # AppContext, plus the responsive opt-in probe. A leaf like the rest of what this
 # file imports -- it holds no Workstation, only the context FACTORY it is handed.
-from system_api import draws_in_look, make_system_api, wants_layout
+from system_api import draws_in_look, make_run_grant, make_system_api, wants_layout
 import moy_app as _moy_app              # the grant policy (native/moy_app)
 import app_perms as _perms
 
@@ -190,6 +233,7 @@ class Player(PlayerDiag):
     ws.run.player.update/... is byte-for-byte unchanged; they are reset per run in start()."""
 
     play = None                      # the run's frame in C: Pace.bind
+    press_owed = False               # a pointer press waiting for a logic tick
     stack_pre = None                  # the task's stack mark before the open: start
     # The task manager's accounting (runtime/shell/procs.py, `Procs.account`):
     # the microseconds this run's `_update` and `_draw` took since the last
@@ -227,6 +271,7 @@ class Player(PlayerDiag):
         self._notice = None           # a notice's text: the panel is a notice
                                       # while cart_error still holds it (`notice`)
         self.notice_title = None  # ...and the title it is drawn under (None: the fit's)
+        self._detail = None           # ...and its cause exact, under Details
         self.crash_line = None        # 1-based cart line of the last runtime crash (#24)
         self.crash_file = None        # WHICH of the cart's scripts that line is in
                                       # (SPEC.md 4), or None for main/no crash
@@ -267,7 +312,9 @@ class Player(PlayerDiag):
         self._responsive = False      # the app defines `_layout` (Player._wants_layout)
         self.ui = None               # a Python app's frame of ui verbs: [context, input, canvas]
         self._run_handle = 0          # the kernel Player's handle on this run, or 0
-        self.app_ctx = None          # a user app's or script's context: its run grant
+        self.app_ctx = None          # a user app's, script's or game's context: its run grant
+        self._grant_perms = None     # a game's grant's permissions (_game_perms)
+        self._files = None            # a Python run's files (_open_files)
                                       # when the run is not guarded
         self._restore_bg = None       # #63: the api's declared-background restore hook
         self._flag_put = None         # flag_edits' applier for the running cart
@@ -289,7 +336,8 @@ class Player(PlayerDiag):
                                       # (ws.netplay), when this run is a linked match. It
                                       # OWNS the tick: fixed dt, and a frame the peer's
                                       # input has not reached does not simulate at all
-        self._pmem_last = 0           # #66 deferred pmem: last periodic flush (_ticks_ms)
+        self._pmem_sync = 0           # _ticks_ms a Lua run's pmem image was last read
+        self._pmem_read = None        # the Lua run's image reader (`_pmem_tick`)
         self._native_ins = None       # #67 spike: nativize's inserted-line map (crash-line fix)
         # Diagnostics for repeat-run regressions (#66 follow-up): one line on cart
         # start and rate-limited slow-logic lines while PERF DIAG is on. Kept here
@@ -316,12 +364,14 @@ class Player(PlayerDiag):
         self.editors = []
         self.focus_editor = None     # the handle holding the keyboard, if any
         # Its two parts: the app-cart face and the pacing half with the
-        # front hand-off. A frame calls no method through either: the four
+        # front hand-off. A frame calls no method through either: the six
         # a frame runs are bound here, once.
         self.face = face = AppFace(self)
         self.pace = pace = Pace(self)
         self._ui_begin = face.begin
         self._ui_close = face.close
+        self._ui_still = face.still
+        self._ui_unchanged = face.unchanged
         self._resume_from_front = pace.resume_from_front
         self._front_again = pace.front_again
 
@@ -406,12 +456,14 @@ class Player(PlayerDiag):
         left open at its close, through the grant, so the grant outlives it."""
         self._close_lua()
         ctx, self.app_ctx = self.app_ctx, None
+        self._grant_perms = None
         if ctx is not None:
             ctx.end()
         self.ws.store.end_all()
 
     def _stop_grant(self, cart):
-        """A compiled app the VM stops for (its imports all C-served, the
+        """A compiled app, or a game declaring the app extension, the VM stops
+        for (its imports all C-served, the
         verdict's rule) runs with no Python to make its grant: the grant is
         made here, before the stop, as make_system_api makes a user app's
         (the C policy and key, the ungated theme and surface beside its
@@ -423,9 +475,11 @@ class Player(PlayerDiag):
         if (app is None or getattr(app, "stop_hold", None) is None
                 or cart.get("runtime") != "wasm"
                 or APP_EXT not in (cart.get("extensions") or ())
-                or not ws.spine.is_user_app(cart)):
+                or not (ws.spine.is_user_app(cart) or _wasm_ext_game(cart, ws.spine))):
             return
-        roles, kind = _moy_app.policy(self.granted)
+        perms = (_game_perms(cart, self.granted) if _wasm_ext_game(cart, ws.spine)
+                 else self.granted)
+        roles, kind = _moy_app.policy(perms)
         needs = roles + tuple(r for r in ("surface", "theme") if r not in roles)
         app_id = _moy_app.id_for(cart.get("id"), cart.get("title"))
         g = app.grant(app_id, needs, kind=kind, ns=app_id, run=True, owner=self.pid or 0)
@@ -456,10 +510,12 @@ class Player(PlayerDiag):
         permissions name, for a compiled user app that declares the app
         extension, whose imports reach them, for a native app, whose rows
         reach them (runtime/run/elf_run.py), and for a Lua app or script,
-        whose state opens their names (moy_app_lua.h). The run's own: the
-        namespace hands it to the runtime's open, which copies it, so two
-        runs hold two grants. None otherwise, so a module's imports from the
-        extension are refused at load and a Lua game holds none."""
+        whose state opens their names (moy_app_lua.h). A game holds one too
+        (`_game`): a Lua game's state opens `prefs` and no `os` ("game"
+        among the roles), and a compiled game that declares the app
+        extension or "moybyte.prefs" serves its imports from it. The run's own: the namespace hands it to the runtime's open,
+        which copies it, so two runs hold two grants. None otherwise, so a
+        module's imports from the extension are refused at load."""
         app = getattr(self.ws, "app_abi", None)
         run = getattr(app, "run", None)
         if run is None:
@@ -467,10 +523,15 @@ class Player(PlayerDiag):
         ctx = self.app_ctx
         rt = cart.get("runtime") if cart is not None else None
         native_app = cart is not None and cart.get("type") == "app" and bool(cart.get("native"))
+        exts = (cart.get("extensions") or ()) if cart is not None else ()
         if (ctx is None or not (rt == "lua" or native_app or (
-                rt == "wasm" and APP_EXT in (cart.get("extensions") or ())))):
+                rt == "wasm" and (APP_EXT in exts or PREFS_EXT in exts)))):
             return run(0, ())
-        return run(ctx.grant, _moy_app.policy(self.granted)[0])
+        perms = self._grant_perms if self._grant_perms is not None else self.granted
+        roles = _moy_app.policy(perms)[0]
+        if self._grant_perms is not None:
+            roles += ("game",)          # its Lua state opens no app run's own
+        return run(ctx.grant, roles)
 
     def flush_editors(self):
         """Write every handle this run opened that holds an edit: the run is
@@ -511,10 +572,10 @@ class Player(PlayerDiag):
         w, h = ws.app_window_size() if self.run.app_window_canvas else (cv.w, cv.h)
         return (w, h, ws.look.effective_font_scale() if self.run.app_full_canvas else 1)
 
-    def _layout_moved(self):
+    def _layout_moved(self, tell=True):
         """Whether `_layout_args` moved from what `_layout` was told, told
-        into `_app_wh` when it did -- read field by field, so a steady frame
-        builds no tuple."""
+        into `_app_wh` when it did (and `tell`) -- read field by field, so a
+        steady frame builds no tuple."""
         ws = self.ws
         if self.run.app_window_canvas:
             wh = ws.app_window_size()
@@ -528,7 +589,8 @@ class Player(PlayerDiag):
         a = self._app_wh
         if a is not None and a[0] == w and a[1] == h and a[2] == fs:
             return False
-        self._app_wh = (w, h, fs)
+        if tell:
+            self._app_wh = (w, h, fs)
         return True
 
     def _map_crash_line(self, line):
@@ -568,6 +630,20 @@ class Player(PlayerDiag):
     def _xor_play_flag(self, n, mask):
         """A Python run's half of `ProjectStore.flag_edits`."""
         self.run.project.play_flags[n] ^= mask
+
+    def _open_files(self, cart):
+        """This run's Python files (`_python_files`), held to be let go."""
+        self._close_files()
+        self._files = _python_files(cart)
+        return self._files
+
+    def _close_files(self):
+        files, self._files = self._files, None
+        if files is not None:
+            try:
+                files.close()
+            except Exception:  # noqa: BLE001 -- a leaving step must never raise
+                pass
 
     def _close_lua(self):
         """Tear down the previous run's Lua state (#67), if any. Idempotent and
@@ -639,15 +715,7 @@ class Player(PlayerDiag):
         _os_log.end(self.pid)
         _moybyte.end(self.pid)
         self.pid = None
-        # Deferred pmem (#66): the dying run's last save, BEFORE the world drops
-        # (self.run.project still points at this run's Project here -- both exit call
-        # sites run release_world ahead of replacing/slimming it).
-        pm = getattr(self.ws.run.project, "pmem", None)
-        if pm is not None:
-            try:
-                pm.flush()
-            except Exception:  # noqa: BLE001
-                pass
+        self._close_files()
         # The dead run's `view(w, h)` must not outlive it: every fullscreen
         # surface shares viewport(), and a lingering view would crop chrome.
         self.run.view = None
@@ -734,6 +802,11 @@ class Player(PlayerDiag):
         # ...and the radio goes down with it.
         self.release_radio()
         self._close_lua()          # #67: the dead run's Lua heap goes with its world
+        # The dying run's last save, once a Lua or compiled run's close has
+        # handed its image to the Pmem and BEFORE the world drops
+        # (self.run.project still points at this run's Project here -- both exit
+        # call sites run release_world ahead of replacing/slimming it).
+        self._pmem_flush()
         rl = getattr(self.run.canvas, "reclaim_layers", None)
         if rl is not None:
             try:
@@ -806,9 +879,10 @@ class Player(PlayerDiag):
         err = self._gate_spec(ws, cart)
         if err is not None:
             return self._refuse(err)
-        # A native cart (runtime/run/elf_run.py) has no main the console's
-        # tiers read: its tier is "elf" whatever its runtime field says.
-        _rt = "elf" if project.cart.get("native") else project.cart.get("runtime", "python")
+        # The tier the cart runs on here (app_perms.tier_of): a native cart's
+        # is "elf" whatever its runtime field says, and a compiled cart that
+        # carries both modules runs the one this console and its consent pick.
+        _rt = _perms.run_tier(ws, project.cart)
         self._wasm = _rt == "wasm"
         run = 0
         self._run_handle = 0
@@ -999,12 +1073,13 @@ class Player(PlayerDiag):
         self.crash_file = None
         return False
 
-    def _refuse_notice(self, text, title):
+    def _refuse_notice(self, text, title, detail=None):
         """Refuse a run before any of the cart's code has run, on the panel
-        drawn as a notice under `title`."""
+        drawn as a notice under `title`, `detail` its cause exact."""
         self._refuse(text)
         self._notice = text
         self.notice_title = title
+        self._detail = detail
         return False
 
     def _begin_run(self, ws, project, t0):
@@ -1046,7 +1121,7 @@ class Player(PlayerDiag):
         self._t_reclaim = _ticks_diff(_ticks_ms(), t0)
         self._sram_run = None          # #211: whatever it reported was the LAST
                                        # run's; a Python cart must not inherit it
-        self._pmem_last = t0           # periodic pmem flush counts from this run's start
+        self._pmem_sync = t0
         self._slow_logic_next = 0
         # #75: cache the bar-visibility-by-type rule for this run (see __init__).
         cart = project.cart
@@ -1153,7 +1228,7 @@ class Player(PlayerDiag):
         `wants_layout(cart)` -- a Lua cart's scripts (lua_ext), a compiled or
         WASI app's module exports, a native app's dynamic symbols (elf_run).
         A runtime with no such answer, or one that fails, is fixed."""
-        rt = "elf" if cart.get("native") else cart.get("runtime", "python")
+        rt = _perms.run_tier(ws, cart)
         if rt == "python":
             return wants_layout(cart.get("src"))
         probe = getattr((getattr(ws, "runtimes", None) or {}).get(rt), "wants_layout", None)
@@ -1251,7 +1326,8 @@ class Player(PlayerDiag):
                          gpio=gpio,         # #9: capability-gated physical pins
                          flags=project.play_flags,   # SPEC.md 3.5: the run's own flags
                          owner=self.owner,  # its layer loans end with it
-                         run=self.run)      # its view() and its clock
+                         run=self.run,      # its view() and its clock
+                         files=self._open_files(cart))   # SPEC.md 9.1
         # Paint is a regular cartridge with one narrow shell capability. Keep it out
         # of the kid API and inject it only into the shipped app identity that asks
         # for the artwork permission; copied/renamed carts do not inherit it.
@@ -1279,6 +1355,13 @@ class Player(PlayerDiag):
                                       owner=self.pid))
             if "ui" in ns:
                 self.face.bind(ns, cart)
+        elif _game(cart, ws.spine):
+            perms = _game_perms(cart, self.granted)
+            ctx = make_run_grant(ws.app_context, cart, keep=self._keep_grant,
+                                 perms=perms, owner=self.pid)[0]
+            self._grant_perms = perms
+            if cart.get("runtime", "python") == "python":
+                ns["prefs"] = ctx.prefs
         if console is not None:
             ns.update(console.api())
         # A permission the manifest lists that Settings turned off reads None
@@ -1433,14 +1516,26 @@ class Player(PlayerDiag):
         if play is not None:
             if self.keyp_latch:
                 self.keyp_latch = 0
-            if n:
-                play(n, dt, draw)
+            # A frame with no tick still hands the run the pointer, whose
+            # press edge then waits for the next tick (native/moy_play).
+            play(n, dt, draw if n else False)
             return
         upd = self.update
         lua = self.lua
         fs = self._lua_split
         te = self.tick_edges
         inp = self.ws.input
+        # The pointer's press edge on a frame with no tick waits for the next
+        # one, as moy_play's latch keeps it where the kernel drives the run.
+        gp = getattr(inp, "game_pointer", None)
+        if not n:
+            if gp is not None and gp[2]:
+                self.press_owed = True
+            return
+        if self.press_owed:
+            self.press_owed = False
+            if gp is not None and not gp[2]:
+                inp.game_pointer = (gp[0], gp[1], True, len(gp) > 3 and gp[3])
         sched = self.sched
         i = 0
         while i < n:
@@ -1507,16 +1602,24 @@ class Player(PlayerDiag):
                 raise ValueError("unknown cart runtime '%s'" % runtime)
             if make is None:
                 # The graceful floor: a cart on a build without its runtime
-                # opens the panel, never a hang.
-                raise RuntimeError("needs the %s runtime (not in this build)"
-                                   % RUNTIME_NAMES[runtime])
+                # gets the notice that says so, never a hang; its cause
+                # exact under Details. A native cart in the browser is the
+                # board-only one.
+                raise _Refused(_ui_draw.s("say.board_only_text"
+                                          if runtime == "elf" and _sys.platform == "webassembly"
+                                          else "say.runtime_text"),
+                               _ui_draw.s("say.runtime"),
+                               "needs the %s runtime (not in this build)"
+                               % RUNTIME_NAMES[runtime])
             if runtime == "wasm" or runtime == "elf":
                 # A compiled cart's imports against this console's table, and
                 # a compiled or native cart's load footprint against what this
                 # console can give it, before anything loads.
                 cart = ws.cart or {}
                 if runtime == "elf" and _cart_unbuilt(make, cart):
-                    raise _Refused(_ui_draw.s("say.chip_text"), _ui_draw.s("say.chip"))
+                    raise _Refused(_ui_draw.s("say.chip_text"), _ui_draw.s("say.chip"),
+                                   "no main.%s.elf" % make.engine.CHIP
+                                   if hasattr(make, "engine") else None)
                 missing = _cart_missing(make, cart)
                 if missing:
                     raise _Refused(newer_notice(missing),
@@ -1570,7 +1673,7 @@ class Player(PlayerDiag):
                 if notice is not None:
                     sub = INTERP_NOTICE_SUB.get(getattr(lua, "interp_cause", None),
                                                 INTERP_NOTICE_SUB_DEFAULT)
-                    notice(INTERP_NOTICE_TITLE, sub, "warn")
+                    notice(INTERP_NOTICE_TITLE, _ui_draw.s(sub), "warn")
             t_exec = _ticks_diff(_ticks_ms(), t5)
             t6 = _ticks_ms()
             if lua.init is not None:
@@ -1598,14 +1701,17 @@ class Player(PlayerDiag):
             # retried on the interpreter inside WasmRun -- what reaches here
             # is a real error (a trap, a bad signature, a malformed cart).
             # A native cart's is the same.
-            if runtime == "wasm" or runtime == "elf":
+            if isinstance(exc, _Refused):
+                self.crash_file, self.crash_line = None, None
+                self._notice = self.cart_error = exc.args[0]
+                self.notice_title = exc.args[1]
+                self._detail = exc.args[2] if len(exc.args) > 2 else None
+            elif runtime == "wasm" or runtime == "elf":
                 self.crash_file, self.crash_line = None, None
                 title = (ws.cart or {}).get("title")
-                if isinstance(exc, _Refused):
-                    self._notice = self.cart_error = exc.args[0]
-                    self.notice_title = exc.args[1]
-                elif _out_of_memory(exc):
+                if _out_of_memory(exc):
                     print("Moybyte cart load:", self.cart_error)
+                    self._detail = self.cart_error
                     fit = _cart_fit(make, ws.cart or {})
                     self._notice = self.cart_error = fit_notice(
                         title, fit[0] if fit else None, fit[1] if fit else None)
@@ -1619,7 +1725,7 @@ class Player(PlayerDiag):
                                 _ticks_diff(_ticks_ms(), t0),
                                 h0[0], h1[0], h0[1], h1[1])
             if self.notice:
-                _os_log.failed(self.pid, self.cart_error)
+                _os_log.failed(self.pid, self._detail or self.cart_error)
             else:
                 self._crashed(None, self.cart_error)
             self._print_run_diag("RUNERR", "err=%s" % self.cart_error)
@@ -1627,6 +1733,10 @@ class Player(PlayerDiag):
                   self.cart_error)
             return False
         self.lua = lua
+        # Its pmem image, read every Pmem.SAVE_MS by the frame's save -- unless
+        # the run saves it itself (moycore_glue's `pmem_saves`) or has none.
+        self._pmem_read = (None if getattr(lua, "pmem_saves", False)
+                           else getattr(lua, "flush_pmem", None))
         relayout = getattr(lua, "layout", None)
         if lay is not None and relayout is not None:
             self._app_layout = relayout
@@ -1677,6 +1787,11 @@ class Player(PlayerDiag):
             gp = getattr(ws.input, "game_pointer", None) if fed is not None else None
             if gp is not None:
                 fed.mouse_frame(ws.input, gp[0], gp[1], dt)   # its wheel and autoscroll
+            if render and self.ui is not None and self._ui_still():
+                self._ui_unchanged()    # its canvas holds the page: no pass
+                if _perf:
+                    ws.pf_upd = ws.pf_cart = ws.pf_audio = ws.pf_bg = 0
+                return
             # The cart's code prints and measures in petme128, whatever the
             # theme names (docs/theme_and_shell_2026-11.md §3.7).
             _was = _cart_text(self._boundary)
@@ -1934,36 +2049,53 @@ class Player(PlayerDiag):
         # cart exception whose __str__ itself raises would otherwise
         # escape here -> the silent device hang the panel exists to prevent.
         print("Moybyte frame error:", self.cart_error)
-        # Deferred pmem (#66): the crash must not eat saved progress --
-        # the cart stops ticking now, so this is its last chance to
-        # persist. Guarded: the panel must paint even if SD is gone.
-        pm = getattr(ws.run.project, "pmem", None)
-        if pm is not None:
-            try:
-                pm.flush()
-            except Exception:  # noqa: BLE001
-                pass
+        # The crash must not eat saved progress -- the cart stops ticking
+        # now, so this is its last chance to persist. Guarded: the panel must
+        # paint even if SD is gone.
+        self._pmem_flush()
         ws.reset_canvas_state()
         if ws.web.parked:
             return ws.crash_to_code()
         return False
 
+    def _pmem_flush(self):
+        """Save the run's pmem now and wait out any save in flight: exit,
+        pause and a crash. A live Lua or compiled run's image is read first.
+        Never raises: the exit and the crash panel go on without the card."""
+        pm = getattr(self.ws.run.project, "pmem", None)
+        if pm is None:
+            return
+        try:
+            sync = getattr(self.lua, "flush_pmem", None)
+            if sync is not None:
+                sync()
+            pm.flush()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _pmem_tick(self, ws):
+        """The frame boundary's pmem save (widgets.Pmem.tick): handed to the
+        store's saver at most every Pmem.SAVE_MS while it moved. A Lua or
+        compiled run that saves itself (moycore_glue's `pmem_saves`) is left
+        to; one that does not has its image read every Pmem.SAVE_MS."""
+        pm = getattr(ws.run.project, "pmem", None)
+        if pm is None:
+            return
+        now = _ticks_ms()
+        if self.lua is not None:
+            read = self._pmem_read
+            if read is None or _ticks_diff(now, self._pmem_sync) < pm.SAVE_MS:
+                return
+            self._pmem_sync = now
+            read()
+        pm.tick(now)        # a method call, never a bound one: a frame allocates nothing
+
     def _tick_tail(self, ws, render):
-        """After the cart's frame: the periodic pmem flush, a quit() exit,
-        the text-mode sync, the canvas-state reset and the chrome a drawn
-        frame paints over the cart."""
-        # Deferred pmem periodic flush (#66, the Letter Blitz attribution): a
-        # dirty pmem persists at most once per PMEM_FLUSH_MS while the cart
-        # plays -- the guaranteed saves are exit (release_world) and the crash
-        # capture above. Running here, after the frame's update/draw, the
-        # ~100ms SD write lands at a frame boundary (one bounded hitch per
-        # minute) instead of inside the logic slice on every pmem() call.
+        """After the cart's frame: the pmem save, a quit() exit, the text-mode
+        sync, the canvas-state reset and the chrome a drawn frame paints over
+        the cart."""
         if self.cart_error is None:
-            if _ticks_diff(_ticks_ms(), self._pmem_last) >= PMEM_FLUSH_MS:
-                self._pmem_last = _ticks_ms()
-                pm = getattr(ws.run.project, "pmem", None)
-                if pm is not None:
-                    pm.flush()
+            self._pmem_tick(ws)
         # A cart ENDS ITSELF by calling quit() (make_api), which sets input.cart_quit.
         # Honor it now that this frame's _update has run: pop to the run caller and stop
         # (screen leaves "desktop", so this cart won't tick again -- skip the
@@ -2083,6 +2215,12 @@ class Player(PlayerDiag):
         console has."""
         n = self._notice
         return n if n is not None and n == self.cart_error else None
+
+    @property
+    def notice_detail(self):
+        """The notice up's cause exact, for the stop card's Details (a
+        parent's or the cart's author's), else None."""
+        return self._detail if self.notice is not None else None
 
     @property
     def newer(self):

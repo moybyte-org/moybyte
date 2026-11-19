@@ -12,6 +12,7 @@
   "moybyte": {
     "type": "game",
     "system": true,
+    "fixture": true,
     "order": 260,
     "targets": [
       "host",

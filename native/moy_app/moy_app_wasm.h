@@ -49,6 +49,15 @@ int moy_app_wasm_row(uint32_t i);
 // The table row an import name serves, or -1.
 int moy_app_wasm_row_named(const char *name, size_t n);
 
+// A game's prefs, module "moybyte.prefs" (native/moycore/moycore_wasm_ext.h):
+// the "moybyte.app" rows prefs_get, prefs_set and prefs_clear, answered from
+// the call's run (below) as they are for an app.
+int32_t moy_app_wasm_prefs_get(void *e, const uint8_t *key, uint32_t key_n, uint8_t *json,
+                               uint32_t json_cap);
+int32_t moy_app_wasm_prefs_set(void *e, const uint8_t *key, uint32_t key_n,
+                               const uint8_t *json, uint32_t json_n);
+int32_t moy_app_wasm_prefs_clear(void *e, const uint8_t *key, uint32_t key_n);
+
 // The run a native's call is for (moy_app_run.h): the engine's handle on the
 // call -- a WAMR exec env, or the browser's binding -- to the run its glue
 // holds for that instance, which the engine's glue defines

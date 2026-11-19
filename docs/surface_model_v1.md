@@ -167,6 +167,13 @@ An animating surface needs no bumps and is never skipped; the by-name lists
 are the declaration (no Surface object holds a flag, §16). A verbs page
 moving on its own -- a fling's coast, a glide to a step's target -- declares
 itself through the engine (`moy_ui_api_moving`, `ws.ui_moving` for the gate).
+The live wallpaper declares itself only while no gesture is live: under a
+drag or fling of the home's cards, a window's drag, move or resize, a
+window's content scrolled or flung, or a coasting page, it holds its frame
+(`Wallpaper.held`) and is a still picture to every cache, the desk's drag
+cache included; a desk that renders live because it moves takes no
+snapshot of itself (`wm._capture_backdrop`), which its next frame would
+render over (owner, 2026-11-18).
 
 **Class C — pointer-armed mutators (the pre-#44 debt).** Paint strokes, map
 pans, block drags and kinetic scrolls mutate content **without marking
@@ -186,7 +193,7 @@ advertisement.
 | running game (Player) | Class B while running; gen moves on frames it renders (L9) |
 | app windows (Editor tabs, Settings, Desk-Lab apps) | Class A via the existing `mark_dirty()` calls (global epoch until attributed); Class C during gestures |
 | self-animating panels (music preview, bluetooth, OTA, live wallpaper, overlays) | Class B declaration |
-| wallpaper (static, e.g. `moybyte.moy_night.moy`) | nothing — idles free *by construction* |
+| wallpaper (static: a cart with no `_update`) | nothing — idles free *by construction* |
 | bar | Class A: clock tick (1/s), status change, lent-zone redraw request from the app |
 | desk icon column | Class A on selection/label change (own surface — not the wallpaper's, §11) |
 | window chrome | its own WM-owned chrome band per window (§5 preamble), bumped by the WM on focus/title change |
@@ -388,9 +395,10 @@ used to live beside `web_view` + `page_tail.js`).
   frames skip it entirely — the whole 0.2ms-vs-70ms idle/drag cliff.
   Allocation is a lever only ACROSS the 16KB cliff, not gradually — which is
   exactly what §4 skip-draw provides (a drag frame ships only the moving
-  window). Shipped policy: `web_boot` raises the threshold to 6MB and the
-  worker lands collects on idle (3 quiet frames) with a bounded periodic
-  guard. Measured on the wasm desktop: window drag 70.15 → **0.54ms/frame**
+  window). Shipped policy: `web_boot` raises the threshold to megabytes, the
+  worker lands collects on idle (3 quiet frames, none while a stream plays),
+  and through sustained activity the threshold's own collect bounds the heap
+  (`worker.js`, IDLE_QUIET_FRAMES). Measured on the wasm desktop: window drag 70.15 → **0.54ms/frame**
   (p95 0.63, no collects in 120 drag frames); content drag 137 → 8ms mean.
 - **Drop-recovery (the review's A7/F2):** the push transports drop frames by
   design (bandwidth cap on device; the page keeps only the newest frame on
@@ -931,7 +939,15 @@ first frame washes that page out of the buffer the frame drew into
 (`last_buffer`, the compositor's face of §14.6's buffer; `copy_last` where
 a compositor names no such buffer; one persistent buffer holds it already)
 instead of drawing it, and holds it as above. A dialog a page's own draw
-opens (a tap on its link) draws the page, which drew this frame anyway. The system menu
+opens (a tap on its link) draws the page, which drew this frame anyway.
+The sprite pickers open over the page the same way (a tap on the Size
+caption), copying it into the frame's buffer (`last`'s `copy`: they wash
+nothing) and drawing again only the hint strip, which names their keys.
+A popover shows its card on the frame that opens it
+(`docs/ui_api_2026-10.md`, `ui.popover`), and the hold's key is taken again
+after the draw (`Hold.drew`): it names the card's place, which a card
+learns by drawing, so the frame after leaves the page and the card as that
+frame drew them (`HOLD_LEFT`). The system menu
 holds the handheld home the same way (`SystemMenuUI.put_home`): where the
 fullscreen WM draws the home and the menu's card alone, the whole frame
 under the card -- the bars, the washed content and the hint strip naming

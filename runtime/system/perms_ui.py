@@ -5,6 +5,11 @@ record's (`app_perms.Consent.turn`); from the cart's next launch it is absent,
 its names `None`, and a cart that requires it is refused with a message
 naming it. An app installed with every permission keeps the ones left on.
 
+A compiled cart carrying a native module for a console that does not confine
+it (`app_perms.native_choice`) gets one more switch, off until the user turns
+it on: `app_perms.NATIVE_LINE`, consent to `full_access` (`Consent.opt`),
+from which the cart runs its native module rather than its wasm one.
+
 A shipped app the shell runs as its own layer (Files, Paint, Appearance) holds
 no grant to narrow and is not listed. The page reaches the shell through its
 AppContext (`PermsPage.NEEDS`): the carts role for the shelf, the install
@@ -19,6 +24,7 @@ TITLE = "App permissions"
 # The keycap hints for a switch, by whether it is on (Settings' own).
 _HINTS = (("confirm", "Turn on", "back", "Back"), ("confirm", "Turn off", "back", "Back"))
 _EMPTY = ("No app on this console asks for more than a game does.",)
+_NATIVE = "native"            # the native-module switch's key in a row
 
 
 class PermsPage:
@@ -33,6 +39,7 @@ class PermsPage:
         self._nav = ctx.nav
         self._rows = None             # ((title, app id, ((perm, line), ...)), ...)
         self._on = {}                 # a switch's id -> whether it showed on
+        self._asked = {}              # app id -> its manifest's permissions (a native switch's)
 
     def open(self):
         self._rows = None
@@ -51,10 +58,13 @@ class PermsPage:
             for cart in self._carts.all() or ():
                 if self._nav.is_system_app(cart):
                     continue              # the shell's own: no grant to narrow
-                perms = _perms.asked(cart.get("permissions"), _perms.tiers_of(cart))
-                if perms:
-                    out.append((cart.get("title") or "?", _perms.app_id(cart),
-                                tuple((p, _perms.line(p)) for p in perms)))
+                perms = _perms.asked(_perms.perms_of(cart), _perms.tiers_of(cart))
+                lines = [(p, _perms.line(p)) for p in perms]
+                if _perms.native_choice(cart):
+                    lines.append((_NATIVE, _perms.NATIVE_LINE))
+                    self._asked[_perms.app_id(cart)] = list(cart.get("permissions") or ())
+                if lines:
+                    out.append((cart.get("title") or "?", _perms.app_id(cart), tuple(lines)))
             self._rows = tuple(out)
         return self._rows
 
@@ -72,10 +82,15 @@ class PermsPage:
             _ui.group(title)
             for perm, line in perms:
                 sid = aid + " " + perm
-                on = consent.is_on(aid, perm)
+                native = perm == _NATIVE
+                on = (_perms.native_opted(consent.get(aid)) if native
+                      else consent.is_on(aid, perm))
                 self._on[sid] = on
                 now = _ui.toggle(line, on, {"id": sid})
                 if now != on:
-                    consent.turn(aid, perm, now)
+                    if native:
+                        consent.opt(aid, "full_access", now, self._asked.get(aid, ()))
+                    else:
+                        consent.turn(aid, perm, now)
                     self._on[sid] = now
             _ui.group()

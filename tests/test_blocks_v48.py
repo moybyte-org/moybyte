@@ -335,8 +335,8 @@ def test_pre_v48_program_still_compiles_unchanged():
     _assert_portable(src)
     _run_cart(src, frames=2)
 
-# (the tap_game byte-for-byte pin lives ONCE, in test_blocks.py --
-# test_tap_game_blocks_json_compiles_to_shipped_main; two more verbatim
+# (the tap_only_red byte-for-byte pin lives ONCE, in test_blocks.py --
+# test_tap_only_red_blocks_json_compiles_to_shipped_main; two more verbatim
 # copies of it lived here until 2026-08-18)
 
 

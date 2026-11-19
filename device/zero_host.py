@@ -1,11 +1,12 @@
 # Map (grep -n a name to jump there):
 #   identity                    this board's name and write PIN (/moy/zero.json)
+#   sweep_carts                 the store opened as a console opens its own: retired seeds taken, installed.json held to the folders
 #   seed_carts                  the image's carts seeded as a console seeds them; seed_room
 #   recover_installs            an install a reset cut short, finished before the seed
 #   connect                     join the first saved network that answers
 #   ZeroUpdate                  the OTA flow, one slice per poll; make_updater builds it
 #   make_addon                  the release's add-on (and the XIAO's official carts) brought to the store; tend_addon runs it, way_back undoes a removal
-#   make_official               /official: the page's Get Carts, this board installing
+#   make_official               /official: the page's Get Carts, this board installing from its shelves
 #   host_class                  the store host: the boards' WebHost
 #   serve                       bring the store host up and pump it forever
 """The Zero: a pocketable cart-store the browser console pairs with (#41).
@@ -52,9 +53,11 @@ where a person triggers it and watches it, which is the whole point of the
 endpoints being sealed JSON rather than a UI.
 
 `GET/POST /official` is the fourth (make_official, below): the browser
-console's Get Carts lists the official carts of this board's own release and
-asks the board to install or remove one, and the board fetches it from its
-release and writes its own store, as it installs its firmware.
+console's Get Carts lists the carts of the indexes this board reads (its
+`system/sources`, else moybyte-org/carts, and its own release's) and asks
+the board to install or remove one, and the board fetches it and writes its
+own store, as it installs its firmware, refusing one its store has no room
+for.
 
 A browser signs in with a device key it got by pairing once with this board's
 password (the setup form sets it; native/moy_net/moy_webhost.c's header and
@@ -133,8 +136,9 @@ def identity():
 # raw-deflate stream each, `carts_data.CARTS_Z`, and this function inflates
 # them, so a Zero flashed from the website's flasher (site/build.py's BOARDS)
 # has a working console with no second, cabled step. Every other system cart
-# is an OFFICIAL cart its release publishes, which the page this board serves
-# installs (`/official`, make_official) and a cable flash refreshes
+# but a test fixture is an OFFICIAL cart its release publishes, which the page this board serves
+# installs (`/official`, make_official, beside the carts of moybyte-org/carts
+# or the board's `system/sources`) and a cable flash refreshes
 # (tools/board_flash.py's install_carts).
 #
 # THE CONSOLES' RULE (owner, 2026-11-17). A seed cart is in the store unless
@@ -148,8 +152,8 @@ def identity():
 #
 # SEED_RESERVE is the room a seed leaves: it stops while that much of the store
 # is still free, so the system folder (the password, the SSH host key, the
-# browsers' keys) and a kid's own carts always fit. The installs of the
-# official carts keep the same reserve.
+# browsers' keys) and a kid's own carts always fit. The installs the page
+# asks for keep the same reserve.
 SEED_RESERVE = 96 * 1024
 # Beside it, a store with no browser console add-on keeps the room the add-on
 # that fits this image will take (its pack, as the image's stamp counts it,
@@ -234,6 +238,34 @@ def _read_stamp(path):
             return f.read()
     except OSError:
         return None
+
+
+def sweep_carts(root=CARTS_DIR):
+    """The store opened as a console opens its own: through the one door
+    (moy_seed.sweep_store: a store behind this image's format stepped, the
+    folders of retired seeds -- moy_seed.RETIRED_FOLDERS and the image's
+    roster's bare folders -- taken once per generation, the board stamp
+    checked), then the shelf's record held to the carts folder
+    (moy_seed.keep_record, which a console's seed runs after its scan): an
+    entry whose folder the page's delete took (moy_sync_apply.c's `dc` leaves
+    `installed.json` as it was) is dropped. Neither writes a line to
+    `system/removed`. After recover_installs, whose stage keep_record waits
+    out. Returns the folders removed; a store it cannot sweep is served as it
+    is and swept on the next boot."""
+    try:
+        from carts_data import CARTS_Z
+    except ImportError:
+        CARTS_Z = None
+    try:
+        import moy_carts
+        gone = moy_carts.sweep_store(root, CARTS_Z)
+        moy_carts.keep_record(root, os.listdir(root))
+    except Exception as exc:             # noqa: BLE001 -- the store serves regardless
+        print("ZERO sweep: the store was not swept:", exc)
+        return 0
+    if gone:
+        print("ZERO sweep: %d retired folders removed" % gone)
+    return gone
 
 
 def seed_carts(root=CARTS_DIR):
@@ -788,6 +820,17 @@ def _has_password():
         return False
 
 
+def _is_password(password):
+    """Whether `password` is this board's (the setup form's record)."""
+    try:
+        with open(SYSTEM_DIR + "/password") as f:
+            record = f.read()
+    except OSError:
+        return False
+    from zero_setup import is_password
+    return is_password(password, record)
+
+
 def host_class():
     """The store host: the boards' own `WebHost`, whose kernel answers /gpio
     over this board's pin table. Imported here, not at the top: importing this
@@ -878,10 +921,12 @@ def make_addon(ota):
 
 def make_official(ota, addon=None):
     """The backend of the webhost's `/official` (web_addon.OfficialCarts):
-    the official carts of this image's release, which the browser console
-    this board serves lists in its Get Carts and asks this board to install
-    or remove; the board fetches from its release over its own network and
-    writes its own store, its one writer, keeping SEED_RESERVE free. While
+    the carts of the indexes this board reads (cart_index.load_indexes: its
+    `system/sources`, else moybyte-org/carts, and this image's release's),
+    which the browser console this board serves lists in its Get Carts and
+    asks this board to install or remove; the board fetches over its own
+    network and writes its own store, its one writer, keeping SEED_RESERVE
+    free and refusing a cart that needs more. While
     `addon`'s step brings the store to a new release it holds a request
     back. None where the image names no release index (no updater) or does
     not carry the install: the route is then absent, and the page says this
@@ -897,7 +942,8 @@ def make_official(ota, addon=None):
         return None
     busy = None if addon is None else addon.busy
     return web_addon.OfficialCarts(_ZeroInstall(CartNet(_ZeroWifi())), ota.own_index,
-                                   busy=busy, reserve=SEED_RESERVE)
+                                   busy=busy, reserve=SEED_RESERVE,
+                                   locked=_has_password, unlock=_is_password)
 
 
 ADDON_SLICE_MS = 40                     # the add-on's install per loop iteration
@@ -971,6 +1017,7 @@ def serve():
     # AP, and the first page served after that form is answered has carts behind
     # it rather than an empty shelf.
     recover_installs(CARTS_DIR)
+    sweep_carts(CARTS_DIR)
     seed_carts(CARTS_DIR)
     me = identity()
     name = me.get("name") or HOSTNAME

@@ -180,6 +180,10 @@ int moy_shelf_without(const char *root, const char *folder, moy_buf_t *out) {
     return 0;
 }
 
+// moy_pmem.h's (weak: an image without the pmem record links none).
+void moy_pmem_forget(const char *path);
+#pragma weak moy_pmem_forget
+
 int moy_shelf_take(const char *root, const char *folder, char *gone, size_t cap) {
     char stage[MOY_SHELF_PATH], cart[MOY_SHELF_PATH];
     if (!sibling(root, MOY_SHELF_STAGE, stage, sizeof stage)) {
@@ -189,6 +193,9 @@ int moy_shelf_take(const char *root, const char *folder, char *gone, size_t cap)
     int c = snprintf(cart, sizeof cart, "%s/%s", root, folder);
     if (a <= 0 || (size_t)a >= cap || c <= 0 || (size_t)c >= sizeof cart) {
         return MOY_EINVAL;
+    }
+    if (moy_pmem_forget != NULL) {
+        moy_pmem_forget(cart);      // its logged pmem leaves with it
     }
     moy_fs_mkdir(stage);
     if (moy_fs_exists(gone)) {

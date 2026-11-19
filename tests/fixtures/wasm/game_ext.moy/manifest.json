@@ -1,0 +1,19 @@
+{
+  "format": "moy-1",
+  "title": "Game Ext Wasm",
+  "id": "local.game_ext",
+  "runtime": "wasm",
+  "main": "main.wasm",
+  "memory": 2,
+  "input": ["buttons", "touch"],
+  "extensions": ["moybyte.app", "moybyte.scenes", "moybyte.images", "moybyte.mouse", "moybyte.prefs"],
+  "moybyte": {
+    "type": "game",
+    "permissions": ["pins"],
+    "assets": {"scenes": ["main", "second"]},
+    "achievements": [
+      {"id": "started", "title": "Started", "icon": "star", "hint": "Start it"},
+      {"id": "steps", "title": "Steps", "icon": "run", "hint": "Take three steps", "goal": 3}
+    ]
+  }
+}

@@ -199,6 +199,34 @@ void mua_parts_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
 void mua_wash(const moy_ui_ctx_t *c, const moy_ui_sink_t *s);
 
 // moy_ui_api_pop.c
+// A popover's or a dialog's first frame, its card drawn tall over what it
+// covers and moved to its place once its body closes (moy_ui_inst_t's
+// `lent`). mua_lent: the one context `c` draws (NULL: none); mua_lent_of:
+// that, where it is the nest `kind` (2 a dialog, 3 a popover) open at the
+// depth `c` is at now; mua_lent_drop gives it back.
+struct moy_ui_lent *mua_lent(const moy_ui_ctx_t *c);
+struct moy_ui_lent *mua_lent_of(const moy_ui_ctx_t *c, int kind);
+void mua_lent_drop(moy_ui_ctx_t *c);
+// Whether the canvas lends a card `t` (as tall as the surface lets it,
+// opening the nest `kind`) the room to draw at once: `t` whole on it and
+// inside its clip, so all its body draws lands, and the memory to keep what
+// it covers. mua_lend_keep keeps that (what is drawn there now), sets the
+// pointer aside (no row hovers or presses where the tall card puts it) and
+// notes the first stop the card records.
+int mua_lend(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t t, int kind);
+void mua_lend_keep(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
+// The body has closed: what the tall card covered goes back whole, and with
+// `ok` the card is drawn at `card` (as wide, no taller) with what was drawn
+// on the tall card put on it, its row o from the tall card's row o above
+// `split` and from as far above the tall card's foot below it, but for the
+// corners its rounding blends and the `e` rows at its foot it shows none of.
+// mua_lend_stops moves the stops it recorded with it (a dialog's buttons by
+// `dy_btn`, the others by `dy`); mua_lend_end gives the pointer back and
+// the memory up.
+void mua_lend_put(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t card, int split, int e,
+                  int ok);
+void mua_lend_stops(moy_ui_ctx_t *c, int dy, int dy_btn);
+void mua_lend_end(moy_ui_ctx_t *c);
 void mua_card_finish(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
 void mua_grid_end(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
 

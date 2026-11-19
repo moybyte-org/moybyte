@@ -1,0 +1,1 @@
+[{"tag": "player", "tile": 3, "x": 40, "y": 50, "flip": 1, "flags": {"speed": 2}}, {"tag": "coin", "tile": 2, "x": 120, "y": 60}]

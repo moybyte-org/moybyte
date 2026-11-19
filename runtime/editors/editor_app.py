@@ -157,6 +157,24 @@ _TAB_LAYOUT_UI = {
     "theme_config": "theme_config_layer",
     "theme_sprites": "theme_sprites_layer",
 }
+# The tabs whose file a tier's run is never handed, by tier (`_tier`): an
+# edit there is one Play ignores, so the Editor offers none of them
+# (`EditorApp._offers`). A wasm run reads the sheet, the map, the sounds and
+# `config.json` through its imports, and no import reads scenes; a native
+# (ELF) run is handed none of them (docs/os_2026-11/tiers.md section 1).
+# "mine" is the Config tab's Make it mine cards.
+_UNREAD = {"wasm": ("scene",), "elf": ("paint", "map", "scene", "music", "mine")}
+
+
+def _tier(cart):
+    """The tier `cart` runs on, as `_UNREAD` keys it: `elf` for a native
+    cart, else its runtime (a compiled cart's native module is handed what
+    its wasm one reads, runtime/run/elf_run.py's game_data)."""
+    if cart.get("native") and cart.get("runtime") != "wasm":
+        return "elf"
+    return cart.get("runtime") or "python"
+
+
 # The theme mode's tabs (runtime/editors/theme_editor.py's TAB_CONFIG, TAB_SPRITES).
 THEME_TABS = ("theme_config", "theme_sprites")
 
@@ -166,7 +184,8 @@ def _te():
     import theme_editor
     return theme_editor
 
-from editor_panes import WORKSPACES as _WORKSPACES
+from editor_panes import WORKSPACES as _WORKSPACES, HOME_TAB as _HOME_TAB
+import moy_carts as _carts
 import iconsets as _iconsets
 import ui as _ui
 import ui_draw as _ui_draw
@@ -400,9 +419,9 @@ class EditorApp:
             self.theme_tab(view)
             return
         self._drop_theme()
-        if view == "code" and ws.cart is not None and not ws.text.code_sources():
-            # A compiled cart that ships no `src/` has no Code tab: there is no
-            # text behind its main.wasm to show (native/moy_wasm/README.md).
+        if ws.cart is not None and view in _OPENS and not self._offers(view):
+            # A tab the cart has not got (`_offers`) opens its Config tab,
+            # whose note says why.
             view = "cards"
         if view != self.tab and self.project is ws.run.project:
             # (#111) autosave-only: the OUTGOING tab still owes whatever it
@@ -474,6 +493,7 @@ class EditorApp:
                                        cols=ws.code_layout.cols,
                                        rows=ws.code_layout.rows,
                                        clip=ws.clipboard)
+                ws.editor.read_only = self.code_read_only()
                 ws.code_layer.reset()   # fresh keyboard-edge tracker for the new editor
                 # A crash marker belongs to the FILE that raised. Marking line N
                 # of whichever file happens to be open would put a red line on
@@ -723,7 +743,7 @@ class EditorApp:
     # -- the desk Editor's row (EDITOR_LAYOUT.md's frame) ---------------------
 
     def _row_layout(self, rect, desk):
-        """The app's row while the desk Editor shows workspaces: the five
+        """The app's row while the desk Editor shows workspaces: the cart's
         workspaces from the left, labelled, or icons with the current one
         labelled where the row is short; undo and redo at a fixed place, a
         hairline, then the Play slot, which never changes width.
@@ -732,7 +752,8 @@ class EditorApp:
         workspace shown and the look (its fonts and metrics measure the
         labels)."""
         fs = self._zone_scale()
-        key = (tuple(rect), fs, desk.key, self.ws.look.look_gen)
+        key = (tuple(rect), fs, desk.key, self.ws.look.look_gen,
+               tuple([w[0] for w in self.workspaces()]))
         got = self._row_memo
         if got is not None and got[0] == key:
             return got[1]
@@ -750,7 +771,7 @@ class EditorApp:
         undo_r = (redo_r[0] - cell, redo_r[1], cell, cell)
         area = (x, y, max(0, undo_r[0] - 12 * fs - x), h)
         cur = "ws:" + desk.key
-        items = [("ws:" + k, label, kind) for k, label, kind in _WORKSPACES]
+        items = [("ws:" + k, label, kind) for k, label, kind in self.workspaces()]
         got = _ui_draw.tab_row_rects(area, [(t, l) for t, l, _k in items], fs, 8 * fs)
         out = []
         if len(got) == len(items) and got[0][2]:
@@ -1050,23 +1071,72 @@ class EditorApp:
                 return i
         return 0
 
-    def _has_code(self):
-        """Whether the open cart has a Code tab: every cart whose main is text
-        does, and a compiled cart only when it ships `src/`."""
-        return bool(self.ws.cart is None or self.ws.text.code_sources())
+    def _offers(self, tab):
+        """Whether the open cart has `tab`: the one rule for what the Editor
+        offers, read by the ladder, the chips, `set_tab`, the desk's panes
+        and workspaces and the Config tab's cards. A tab is offered only
+        where the cart's run reads what it writes. Code: every cart whose
+        main is text, and a compiled cart only when it ships `src/` (read
+        only there, `code_read_only`). Blocks: a Python cart only, blocks
+        compiling to Python. The asset tabs and "mine" (the Config tab's
+        Make it mine cards, `config.json`): where its tier's run is handed
+        that file (`_UNREAD`)."""
+        ws = self.ws
+        cart = ws.cart
+        if cart is None:
+            return True
+        if tab == "code":
+            return bool(ws.text.code_sources())
+        if tab == "blocks":
+            return ws.text.takes_blocks()
+        return tab not in _UNREAD.get(_tier(cart), ())
+
+    def code_read_only(self):
+        """Whether the Code tab shows the open cart's code to read and takes
+        no edit: a compiled cart's `src/`, which Play never reads (its module
+        is rebuilt from it on a computer, `moy app build`)."""
+        cart = self.ws.cart
+        return cart is not None and _carts.is_compiled(cart)
+
+    def missing_note(self):
+        """The Config tab's line saying why the open cart has fewer tabs
+        (`_offers`), or None where it has them all."""
+        if not self._offers("paint"):
+            return _ui_draw.s("editor.no_assets")
+        if not self._offers("scene"):
+            return _ui_draw.s("editor.no_scenes")
+        return None
+
+    def workspaces(self):
+        """The desk's workspaces the open cart has: Settings always, each
+        other where its home tab is offered (a blocks cart's Code is its
+        Blocks)."""
+        out = []
+        for k, label, kind in _WORKSPACES:
+            home = _HOME_TAB[k]
+            if (home == "cards" or self._offers(home)
+                    or (home == "code" and self._offers("blocks"))):
+                out.append((k, label, kind))
+        return out
 
     def _ladder(self):
         """The base-density ladder for the open cart: `_ZONE_TABS`, less the
-        Code tab when there is no code (the draw and the hit test share it)."""
-        if self._has_code():
-            return _ZONE_TABS
-        return tuple(t for t in _ZONE_TABS if t[0] != "code")
+        tabs it has not got (`_offers`; the draw and the hit test share it)."""
+        return self._less(_ZONE_TABS)
 
     def _chips(self):
         """The shelf-density twin of `_ladder`."""
-        if self._has_code():
-            return _TAB_CHIPS
-        return tuple(t for t in _TAB_CHIPS if t[0] != "code")
+        return self._less(_TAB_CHIPS)
+
+    def _less(self, tabs):
+        """`tabs` itself while the cart has every one, else a copy without
+        the ones it lacks."""
+        for t in tabs:
+            if t[0] in _OPENS and not self._offers(t[0]):
+                break
+        else:
+            return tabs
+        return tuple(t for t in tabs if t[0] not in _OPENS or self._offers(t[0]))
 
     def _draw_history_icon(self, cv, glyph, x, y, ic, enabled):
         """Draw the UNDO/REDO bar icon (#88), in the theme's `disabled` ink when

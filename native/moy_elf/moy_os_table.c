@@ -579,6 +579,14 @@ const moy_os_table_t moy_os_table = {
         (void *)moy_os_moy_name,
         (void *)moy_os_moy_clock,
         (void *)moy_os_moy_ui_tell,
+        (void *)moy_os_moy_game_data,
+        (void *)moy_os_moy_game_sound,
+        (void *)moy_os_moy_game_snd,
+        (void *)moy_os_moy_game_pmem,
+        (void *)moy_os_moy_game_read,
+        (void *)moy_os_moy_game_write,
+        (void *)moy_os_moy_game_erase,
+        (void *)moy_os_moy_game_list,
     },
 };
 
@@ -710,4 +718,12 @@ const char *const moy_os_row_names[MOY_OS_ROWS] = {
     "moy_name",
     "moy_clock",
     "moy_ui_tell",
+    "moy_game_data",
+    "moy_game_sound",
+    "moy_game_snd",
+    "moy_game_pmem",
+    "moy_game_read",
+    "moy_game_write",
+    "moy_game_erase",
+    "moy_game_list",
 };

@@ -9,6 +9,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include "moy_proc_exit.h"
 #include "moy_tty.h"
 #include "moy_tty_int.h"
 
@@ -40,6 +41,8 @@ struct moy_tty {
     void *sh;
     int started;                // 1 the face task took it, 2 the reaper did
     int more, esc, esc_num, last_cr, eof, front;
+    int secret;                 // the prompt is a secret question's: its answer is not echoed
+    int once;                   // an exec answering its command's question: ends when none waits
     volatile int interrupt;     // a `signal` request (INT)
     volatile int resized;       // a window-change request
     volatile int exited;        // the status is final: Dropbear may reap it
@@ -315,7 +318,12 @@ int moy_tty_ready(moy_tty_t *f, int ms) {
     return readable(f, ms);
 }
 
+// The prompt; while it is a secret question's (moy_sh.h's MOY_SH_ASK_SECRET)
+// the line typed is echoed by nothing, its edits move nothing on the
+// terminal, Up, Down and Tab do nothing, and it is kept from the history.
 static void prompt(moy_tty_t *f) {
+    f->secret = f->front == MOY_TTY_FRONT_SHELL && !f->more && shell()->secret != NULL
+        && shell()->secret(f->sh);
     char p[128];
     size_t n = shell()->prompt(f->sh, f->more, p, sizeof p);
     moy_tty_out(f, p, n);
@@ -359,6 +367,10 @@ static void finish(moy_tty_t *f, int status) {
     __atomic_store_n(&f->done, 1, __ATOMIC_RELEASE);
 }
 
+static int asking(moy_tty_t *f) {
+    return shell()->asking != NULL && shell()->asking(f->sh);
+}
+
 static int front(moy_tty_t *f) {
     return shell()->front != NULL ? shell()->front(f->sh) : MOY_TTY_FRONT_SHELL;
 }
@@ -373,6 +385,12 @@ static void settle(moy_tty_t *f) {
     f->front = now;
     if (now != MOY_TTY_FRONT_FULL && (f->pty || !f->more)) {
         prompt(f);
+    }
+}
+
+static void wipe(char *p, size_t n) {
+    for (volatile char *q = p; n--; q++) {
+        *q = 0;
     }
 }
 
@@ -434,6 +452,9 @@ static void replace_line(moy_tty_t *f, const char *text) {
 // the history and move the caret, Home, End and Delete edit the line; any
 // other is dropped.
 static void edit_key(moy_tty_t *f, char c, int num) {
+    if (f->secret) {
+        return;
+    }
     if (c == '~') {
         c = num == 1 || num == 7 ? 'H' : num == 4 || num == 8 ? 'F' : num == 3 ? 'P' : 0;
     }
@@ -486,9 +507,11 @@ static void insert(moy_tty_t *f, const char *p, size_t n) {
         memmove(f->line + f->cur + 1, f->line + f->cur, f->n - f->cur);
         f->line[f->cur++] = p[i];
         f->n++;
-        gather(f, p + i, 1);
+        if (!f->secret) {
+            gather(f, p + i, 1);
+        }
     }
-    if (f->cur < f->n) {
+    if (f->cur < f->n && !f->secret) {
         redraw_tail(f, 0);
     }
 }
@@ -496,7 +519,7 @@ static void insert(moy_tty_t *f, const char *p, size_t n) {
 // Tab at the shell's prompt: the word left of the caret completed, or the
 // names it could be listed under the line, the prompt and the line after.
 static void tab(moy_tty_t *f) {
-    if (shell()->complete == NULL || f->front != MOY_TTY_FRONT_SHELL || f->more) {
+    if (shell()->complete == NULL || f->front != MOY_TTY_FRONT_SHELL || f->more || f->secret) {
         return;
     }
     char ins[256];
@@ -530,7 +553,8 @@ static void tab(moy_tty_t *f) {
 
 // A complete line to the shell or to the line app in front; 1 when the shell exited.
 static int run_line(moy_tty_t *f) {
-    if (f->pty) {
+    int hid = f->secret;
+    if (f->pty && !hid) {
         remember(f);
     }
     f->cur = 0;
@@ -543,8 +567,11 @@ static int run_line(moy_tty_t *f) {
     }
     f->line[f->n++] = '\n';
     int r = shell()->run(f->sh, f->line, f->n);
+    if (hid) {
+        wipe(f->line, f->n);
+    }
     f->n = 0;
-    if (r == SH_EXIT) {
+    if (r == SH_EXIT || (f->once && !asking(f))) {
         finish(f, shell()->status(f->sh));
         return 1;
     }
@@ -589,6 +616,14 @@ static int key(moy_tty_t *f, char c) {
         return 0;
     case 3:
         moy_tty_out(f, "^C\n", 3);
+        if (f->secret) {
+            wipe(f->line, f->n);
+        }
+        if (f->once && f->front == MOY_TTY_FRONT_SHELL) {
+            shell()->cancel(f->sh);
+            finish(f, MOY_PROC_INTERRUPTED);
+            return 1;
+        }
         f->n = f->cur = 0;
         f->hi = f->nhist;
         f->more = 0;
@@ -615,7 +650,9 @@ static int key(moy_tty_t *f, char c) {
             memmove(f->line + f->cur - 1, f->line + f->cur, f->n - f->cur);
             f->n--;
             f->cur--;
-            if (f->cur == f->n) {
+            if (f->secret) {
+                f->line[f->n] = 0;
+            } else if (f->cur == f->n) {
                 gather(f, "\b \b", 3);
             } else {
                 back(f, 1);
@@ -755,10 +792,13 @@ static void face_run(moy_tty_t *f) {
         int r = shell()->run(f->sh, f->cmd, strlen(f->cmd));
         if (r == SH_MORE) {
             // an unfinished command (an open quote): ended as sh -c would
-            shell()->run(f->sh, "\n", 1);
+            r = shell()->run(f->sh, "\n", 1);
         }
-        finish(f, shell()->status(f->sh));
-        return;
+        if (r == SH_EXIT || !f->pty || !asking(f)) {
+            finish(f, shell()->status(f->sh));
+            return;
+        }
+        f->once = 1;
     }
     settle(f);
     for (;;) {

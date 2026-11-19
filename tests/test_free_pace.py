@@ -78,7 +78,7 @@ def test_the_roster_carries_free_through_to_the_boards():
     carts = gen_device_carts.build_carts(str(ROOT / "system_carts"))
     by_title = {c["title"]: c for c in carts}
     assert by_title["Star Catcher"]["fps"] == "free"
-    assert by_title["Sky Run"]["fps"] == 60
+    assert "fps" not in by_title["Coin Quest"]            # undeclared: paced at 30
 
 
 # The seed games that declare free, each audited: every per-frame motion in its
@@ -92,9 +92,8 @@ def test_the_roster_carries_free_through_to_the_boards():
 # so a phase row is the frame the board can run rather than the 30Hz tick --
 # paced, every phase cheaper than the tick read 30.3 / p50 33 on every board
 # for twelve days after #217 (owner call 2026-09-22, numbers in #66).
-FREE_SEEDS = {"Star Catcher", "Brick Siege", "Brick Siege Lua", "Tiny Runner",
-              "Letter Blitz", "Harpoon Pop", "Tap Only Red", "Pixel Pet",
-              "Bullet Storm", "Bench", "Bench Lua"}
+FREE_SEEDS = {"Star Catcher", "Brick Siege", "Brick Siege Lua", "Letter Blitz",
+              "Harpoon Pop", "Bullet Storm", "Bench", "Bench Lua"}
 
 
 def test_only_audited_seed_games_declare_free():

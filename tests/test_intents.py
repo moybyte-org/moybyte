@@ -111,7 +111,9 @@ def test_an_item_is_its_path_in_the_shared_folders():
                      ("Pictures/Sprites/hero.moygfx", ("sprites", "hero")),
                      ("Music/tune.moysong", ("music", "tune")),
                      ("Recordings/take_1", ("recordings", "take_1")),
-                     ("Documents/Stories/tale", ("stories", "tale"))):
+                     ("Documents/Stories/tale", ("stories", "tale")),
+                     ("Downloads/Trip Notes.md", ("downloads", "Trip Notes.md")),
+                     ("Downloads/readme", ("downloads", "readme"))):
         assert I.split(item) == kn, item
         assert I.item_of(*kn) == item
     for bad in ("nowhere/x", "docs/todo", "Documents/todo", "Pictures/cat.md",
@@ -352,6 +354,25 @@ def test_the_picker_lists_the_files_of_the_type(tmp_path):
     assert I.INTENTS.pick(pid, "text/*")
     c = _picker_up(ws, drv, "Choose a document")
     assert c.rows == ["todo"] and c.icons == ["notes"]
+
+
+def test_a_download_is_picked_by_its_whole_name(tmp_path):
+    """Downloads is no grant's: a file there reaches an app one at a time, the
+    picker listing it beside the folders' own by its whole name."""
+    ws, drv, pid = _picker(tmp_path)
+    d = os.path.join(ws.carts_store.files_root(ws.carts_root), "Downloads")
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "Trip List.txt"), "w") as f:
+        f.write("pack")
+    assert I.INTENTS.files_of("text/plain") == ["Downloads/Trip List.txt"]
+    assert I.INTENTS.pick(pid, "text/*")
+    c = _picker_up(ws, drv, "Choose a document")
+    assert c.rows == ["todo", "Trip List.txt"]
+    _press(drv, "down")
+    _press(drv, "a")
+    h = _jot_ns(ws)["got"][-1]
+    assert (h.name, h.mime, h.mode) == ("Trip List.txt", "text/plain", "r")
+    assert h.read() == "pack"
 
 
 def test_keys_reach_a_row_past_the_card_and_hand_it_over(tmp_path):

@@ -685,7 +685,9 @@ ssize_t moy_sh_write(int fd, const void *buf, size_t n) {
     }
     switch (o->kind) {
         case O_TERM:
-            s->host.out(s->host.ctx, o->stream ? o->stream : 1, buf, n);
+            if (!moy_sh_replaying(s)) {     // a replay's output was shown by the run before
+                s->host.out(s->host.ctx, o->stream ? o->stream : 1, buf, n);
+            }
             return (ssize_t)n;
         case O_NUL:
             return (ssize_t)n;

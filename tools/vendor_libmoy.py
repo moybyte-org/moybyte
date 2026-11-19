@@ -86,6 +86,9 @@ VENDOR = {
         # moycore takes the file and gets an empty translation unit.
         "moy_wasm.c": "libmoy/src/moy_wasm.c",
         "moy_wasm.h": "libmoy/include/moy_wasm.h",
+        # The name rules both bindings hold a cart's file names to (SPEC.md
+        # 9.1, 16.6, 16.12), which moy_lua.c and moy_wasm.c include.
+        "moy_cartpath.h": "libmoy/src/moy_cartpath.h",
         "LICENSE": "LICENSE",
     },
     # The browser's wasm engine (native/moy_wasm_web): what libmoy's binding
@@ -96,6 +99,13 @@ VENDOR = {
     os.path.join(NATIVE, "moy_wasm_web", "libmoy"): {
         "embed.c": "libmoy/port/wasm/embed.c",
         "LICENSE": "LICENSE",
+    },
+    # The wasm binding's imports as C (SPEC.md 16): the verbs a compiled C
+    # cart calls, which the SDK's moybyte/cart.h declares from this file on
+    # every target -- the "moy" imports under wasm, the adapter's functions in
+    # a native module (sdk/src/moycart.c).
+    os.path.join(ROOT, "sdk", "include"): {
+        "moy_cart.h": "libmoy/include/moy_cart.h",
     },
     # The WebAssembly text assembler moy-spec's own wasm fixtures are built
     # with. The one file here that is not C: moybyte's wasm carts under test

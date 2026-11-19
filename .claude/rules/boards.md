@@ -22,7 +22,9 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   console's pack and the digest the image names (generated into the STAGED
   copy and `dist/` — a build never writes into `native/`), the
   OTA identity stamp from `device/moy_ota.py`, the frozen manifest and its
-  fingerprint, the stale-sdkconfig guard, the #168 size guard and, outside
+  fingerprint, the stale-sdkconfig guard, the #168 size guard, the hot C's
+  64-bit helper guard (`tools/hot64.py`: a new `__divdi3` and kin in the
+  raster, presenters, audio or frame loop fails the build) and, outside
   CI, the one ccache every checkout and worktree shares (`moybyte_ccache`). What stays per
   board is its patch ladder and its sdkconfig facts. Builds clone mainline
   MicroPython and ESP-IDF at the releases `tools/upstream_pins.env` names
@@ -380,6 +382,10 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   a game full screen on the desk once the glass around it is still) runs in
   the kernel's front with the VM up, and the same scale and snapshot are C
   (`moy_glass.front`'s frame op, `moy_play.h`): no console Python a frame.
+  A native wallpaper's frame skips the game canvas too, palette or not:
+  the desk's cover scale (`blit_cover`'s `frame`) reads it from the
+  program's screen slot, which holds the last frame taken between frame
+  calls (`moy_screen_slot.h`, `wallpaper._Hosted.kept`).
 - **An async PPA op must be the frame's LAST write**, and `moy_ppa` must
   C2M-writeback a CPU-painted destination before submit, because the IDF
   driver invalidates the out window at submit. Both are ROW-SCOPED
@@ -415,7 +421,9 @@ stages 1–6 all absent. Its README is the authority; what bites:
   2026-11-17): a removal recorded in `system/removed` holds, a newer version
   replaces, `SEED_RESERVE` stays free. Everything else is an official cart
   of the release, which the page asks the board for over `/official` (the
-  board is its store's one writer). Its README says which carts each Zero
+  board is its store's one writer), beside the carts of moybyte-org/carts
+  (or its `system/sources`), each refused with the sizes where its store
+  has no room. Its README says which carts each Zero
   carries and how a cable flash, provisioning and an update bring the rest.
 - With no browser console add-on in its store a Zero fetches the one that
   fits from its release (`zero_host.make_addon`, `tend_addon`), unless its

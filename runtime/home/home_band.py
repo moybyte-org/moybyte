@@ -29,8 +29,14 @@ def _wall_ink(ws):
     (docs/history/look_2026-10.md steps 25 and 28)."""
     if ws.look.wallpaper_id is None:
         return None
-    black, white = ws.look.live.fixed[2:]
-    return white, black
+    f = ws.look.live.fixed
+    k = _WALL_INK[0]
+    if k is None or k[0] != f[3] or k[1] != f[2]:
+        k = _WALL_INK[0] = (f[3], f[2])
+    return k
+
+
+_WALL_INK = [None]      # the pair `_wall_ink` answered last: the same while it stands
 
 
 def _overlaps_any(rects, others):
@@ -119,6 +125,14 @@ class _Keyed:
             self.n = (self.n + 1) & 0x3fffffff
         return self.n
 
+    def of3(self, a, b, c):
+        """`of((a, b, c))`, the tuple made only where one of them moved."""
+        v = self.v
+        if v is None or v[0] != a or v[1] != b or v[2] != c:
+            self.v = (a, b, c)
+            self.n = (self.n + 1) & 0x3fffffff
+        return self.n
+
 
 def _band_key(layer, cv, dt, grid, vouch, calm=False):
     """The band's keys (`band_pass`'s `key`): what the frame round the band
@@ -136,7 +150,7 @@ def _band_key(layer, cv, dt, grid, vouch, calm=False):
         k[0] = k[1] = -1
         return k
     k[0] = layer._sk.of(layer._statics_key(cv))
-    k[1] = layer._bk.of((k[0], gen, grid.band_key()))
+    k[1] = layer._bk.of3(k[0], gen, grid.band_key())
     return k
 
 

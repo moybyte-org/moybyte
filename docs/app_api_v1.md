@@ -182,7 +182,7 @@ absent (`runtime/carts/moy_store_base.py`, `VENDOR_KEY`):
 | `assets` | a cart's scenes, in order | `docs/moy_cart_api.md`, Scenes |
 | `glass`, `pictures` | a wallpaper drawn per glass, a picture wallpaper | `docs/theme_and_shell_2026-11.md` §3.9 |
 | `graduated` | written by the Editor when blocks become code; never by hand | `runtime/editors/blocks.py` |
-| `system`, `order`, `targets`, `app` | the seed carts' (`system_carts/`): a system cart, its place, the targets it ships to, a shipped app's declaration | §13 |
+| `system`, `order`, `targets`, `app`, `fixture`, `seed` | the seed carts' (`system_carts/`): a system cart, its place, the targets it ships to, a shipped app's declaration, `true` for a test fixture, which only the host seeds: no console image or browser bundle carries it and no release publishes it as an official cart; and `seed: false` for an official cart no store is seeded with: the release publishes it, Get Carts installs it, and no image, browser bundle or host store carries it | §13 |
 
 ## 3. Drawing an app
 
@@ -549,7 +549,17 @@ the ui used. A Python process reads raw input records, timestamped, with
 **Prefs** (`prefs`): `prefs.get(key)`, `prefs.set(key, value)`,
 `prefs.clear(key)`, any value JSON carries, each a row of the console's
 settings namespaced under your app's `id`, saved as it is written; `None`
-(Lua `nil`) for a key never set. Your app and its service share them.
+(Lua `nil`) for a key never set. Your app and its service share them. Games
+hold the same `prefs` (owner, 2026-11-18, #261) and ask for no permission:
+a game's run's grant carries the prefs role alone, under the game's `id`, so a game
+that becomes an app keeps its rows; a compiled game imports them from
+`"moybyte.prefs"` (`docs/moy_cart_api.md`, "A compiled cart's Moybyte verbs").
+
+**A cart's own files** need no permission either: any cart, app or game,
+reads its own folder and writes the paths its manifest declares `writable`
+(`read`, `write`, `erase`, `list`; moy-spec SPEC.md §9.1,
+`docs/moy_cart_api.md`, Files). They are the cart's private files, never the
+user's folders below.
 
 **Files** (`files` / `files:<folder>`): one of the user's shared folders,
 the ones the Files app shows: `files:documents` (the default),
@@ -656,7 +666,12 @@ opens a text file from Files with (Notes).
 it is a `NameError` (Lua: `nil`), like a typo. A permission the user turned
 off in Settings (About → App permissions) has its names bound to `None`
 (`nil`), so `if prefs is None:` is how an app copes. A permission naming what
-this console lacks (`pins` on a board without them) leaves no name. Only a
+this console lacks (`pins` on a board without them) leaves no name. A
+permission none of the cart's tiers serves (its own, and its service's) is the
+cart's mistake: the install and the launch refuse it, naming it, and `moy app
+check` reports it as an error. `network` is the one an author meets: it hands
+Python's `wifi` and a native module's sockets, and the way every tier reaches
+the internet is `http` (`moybyte.http`, by handle on the compiled tiers). Only a
 `required` one refuses the launch, naming what is missing, at install and
 again at launch; an app requiring a device the console lacks shows no run
 tile (the home's Games, Mine and Apps, the desk), while Files and Make still
@@ -673,7 +688,13 @@ built-ins are never asked about. The record is kept per app id (`runtime/shell/a
 `Consent`); `docs/os_2026-11/processes.md`
 §2 has the rules. What a permission, a tier and a signature protect
 against, and what they do not (a Python app is trusted, a C module on an S3
-is the whole console), is `docs/os_2026-11/threat_model.md`.
+is the whole console), is `docs/os_2026-11/threat_model.md`. A Python cart
+is trusted only from a reviewed index (moybyte-org/carts, signed under its
+review key, or the console's own release); from any other store its prompt
+warns that nobody checked it and it can do anything on the console, and
+where the console has a password (`passwd`) the yes takes it. An index can
+revoke a version: it is refused at install, and an installed copy will not
+launch until it is updated or removed (`runtime/carts/cart_index.py`).
 
 **Notifications** (`notifications`): `moybyte.notify(summary, body="",
 icon=None, actions=(), urgency=1, replaces_id=0)` answers the notification's
@@ -971,7 +992,10 @@ names from every app. Because the kernel stamps the sender, a game unlocks
 only its own manifest's badges; the process refuses any other id and logs
 the refusal. A Lua
 game, app and service hold `moybyte.award` and `moybyte.progress` too, a
-compiled app imports `moybyte_award` and `moybyte_progress`, a WASI program
+compiled app imports `moybyte_award` and `moybyte_progress`, and so does a
+compiled game that declares the `moybyte.app` extension (its run then holds
+a grant of its own, as an app's does, which its device handles answer under
+too: `docs/moy_cart_api.md`, "A compiled cart's Moybyte verbs"), a WASI program
 `moybyte.os`'s `award` and `progress`, and a C program calls `moy_award`
 and `moy_progress`.
 `system_carts/moybyte.harpoon_pop.moy` uses all three kinds;
@@ -1035,7 +1059,7 @@ The calls a program reaches on more than one tier, each by its name there
 | `moybyte.recv` | none |  |  | `moybyte_recv` |  |
 | `moybyte.item_read` | none |  |  | `moybyte_item_read`, `moybyte.os.item_read` | `moy_item_read` |
 | `moybyte.item_write` | none |  |  | `moybyte_item_write`, `moybyte.os.item_write` | `moy_item_write` |
-| `net` | `multiplayer` | `net`, `on_net` | `on_net` |  |  |
+| `net` | `multiplayer` | `net`, `on_net` | `net`, `on_net` |  |  |
 | `pins` | `pins` | `pin_write`, `pin_read` | `pin_write`, `pin_read` |  |  |
 | `console` | `console` | `print` | `print` |  |  |
 | `moybyte.at` | `alarms` | `moybyte.at` | `moybyte.at` | `moybyte_at`, `moybyte.os.at` | `moy_at` |
@@ -1067,6 +1091,14 @@ The calls a program reaches on more than one tier, each by its name there
 | `moy_ui_pull` | none |  |  | `moybyte.os.ui_pull` | `moy_ui_pull` |
 | `moy_ui_font_pull` | none |  |  | `moybyte.os.ui_font_pull` | `moy_ui_font_pull` |
 | `moy_ui_tell` | none |  |  | `moybyte.os.ui_tell` | `moy_ui_tell` |
+| `moy_game_data` | none |  |  |  | `moy_game_data` |
+| `moy_game_sound` | none |  |  |  | `moy_game_sound` |
+| `moy_game_snd` | none |  |  |  | `moy_game_snd` |
+| `moy_game_pmem` | none |  |  |  | `moy_game_pmem` |
+| `moy_game_read` | none |  |  |  | `moy_game_read` |
+| `moy_game_write` | none |  |  |  | `moy_game_write` |
+| `moy_game_erase` | none |  |  |  | `moy_game_erase` |
+| `moy_game_list` | none |  |  |  | `moy_game_list` |
 | `moybyte.aes_ctr` | none | `moybyte.aes_ctr` | `moybyte.aes_ctr` | `moybyte_aes_ctr`, `moybyte.os.aes_ctr` | `moy_aes_ctr` |
 | `moybyte.aes_ccm_seal` | none | `moybyte.aes_ccm_seal` | `moybyte.aes_ccm_seal` | `moybyte_aes_ccm_seal`, `moybyte.os.aes_ccm_seal` | `moy_aes_ccm_seal` |
 | `moybyte.aes_ccm_open` | none | `moybyte.aes_ccm_open` | `moybyte.aes_ccm_open` | `moybyte_aes_ccm_open`, `moybyte.os.aes_ccm_open` | `moy_aes_ccm_open` |
@@ -1179,7 +1211,16 @@ C app as a reactor, its memory the manifest's `memory` pages,
 `tests/fixtures/wasm/app_talk.moy`), `--chip` adding a board's signed AOT
 module; `native/moy_wasm/README.md` is the tier.
 
-**Devices by handle.** A compiled program (a compiled app, a WASI program,
+**A compiled game** (any `type` but `app`) that declares `"extensions":
+["moybyte.app"]` imports from the same module: its run holds a grant of its
+own, made from its permissions and their consent as an app's is, so
+`moybyte_award`, `moybyte_progress`, `moybyte_notify` and the device
+handles below answer it as they answer an app, and an import its
+permissions do not grant is refused at load. A game that declares none
+holds no grant. Its scenes, paint images and mouse are Moybyte's other
+extensions (`docs/moy_cart_api.md`, "A compiled cart's Moybyte verbs").
+
+**Devices by handle.** A compiled program (a compiled app or game, a WASI program,
 a native module) and a Lua program (an app or a service) hold a lease or a
 device API by a handle where a Python program holds an object (`native/moy_kernel/moy_dev.h` is the authority
 on the leases' names, keys and answers, `runtime/system/dev_handles.py` on
@@ -1451,8 +1492,9 @@ gives the app its tile, title and re-seed, and its manifest declares the
 app. A built-in is known by where it came from: a folder the firmware's seed
 wrote (`moy_store_base.builtin_name`, against the roster the seed records
 for its store, `seeded`). Only the seed writes the built-ins' namespace,
-and the console's own release index, which publishes the seed carts as its
-official carts (a carts index naming a `moybyte.` folder or id is refused
+and the console's own release index, which publishes the seed carts but
+the test fixtures as its official carts, those no store is seeded with
+(`seed: false`) among them (a carts index naming a `moybyte.` folder or id is refused
 unless it is that index with its signature verified,
 `.claude/rules/carts.md`; a cart made under an author of that name is made as
 `local.`'s), and an id of that namespace
@@ -1517,7 +1559,7 @@ no cart as their identity: they join the router, the app table and
 | `ctx.wallpaper` | the desktop backdrop, the theme's (`docs/theme_and_shell_2026-11.md` D6): what is shown, the wallpaper carts, a wallpaper's title, a pick (a change to the theme, landing in `custom`; None is NONE, the theme's `desktop` fill), the live preview, My Art's thumbnail, and Paint's picture as Paint and Files copy a drawing into it (its two rows C, over the user-files layer), which a My Art pick copies into the theme | the shell | `current()`, `carts()`, `id_for()`, `title()`, `select()`, `preview()`, `thumbnail()`, `load_copy()`, `save_copy()` |
 | `ctx.artwork` | Paint's open picture, Paint's settings rows: which it is (`(kind, name)`, or None), and following it when its file is renamed under it | the shell | `current()`, `follow()` |
 | `ctx.clipboard` | the system cut/copy/paste buffer (#132): at most 4 KiB of text, kernel state, so it outlives a VM stop; a longer `put_text` answers False and keeps the old text | `clipboard` | `put_text()`, `text()`, `kind()`, `seq()` |
-| `ctx.install` | carts from outside (#124): the network Get Carts fetches through, its radio lease, one store op of an install (`op(fn)`, inside the bus gate), the engine's sizing, this console's chip and compiled-code format; in the browser, the keeper that makes an install durable in OPFS, the page's file picker, where carts come from on a page a board serves, and the console with no screen serving one, which installs and removes its own official carts when asked (`board()`); the Wi-Fi page Get Carts opens when the radio has no network, and whether it is still open; the console's consent records, which the install prompt reads and writes (`runtime/shell/app_perms.py`) | the shell | `hold()`, `release()`, `fit()`, `memory()`, `chip()`, `runtimes()`, `home()`, `can_pick()`, `pick()`, `root()`, `writable()`, `op()`, `rescan()`, `free()`, `find()`, `net()`, `keep()`, `wifi()`, `wifi_open()`, `consent()`, `own()`, `board()` |
+| `ctx.install` | carts from outside (#124): the network Get Carts fetches through, its radio lease, one store op of an install (`op(fn)`, inside the bus gate), the engine's sizing, this console's chip and compiled-code format; in the browser, the keeper that makes an install durable in OPFS, the page's file picker, where carts come from on a page a board serves, and the console with no screen serving one, which installs and removes its own official carts when asked (`board()`); the Wi-Fi page Get Carts opens when the radio has no network, and whether it is still open; the console's consent records, which the install prompt reads and writes (`runtime/shell/app_perms.py`); whether the console has a password and whether one typed is it, which the unreviewed warning's yes takes (`runtime/shell/pkg.py`'s `gated`) | the shell | `hold()`, `release()`, `fit()`, `memory()`, `chip()`, `runtimes()`, `home()`, `can_pick()`, `pick()`, `root()`, `writable()`, `op()`, `rescan()`, `free()`, `find()`, `net()`, `keep()`, `wifi()`, `wifi_open()`, `consent()`, `own()`, `board()`, `locked()`, `unlock()` |
 | `ctx.wifi` | the console's Wi-Fi station, which Settings' Wi-Fi panel scans, joins and forgets through (`station()`), and the radio lease the panel holds while it is open (`hold()`, `release()`, under the grant's app id); never a cart's | the shell | `hold()`, `release()`, `station()` |
 | `ctx.bt` | the Bluetooth keyboard service Settings' keyboard picker drives, or None on a board with none: the touch-only boards' keyboard itself, the T-Deck's second one (`keyboard()`); never a cart's | the shell | `keyboard()` |
 | `ctx.usb` | the USB drive, which lends the card to a computer (`runtime/system/usb_drive.py`): the drive or None (`drive()`), turning it on and off, and its state as the computer moved it (`poll()`); never a cart's | the shell | `drive()`, `turn_on()`, `turn_off()`, `poll()` |

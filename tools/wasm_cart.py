@@ -97,7 +97,8 @@ def assemble(src, stem="main"):
     the Player runs, drawing with the toolkit it links: sdk/include/moybyte/
     ui.h over `libmoyui`), clang's reactor model, so the exports it names (`_init`,
     `_update`, `_draw`) are its loop and no `_start` or `main` is linked,
-    and its memory fixed at the manifest's `memory` pages, as a cart's is;
+    and its memory fixed at the manifest's `memory` pages, as a cart's is,
+    its `__stack_pointer` exported for moy_par's items (moy_cart.h);
     its DWARF stripped (`strip_debug`). A `stem` other than main is an app's
     service entry, `src/<stem>.*`, always a WASI command."""
     wat_src = os.path.join(src, "src", stem + ".wat")
@@ -124,7 +125,7 @@ def assemble(src, stem="main"):
                     and ven.get("wasi") is not True:
                 mem = "%d" % (int(man.get("memory") or 1) * 65536)
                 cmd[-3:-3] = ["-mexec-model=reactor", "-Wl,--initial-memory=" + mem,
-                              "-Wl,--max-memory=" + mem]
+                              "-Wl,--max-memory=" + mem, "-Wl,--export=__stack_pointer"]
             if stem == "main" and ven.get("type") == "app" and ven.get("wasi") is True:
                 cmd += ["-Wl,--gc-sections", libmoyui(sdk)]
         elif os.path.isfile(rs_src):

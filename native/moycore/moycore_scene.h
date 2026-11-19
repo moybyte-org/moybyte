@@ -45,6 +45,7 @@ typedef struct {
     char *name[MOYCORE_SCENES];      /* NUL-terminated */
     char *text[MOYCORE_SCENES];      /* the .moyscene, len[i] bytes */
     size_t len[MOYCORE_SCENES];
+    int active;                      /* a compiled cart's active scene (moycore_lua.h) */
 } moycore_scenes_t;
 
 typedef void *(*moycore_scene_alloc_fn)(size_t n);

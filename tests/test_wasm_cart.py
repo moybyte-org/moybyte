@@ -257,6 +257,44 @@ def test_the_hooks_run_under_the_tick_model(tmp_path):
     assert abs(got[3] - 33333) <= 1, got[3]      # dt is the tick's period
 
 
+# A cart that counts, in pmem slot 0, the ticks it saw "right" held.
+RIGHTS = """
+(module
+  (import "moy" "pmem" (func $pmem (param i32 i32 i32) (result i32)))
+  (import "moy" "btn" (func $btn (param i32 i32) (result i32)))
+  (memory (export "memory") 1 1)
+  (func (export "_init"))
+  (func (export "_draw"))
+  (func (export "_update") (param $dt f32)
+    (if (call $btn (i32.const 1) (i32.const 0))
+      (then (drop (call $pmem (i32.const 0)
+        (i32.add (call $pmem (i32.const 0) (i32.const 0) (i32.const 0)) (i32.const 1))
+        (i32.const 1)))))))
+"""
+
+
+def test_held_aside_it_reads_no_buttons(tmp_path):
+    """A run held aside (runtime/shell/procs.py) is muted, as the board's
+    wasm and Lua runs are: its ticks see no buttons until it is given back."""
+    _binding_or_skip()
+    ws = host_app.build_workstation(_store(tmp_path, _wat_cart("Rights", RIGHTS, 1)))
+    open_cart(ws, "Rights")
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    run = ws.run.player.lua
+    src = ws.input.source("kbd")
+    src.set_button("right", True)
+    run.mute(True)
+    for _ in range(10):
+        ws.input.begin_frame()
+        ws.frame(_DT)
+    assert _pmem(ws)[0] == 0
+    run.mute(False)
+    for _ in range(10):
+        ws.input.begin_frame()
+        ws.frame(_DT)
+    assert _pmem(ws)[0] > 0
+
+
 # A cart that writes time() into pmem slot 0 every _update.
 CLOCK = """
 (module
@@ -329,9 +367,10 @@ def test_a_trap_ends_the_run_with_no_partial_frame_and_no_edit(tmp_path):
     corner = (ws.run.canvas.h - 1) * w
     px = ws.run.canvas._buf[2 * corner] | ws.run.canvas._buf[2 * corner + 1] << 8
     assert px == ws.run.canvas._wire[0], hex(px)
-    # The stop card offers no See why for a compiled cart: Restart and Home.
+    # The stop card offers no See why for a compiled cart: Restart and Home,
+    # and the trap's text under Details (no src/, so no See the code).
     assert ws.pause.open and ws.pause.stopped
-    assert ws.pause.rows == (ws.pause.RESTART, ws.pause.HOME)
+    assert ws.pause.rows == (ws.pause.RESTART, ws.pause.HOME, ws.pause.DETAILS)
 
 
 def test_a_trap_in_init_is_the_carts_error_and_init_runs_once(tmp_path):
@@ -561,7 +600,12 @@ def test_a_build_without_the_runtime_opens_the_runtime_missing_panel(tmp_path):
     ws = host_app.build_workstation(_store(tmp_path, _hello))
     ws.runtimes.pop("wasm", None)
     open_cart(ws, "Hello Wasm")
-    assert "needs the wasm runtime (not in this build)" in ws.run.player.cart_error
+    p = ws.run.player
+    en = json.load(open(os.path.join(ROOT, "native", "moy_spine", "strings", "en.json")))
+    assert p.notice == en["strings"]["say.runtime_text"]      # a kid's words first
+    assert p.notice_title == en["strings"]["say.runtime"]
+    assert p.notice_detail == "needs the wasm runtime (not in this build)"
+    assert ws.pause.rows[-1] == ws.pause.DETAILS               # ...the cause under Details
     assert not ws.wm.top_is("menu")
     _frames(ws, 2)                                # the panel frame must not raise
 
@@ -588,9 +632,10 @@ def test_no_text_write_reaches_the_module(tmp_path):
     path = os.path.join(root, "hello.moy")
     cart = host_app.moy_carts.load(path)
     before = open(os.path.join(path, "main.wasm"), "rb").read()
+    src = open(os.path.join(path, "src", "main.wat")).read()
     status, _ = host_app.moy_carts.save_code(cart, ";; edited\n")
-    assert status == host_app.moy_carts.SAVE_OK
-    assert open(os.path.join(path, "src", "main.wat")).read() == ";; edited\n"
+    assert status == host_app.moy_carts.SAVE_BAD_SYNTAX       # Play would never run it
+    assert open(os.path.join(path, "src", "main.wat")).read() == src
     status, _ = host_app.moy_carts.save_code(cart, "x", name="main.wasm")
     assert status == host_app.moy_carts.SAVE_BAD_SYNTAX
     assert open(os.path.join(path, "main.wasm"), "rb").read() == before

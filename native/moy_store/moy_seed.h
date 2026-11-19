@@ -4,7 +4,7 @@
 // runtime/carts/moy_seed.py's `seed_builtins` documents the rules: the
 // manifest regenerated from the cart's fields
 // in its key order, every payload the cart carries, and a cart's saves and
-// config (pmem.json, config.json) kept across a re-seed. A roster blob is one
+// config (pmem.bin, config.json) kept across a re-seed. A roster blob is one
 // cart's JSON as raw deflate (tools/gen_device_carts.py --packed), inflated
 // with the uzlib the image links for `deflate` into one PSRAM buffer, which is
 // freed before the call returns. What to write is the caller's: the scan's

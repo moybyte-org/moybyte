@@ -242,6 +242,10 @@ class ConsoleDriver:
         self._chord = False     # ...and another key went down meanwhile
         self._pb = 0            # the mouse's buttons held (moy_input PB_*)
         self._after = None      # where the pointer went after this frame's press
+        self._router = None     # the router whose entries the frame loop calls
+        self._entries = None    # (handle_input, handle_pointer), bound once
+        self._dt = 0.0          # the frame's dt, for the loop's draw entry
+        self._draw = self._draw_frame
         self._clock = 1.0       # the table's clock, ms: the frames' dt summed
 
     # -- input the sim feeds in ---------------------------------------------
@@ -450,6 +454,13 @@ class ConsoleDriver:
             policy.back()
 
     # -- per-frame tick ------------------------------------------------------
+    def _draw_frame(self, _dt):
+        """The loop's draw entry: the console's frame at the dt this harness
+        was given; the frames it has drawn."""
+        ws = self.ws
+        ws.frame(self._dt)
+        return ws.frame_state.frames_drawn
+
     def frame(self, dt):
         for name in self._pending:
             self.input.set_held(name, True)
@@ -492,16 +503,22 @@ class ConsoleDriver:
         # tier too: one loop step over no stages but the clock, calling up
         # into the console's three entries in its order. This harness owns the
         # input (above) and the clock, so the frame keeps the dt it was given.
-        ws = self.ws
-        _loop.drive(ws.router.handle_input, ws.router.handle_pointer,
-                    lambda _dt: (ws.frame(dt), ws.frame_state.frames_drawn)[1], dt)
+        # The entries are bound once (a router a rebuild swapped is bound
+        # again): a frame that moves nothing allocates nothing here.
+        r = self.ws.router
+        if r is not self._router:
+            self._router = r
+            self._entries = (r.handle_input, r.handle_pointer)
+        self._dt = dt
+        _loop.drive(self._entries[0], self._entries[1], self._draw, dt)
         # The background scheduler after the frame, as a board's tail runs it:
         # this harness does not sleep, so its budget is the guaranteed slice.
         _sched.tick(0)
         for name in self._pending:
             if name not in self._held_ext:     # never release an explicit hold()
                 self.input.set_held(name, False)
-        self._pending = []
+        if self._pending:
+            self._pending = []
         self._click = False
         self._src.last_key = 0
         if self._after is not None:

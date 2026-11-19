@@ -703,7 +703,7 @@ def test_a_cart_with_no_module_for_this_console_does_not_run(built):
     other = dict(cart, native=["esp32s3"])
     assert rt.module(other) is None
     code, why = rt.command(other, ["hello"])
-    assert code == REFUSED and "no module for this console (host)" in why
+    assert code == REFUSED and why == "it was built for another kind of console (it has no host module)"
 
 
 def test_the_player_leaves_a_native_command_to_the_terminal(term):

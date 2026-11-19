@@ -125,8 +125,9 @@ void moy_shape_shadow_io(const uint16_t *src, uint16_t *also);
 // of buffer rect `outer` but those of `inner` (each x, y, w, h; the clip
 // does not apply): blended under the shadow where it falls, copied where it
 // does not -- a restore and the shadow over it in one pass, each pixel read
-// and stored once. NULL: none. moy_shape_shadow_fill_end lays a fill no
-// shadow took (one that drew nothing) as the copy alone.
+// and stored once. The shadow's hole, the caster's body, is left on the
+// shadow's rows: the caster paints it. NULL: none. moy_shape_shadow_fill_end
+// lays a fill no shadow took (one that drew nothing) as the copy alone.
 void moy_shape_shadow_fill(const uint16_t *src, const int outer[4], const int inner[4]);
 int moy_shape_shadow_fill_end(const moy_text_target_t *t);
 

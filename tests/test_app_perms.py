@@ -75,6 +75,27 @@ def test_a_tier_that_serves_no_row_of_a_permission_is_not_asked_for_it():
         "Use Wi-Fi and the internet"
 
 
+@pytest.mark.parametrize("runtime", ["lua", "wasm"])
+def test_network_on_a_tier_without_it_is_refused_naming_http(runtime):
+    """`network` hands Python's `wifi` and a native module's sockets; a Lua
+    or wasm cart reaches the internet through `http`. A cart of those tiers
+    that asks for `network` is refused at install and at launch with that
+    sentence, never run with the name silently absent."""
+    cart = {"runtime": runtime, "permissions": ["network", "prefs"]}
+    why = P.check(cart, None, ())[2]
+    assert why == ('asks for "network", which is a Python or native cart\'s: a %s cart '
+                   'reaches the internet through "http"' % runtime)
+    cart["permissions"] = ["http", "prefs"]
+    assert P.check(cart, None, ("wifi",)) == (["http", "prefs"], [], None)
+    assert P.prompt(cart)[0] == "Fetch pages from the internet and your network"
+    py = {"runtime": "python", "permissions": ["network"]}
+    assert P.check(py, None, ("wifi",))[2] is None
+    # a wasm app whose Python service holds the sockets asks for them rightly
+    app = {"runtime": "wasm", "type": "app", "permissions": ["network"],
+           "entries": {"service": "svc.py"}}
+    assert P.check(app, None, ("wifi",))[2] is None
+
+
 def test_the_table_is_well_formed():
     seen = set()
     for perm, grants, tiers, prompt, needs, py in P.TABLE:
@@ -194,7 +215,7 @@ def test_a_required_name_the_manifest_does_not_list_refuses():
 
 def test_a_tier_a_row_excludes_is_absent():
     cart = {"runtime": "lua", "permissions": ["editor"], "required": ["editor"]}
-    assert P.check(cart, None, ())[2] == 'needs "editor" - not for a lua cart'
+    assert P.check(cart, None, ())[2] == 'asks for "editor", which a lua cart cannot hold'
 
 
 def test_a_files_folder_the_console_has_none_of_refuses_by_name():
@@ -420,7 +441,7 @@ def test_install_asks_with_the_tables_lines_and_no_has_the_focus(tmp_path):
     ws, app = _store_ws(tmp_path, repo)
     _get(ws, app, "radio")
     assert app.phase == "consent"
-    assert app.question == ["Switch the console's pins", "Keep its own settings"]
+    assert app.question == ["From Test carts", "Switch the console's pins", "Keep its own settings"]
     assert app._ui.box("No") is not None and app._ui.box("Install") is not None
     _frames(ws, 2)
     assert app._focused == "No"
@@ -500,7 +521,7 @@ def test_an_update_that_adds_a_permission_asks_again(tmp_path):
     app.fetched_at = None
     _get(ws, app, "radio")
     assert app.phase == "consent"
-    assert app.question == ["Keep its own settings", "Switch the console's pins"]
+    assert app.question == ["From Test carts", "Keep its own settings", "Switch the console's pins"]
 
 
 def test_a_required_permission_the_console_lacks_is_not_installed(tmp_path):
@@ -509,8 +530,10 @@ def test_a_required_permission_the_console_lacks_is_not_installed(tmp_path):
     ws.gpio = None
     _get(ws, app, "radio")
     assert app.phase == "failed"
-    assert app.why == ('Not for this console: needs "pins" - the %s has none'
-                       % (P.board_words() or "console"))
+    from runtime import cart_index
+    assert app.why == cart_index.NOT_HERE                 # a kid's words
+    assert app.why_detail == ('needs "pins" - the %s has none'   # ...the cause under them
+                              % (P.board_words() or "console"))
     assert not (tmp_path / "carts" / "radio.moy").exists()
 
 

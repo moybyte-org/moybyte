@@ -226,6 +226,20 @@ int moy_app_wasm_row_named(const char *name, size_t n) {
     return -1;
 }
 
+// A game's prefs (module "moybyte.prefs", native/moycore/moycore_wasm_ext.h):
+// the prefs rows above, served from the run's grant as an app's are.
+int32_t moy_app_wasm_prefs_get(void *e, const uint8_t *key, uint32_t key_n, uint8_t *json,
+                               uint32_t json_cap) {
+    return w_prefs_get(e, key, key_n, json, json_cap);
+}
+int32_t moy_app_wasm_prefs_set(void *e, const uint8_t *key, uint32_t key_n,
+                               const uint8_t *json, uint32_t json_n) {
+    return w_prefs_set(e, key, key_n, json, json_n);
+}
+int32_t moy_app_wasm_prefs_clear(void *e, const uint8_t *key, uint32_t key_n) {
+    return w_prefs_clear(e, key, key_n);
+}
+
 // -- a module's imports ----------------------------------------------------------------
 
 static int uleb(const uint8_t *b, size_t n, size_t *at, uint32_t *v) {

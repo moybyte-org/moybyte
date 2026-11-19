@@ -62,10 +62,17 @@ more; the bar's clock turning its minute is an event of its own, one frame.
 Then Settings' Achievements page (docs/history/look_2026-10.md step 32), idle at its
 top and idle again swiped to its end: it allocates nothing either way.
 
+Then, on a console booted under the windowed tier (a run of its own), a
+window dragged across the desk by its title strip: a drag frame allocates
+only the answers the drag moved (DESK_DRAG_FRAME).
+
 Then the home, idle: the launcher's input and frame path with nothing pressed
 paints nothing and allocates nothing. Then its carousel gliding a card and
 back: a moving frame (the band's table pass) allocates under a ceiling,
 HOME_BAND_FRAME, not yet nothing, and the carousel at rest allocates nothing.
+Then a finger on its Games tab, over a shelf of the kid's games: the
+carousel flung (HOME_SWIPE_FRAME, HOME_SWIPE_MEAN) and the icons
+arrangement dragged up its rows and flung (ICONS_SWIPE_MEDIAN).
 
 THE CLOCK. The console's frame is handed one slot of the T-Deck's 60 fps cap as
 its dt, whatever the frame cost (the driver's FRAME_S), and an input is given a
@@ -98,6 +105,7 @@ from unix_mp import require_unix_mp, runtime_tree
 
 ROOT = Path(__file__).resolve().parent.parent
 TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
+P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 
 # -- the hardware under the T-Deck's modules ----------------------------------
 #
@@ -310,7 +318,8 @@ def run_begin(fb, w, h, wire, sheet, cells, mw, mh, snap, aq, pmem, cfg, flags,
 
 
 def wasm_open(module, head, pages, sha, path, swapped, allow_unsigned=False,
-              interp=False, writable=None, ring=0, app=None, layout=None):
+              interp=False, writable=None, ring=0, app=None, layout=None,
+              exts=0):
     return None
 
 
@@ -1220,6 +1229,101 @@ def home(loop, info):
     gc.enable()
     for _ in range(60):
         loop.step()
+    home_swiped(loop, info)
+    home_live(loop, info)
+
+
+def home_live(loop, info):
+    """The home over a LIVE wallpaper (Sakura, a cart with `_update`): every
+    frame is the home's full paint, the wallpaper's frame and its blit
+    included, and allocates nothing beyond what the wallpaper cart's own
+    code makes. Then the carousel dragged across it, the wallpaper held
+    still (`Wallpaper.held`): each frame and whether it advanced."""
+    ws = loop.ws
+    was = ws.look.wallpaper_id
+    ws.look.select_wallpaper("moybyte.sakura", persist=False)
+    for _ in range(60):
+        loop.step()
+    w = ws.wallpaper
+    info["home_live_anim"] = w.is_animating(FRAME_S)
+    gc.collect()
+    gc.disable()
+    d0 = ws.frame_state.frames_drawn
+    info["home_live"] = _frames(loop, @WINDOW_MS@, False, @MIN_FRAMES@)
+    info["home_live_drawn"] = ws.frame_state.frames_drawn - d0
+    gc.enable()
+    g, (bx, by, bw, bh) = ws.launcher, ws.launcher.band_rect()
+    cy = by + bh // 2
+    held = []
+    real = w.held
+
+    def _held():
+        r = real()
+        if r:
+            held.append(1)
+        return r
+    w.held = _held
+    info["home_live_drag"] = _swiped(loop, bx + bw * 3 // 4, cy, bx + bw // 4, cy, 12, 40)
+    w.held = real
+    info["home_live_held"] = len(held)
+    ws.look.select_wallpaper(was, persist=False)
+    for _ in range(60):
+        loop.step()
+
+
+def _swiped(loop, x0, y0, x1, y1, n, steps):
+    """A finger swiped from (x0, y0) to (x1, y1) over `n` frames and let
+    go, and `steps` frames from its press: each frame's allocation, and
+    whether it drew."""
+    import moy_loop
+    from gc import mem_alloc
+    ws = loop.ws
+    out = []
+    gc.collect()
+    gc.disable()
+    moy_loop.swipe(x0, y0, x1, y1, n)
+    for _ in range(steps):
+        d0 = ws.frame_state.frames_drawn
+        m = mem_alloc()
+        loop.step()
+        out.append((mem_alloc() - m, ws.frame_state.frames_drawn != d0))
+    gc.enable()
+    return out
+
+
+def home_swiped(loop, info):
+    """The home's bands under a finger: the carousel flung across, then
+    the icons arrangement dragged up its rows and flung, on the Games tab
+    (the shelf, `_stage_shelf`), and the carousel and the tab put back.
+    What each frame allocates and whether it drew."""
+    ws = loop.ws
+    tab = ws.launcher.tab
+    ws.home.set_home_tab("games")
+
+    def _top():
+        g = ws.launcher
+        g.sel = 0
+        g.scroll = 0
+        ws.mark_dirty()
+        for _ in range(60):
+            loop.step()
+        return g, g.band_rect()
+
+    g, (bx, by, bw, bh) = _top()
+    cy = by + bh // 2
+    info["home_fling"] = _swiped(loop, bx + bw * 3 // 4, cy, bx + bw // 4, cy, 5,
+                                 @FLING_STEPS@)
+    ws.home.set_home_arrangement("icons")
+    g, (bx, by, bw, bh) = _top()
+    info["icons_rows"] = (len(g.items), g.max_scroll())
+    cx = bx + bw // 2
+    info["icons_drag"] = _swiped(loop, cx, by + bh - 10, cx, by + 10, 40, 70)
+    _top()
+    info["icons_fling"] = _swiped(loop, cx, by + bh * 3 // 4, cx, by + bh // 4, 5,
+                                  @FLING_STEPS@)
+    ws.home.set_home_arrangement("carousel")
+    ws.home.set_home_tab(tab)
+    _top()
 
 
 # The console's clock as the measurement drives it: one slot of the T-Deck's
@@ -1328,9 +1432,15 @@ MIN_FRAMES = 150
 BAND_MOVES = 6
 BAND_STEPS = 40
 BAND_REST = 16
+# The frames a fling's run is measured over, from its press: the swipe's
+# five, the coast, the glide home and a rest.
+FLING_STEPS = 150
 
 
-def _stage(dest, exe, apps=False):
+def _stage(dest, exe, apps=False, desk=False):
+    """The T-Deck's image as a board stages it, frozen, and the fakes under
+    it. `desk`: the windowed tier's modules too (the Waveshare P4's from
+    runtime/, which the T-Deck denies) and a desk-sized panel."""
     sys.path.insert(0, str(ROOT / "tools"))
     try:
         import board_config
@@ -1338,7 +1448,13 @@ def _stage(dest, exe, apps=False):
         sys.path.pop(0)
     stage = dest / "stage"
     stage.mkdir()
-    for name, src in board_config.staged_modules(TDECK, root=ROOT).items():
+    mods = board_config.staged_modules(TDECK, root=ROOT)
+    if desk:
+        runtime = ROOT / "runtime"
+        for name, src in board_config.staged_modules(P4, root=ROOT).items():
+            if name not in mods and runtime in Path(src).resolve().parents:
+                mods[name] = src
+    for name, src in mods.items():
         shutil.copyfile(src, stage / name)
     for name, src in board_config.staged_packages(TDECK, root=ROOT).items():
         shutil.copytree(src, stage / name,
@@ -1358,6 +1474,9 @@ def _stage(dest, exe, apps=False):
     fakes = dest / "fakes"
     fakes.mkdir()
     for name, body in FAKES.items():
+        if desk and name == "moy_lcd.py":
+            body = body.replace("WIDTH = 320", "WIDTH = %d" % DESK_W).replace(
+                "HEIGHT = 240", "HEIGHT = %d" % DESK_H)
         (fakes / name).write_text(body.lstrip("\n").replace("@FORMAT@", format_version()))
     cart = dest / "carts" / "frame_probe.moy"
     cart.mkdir(parents=True)
@@ -1374,11 +1493,34 @@ def _stage(dest, exe, apps=False):
                     dest / "carts" / "moybyte.notes.moy")
     shutil.copytree(ROOT / "system_carts" / "moybyte.star_catcher.moy",
                     dest / "carts" / "moybyte.star_catcher.moy")
+    shutil.copytree(ROOT / "system_carts" / "moybyte.sakura.moy",
+                    dest / "carts" / "moybyte.sakura.moy")
     if apps:
+        _stage_shelf(dest)
         for app in ("appearance", "storybook", "get_carts", "my_art"):
             shutil.copytree(ROOT / "system_carts" / ("moybyte.%s.moy" % app),
                             dest / "carts" / ("moybyte.%s.moy" % app))
         _stage_app_data(dest)
+
+
+def _stage_shelf(dest):
+    """Games enough for the home's bands to scroll (the icons' rows past
+    the glass): SHELF_GAMES of the kid's own, copies of Star Catcher under
+    their own names with no cover, so each card is its title tile and no
+    cover decodes inside a measured window."""
+    src = ROOT / "system_carts" / "moybyte.star_catcher.moy"
+    for i in range(SHELF_GAMES):
+        d = dest / "carts" / ("mine.game%02d.moy" % i)
+        shutil.copytree(src, d, ignore=shutil.ignore_patterns("cover.png"))
+        m = json.loads((d / "manifest.json").read_text())
+        m["title"] = "Game %02d" % i
+        m["id"] = "mine.game%02d" % i
+        m["moybyte"].pop("system", None)
+        m["moybyte"].pop("order", None)
+        (d / "manifest.json").write_text(json.dumps(m))
+
+
+SHELF_GAMES = 24
 
 
 def _stage_app_data(dest):
@@ -1438,7 +1580,8 @@ def _run(tmp_path):
                       .replace("@WINDOW_MS@", str(WINDOW_MS))
                       .replace("@MIN_FRAMES@", str(MIN_FRAMES))
                       .replace("@BAND_MOVES@", str(BAND_MOVES))
-                      .replace("@BAND_STEPS@", str(BAND_STEPS)))
+                      .replace("@BAND_STEPS@", str(BAND_STEPS))
+                      .replace("@FLING_STEPS@", str(FLING_STEPS)))
     out_path = tmp_path / "out.txt"
     # stdin stays OPEN and silent, as a board's serial does between commands:
     # the dev channel polls it every frame.
@@ -1681,6 +1824,30 @@ def test_the_home_idle_paints_nothing_and_allocates_nothing(result):
     _assert_quiet(info["home_idle"], "the home idle", text, minute=True)
 
 
+# What the T-Deck home's frame over a live wallpaper may allocate: every
+# frame is a full paint -- the wallpaper, its blit, the hint strip as it was
+# laid out (`HomeHints._hint_laid_out`) and the band's table pass. What is
+# left is the band pass's cards and caption, the path HOME_BAND_FRAME holds
+# a ceiling over (2026-11-18: 576 B, down from 3 KB).
+HOME_LIVE_FRAME = 640
+
+
+def test_a_live_wallpaper_home_frame_allocates_under_its_ceiling(result):
+    """Sakura on the home: every frame paints, and none allocates more than
+    HOME_LIVE_FRAME; dragged across, the wallpaper holds still."""
+    info, text = result
+    assert info["home_live_anim"], text[-3000:]
+    frames = info["home_live"]
+    assert len(frames) > 20 and info["home_live_drawn"] == len(frames), (
+        info["home_live_drawn"], len(frames))
+    assert max(frames) <= HOME_LIVE_FRAME, (
+        "a live-wallpaper home frame allocated over %d bytes: %s"
+        % (HOME_LIVE_FRAME, sorted(set(frames))))
+    assert info["home_live_held"] > 0
+    drag = [a for a, _drew in info["home_live_drag"]]
+    assert max(drag) <= HOME_SWIPE_FRAME, drag
+
+
 # What one moving frame of the T-Deck home's carousel may allocate: a
 # ceiling, not zero. The band's table pass and the frame around it allocate
 # 1.1-2.8 KB a moving frame (2026-10-30; the private band path before it
@@ -1705,6 +1872,52 @@ def test_a_home_band_frame_allocates_under_its_ceiling(result):
     rest = [k for k in range(len(band)) if k % BAND_STEPS >= BAND_STEPS - BAND_REST]
     assert not any(info["home_band_drew"][k] for k in rest), info["home_band_drew"]
     _assert_quiet([band[k] for k in rest], "the home band at rest", text)
+
+
+# What a frame of a finger on the home's bands may allocate: a ceiling, not
+# zero. A moving carousel frame lays its cards out again (each card's rect
+# and its place in the row, `Carousel._visible`), the band's floor and the
+# rects it hands as damage are new each frame (`band_floor`), and a card
+# with no cover draws its title tile. Measured 2026-11-18 on the shelf
+# `_stage_shelf` stages: the carousel's fling at most 2928 bytes a frame and
+# 1309 on average (3264 and 1821 before its keys were kept and its geometry
+# read once a pass); the icons' drag a median of 736 (1056 before) and
+# their fling 784, around two frames of the drag over 7 KB that were there
+# before too.
+HOME_SWIPE_FRAME = 3 * 1024
+HOME_SWIPE_MEAN = 1536
+ICONS_SWIPE_MEDIAN = 1024
+
+
+def _moved(info, key, least):
+    """The allocation of each frame of run `key` that drew, at least `least`."""
+    moved = [b for b, drew in info[key] if drew]
+    assert len(moved) >= least, (key, info[key])
+    return moved
+
+
+def test_a_home_fling_allocates_under_its_ceiling(result):
+    """The carousel flung by a finger: no frame of the swipe, the coast, the
+    glide to the nearest card and the rest allocates more than
+    HOME_SWIPE_FRAME, the frames that drew no more than HOME_SWIPE_MEAN on
+    average, and the row at rest allocates nothing."""
+    info, text = result
+    run = info["home_fling"]
+    moved = _moved(info, "home_fling", 30)
+    assert max(b for b, _drew in run) <= HOME_SWIPE_FRAME, ("a fling frame", run)
+    assert sum(moved) // len(moved) <= HOME_SWIPE_MEAN, ("the fling's frames", moved)
+    _assert_quiet([b for b, _drew in run[-30:]], "the carousel at rest", text)
+
+
+def test_the_icons_dragged_and_flung_allocate_under_the_ceiling(result):
+    """The icons arrangement dragged up its rows and flung (rows enough to
+    run past the glass): the frames that drew allocate a median of no more
+    than ICONS_SWIPE_MEDIAN."""
+    info, text = result
+    assert info["icons_rows"][1] > 0, info["icons_rows"]
+    for key, least in (("icons_drag", 30), ("icons_fling", 6)):
+        moved = sorted(_moved(info, key, least))
+        assert moved[len(moved) // 2] <= ICONS_SWIPE_MEDIAN, (key, info[key])
 
 
 # One answer tuple: a 5-tuple (the card's) is seven words, two 16-byte blocks.
@@ -1892,6 +2105,201 @@ def test_a_splits_divider_drag_allocates_nothing(result):
     assert any(act and got for _b, act, got in at), at
     assert all(b == 0 for b, _act, got in at if not got), at
     assert all(b <= ANSWER for b, _act, got in at if got), at
+
+
+# -- a window dragged on the desk ---------------------------------------------
+#
+# The P4s' window drag collected for ~100 ms about every 7 s (#249, 2026-11-16):
+# a drag frame left ~3.4 KB of garbage on glass. Here the same console boots
+# under the windowed tier (WindowedWM, the T-Deck's canvas grown to a desk:
+# the shared WM and toolkit, not the P4's PPA canvas), Settings is opened,
+# and the kernel's own drag (`moy_loop.drag`, the perf pass's `drag` word)
+# moves it by its title strip. A drag frame may allocate the answers the
+# drag moved and nothing else: the window's content rect (it moved), and
+# the finger's -- the game pointer the console publishes while it is down,
+# its mapping, and the pointer state the frame keeps to compare the next
+# with. That is DESK_DRAG_FRAME. The WM's own frame -- the window shape's
+# signature, the desk's, the backdrop's restore and its history, the
+# chrome's and the chips' signatures, the extents and rects -- compares and
+# writes in place.
+
+DESK_W, DESK_H = 800, 480
+DESK_DRAG = 90
+DESK_DRAG_FRAME = 112
+
+DESK_DRIVER = r'''
+import sys
+import gc
+import json
+import _thread
+import time
+ROOT = @ROOT@
+sys.path.insert(0, ROOT + "/stage")
+sys.path.insert(0, ROOT + "/fakes")
+DONE = _thread.allocate_lock()
+DONE.acquire()
+FRAME_S = 1 / 60
+
+
+class _HeldClock:
+    def __init__(self):
+        self.lt = time.localtime()
+
+    def localtime(self, t=None):
+        return self.lt
+
+
+def main():
+    try:
+        import fake_machine
+        sys.modules["machine"] = fake_machine
+        import moycore as _real_moycore
+        import moycore_shim
+        moycore_shim.install(_real_moycore, moycore_shim)
+        sys.modules["moycore"] = moycore_shim
+        import moybyte_sd
+        moybyte_sd._live_mounted = True
+        import device_boot
+        import moy_runtime
+        import moy_loop
+        import bar_layer
+        from wm_windowed import WindowedWM
+
+        def _load(self, boot, store):
+            carts, root = boot.load_carts(store, [], root=ROOT + "/carts", media="SD")
+            import os
+            import moy_store_base
+            moy_store_base.seeded(root, [n for n in os.listdir(root)
+                                         if moy_store_base.builtin_ns(n)])
+            self.on_sd = True
+            return carts, root, None
+
+        moy_runtime._Storage.load = _load
+        moy_runtime.POWER_SAVE_MS = 0
+        build = moy_runtime.build_desktop
+
+        def _windowed(*a, **k):
+            k["wm"] = WindowedWM
+            k["game_wh"] = (320, 240)
+            return build(*a, **k)
+
+        moy_runtime.build_desktop = _windowed
+        ws = moy_runtime.run_desktop().ws
+        frame = ws.frame
+        ws.frame = lambda dt: frame(FRAME_S)
+        bar_layer._wc = _HeldClock()
+        ws.bar_layer.clock_at = -1
+        step = moy_loop.step
+        for _ in range(60):
+            step()
+        ws.open_settings()
+        for _ in range(90):
+            step()
+        wm = ws.wm
+        win = wm.windows[wm.z_order[-1]]
+        info = {"order": list(wm.z_order), "x0": win.x, "y0": win.y}
+        moy_loop.drag(win.x + 30, win.y + max(6, win.title_h // 2), @N@ + 60, 6)
+        for _ in range(30):
+            step()
+        gc.collect()
+        gc.disable()
+        out = []
+        drawn = []
+        moved = 0
+        for _ in range(@N@):
+            n = ws.frame_state.frames_drawn
+            x = win.x
+            a = gc.mem_alloc()
+            step()
+            out.append(gc.mem_alloc() - a)
+            drawn.append(ws.frame_state.frames_drawn - n)
+            moved += win.x != x
+        gc.enable()
+        info["drag"] = out
+        info["drawn"] = drawn
+        info["moved"] = moved
+        info["dragging"] = wm._drag is not None
+        for _ in range(30):
+            step()
+        # The desk over a live wallpaper: every frame renders the desk.
+        ws.look.select_wallpaper("moybyte.sakura", persist=False)
+        for _ in range(60):
+            step()
+        info["live_anim"] = ws.wallpaper.is_animating(FRAME_S)
+        gc.collect()
+        gc.disable()
+        live = []
+        d0 = ws.frame_state.frames_drawn
+        for _ in range(@N@):
+            a = gc.mem_alloc()
+            step()
+            live.append(gc.mem_alloc() - a)
+        gc.enable()
+        info["live"] = live
+        info["live_drawn"] = ws.frame_state.frames_drawn - d0
+        print("RESULT " + json.dumps(info))
+    except BaseException as exc:             # noqa -- say it, then end the run
+        sys.print_exception(exc)
+    DONE.release()
+
+
+_thread.stack_size(4 << 20)
+_thread.start_new_thread(main, ())
+DONE.acquire()
+time.sleep_ms(50)
+'''
+
+
+@pytest.fixture(scope="module")
+def desk(tmp_path_factory):
+    exe = require_unix_mp(
+        "moycore", "moy_gfx", "moy_audio", board_model=True,
+        why="The desk's window drag allocating nothing of its own is measured "
+            "only on the boards' Python heap.")
+    dest = tmp_path_factory.mktemp("frame_alloc_desk")
+    _stage(dest, exe, desk=True)
+    script = dest / "driver.py"
+    script.write_text(DESK_DRIVER.replace("@ROOT@", repr(str(dest)))
+                      .replace("@N@", str(DESK_DRAG)))
+    out = subprocess.run([exe, "-X", "heapsize=64M", str(script)],
+                         stdin=subprocess.PIPE, capture_output=True, text=True,
+                         timeout=600)
+    text = out.stdout + out.stderr
+    for line in text.splitlines():
+        if line.startswith("RESULT "):
+            return json.loads(line[7:]), text
+    raise AssertionError("the desk driver reported nothing:\n" + text[-4000:])
+
+
+def test_the_desk_drag_moves_a_window_and_paints_every_frame(desk):
+    info, text = desk
+    assert info["order"] == ["settings"] and info["dragging"], text[-3000:]
+    assert info["drawn"] == [1] * DESK_DRAG, info["drawn"]
+    assert info["moved"] >= DESK_DRAG * 3 // 4, info["moved"]
+
+
+# What a desk frame over a live wallpaper may allocate: the desk renders
+# whole every frame, its column, quiet rectangles and tiles' look kept
+# (`_BackdropLayer._icon_rects`); what is left is the windows' chrome and
+# the taskbar's chips, which every desk repaint draws (2026-11-18: 448 B,
+# down from 3.3 KB).
+DESK_LIVE_FRAME = 512
+
+
+def test_a_live_wallpaper_desk_frame_allocates_under_its_ceiling(desk):
+    info, text = desk
+    assert info["live_anim"], text[-2000:]
+    assert info["live_drawn"] == DESK_DRAG, info["live_drawn"]
+    assert max(info["live"]) <= DESK_LIVE_FRAME, (
+        "a live-wallpaper desk frame allocated over %d bytes: %s"
+        % (DESK_LIVE_FRAME, info["live"]))
+
+
+def test_a_desk_drag_frame_allocates_only_the_answers_the_drag_moved(desk):
+    info, text = desk
+    drag = info["drag"]
+    assert max(drag) <= DESK_DRAG_FRAME, (
+        "a window drag frame allocated over %d bytes: %s" % (DESK_DRAG_FRAME, drag))
 
 
 MATCH_DRIVER = r'''

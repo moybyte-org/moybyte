@@ -179,7 +179,7 @@ def test_put_then_get_moves_a_tile_between_carts_via_ui(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
 
     # Cart A: open the paint editor, paint a recognizable tile, PUT it to shared.
-    _open_cart(ws, "Pixel Pet")
+    _open_cart(ws, "Harpoon Pop")
     ws.text.open_paint()
     assert ws.menu_view == "paint"
     src_tile = ws.paint.n
@@ -217,7 +217,7 @@ def test_put_then_get_moves_a_tile_between_carts_via_ui(tmp_path):
 
 def test_get_reports_when_shared_sheet_is_empty(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _open_cart(ws, "Pixel Pet")
+    _open_cart(ws, "Harpoon Pop")
     ws.text.open_paint()
     _tap(ws, ws.paint_layer.layout.get_btn)                 # nothing saved yet
     assert ws.paint_status in ("NO SHARED", "SHARED EMPTY")

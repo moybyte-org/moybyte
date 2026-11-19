@@ -533,7 +533,8 @@ static mp_obj_t app_role(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(app_role_obj, 5, 5, app_role);
 
-// run(g, roles): an app's run, as the bytes a tier's open copies.
+// run(g, roles): an app's run, as the bytes a tier's open copies; "game"
+// among the roles is a game's run (MOY_APP_RUN_GAME).
 static mp_obj_t app_run(mp_obj_t self_in, mp_obj_t g, mp_obj_t roles) {
     app_obj_t *self = MP_OBJ_TO_PTR(self_in);
     uint32_t h = (uint32_t)mp_obj_get_int_truncated(g);
@@ -541,8 +542,18 @@ static mp_obj_t app_run(mp_obj_t self_in, mp_obj_t g, mp_obj_t roles) {
     if (h == 0u) {
         return mp_const_none;
     }
+    mp_obj_t game = MP_OBJ_NEW_QSTR(MP_QSTR_game);
+    uint32_t flag = mp_binary_op(MP_BINARY_OP_IN, game, roles) == mp_const_true
+                    ? MOY_APP_RUN_GAME : 0u;
+    mp_obj_t only = mp_obj_new_list(0, NULL);
+    mp_obj_t it = mp_getiter(roles, NULL), r1;
+    while ((r1 = mp_iternext(it)) != MP_OBJ_STOP_ITERATION) {
+        if (!mp_obj_equal(r1, game)) {
+            mp_obj_list_append(only, r1);
+        }
+    }
     moy_app_run_t r;
-    moy_app_run_make(self->a, h, roles_mask(roles), &r);
+    moy_app_run_make(self->a, h, roles_mask(only) | flag, &r);
     return mp_obj_new_bytes((const byte *)&r, sizeof(r));
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(app_run_obj, app_run);
@@ -1796,6 +1807,8 @@ SERVED(install, INSTALL, wifi_open)
 SERVED(install, INSTALL, consent)
 SERVED(install, INSTALL, own)
 SERVED(install, INSTALL, board)
+SERVED(install, INSTALL, locked)
+SERVED(install, INSTALL, unlock)
 
 static const mp_rom_map_elem_t install_locals_table[] = {
     ROW(install, hold)
@@ -1820,6 +1833,8 @@ static const mp_rom_map_elem_t install_locals_table[] = {
     ROW(install, consent)
     ROW(install, own)
     ROW(install, board)
+    ROW(install, locked)
+    ROW(install, unlock)
 };
 SERVED_ROLE(install, Install)
 

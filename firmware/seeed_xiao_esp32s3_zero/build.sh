@@ -104,6 +104,11 @@ moybyte_patch_pwm_ledc_book
 #    request. Taken the day something here allocates at a rate, with the
 #    rebuild and the boot check that costs.
 #
+# DECLINED moybyte_patch_map_load -- a hash map grown at three quarters full
+#    shortens the probe a missing attribute walks, paid for in heap on every
+#    map above twelve slots. It is bought per frame and this board has no
+#    frame loop. Taken the day something here looks names up at a rate.
+#
 # DECLINED moybyte_patch_gc_meters -- gc.pauses() feeds the PERF line and
 #    gc.areas() the dev channel's `heapcaps`; this board runs neither.
 #

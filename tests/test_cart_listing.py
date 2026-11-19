@@ -118,4 +118,4 @@ def test_the_seed_games_each_name_a_genre_and_a_line():
         assert cl.genre(man.get("genre")), d.name
         text = man.get("description")
         assert text and cl.description(text) == text, d.name
-    assert len(games) >= 15
+    assert len(games) >= 10

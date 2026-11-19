@@ -95,9 +95,14 @@ def _manifest(folder):
 # -- every system cart has a faithful embedded mirror -----------------------
 
 def test_every_system_cart_has_an_embedded_entry():
+    """Every seed cart but a test fixture or an official cart no store is
+    seeded with, which no image carries (gen_device_carts.in_image)."""
     carts = _carts_by_title()
     for folder in sorted(p.name[:-4] for p in SYSTEM_CARTS.glob("*.moy")):
         man = _manifest(folder)
+        if not _gdc.in_image(man):
+            assert man["title"] not in carts, "an image carries " + folder
+            continue
         assert man["title"] in carts, "no embedded CARTS entry mirrors " + folder
         assert TITLE_TO_FOLDER[man["title"]] == folder
 
@@ -213,7 +218,7 @@ def test_embedded_edit_and_cfg_match_manifest():
 
 
 def test_embedded_blocks_match_blocks_json_or_both_absent():
-    # A block-authored cart (#29: tap_game) carries its blocks.json into the bundle
+    # A block-authored cart (#29: Tap Only Red) carries its blocks.json into the bundle
     # (parsed) so the on-device block editor opens it as blocks; a code-only cart has
     # no "blocks" key. Drift fails here.
     carts = _carts_by_title()
@@ -388,7 +393,7 @@ def test_seed_builtins_overwrites_when_version_is_newer(tmp_path):
 
 
 def test_seed_builtins_preserves_saves_and_config_across_version_bump(tmp_path):
-    # A re-seed replaces code/art but keeps the kid's data: pmem.json (high scores /
+    # A re-seed replaces code/art but keeps the kid's data: pmem.bin (high scores /
     # save state) and config.json (Make-it-mine tuning) survive the bump.
     from runtime import moy_carts
 

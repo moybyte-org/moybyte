@@ -391,6 +391,7 @@ class P4Board:
         port -- how the host tests drive the reply reader (read/write/flush and
         a `port` name are the whole contract) with no board on the desk."""
         decl = declared_serial(board_dir or P4_BOARD_DIR)
+        self.board_dir = board_dir or P4_BOARD_DIR
         self.log = log if log is not None else (lambda s: None)
         self.attach_only = bool(decl["attach_only"])
         self.expect_board = declared_board_id(board_dir or P4_BOARD_DIR)

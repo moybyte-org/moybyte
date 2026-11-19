@@ -126,7 +126,8 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
         self._ck = _Keyed()
         self._beside_drew = []
         # what the hint strip's key was made of, and the key (`_outside_key`)
-        self._ok = [None, None, None, None, None, None, None, None]
+        self._ok = [None, None, None, None, None, None, None, None, None]
+        self._st_parts = [None] * 16  # the statics key's parts (`_statics_key`)
         self._zone_bump = 0           # the tab row's focus moved (the bar's zone shows it)
         # Retained WHOLE-frame cache (2026-07-27, the damage-model doctrine at
         # shelf granularity): the last full home frame, captured at the END of
@@ -347,14 +348,36 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
         streak re-arms. Where the keys are -- the tab row, the bar, a card --
         is not in it: the tabs are the bar's, which a band frame draws, the
         hint strip names the tab row's keys under its own key (`_outside_key`)
-        and the selected card wears the focus as its part's gen."""
+        and the selected card wears the focus as its part's gen. The base's
+        six (`_statics_base`) then these, read into a kept list and made a
+        tuple only where one moved from the key the band last keyed on
+        (`_band_key`): that tuple while they stand."""
         ws = self.ws
-        return _statics_base(ws, cv, self.grid) + (
-            ws.look.wallpaper_id, modal_keys(ws),
-            getattr(ws, "search_query", ""), getattr(ws, "search_typing", False),
-            getattr(ws, "search_typing", False) and ws.text.can_type(),
-            self.grid.tab, self._button_focus, self.grid.arrangement,
-            self.grid.statics_sel(), self._back_tip)
+        g = self.grid
+        look = ws.look
+        v = self._st_parts
+        v[0] = cv.w
+        v[1] = cv.h
+        v[2] = ws.layout.fs
+        v[3] = look.look_gen
+        v[4] = g.band_rect()
+        v[5] = len(g.items)
+        v[6] = look.wallpaper_id
+        v[7] = modal_keys(ws)
+        v[8] = getattr(ws, "search_query", "")
+        typing = v[9] = getattr(ws, "search_typing", False)
+        v[10] = typing and ws.text.can_type()
+        v[11] = g.tab
+        v[12] = self._button_focus
+        v[13] = g.arrangement
+        v[14] = g.statics_sel()
+        v[15] = self._back_tip
+        k = self._sk.v
+        i = 0
+        if k is not None:
+            while i < 16 and v[i] == k[i]:
+                i += 1
+        return k if i == 16 else tuple(v)
 
     def _retained_key(self, cv, statics=None):
         """Everything the WHOLE home frame's pixels are a pure function of: the
@@ -504,10 +527,16 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
         one full-screen copy (~26ms on P4) charged only when the key CHANGED --
         once per settled state, not per frame. Skipped mid-drag/fling (the key
         carries the scroll offset, so every frame would re-capture) and while
-        anything animates (those pixels are not a pure function of the key)."""
+        anything animates (those pixels are not a pure function of the key),
+        which also forfeits the frame it holds: a live wallpaper has moved
+        under it, and a gesture holding the wallpaper still must not stamp
+        the frame of another moment (`Wallpaper.held`)."""
         ws = self.ws
-        if (self._lib_unsupported or self.grid.dragging
-                or self.grid.flinging or ws.animating(dt)):
+        if self._lib_unsupported or self.grid.dragging or self.grid.flinging:
+            return
+        if ws.animating(dt):
+            if ws.wallpaper.is_animating(dt):
+                self._lib_key = None
             return
         if getattr(cv, "RETAINED_FRAMES", 0) < 1:
             return              # a canvas that retains nothing has no frame to copy
@@ -572,7 +601,8 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
         bd = self._bd_now
         if bd is not None:
             fill = self.ws.wallpaper.restorer(cv, bd)
-        elif self._band_bg is None or self._band_key != self._band_key_of(cv):
+        elif (self._band_bg is None or self._band_key is None
+              or self._band_key != self._band_key_of(cv)):
             return False
         else:
             fill = self._backdrop_fill
@@ -635,9 +665,16 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
             m[5] = cm
             m[6] = g.favorite_for
         hint = m[7]
+        now = m[8]
         if isinstance(g, IconHome) and g._cells().caption is not None:
-            return (hint, (g.sel, g.today()))
-        return (hint, None)
+            sel = g.sel
+            day = g.today()
+            if now is None or now[0] is not hint or now[1] is None or now[1][0] != sel \
+                    or now[1][1] != day:
+                now = m[8] = (hint, (sel, day))
+        elif now is None or now[0] is not hint or now[1] is not None:
+            now = m[8] = (hint, None)
+        return now
 
     def _beside(self, cv, whole, draw=True):
         """The parts outside the band a selection changes (the hint strip,
@@ -966,6 +1003,14 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
             wm.hand_content_damage(cv, bx, by, bw, bh)
         return laid
 
+    def _band_owed(self):
+        """Whether a band pass that answered -1 (a buffer lags its band)
+        owes the frames that bring every buffer to it: where the wallpaper
+        puts its own pixels back and the band's keys stand. Keys of -1 (the
+        band not the home's alone on the glass: a dialog over it) keep
+        nothing, so no frame pays that debt."""
+        return self._bd_now is not None and self._keys[0] != -1
+
     def _still_debt(self):
         """Ask for the frame that brings one more buffer to this frame,
         while nothing moves and no press waits on it (as the windowed WM
@@ -1023,7 +1068,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
         # band's record stays honest.
         # (under the menu's hold the retained frame is the one before it)
         if not ws.menu_ui.holds_home() and self._try_stamp_retained(cv, dt):
-            if self._band_note(cv, dt) == -1 and self._bd_now is not None:
+            if self._band_note(cv, dt) == -1 and self._band_owed():
                 self._still_debt()
             parts = self._still_now(cv, dt)
             if parts is not None and not self._note_still(cv, parts):
@@ -1056,7 +1101,7 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
             _t3 = _ticks_ms()
             ws.pf_home = (_ticks_diff(_t1, _t0), _ticks_diff(_t2, _t1),
                            _ticks_diff(_t3, _t2))
-        if end == -1 and self._bd_now is not None:
+        if end == -1 and self._band_owed():
             self._still_debt()       # every buffer to this frame: the next step is a band frame
         parts = self._still_now(cv, dt)
         owed = parts is not None and not self._note_still(cv, parts)
@@ -1422,6 +1467,8 @@ class LauncherHomeLayer(HomeHints, HomeDetails, HomeZone, HomeSearch, Layer):
             ws.confirm.ask(self.grid.selected())   # never on one press: it asks
         elif verb == "favourite":
             self.toggle_favourite()
+        elif verb == "send":
+            ws.link.beam_send(ws, self.grid.selected())
         elif verb == "options":
             self.open_card_menu()
         elif verb == "window":

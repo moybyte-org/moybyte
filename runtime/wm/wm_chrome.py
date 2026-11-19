@@ -24,6 +24,7 @@ import layout_base as _layout_base
 import ui_draw as _ui_draw
 from bar_layer import glyph as _bar_glyph
 import iconsets as _iconsets
+from wm_parts import _set_rect
 
 # The frame itself (ring, strip, title, buttons, shadow) is the theme's frame
 # style, drawn in C (ui.frame); the letterbox bezel keeps the shadow's black.
@@ -47,6 +48,7 @@ THEME_TITLE = "Theme"
 # separator and the cart; the separator is a hyphen in a face without the dot
 # (petme128). A chip under the 2026-10 look shows the app alone.
 _SEP_DOT, _SEP_ASCII = " \u00b7 ", " - "
+_SEPS = (_SEP_DOT, _SEP_ASCII)
 _PLAY = "Play"
 
 # The title icon of a window no app cart draws (`_win_icon`).
@@ -105,10 +107,29 @@ class WindowChrome:
             self._full_chrome(win, focused, quiet)
             return
         btns = self._win_btns(win)
-        sig = (win.x, win.y, win.w, win.h, win.title_h, focused,
-               self._win_title(win), btns, self.ws.look.look_gen, self._fs())
+        title = self._win_title(win)
+        look = self.ws.look.look_gen
+        fs = self._fs()
+        k = win._chrome_keys
+        if (k[0] != win.x or k[1] != win.y or k[2] != win.w or k[3] != win.h
+                or k[4] != win.title_h or k[5] != focused or k[6] != title
+                or k[7] != btns or k[8] != look or k[9] != fs):
+            k[0] = win.x
+            k[1] = win.y
+            k[2] = win.w
+            k[3] = win.h
+            k[4] = win.title_h
+            k[5] = focused
+            k[6] = title
+            k[7] = btns
+            k[8] = look
+            k[9] = fs
+            self._chrome_count += 1       # one count for every window's, so a
+            win._chrome_gen = self._chrome_count  # new window never repeats one
+        sig = win._chrome_gen
         if sig != getattr(win, "_chrome_sig", None):
             self._win_touched = True      # the chrome's pixels differ from last frame's
+            self._outside_f = self.ws.frame_state.frames_drawn
         if not quiet or sig != getattr(win, "_chrome_sig", None):
             win._chrome_sig = sig
             win._chrome_streak = 0
@@ -121,9 +142,10 @@ class WindowChrome:
         # The game window's content stands in further than the frame takes
         # (_win_edge): the frame's body paints that matte, as it does the foot.
         matte = _ui_draw.FRAME_MATTE if win.edge > self._frame_edge() else 0
-        _ui_draw.frame(self.root_canvas, self.ws.theme_colors, (win.x, win.y, win.w, win.h),
-                  win.title_h, self._win_title(win), focused, int(btns) | matte, self._fs())
-        slot = _ui_draw.frame_icon((win.x, win.y, win.w, win.h), win.title_h, btns)
+        rect = _set_rect(win._frame_rect, win.x, win.y, win.w, win.h)
+        _ui_draw.frame(self.root_canvas, self.ws.theme_colors, rect,
+                  win.title_h, title, focused, int(btns) | matte, fs)
+        slot = _ui_draw.frame_icon(rect, win.title_h, btns, win._icon_rect)
         if slot is not None:
             self._win_icon(win, slot, focused)
         self._win_grip(win, focused)
@@ -147,6 +169,7 @@ class WindowChrome:
                self.ws.look.look_gen, self._fs())
         if sig != getattr(win, "_chrome_sig", None):
             self._win_touched = True
+            self._outside_f = self.ws.frame_state.frames_drawn
         if not quiet or sig != getattr(win, "_chrome_sig", None):
             win._chrome_sig = sig
             win._chrome_streak = 0
@@ -284,9 +307,13 @@ class WindowChrome:
         review R3-25)."""
         if not _ui_draw.depth()[12]:
             return 0
-        lk = self.ws.look.live.look[0]
-        w = max(lk.get("win.frame.w", 0), lk.get("win.frame_back.w", 0))
-        return max(0, (w + 50) // 100 - 1)
+        look = self.ws.look
+        if self._edge_gen != look.look_gen:   # the look's, read once a publish
+            lk = look.live.look[0]
+            w = max(lk.get("win.frame.w", 0), lk.get("win.frame_back.w", 0))
+            self._edge = max(0, (w + 50) // 100 - 1)
+            self._edge_gen = look.look_gen
+        return self._edge
 
     def _win_edge(self, win):
         """The columns `win`'s content stands in from its frame each side:
@@ -299,15 +326,23 @@ class WindowChrome:
             return max(e, self._win_foot(win))
         return e
 
-    def _pad_extent(self, win, x, y, w, h):
+    def _pad_extent(self, win, x, y, w, h, out=None):
         """(x, y, w, h) grown by what its draw touches beyond it: the border,
         the classic 3px shadow, or the depth's shadow at its full size; a
-        full-screen window draws nothing past the glass it covers."""
+        full-screen window draws nothing past the glass it covers. Written
+        into the list `out` when one is given."""
         if win.saved is not None:
+            if out is not None:
+                return _set_rect(out, x, y, w, h)
             return (x, y, w, h)
         if _ui_draw.depth()[12]:
             g = _ui_draw.frame_geom(w, h, win.title_h)
+            if out is not None:
+                return _set_rect(out, x - g[2] - 2, y - g[3] - 2, w + g[2] + g[4] + 4,
+                                 h + g[3] + g[5] + 4)
             return (x - g[2] - 2, y - g[3] - 2, w + g[2] + g[4] + 4, h + g[3] + g[5] + 4)
+        if out is not None:
+            return _set_rect(out, x - 2, y - 2, w + 7, h + 7)
         return (x - 2, y - 2, w + 7, h + 7)
 
     def draw_unders(self, clip=None):
@@ -360,12 +395,13 @@ class WindowChrome:
 
     def _shown_rect(self, win):
         """Where `win` stands this frame: a live resize's rubber rect, else
-        its own -- what its shadow and outline fringe follow."""
+        its own (the window's kept list, written in place: read it, never
+        keep it) -- what its shadow and outline fringe follow."""
         g = self._resize
         if (g is not None and self.windows.get(g[0]) is win
                 and win.kind != "desktop" and self._live_resize_ok()):
             return (g[10], g[11], g[5], g[6])
-        return (win.x, win.y, win.w, win.h)
+        return _set_rect(win._shown, win.x, win.y, win.w, win.h)
 
     def _cast_onto(self, i, within=None):
         """The windows above z-slot `i` cast their shadows and outline
@@ -458,7 +494,11 @@ class WindowChrome:
         named = self._page_named(win)
         if named:
             return named                      # the page a shell app names (a story's)
-        base = ws.spine.app_title(win.kind) or _TITLES.get(win.kind, win.kind.upper())
+        base = ws.spine.app_title(win.kind)
+        if not base:
+            base = _TITLES.get(win.kind)
+            if base is None:
+                base = win.kind.upper()
         app = ws.app(win.kind)
         host = getattr(app, "_ui", None) if getattr(app, "UI", False) else None
         if host is not None:
@@ -483,7 +523,7 @@ class WindowChrome:
         named = self._page_named(win)
         if named and t == named:
             t = self.ws.spine.app_title(win.kind) or t  # the chip names the app
-        for sep in (_SEP_DOT, _SEP_ASCII):
+        for sep in _SEPS:
             at = t.find(sep)
             if at > 0 and win.kind == "desktop" and self.ws.run.app_window_canvas:
                 return t[:at]                     # an app's chip names the app
@@ -678,12 +718,36 @@ class WindowChrome:
 
     def _chips_cell(self):
         """(bar, cell) of the desk's `chips` widget in the root layout's
-        packing (shell_layout.pack), or None where no bar places it."""
-        for bar in self.root_ctx.layout.bars:
+        packing (shell_layout.pack), or None where no bar places it. Kept
+        while the packing stands: a new packing is a new list."""
+        bars = self.root_ctx.layout.bars
+        m = self._cell_memo
+        if m is not None and m[0] is bars:
+            return m[1]
+        got = None
+        for bar in bars:
             for c in bar[3]:
-                if c[0] == "chips":
-                    return bar, c
-        return None
+                if c[0] == "chips" and got is None:
+                    got = (bar, c)
+        self._cell_memo = (bars, got)
+        return got
+
+    def _chips_same(self, m, side):
+        """Whether the open windows and their chip titles are memo `m`'s,
+        compared in place (`_chip_rects`)."""
+        kinds, titles = m[0], m[1]
+        j = 0
+        for k in self._kinds:
+            win = self.windows.get(k)
+            if win is None:
+                continue
+            if j >= len(kinds) or kinds[j] != k:
+                return False
+            t = self._win_title(win) if side else self._chip_title(win)
+            if titles[j] != t:
+                return False
+            j += 1
+        return j == len(kinds)
 
     def _chip_rects(self):
         """One chip per open window, in the `chips` widget's cell: across a
@@ -695,26 +759,34 @@ class WindowChrome:
         back-stack's, never the z-order, so a chip never moves when the focus
         does), on the root canvas; deterministic, so draw + hit-test share it
         without stored state. The answer is kept while the windows, their
-        titles, the cell and the scales stand (`_chip_memo`): the list is
+        titles, the cell and the scales stand (`_chip_memo`, compared in place
+        so that a frame that asks again allocates nothing): the list is
         shared, never changed."""
-        kinds = tuple(k for k in self._kinds if k in self.windows)
-        if not kinds:
-            return []
         got = self._chips_cell()
         if got is None:
             return []
         (edge, (bx, by, bw, bh), _dy, _cells), (_n, (cx, cy, cw, ch), _t, slot) = got
         lay = self.root_ctx.layout
         fs = lay.fs
-        side = edge in ("left", "right")
+        side = edge == "left" or edge == "right"
+        m = self._chip_memo
+        if (m is not None and m[2] is got and m[3] == fs and m[4] == lay.cs
+                and self._chips_same(m, side)):
+            return m[5]
+        return self._chips_made(got, lay, fs, side)
+
+    def _chips_made(self, got, lay, fs, side):
+        """`_chip_rects`' answer made again (its comprehensions' cells are
+        made on every call of the function that holds them, so they live
+        here, where only a change runs)."""
+        (edge, (bx, by, bw, bh), _dy, _cells), (_n, (cx, cy, cw, ch), _t, slot) = got
+        kinds = tuple(k for k in self._kinds if k in self.windows)
+        if not kinds:
+            return []
         if side:
             titles = tuple(self._win_title(self.windows[k]) for k in kinds)
         else:
             titles = tuple(self._chip_title(self.windows[k]) for k in kinds)
-        m = self._chip_memo
-        if (m is not None and m[0] == kinds and m[1] == titles and m[2] == got
-                and m[3] == fs and m[4] == lay.cs):
-            return m[5]
         out = []
         self._chip_memo = (kinds, titles, got, fs, lay.cs, out)
         if side:
@@ -765,8 +837,7 @@ class WindowChrome:
         sc = self.root_canvas
         fs = self._fs()
         th = self.ws.theme_colors
-        sig = tuple((k, r, lb, k == self.focus_key, self.windows[k].minimized)
-                    for k, r, lb in self._chip_rects())
+        sig = self._chips_gen()
         if sig != self._chip_sig:
             # New chip pixels on the OS bar: the compositor's strip carries them.
             self._outside_f = self.ws.frame_state.frames_drawn
@@ -786,6 +857,32 @@ class WindowChrome:
         self.ws.bar_layer.repaint_cell("desk", "chips")
         line_h = self.root_ctx.layout.line_h
         self._draw_look_chips(sc, th, fs, line_h)
+
+    def _chips_gen(self):
+        """A count that moves whenever the chips' pixels would: each chip's
+        window, rect and label, whether it has the focus and whether its
+        window is minimised, compared in place in one kept list."""
+        k = self._chip_keys
+        chips = self._chip_rects()
+        moved = len(k) != 5 * len(chips)
+        if moved:
+            k[:] = [None] * (5 * len(chips))
+        i = 0
+        for key, r, lb in chips:
+            foc = key == self.focus_key
+            mini = self.windows[key].minimized
+            if (k[i] != key or k[i + 1] != r or k[i + 2] != lb or k[i + 3] != foc
+                    or k[i + 4] != mini):
+                k[i] = key
+                k[i + 1] = r
+                k[i + 2] = lb
+                k[i + 3] = foc
+                k[i + 4] = mini
+                moved = True
+            i += 5
+        if moved:
+            self._chip_gen += 1
+        return self._chip_gen
 
     def _draw_look_chips(self, sc, th, fs, line_h):
         """The taskbar chips as the look's tabs (docs/history/look_2026-10.md step 14):

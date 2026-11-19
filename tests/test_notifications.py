@@ -319,6 +319,33 @@ def test_the_kernel_draws_the_banner_over_a_run_it_drives(tmp_path):
     assert not moy_play.chrome_overlay_draw(raw, w, h, pal, now)
 
 
+def test_a_notice_said_for_no_time_takes_the_kernels_copy_down(tmp_path):
+    """The RUNNING SLOWLY banner the kernel draws over an interpreted run
+    spans the top of a 320-wide canvas, over the hello cart's greeting band
+    (row 9, x=24) in the blocks theme, the slow.missing line being as wide
+    as it is; said again for no time, both copies are down. That is how
+    tests/on_glass.py's hello_read_its_greeting reads the band under it."""
+    from ticks import _ticks_ms
+    with open(os.path.join(os.path.dirname(__file__), "..", "native", "moy_spine",
+                           "strings", "en.json")) as f:
+        sub = json.load(f)["strings"]["slow.missing"]
+    ws, drv = _ws(tmp_path)
+    ws.look.set_theme("blocks", persist=False)
+    cv = ws.run.canvas
+    w, h = 320, 240
+    pal = [cv._wire[cv._pal_map[i]] for i in range(64)]
+    ws.notices.notice("RUNNING SLOWLY", sub, "warn")
+    raw = (ctypes.c_uint16 * (w * h))(*([0x1234] * (w * h)))
+    assert moy_play.chrome_overlay_draw(raw, w, h, pal, _ticks_ms())
+    assert raw[9 * w + 24] != 0x1234
+    ws.notices.notice(*ws.notice_up, ms=0)
+    drv.frame(_DT)
+    assert not ws.notices.notice_active() and ws.notice_up is None
+    raw = (ctypes.c_uint16 * (w * h))(*([0x1234] * (w * h)))
+    assert not moy_play.chrome_overlay_draw(raw, w, h, pal, _ticks_ms())
+    assert raw[9 * w + 24] == 0x1234
+
+
 def _key(drv, name):
     """One press of `name`, and its key-up frame."""
     drv.press(name)

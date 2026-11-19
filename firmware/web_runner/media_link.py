@@ -218,24 +218,26 @@ class _Stream:
         self._pos = 0
 
     def readinto(self, buf):
+        """What the segment being read holds past what was read, as far as it
+        has grown: a read at its end that finds nothing new moves on to the
+        next one only once the worker said it was whole. The face pumps this
+        every PUMP_MS while a stream plays, so it allocates nothing but a
+        segment's file and name, once a segment."""
         if self.url is not None and not self.headed and self.err is None:
             return None
         while True:
-            path = self._path(self._seg)
-            try:
-                have = os.stat(path)[6] - self._pos
-            except OSError:
-                have = 0
-            if have > 0:
-                if self._f is None:
-                    self._f = open(path, "rb")
-                mv = memoryview(buf)
-                if len(mv) > have:
-                    mv = mv[:have]
-                self._f.seek(self._pos)
-                n = self._f.readinto(mv)
-                self._pos += n
-                return n
+            f = self._f
+            if f is None:
+                try:
+                    f = self._f = open(self._path(self._seg), "rb")
+                except OSError:
+                    f = None
+            if f is not None:
+                f.seek(self._pos)
+                n = f.readinto(buf)
+                if n:
+                    self._pos += n
+                    return n
             if self._seg < self.done:
                 self._drop_seg()
                 continue

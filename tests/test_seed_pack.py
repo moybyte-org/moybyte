@@ -111,9 +111,9 @@ def test_the_packed_roster_is_much_smaller_than_the_plain_one():
 
 def test_the_zero_images_carry_the_roster_their_board_names():
     """A Zero's image carries the carts board.toml's `[roster] image` names,
-    which its build passes to the generator: the XIAO's the core, every app and
-    five games, the C3's the core alone, and a new C3 store gets nothing more
-    (`[roster] install` empty, owner 2026-11-17): its room is the kid's."""
+    which its build passes to the generator: the XIAO's the core, every app,
+    five games and Pin Light, the C3's the core alone, and a new C3 store gets
+    Pin Light alone (2026-11-18): the rest of its room is the kid's."""
     from runtime import moy_seed
     c3 = os.path.join(os.path.dirname(ZERO), "esp32c3_zero")
     for zero in (ZERO, c3):
@@ -128,8 +128,27 @@ def test_the_zero_images_carry_the_roster_their_board_names():
     assert board_config.roster_only(c3) == moy_seed.CORE
     xiao = board_config.roster_only(ZERO)
     assert "moybyte.notes" in xiao and "moybyte.star_catcher" in xiao
+    assert "moybyte.pin_light" in xiao
     assert board_config.roster_install(ZERO) == ()
-    assert board_config.roster_install(c3) == ()
+    assert board_config.roster_install(c3) == ("moybyte.pin_light",)
+
+
+def test_no_image_nor_browser_bundle_carries_a_test_fixture():
+    """A test fixture (`"moybyte": {"fixture": true}`) is seeded on the host
+    alone: the packed roster every console image freezes, the plain one, the
+    browser bundle's and the device roster leave it out, the host's keeps it,
+    and a Zero's `--only` naming one is refused."""
+    fixtures = {f: m for f, m in gen.read_manifests(SYSTEM_CARTS) if gen.is_fixture(m)}
+    assert fixtures
+    titles = {m["title"] for m in fixtures.values()}
+    assert not titles & {t for t, _v, _b in gen.build_packed(SYSTEM_CARTS)}
+    assert not titles & {c["title"] for c in gen.build_carts(SYSTEM_CARTS)}
+    assert titles <= {c["title"] for c in gen.build_carts(SYSTEM_CARTS, fixtures=True)}
+    for target in ("device", "web"):
+        assert not set(fixtures) & set(gen.roster(target))
+    assert set(fixtures) <= set(gen.roster("host"))
+    with pytest.raises(ValueError):
+        gen.build_packed(SYSTEM_CARTS, (sorted(fixtures)[0],))
 
 
 def test_an_only_that_names_no_cart_is_refused():
@@ -270,6 +289,37 @@ def test_a_seed_cart_the_kid_removed_stays_out_and_a_lost_one_comes_back(
     assert os.path.exists(root + "/" + lost + "/manifest.json")
 
 
+def test_the_zeros_boot_retires_the_folders_a_console_retires(tmp_path, monkeypatch):
+    """The Zero opens its store through the consoles' door (sweep_store): a
+    retired seed's folder goes once, before the seed, and a removal's record
+    and a kid's own cart stay."""
+    zero_host = _zero_host(tmp_path, monkeypatch)
+    mod = _fake_roster(monkeypatch)
+    root = str(tmp_path / "carts")
+    for folder in ("moybyte.moy_night.moy", "my_game.moy"):
+        os.makedirs(root + "/" + folder)
+        with open(root + "/" + folder + "/manifest.json", "w") as f:
+            f.write("{}")
+    assert "moybyte.moy_night.moy" in moy_seed.RETIRED_FOLDERS
+    kept = [n for n in (moy_carts.cart_folder(t, moy_carts.BUILTIN_NS)
+                        for t, _v, _b in mod.CARTS_Z) if moy_carts.removable(n)][0]
+    assert moy_carts.note_removed(root, kept)
+
+    assert zero_host.sweep_carts(root) == 1
+    assert zero_host.seed_carts(root) == len(mod.CARTS_Z) - 1
+    assert not os.path.exists(root + "/moybyte.moy_night.moy")
+    assert os.path.exists(root + "/my_game.moy/manifest.json")
+    assert moy_carts.load_removed(root) == [kept]
+    assert not os.path.exists(root + "/" + kept)
+    assert moy_seed.load_store_version(root) == (moy_seed.STORE_FORMAT,
+                                                 moy_seed.RETIRED_GEN)
+    os.makedirs(root + "/moybyte.moy_night.moy")
+    assert zero_host.sweep_carts(root) == 0, "once per generation"
+    import inspect
+    boot = inspect.getsource(zero_host.serve)
+    assert boot.index("sweep_carts(") < boot.index("seed_carts(")
+
+
 def test_a_newer_image_replaces_a_seed_cart_and_keeps_its_saves(tmp_path, monkeypatch):
     zero_host = _zero_host(tmp_path, monkeypatch)
     mod = _fake_roster(monkeypatch)
@@ -280,7 +330,7 @@ def test_a_newer_image_replaces_a_seed_cart_and_keeps_its_saves(tmp_path, monkey
     mod.CARTS_Z = [("Hop", 1, gen.pack_cart(cart))]
     assert zero_host.seed_carts(root) == 1
     hop = root + "/moybyte.hop.moy"
-    with open(hop + "/pmem.json", "w") as f:
+    with open(hop + "/pmem.bin", "w") as f:
         f.write("[7]")
     with open(hop + "/main.py", "w") as f:
         f.write("the kid's own")
@@ -289,7 +339,7 @@ def test_a_newer_image_replaces_a_seed_cart_and_keeps_its_saves(tmp_path, monkey
     mod.CARTS_Z = [("Hop", 2, gen.pack_cart(dict(cart, version=2, src="NEW")))]
     assert zero_host.seed_carts(root) == 1
     assert moy_carts._read(hop + "/main.py") == "NEW"
-    assert moy_carts._read(hop + "/pmem.json") == "[7]"
+    assert moy_carts._read(hop + "/pmem.bin") == "[7]"
 
 
 def test_a_warm_boot_reads_no_seed_cart_s_manifest(tmp_path, monkeypatch, capsys):
@@ -386,7 +436,7 @@ def test_a_replacement_the_reserve_stops_keeps_the_cart(tmp_path, monkeypatch):
     cart = {"title": "Hop", "type": "game", "version": 1, "src": "OLD",
             "cfg": {}, "edit": []}
     moy_carts.seed_packed([("Hop", 1, gen.pack_cart(cart))], root)
-    with open(root + "/moybyte.hop.moy/pmem.json", "w") as f:
+    with open(root + "/moybyte.hop.moy/pmem.bin", "w") as f:
         f.write("[7]")
     asked = []
 
@@ -396,7 +446,7 @@ def test_a_replacement_the_reserve_stops_keeps_the_cart(tmp_path, monkeypatch):
     newer = [("Hop", 2, gen.pack_cart(dict(cart, version=2, src="NEW")))]
     assert moy_carts.seed_packed(newer, root, room=room) == 1
     assert moy_carts._read(root + "/moybyte.hop.moy/main.py") == "NEW"
-    assert moy_carts._read(root + "/moybyte.hop.moy/pmem.json") == "[7]"
+    assert moy_carts._read(root + "/moybyte.hop.moy/pmem.bin") == "[7]"
 
 
 # -- the build wiring ------------------------------------------------------

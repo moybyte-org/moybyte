@@ -93,8 +93,10 @@ def test_a_permission_turned_off_reads_nil_in_lua(tmp_path):
         "os=table clipboard=nil os.remove=nil os.rename=nil os.time=function")
 
 
-def test_a_lua_game_has_no_app_names(tmp_path):
-    """A cart that is not an app makes no grant: nothing of the binding."""
+def test_a_lua_game_holds_prefs_and_no_other_app_name(tmp_path):
+    """A cart that is not an app holds a grant with the prefs role alone
+    (docs/app_api_v1.md section 5): `prefs`, and none of an app run's own
+    (`os`, MOY_APP_RUN_GAME)."""
     d = tmp_path / "carts" / "Game.moy"
     d.mkdir(parents=True)
     (d / "manifest.json").write_text(json.dumps(
@@ -109,7 +111,7 @@ def test_a_lua_game_has_no_app_names(tmp_path):
     ws.frame(DT)
     assert ws.run.player.cart_error is None, ws.run.player.cart_error
     assert ws.run.player.lua.get_global("SEEN") == (
-        "files=nil prefs=nil set_theme=nil themes=nil open_app=nil io=nil "
+        "files=nil prefs=table set_theme=nil themes=nil open_app=nil io=nil "
         "os=nil clipboard=nil")
 
 

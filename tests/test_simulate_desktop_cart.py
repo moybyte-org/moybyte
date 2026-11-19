@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 import simulate_desktop  # noqa: E402
 from runtime import host_app  # noqa: E402
 
-CART = "moybyte.tap_game.moy"
+CART = "moybyte.tap_only_red.moy"
 
 
 def _launch(carts, src):

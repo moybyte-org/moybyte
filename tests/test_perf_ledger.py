@@ -37,9 +37,9 @@ def records(tmp_path):
     for r in [
         rec("tdeck", "aaaa1111", "2026-11-15T10:00:00",
             **{"Brick Siege fps": fps(50.0), "Brick Siege frame": ms(20.0),
-               "Hop Quest fps": fps(40.0), "heap sram free": kib(100.0)}),
+               "Letter Blitz fps": fps(40.0), "heap sram free": kib(100.0)}),
         rec("tdeck", "bbbb2222", "2026-11-15T11:00:00",
-            errors={"Sakura": "not a run tile on this board's home: not measured"},
+            errors={"Sakura Lua": "not a run tile on this board's home: not measured"},
             **{"Brick Siege fps": fps(60.0), "Brick Siege frame": ms(16.0),
                "heap sram free": kib(110.0)}),
         rec("p4", "bbbb2222", "2026-11-15T11:30:00",
@@ -87,8 +87,8 @@ def test_each_board_has_a_cart_table_of_the_roster_with_fps_and_frame_ms(records
 def test_a_metric_the_record_lacks_is_a_dash_never_zero(records, tmp_path):
     _, text = write(records, tmp_path)
     by = {r[0]: r for r in table(text, "Carts", "tdeck")[2:]}
-    assert by["Hop Quest"] == ["Hop Quest", "-", "-"]
-    assert by["Sakura"] == ["Sakura", "-", "-"]
+    assert by["Letter Blitz"] == ["Letter Blitz", "-", "-"]
+    assert by["Sakura Lua"] == ["Sakura Lua", "-", "-"]
     desk = {r[0]: r for r in table(text, "The desk", "tdeck")[2:]}
     assert desk["window drag fps"][2] == "-"
     assert desk["heap sram free"][2] == "110"
@@ -102,8 +102,8 @@ def test_the_baseline_is_the_record_at_that_commit_with_the_change(records, tmp_
     brick = rows[2]
     assert brick[1:4] == ["60.0", "50.0", "+20.0% better"]
     assert brick[4:7] == ["16.0", "20.0", "-20.0% better"]
-    hop = next(r for r in rows if r[0] == "Hop Quest")
-    assert hop[1:4] == ["-", "40.0", "-"]
+    blitz = next(r for r in rows if r[0] == "Letter Blitz")
+    assert blitz[1:4] == ["-", "40.0", "-"]
 
 
 def test_a_board_without_a_record_at_the_baseline_says_so(records, tmp_path):
@@ -120,7 +120,7 @@ def test_a_longer_commit_prefix_still_finds_the_baseline(records, tmp_path):
 def test_the_records_errors_are_notes_under_the_table(records, tmp_path):
     _, text = write(records, tmp_path)
     tdeck = text.split("## Carts", 1)[1].split("### tdeck\n", 1)[1].split("\n## ", 1)[0]
-    assert ("- latest `bbbb2222`: Sakura: not a run tile on this board's home: "
+    assert ("- latest `bbbb2222`: Sakura Lua: not a run tile on this board's home: "
             "not measured") in tdeck
 
 

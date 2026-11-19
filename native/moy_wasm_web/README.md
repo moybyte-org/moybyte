@@ -114,6 +114,12 @@ WasmRun opens `main.wasm` itself and is never "slow" for it — the slow-play
 notice is about a board missing ITS module. A cart's `full_access` consent has
 nothing to govern here.
 
+A compiled SERVICE does not run here either: a board's runs on a task of its
+own, and the page's one thread is the VM's. The engine exports no
+`service_start`, and `WasmRuntime.service` (`device/moycore_glue.py`)
+answers the scheduler's refusal, "a wasm service does not run on this
+console", which ends the service's row.
+
 The fit check is the browser's own: a cart's load takes its declared memory,
 one block of its own (the module's `WebAssembly.Memory`), and its module
 file, as moy-spec's web player sizes it; what the browser can give is the

@@ -586,7 +586,7 @@ def test_an_update_hands_the_keeper_the_saves_it_carries(tmp_path):
     ci_job = ci.Install(_cart(repo, "jet"), ci.plan(_cart(repo, "jet")),
                         MemNet(repo.routes()), root, _session, keep=Keeper())
     _run(ci_job)
-    (Path(root) / "jet.moy" / "pmem.json").write_text('{"0": 7}')
+    (Path(root) / "jet.moy" / "pmem.bin").write_text('{"0": 7}')
     repo.add("jet", version=2)
     keep = Keeper(answer=None)
     job = ci.Install(_cart(repo, "jet"), ci.plan(_cart(repo, "jet")),
@@ -596,13 +596,13 @@ def test_an_update_hands_the_keeper_the_saves_it_carries(tmp_path):
             break
         job.step()
     folder, files, record = keep.commits[0]
-    assert files["pmem.json"] == b'{"0": 7}'
+    assert files["pmem.bin"] == b'{"0": 7}'
     assert (Path(root) / "jet.moy" / "main.wasm").read_bytes().endswith(b"1"), \
         "the old copy moved before the keeper had the new one"
     keep.finish()
     job.step()
     assert (Path(root) / "jet.moy" / "main.wasm").read_bytes().endswith(b"2")
-    assert (Path(root) / "jet.moy" / "pmem.json").read_text() == '{"0": 7}'
+    assert (Path(root) / "jet.moy" / "pmem.bin").read_text() == '{"0": 7}'
 
 
 def test_a_removal_tells_the_keeper_the_record_before_the_folder_goes(tmp_path):

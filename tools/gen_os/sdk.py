@@ -213,7 +213,10 @@ def gen_lua_stub(src):
         if tbl and tbl not in tables:
             tables.append(tbl)
             o.append("%s = {}" % tbl)
-        o += ["--- " + _stub_doc(n, r, perms), "function %s(...) end" % n]
+        if "in" not in r and n == r["name"]:     # a service's object (net), not a call
+            o += ["--- " + _stub_doc(n, r, perms), "%s = {}" % n]
+        else:
+            o += ["--- " + _stub_doc(n, r, perms), "function %s(...) end" % n]
     return "\n".join(o) + "\n"
 
 

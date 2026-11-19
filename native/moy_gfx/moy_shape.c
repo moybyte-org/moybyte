@@ -939,7 +939,9 @@ static int shadow_run(uint16_t *row, int X0, int X1, uint16_t col, int a) {
 // The per-pixel blends' tables: for each of the 16 mask levels, each
 // channel's 32 or 64 results of over() at that level's weight of `col`, as
 // the buffer holds them -- run_tables' at every level at once, kept for the
-// next shadow of the same colour and strength.
+// next shadow of the same colour and strength. A level that weighs nothing
+// maps a word to itself and one that covers whole to the colour, so every
+// pixel takes the same three lookups.
 #define LUT_N 128
 static struct {
     uint16_t *t;     // 16 x (tr[32], tg[64], tb[32])
@@ -958,10 +960,7 @@ static const uint16_t *lut_get(uint16_t col, int alpha, const int wt[16]) {
         return s_lut.t;
     }
     for (int k = 0; k < 16; k++) {
-        int a = wt[k];
-        if (a <= 0 || a >= 256) {
-            continue;                       // never looked up: a copy or the colour
-        }
+        int a = imax(0, imin(wt[k], 256));
         uint16_t *tr = s_lut.t + k * LUT_N, *tg = tr + 32, *tb = tr + 96;
         int iw = 256 - a;
         int fr = ((col >> 11) & 31) * a + 128, fg = ((col >> 5) & 63) * a + 128,
@@ -980,29 +979,95 @@ static const uint16_t *lut_get(uint16_t col, int alpha, const int wt[16]) {
     return s_lut.t;
 }
 
-// Buffer word `w` under one level's tables (lut_get).
-static inline uint16_t lut_px(const uint16_t *T, uint16_t w) {
-    if (moy_gfx_swapped) {
-        return (uint16_t)(T[(w >> 3) & 31] | T[32 + (((w & 7) << 3) | ((w >> 13) & 7))]
-                          | T[96 + ((w >> 8) & 31)]);
-    }
-    return (uint16_t)(T[w >> 11] | T[32 + ((w >> 5) & 63)] | T[96 + (w & 31)]);
-}
+// A mask's columns: C = b + max(r, b).
+#define SH_COLS (MOY_SHAPE_BLUR_MAX \
+                 + (MOY_SHAPE_RMAX > MOY_SHAPE_BLUR_MAX ? MOY_SHAPE_RMAX : MOY_SHAPE_BLUR_MAX))
 
-// What one shadow draws with, fixed for the call.
+// What one shadow draws with, fixed for the call, and the tables of the mask
+// row last drawn.
 typedef struct {
     const mask_t *m;
     const int *wt;
     const uint16_t *lut;     // lut_get's, or NULL: over() a pixel
     int sx, w, b, C, Ia, Ib;
     uint16_t col;            // canonical
+    // mask row `rk`'s columns jj < C: each one's level tables (lut_get's) and
+    // cnt[jj], how many of the columns before it weigh anything. Every row
+    // past the corner boxes is row C.
+    int rk;
+    const uint16_t *rl[SH_COLS];
+    uint8_t cnt[SH_COLS + 1];
 } sh_t;
+
+static void row_levels(sh_t *h, int ii) {
+    int key = imin(ii, h->C);
+    if (key == h->rk) {
+        return;
+    }
+    h->rk = key;
+    int c = 0;
+    for (int jj = 0; jj < h->C; jj++) {
+        int k = mask_at(h->m, ii, jj);
+        h->rl[jj] = h->lut + k * LUT_N;
+        h->cnt[jj] = (uint8_t)c;
+        c += h->wt[k] != 0;
+    }
+    h->cnt[h->C] = (uint8_t)c;
+}
+
+// Pixels [X0, X1) of a row through the tables of columns jj, jj + step, ...
+// over `src`, stored to `row` and to `also` (NULL: none).
+static void px_levels(uint16_t *row, const uint16_t *src, uint16_t *also,
+                      const uint16_t *const *rl, int X0, int X1, int jj, int step) {
+    if (moy_gfx_swapped) {
+        for (int X = X0; X < X1; X++, jj += step) {
+            const uint16_t *T = rl[jj];
+            uint16_t w = src[X];
+            uint16_t o = (uint16_t)(T[(w >> 3) & 31] | T[32 + (((w & 7) << 3) | ((w >> 13) & 7))]
+                                    | T[96 + ((w >> 8) & 31)]);
+            row[X] = o;
+            if (also != NULL) {
+                also[X] = o;
+            }
+        }
+        return;
+    }
+    for (int X = X0; X < X1; X++, jj += step) {
+        const uint16_t *T = rl[jj];
+        uint16_t w = src[X];
+        uint16_t o = (uint16_t)(T[w >> 11] | T[32 + ((w >> 5) & 63)] | T[96 + (w & 31)]);
+        row[X] = o;
+        if (also != NULL) {
+            also[X] = o;
+        }
+    }
+}
+
+// Pixels [X0, X1) of mask row `ii` in its corner boxes, through the row's
+// tables: columns left of the middle count jj up from the left edge, the
+// rest down from the right. Answers the pixels blended.
+static int shadow_px(sh_t *h, uint16_t *row, const uint16_t *src, uint16_t *also, int ii,
+                     int X0, int X1) {
+    row_levels(h, ii);
+    int mid = imax(X0, imin(X1, h->sx + (h->w - 1) / 2 + 1)), n = 0;
+    if (mid > X0) {
+        int j0 = X0 - h->sx + h->b, j1 = mid - h->sx + h->b;
+        px_levels(row, src, also, h->rl, X0, mid, j0, 1);
+        n += h->cnt[j1] - h->cnt[j0];
+    }
+    if (X1 > mid) {
+        int j0 = h->sx + h->w - X1 + h->b, j1 = h->sx + h->w - mid + h->b;
+        px_levels(row, src, also, h->rl, mid, X1, j1 - 1, -1);
+        n += h->cnt[j1] - h->cnt[j0];
+    }
+    return n;
+}
 
 // Pixels [X0, X1) of buffer row `row` at mask row `ii`, blended over the
 // same pixels of `src` (`row` itself, or a row of another buffer laid out as
 // the target) and stored to `row` and to `also` (NULL: none); where the mask
 // is clear, `src`'s pixel is stored as it is. Answers the pixels blended.
-static int shadow_span(const sh_t *h, uint16_t *row, const uint16_t *src, uint16_t *also,
+static int shadow_span(sh_t *h, uint16_t *row, const uint16_t *src, uint16_t *also,
                        int ii, int X0, int X1) {
     int n = 0, X = X0, wa = -1;
     while (X < X1) {
@@ -1018,6 +1083,11 @@ static int shadow_span(const sh_t *h, uint16_t *row, const uint16_t *src, uint16
             continue;
         }
         int stop = X < h->Ia ? imin(h->Ia, X1) : X1;
+        if (h->lut != NULL) {
+            n += shadow_px(h, row, src, also, ii, X, stop);
+            X = stop;
+            continue;
+        }
         for (; X < stop; X++) {
             int j = X - h->sx;
             int k = mask_at(h->m, ii, imin(j, h->w - 1 - j) + h->b);
@@ -1029,9 +1099,7 @@ static int shadow_span(const sh_t *h, uint16_t *row, const uint16_t *src, uint16
                     row[X] = o;
                 }
             } else {
-                o = a >= 256 ? wire(h->col)
-                    : h->lut != NULL ? lut_px(h->lut + k * LUT_N, src[X])
-                    : wire(over(h->col, moy_gfx_order(src[X]), a));
+                o = a >= 256 ? wire(h->col) : wire(over(h->col, moy_gfx_order(src[X]), a));
                 row[X] = o;
                 n++;
             }
@@ -1118,7 +1186,7 @@ int moy_shape_shadow_fill_end(const moy_text_target_t *t) {
 
 // Shadow pixels [X0, X1) of row Y: those inside the fill's spans `f` blended
 // over the fill's source, the rest over `src` as moy_shape_shadow_io says.
-static int shadow_seg(const sh_t *h, uint16_t *row, const uint16_t *src, uint16_t *also,
+static int shadow_seg(sh_t *h, uint16_t *row, const uint16_t *src, uint16_t *also,
                       const uint16_t *frow, const int *f, int nf, int ii, int X0, int X1) {
     int n = 0;
     for (int k = 0; k < nf && X0 < X1; k++) {
@@ -1162,8 +1230,18 @@ int moy_shape_shadow(const moy_text_target_t *t, int x, int y, int w, int h,
     // Columns whose mask cell lies past its corner box take the row's one
     // weight (mask_at): [Ia, Ib) on the buffer.
     int C = m->C;
-    sh_t sh = {m, wt, lut_get(col, alpha, wt), sx, w, b, C, imax(sx + C - b, Xa),
-               imin(sx + w - (C - b), Xb), col};
+    sh_t sh;
+    sh.m = m;
+    sh.wt = wt;
+    sh.lut = lut_get(col, alpha, wt);
+    sh.sx = sx;
+    sh.w = w;
+    sh.b = b;
+    sh.C = C;
+    sh.Ia = imax(sx + C - b, Xa);
+    sh.Ib = imin(sx + w - (C - b), Xb);
+    sh.col = col;
+    sh.rk = -1;
     // A pending fill is laid in the same pass: its rows, the shadow's or not.
     const uint16_t *fsrc = s_fill.src;
     s_fill.src = NULL;
@@ -1188,7 +1266,8 @@ int moy_shape_shadow(const moy_text_target_t *t, int x, int y, int w, int h,
             }
             continue;
         }
-        // the shadow stores [Xa, Xb) but the hole's [hx0, hx1)
+        // the shadow stores [Xa, Xb) but the hole's [hx0, hx1), which the
+        // fill leaves to the caster too
         tgt_row(&g, Y);
         int hx0 = imax(g.hx0, Xa), hx1 = imin(g.hx1, Xb);
         if (hx1 <= hx0) {
@@ -1197,7 +1276,6 @@ int moy_shape_shadow(const moy_text_target_t *t, int x, int y, int w, int h,
         for (int k = 0; k < nf; k++) {
             int a0 = f[2 * k], a1 = f[2 * k + 1];
             copy_px(row, frow, a0, imin(a1, Xa));
-            copy_px(row, frow, imax(a0, hx0), imin(a1, hx1));
             copy_px(row, frow, imax(a0, Xb), a1);
         }
         int i = Y - sy;

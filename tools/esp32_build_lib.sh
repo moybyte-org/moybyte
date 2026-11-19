@@ -484,6 +484,18 @@ moybyte_patch_slice_store() {
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_slice_store.py" "${MPY_DIR}" || exit 1
 }
 
+# A hash map grows while a quarter of its slots are still free: stock grows
+# one only when it is full, and a lookup that misses walks the probe to an
+# empty slot, so every method call on a crowded instance (and every builtin
+# a crowded module names) reads most of a table first. tools/patch_map_load.py
+# is the patch and the measurement: all-or-nothing, idempotent; tables of
+# twelve slots and under keep the stock rule. Costs heap on every map above
+# that, so a board without a frame loop declines it.
+moybyte_patch_map_load() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_map_load.py" "${MPY_DIR}" || exit 1
+}
+
 # An extensible built-in (`json`, `array`, `time`, ...) is entered in
 # sys.modules once an import has found it: stock searches every sys.path entry
 # for the name on EVERY import of it, 24 ms a miss on a T-Deck.
@@ -1210,6 +1222,8 @@ moybyte_build_and_collect() {
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/coredump.py" check-elf "${bout}/micropython.elf" \
     || exit 1
   moybyte_p4_clk_switch_guard "${bout}" || exit 1
+  # No new 64-bit helper call (__divdi3 and kin) in the hot C (tools/hot64.py).
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/hot64.py" check "${bout}" || exit 1
   echo "OK ->${DIST_DIR}/${stem}.bin (${flash_note})"
   echo "OK -> ${DIST_DIR}/${stem}_app.bin (OTA payload, app partition)"
 }

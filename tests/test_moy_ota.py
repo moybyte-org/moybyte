@@ -769,11 +769,14 @@ def test_only_the_signed_updater_skips_the_certificate():
 
 def test_the_consoles_carry_the_ca_bundle():
     """docs/os_2026-11/hardware.md section 1: every console verifies, so
-    each one's sdkconfig turns on the bundle MicroPython's base turns off."""
+    each one's sdkconfig turns on the bundle MicroPython's base turns off;
+    and so does the XIAO Zero, whose page's Get Carts it fetches indexes
+    and carts over https for (runtime/carts/web_addon.py's OfficialCarts)."""
     for board in ("lilygo_t_deck_plus_mainline/boards/MOYBYTE_TDECK",
                   "guition_jc3248w535/boards/MOYBYTE_GUITION_S3",
                   "esp32_p4_wifi6_touch_lcd_7b/boards/MOYBYTE_P4",
-                  "guition_jc8012p4a1c/boards/MOYBYTE_GUITION_P4"):
+                  "guition_jc8012p4a1c/boards/MOYBYTE_GUITION_P4",
+                  "seeed_xiao_esp32s3_zero/boards/MOYBYTE_ZERO"):
         lines = (ROOT / "firmware" / board / "sdkconfig.board").read_text().splitlines()
         assert "CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y" in lines, board
         assert "CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y" in lines, board

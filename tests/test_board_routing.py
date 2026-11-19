@@ -604,10 +604,11 @@ def test_seed_carts_model_the_fast_draw_habits():
     assert 'cls(' not in battle.split("def _draw()")[1].split("def ")[0], (
         "the play frame must not clear -- the engine restores the declared backdrop")
     assert 'rect(0, 0, FIELD, FIELD' not in battle      # no double-paint backdrop
-    hop = (Path("system_carts") / "moybyte.hop_quest.moy" / "main.py").read_text(encoding="utf-8")
-    assert "def _build_layer():" in hop
-    assert "lay.map(0, 0, MW, MH" in hop                # terrain rendered once
-    assert "draw_layer(lay, 0, 0)" in hop               # stamped per frame
+    blitz = (Path("system_carts") / "moybyte.letter_blitz.moy" / "main.py").read_text(
+        encoding="utf-8")
+    assert "def _redraw_bg():" in blitz
+    assert "_bg.map(0, 0, GRID_COLS, GRID_ROWS" in blitz    # the arena rendered once
+    assert "draw_layer(_bg, 0, 0)" in blitz             # stamped per frame
     api_doc = (Path("docs") / "moy_cart_api.md").read_text(encoding="utf-8")
     assert "## Make it fast" in api_doc                 # the habits are documented
 
@@ -976,9 +977,10 @@ def test_moycore_hardware_learned_constraints_pinned():
     #    the knob while run_desktop lowered the old runtime's, which left a
     #    moycore cart at 48KB: ~97% PSRAM on this board, i.e. the 2x regime.
     #    (The knob itself is executed in tests/test_moycore_loop.py.)
-    assert "MALLOC_CAP_INTERNAL" in mod
+    assert "MOY_KMEM_SRAM_CAPS" in mod                 # internal SRAM, one spelling
+    assert "MALLOC_CAP_INTERNAL" in (NATIVE / "moy_kernel" / "moy_kmem.h").read_text()
     assert "48 * 1024" in mod                          # the WiFi/DMA headroom floor
-    assert mod.index("MALLOC_CAP_INTERNAL") < mod.index("MALLOC_CAP_SPIRAM")
+    assert mod.index("MOY_KMEM_SRAM_CAPS") < mod.index("MALLOC_CAP_SPIRAM")
     runtime_src = runtime_text(ROOT / "modules" / "moy_runtime.py")
     assert 'for _mod in ("moy_lua", "moycore")' in runtime_src, \
         "the boot-time floor drop must reach moycore by name"

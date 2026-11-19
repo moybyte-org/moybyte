@@ -5,6 +5,7 @@
 #   unpack                  a .moy archive -> a folder
 #   adopt                   a staged folder made the target, the old one set aside
 #   import_archive          a .moy archive installed as a cart or a theme
+#   install_staged          a cart's staged folder installed as a cart or a theme
 """A cart as it travels (#127, #122): the `.moy` archive it is packed into
 and unpacked from, the staged folder adopted in place of the one it
 replaces, an archive imported as a cart or a theme, and a theme package's
@@ -150,7 +151,14 @@ def import_archive(archive, root=CARTS_DIR, stage=None, name=None):
     if not n:
         _rmtree(stage)
         return None
-    base = top or name or archive.rsplit("/", 1)[-1]
+    return install_staged(stage, top or name or archive.rsplit("/", 1)[-1], root)
+
+
+def install_staged(stage, base, root=CARTS_DIR):
+    """The cart folder staged whole at `stage` (in the store's install
+    folder) adopted onto the shelf, as `import_archive` adopts an unpacked
+    archive: a cart under `import_base(base)`, a theme under its own name.
+    The new cart's path."""
     theme = _theme_of(stage, base)
     target = import_target(root, theme[0] if theme else import_base(base),
                            theme is not None)

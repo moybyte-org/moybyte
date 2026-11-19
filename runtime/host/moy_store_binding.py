@@ -50,6 +50,9 @@ _SIGS = (
     ("moy_fs_root", [_P], c.c_int),
     ("moy_fs_roots_clear", [], None),
     ("moy_fs_publish", [_P, _P, _S], c.c_int),
+    ("moy_pmem_read", [_P, c.POINTER(c.c_int32)], c.c_int),
+    ("moy_save_pmem", [_P, c.POINTER(c.c_int32)], c.c_int),
+    ("moy_pmem_tidy", [], c.c_int),
     ("moy_fs_publish_bak", [_P, _P, _S], c.c_int),
     ("moy_fs_publish_mark", [_P, _P, _S], c.c_int),
     ("moy_fs_write", [_P, _P, _S], c.c_int),
@@ -217,7 +220,7 @@ def _entry(at, e):
          "runtime": _json(e.runtime, "lua" if e.spec else "python"),
          "main": _str(e.main, e.main_n),
          "memory": _int_of(e.memory, None) if e.compiled else None,
-         "writable": _json(e.writable, None) if e.compiled and e.writable_ok else None,
+         "writable": _json(e.writable, None) if e.writable_ok else None,
          "audio_ring": _int_of(e.audio_ring, None),
          "version": _int_of(e.version, 0),
          "format": _json(e.format, "moybyte-cart-v1"),
@@ -370,6 +373,27 @@ def binding():
     publish_mark = _publish(lambda: _lib().moy_fs_publish_mark)
     write = _publish(lambda: _lib().moy_fs_write)
     write_bytes = _publish(lambda: _lib().moy_fs_write_bytes)
+
+    def pmem_read(path):
+        cells = (c.c_int32 * 256)()
+        _lib().moy_pmem_read(_path(path), cells)
+        return list(cells)
+
+    def pmem_save(path, cells):
+        """The saver's verb (native/moy_store/moy_save.h) with no saver task,
+        as the threadless tiers have it: the record written at once."""
+        buf = (c.c_int32 * 256)()
+        for i, v in enumerate(cells[:256]):
+            buf[i] = ((int(v) + 0x80000000) & 0xFFFFFFFF) - 0x80000000
+        _ok(_lib().moy_save_pmem(_path(path), buf))
+
+    def save_wait(path=None):
+        """Nothing is ever in flight here: pmem_save wrote it."""
+
+    def pmem_tidy():
+        """One step of the pmem log's quiet work (native/moy_store/moy_plog.h):
+        0 here, where no volume has a log."""
+        return _lib().moy_pmem_tidy()
 
     def read_recover(path, at=None):
         lib, buf = _lib(), _Buf()

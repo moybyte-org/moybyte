@@ -29,7 +29,7 @@ made in `WindowedWM.__init__`.
 """
 
 from wm import FullscreenStackWM, _VIEWPORT_BEZEL
-from wm_parts import _Win, _overlap, _grow, MODE_MARK, _SHOWN
+from wm_parts import _Win, _overlap, _grow, _set_rect, MODE_MARK, _SHOWN
 from wm_chrome import _SHADOW
 from widgets import _Blit, _ticks_ms
 import layout_base as _layout_base
@@ -128,19 +128,22 @@ class WindowPaint:
             # on the web root that leaked one RecordingLayer per drag frame).
             self._backdrop_unsupported = True
 
-    def _gesture_extent(self):
+    def _gesture_extent(self, out=None):
         """The moving window's CURRENT damage bbox (x, y, w, h) -- everything the
         gesture draws this frame: the window body (at the resize rubber size when
         larger OR smaller -- max covers the no-live-resize outline mode too), its
         border and the 3px drop shadow, padded a couple px for safety. None when
-        no gesture is in flight."""
+        no gesture is in flight. Written into the list `out` when one is given."""
         g = self._gesture()
         if g is None:
             return None
         win = self.windows.get(g[0])
         if win is None:
             return None
-        x, y, w, h = win.x, win.y, win.w, win.h
+        x = win.x
+        y = win.y
+        w = win.w
+        h = win.h
         # Gesture tuples carry the window REGISTRY key (g[0]); every
         # gesture-vs-window test below resolves through windows identity.
         if g is self._resize:
@@ -149,7 +152,7 @@ class WindowPaint:
             y1 = max(y + h, ry + rh)
             x, y = min(x, rx), min(y, ry)
             w, h = x1 - x, y1 - y
-        return self._pad_extent(win, x, y, w, h)
+        return self._pad_extent(win, x, y, w, h, out)
 
     def _gesture(self):
         """The gesture the desk's restore follows: a drag or a resize in
@@ -196,24 +199,36 @@ class WindowPaint:
         if self._backdrop is None:
             return
         rc = self.root_canvas
-        ext = self._gesture_extent()
         n = self.retained_n()
-        if (not hasattr(rc, "blit_strip_rect") or self.union_disabled or ext is None
-                or not self._gesture_hist):
+        hist = self._gesture_hist
+        if (not hasattr(rc, "blit_strip_rect") or self.union_disabled or not hist):
+            ext = self._gesture_extent()
             rc.blit_strip(self._backdrop, 0, 0)
             self._restored = None
             if ext is not None:
-                self._gesture_hist = (self._gesture_hist + [ext])[-n:] \
-                    if self._gesture_hist else [ext] * n
+                self._gesture_hist = (hist + [ext])[-n:] if hist else [ext] * n
             # A whole-cache copy still CHANGES only the gesture's footprint:
             # outside it the cache is the desk that was already there, and the
             # other windows re-stamp over it identically.
             return self._union_bbox(self._gesture_hist)
-        rects = self._gesture_hist + [ext]
-        x0 = min(r[0] for r in rects)
-        y0 = min(r[1] for r in rects)
-        x1 = max(r[0] + r[2] for r in rects)
-        y1 = max(r[1] + r[3] for r in rects)
+        ext = self._gesture_extent(self._ext_now)
+        if ext is None:
+            rc.blit_strip(self._backdrop, 0, 0)
+            self._restored = None
+            return self._union_bbox(hist)
+        # The union of the last N frames' extents and this one's. Plain loops,
+        # kept lists: a drag frame allocates nothing here.
+        x0, y0 = ext[0], ext[1]
+        x1, y1 = x0 + ext[2], y0 + ext[3]
+        for r in hist:
+            if r[0] < x0:
+                x0 = r[0]
+            if r[1] < y0:
+                y0 = r[1]
+            if r[0] + r[2] > x1:
+                x1 = r[0] + r[2]
+            if r[1] + r[3] > y1:
+                y1 = r[1] + r[3]
         # Subtract the window's CURRENT opaque body from the union (measured on
         # glass 2026-07-10: the union alone bought ~nothing for a near-full-screen
         # window -- the default windows are ~60% of the desktop, so "window-sized"
@@ -229,7 +244,10 @@ class WindowPaint:
         win = self.windows.get(g[0]) if g is not None else None
         bx0 = by0 = bx1 = by1 = 0
         if win is not None:
-            wx, wy, bw, bh = win.x, win.y, win.w, win.h
+            wx = win.x
+            wy = win.y
+            bw = win.w
+            bh = win.h
             if g is self._resize \
                     and self._live_resize_ok() and win.kind != "desktop":
                 wx, wy, bw, bh = g[10], g[11], g[5], g[6]
@@ -241,28 +259,44 @@ class WindowPaint:
             bx1 = min(x1, wx + bw)
             by1 = min(y1, wy + bh - r)
         laid = self._laid
-        del laid[:]
+        while laid:                       # emptied in place: `del laid[:]` makes a slice
+            laid.pop()
         if win is None or bx0 >= bx1 or by0 >= by1:
             bx0 = bx1 = by0 = by1 = 0
-            laid.append((x0, y0, x1 - x0, y1 - y0))
+            self._laid_put(x0, y0, x1 - x0, y1 - y0)
         else:
             if by0 > y0:                                       # top strip
-                laid.append((x0, y0, x1 - x0, by0 - y0))
+                self._laid_put(x0, y0, x1 - x0, by0 - y0)
             if by1 < y1:                                       # bottom strip
-                laid.append((x0, by1, x1 - x0, y1 - by1))
+                self._laid_put(x0, by1, x1 - x0, y1 - by1)
             if bx0 > x0:                                       # left strip
-                laid.append((x0, by0, bx0 - x0, by1 - by0))
+                self._laid_put(x0, by0, bx0 - x0, by1 - by0)
             if bx1 < x1:                                       # right strip
-                laid.append((bx1, by0, x1 - bx1, by1 - by0))
+                self._laid_put(bx1, by0, x1 - bx1, by1 - by0)
         if self._fill_ok(rc, laid):
             # laid by draw_unders with the first shadow over it, one pass
-            self._fill = (self._backdrop, (x0, y0, x1 - x0, y1 - y0),
-                          (bx0, by0, bx1 - bx0, by1 - by0))
+            f = self._fill = self._fill_rec
+            f[0] = self._backdrop
+            _set_rect(f[1], x0, y0, x1 - x0, y1 - y0)
+            _set_rect(f[2], bx0, by0, bx1 - bx0, by1 - by0)
         else:
             self._lay(laid)
-        self._gesture_hist = (self._gesture_hist + [ext])[-n:]
-        self._restored = (x0, y0, x1 - x0, y1 - y0)
+        # This frame's extent joins the history in the list the oldest leaves
+        # (a seed's rects are tuples, shared: those are never written).
+        old = hist.pop(0) if len(hist) >= n else None
+        if type(old) is not list:
+            old = [0, 0, 0, 0]
+        _set_rect(old, ext[0], ext[1], ext[2], ext[3])
+        hist.append(old)
+        while len(hist) > n:
+            hist.pop(0)
+        self._restored = _set_rect(self._restored_rect, x0, y0, x1 - x0, y1 - y0)
         return self._restored
+
+    def _laid_put(self, x, y, w, h):
+        """One more of `_laid`'s rects, in the kept list its place has."""
+        laid = self._laid
+        laid.append(_set_rect(self._laid_rects[len(laid)], x, y, w, h))
 
     def _lay(self, laid):
         rc = self.root_canvas
@@ -307,13 +341,22 @@ class WindowPaint:
     def _win_extent(self, win):
         """Everything a window's draw touches: body, border and shadow, padded
         like _gesture_extent; the answer kept while the window and the look
-        stand (the window loop asks it every frame)."""
+        stand (the window loop asks it every frame), one list per window
+        written in place when it moves: read it, never keep it."""
         k = getattr(win, "_ext", None)
         g = self.ws.look.look_gen
-        if (k is None or k[0] != win.x or k[1] != win.y or k[2] != win.w or k[3] != win.h
+        if k is None:
+            k = win._ext = [None, None, None, None, None, None, None, [0, 0, 0, 0]]
+        if (k[0] != win.x or k[1] != win.y or k[2] != win.w or k[3] != win.h
                 or k[4] != win.title_h or k[5] is not win.saved or k[6] != g):
-            k = win._ext = [win.x, win.y, win.w, win.h, win.title_h, win.saved, g,
-                            self._pad_extent(win, win.x, win.y, win.w, win.h)]
+            k[0] = win.x
+            k[1] = win.y
+            k[2] = win.w
+            k[3] = win.h
+            k[4] = win.title_h
+            k[5] = win.saved
+            k[6] = g
+            self._pad_extent(win, win.x, win.y, win.w, win.h, k[7])
         return k[7]
 
     def _hand_damage(self, touched):
@@ -562,10 +605,38 @@ class WindowPaint:
         """The frame's window SHAPE: which windows exist, z-order, geometry,
         minimised state, focus. The ONE signature both retained-pixel voiders
         key on (window stamps AND the desk-restore streak) -- a change means
-        pixels somewhere stopped being covered by what covered them last frame."""
-        return (tuple(self.z_order), self.focus_key,
-                tuple((w.x, w.y, w.w, w.h, w.minimized, w.kind)
-                      for w in (self.windows[k] for k in self.z_order)))
+        pixels somewhere stopped being covered by what covered them last frame.
+
+        Answers `_shape_gen`, a count that moves whenever the shape does;
+        `_place_gen` moves with the order and the places alone (focus left
+        out). The values are compared in place in one kept list, so a frame
+        whose shape stands allocates nothing."""
+        k = self._shape_keys
+        order = self.z_order
+        windows = self.windows
+        moved = len(k) != 1 + 7 * len(order)
+        if moved:
+            k[:] = [None] * (1 + 7 * len(order))
+        i = 1
+        for key in order:
+            w = windows[key]
+            if (k[i] != key or k[i + 1] != w.x or k[i + 2] != w.y or k[i + 3] != w.w
+                    or k[i + 4] != w.h or k[i + 5] != w.minimized or k[i + 6] != w.kind):
+                k[i] = key
+                k[i + 1] = w.x
+                k[i + 2] = w.y
+                k[i + 3] = w.w
+                k[i + 4] = w.h
+                k[i + 5] = w.minimized
+                k[i + 6] = w.kind
+                moved = True
+            i += 7
+        if moved:
+            self._place_gen += 1
+        if moved or k[0] != self.focus_key:
+            k[0] = self.focus_key
+            self._shape_gen += 1
+        return self._shape_gen
 
     def _content_flinging(self):
         """True while a window's CONTENT is coasting on a kinetic fling (#113) --
@@ -574,10 +645,11 @@ class WindowPaint:
         the live desk render and the fling frames measured ~180ms against the
         drag's ~100ms (on glass, 2026-07-26)."""
         ws = self.ws
-        for grid in (ws.projects_grid, ws.launcher):
-            if grid is not None and getattr(grid, "flinging", False):
-                return True
-        return False
+        grid = ws.projects_grid
+        if grid is not None and getattr(grid, "flinging", False):
+            return True
+        grid = ws.launcher
+        return grid is not None and bool(getattr(grid, "flinging", False))
 
     # -- drawing ---------------------------------------------------------------
 
@@ -679,7 +751,9 @@ class WindowPaint:
         # scroll: 8.2ms of a 70ms frame, every frame, for an unchanged title bar.
         # _lowest_dirty_window sets _sig_stable (window shape/order/focus).
         quiet = self.chrome_quiet = self._sig_stable and self._frame_is_quiet(dt)
-        touched = []
+        touched = self._touched
+        while touched:
+            touched.pop()
         self._under_hit = False
         below = self._below
         below[0] = below[1] = below[2] = below[3] = 0

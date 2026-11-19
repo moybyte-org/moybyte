@@ -59,6 +59,45 @@ import moy_catalogue
 COMMIT_LOG_MS = 500
 
 
+
+class _PmemSaver:
+    """A cart's pmem on the store (Pmem's `saver`), inside the board's store
+    session: `later` hands the cells to the store's saver
+    (moy_carts.save_pmem_later: queued where the saver's task writes the
+    medium, else written now), `now` returns once they are on the medium, `wait` waits out
+    a save in flight. A failed save is printed and lost, never raised into
+    the cart. The PMEM diag line times each hand-over on the frame
+    (perf_capture-gated like every diag line)."""
+
+    def __init__(self, ws, cart):
+        self.ws = ws
+        self.cart = cart
+
+    def later(self, cells):
+        self._save(self.ws.carts_store.save_pmem_later, cells)
+
+    def now(self, cells):
+        self._save(self.ws.carts_store.save_pmem, cells)
+
+    def _save(self, fn, cells):
+        ws, cart = self.ws, self.cart
+        t0 = _ticks_ms()
+        try:
+            ws.with_sd(lambda: fn(cart, cells))
+        except Exception as exc:  # noqa: BLE001
+            print("Moybyte pmem save failed:", _err_text(exc))
+            return
+        if ws.perf_capture:
+            print("PMEM save=%dms cart=%s"
+                  % (_ticks_diff(_ticks_ms(), t0), cart.get("title")))
+
+    def wait(self):
+        try:
+            self.ws.carts_store.wait_pmem(self.cart)
+        except Exception as exc:  # noqa: BLE001
+            print("Moybyte pmem save failed:", _err_text(exc))
+
+
 class ProjectStore:
     """The open cart's live data, its builders and its commit_* verbs (see the
     module docstring). `Project` subclasses it and adds the op histories."""
@@ -102,7 +141,7 @@ class ProjectStore:
         return SpriteSheet(16, 32)
 
     def _build_pmem(self):
-        """Load the open cart's persistent memory (pmem.json) into a Pmem, wiring
+        """Load the open cart's persistent memory (pmem.bin) into a Pmem, wiring
         its writes back through the SD store when the cart is writable. An
         embedded/non-SD cart still gets working (volatile) RAM."""
         ws = self.ws
@@ -115,27 +154,10 @@ class ProjectStore:
                 print("Moybyte pmem load failed:", exc)
                 cells = None
 
-        on_write = None
         if path and ws.carts_store is not None and ws.can_manage:
-            def on_write(values, cart=self.cart):
-                # Runs from Pmem.flush() (#66 deferred persistence) -- cart
-                # exit/crash + the Player's periodic flush -- never per pmem()
-                # call anymore: the per-write version of this save WAS Letter
-                # Blitz's 81-130ms "word-event" logic spike (measured on glass
-                # by the PMEM diag line below, which stays to show
-                # the deferred cadence; perf_capture-gated like every diag line).
-                t0 = _ticks_ms()
-                try:
-                    ws.with_sd(lambda: ws.carts_store.save_pmem(cart, values))
-                except Exception as exc:  # noqa: BLE001
-                    # No serial in the device run loop, but a failed pmem write must
-                    # not crash the cart -- the kid just loses that one save.
-                    print("Moybyte pmem save failed:", _err_text(exc))
-                    return
-                if ws.perf_capture:
-                    print("PMEM save=%dms cart=%s"
-                          % (_ticks_diff(_ticks_ms(), t0), cart.get("title")))
-        return Pmem(cells, on_write)
+            saver = _PmemSaver(ws, self.cart)
+            return Pmem(cells, saver=saver, path=ws.carts_store.pmem_path(self.cart))
+        return Pmem(cells)
 
     def _build_tilemap(self, cart=None):
         """Build `cart`'s TileMap from its map.moymap blob (#32) (default: the open

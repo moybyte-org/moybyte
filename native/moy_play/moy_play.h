@@ -7,7 +7,8 @@
 //   1. the runtime is "lua" or "wasm" and this image has its row (moy_rt_get);
 //   2. the type is "game" (a manifest that names none is a game when it is a
 //      spec cart, an app otherwise: runtime/carts/moy_carts.py's rule), or "app"
-//      with the runtime "wasm" where the image carries native/moy_app;
+//      with the runtime "wasm" where the image carries native/moy_app (a
+//      compiled game declaring the app extension is read as such an app);
 //   3. every permission is in the native set: graphics, input, audio,
 //      multiplayer -- or, for a compiled app, a role's permission or a
 //      `lease:<row>`, which pass when every row the module imports from the
@@ -15,6 +16,10 @@
 //      table takes a compiled program's leases without MOY_LEASE_VM, and a
 //      lease a VM process holds keeps the VM at the stop's verdict instead
 //      (moy_play_stop.c). A permission the kernel does not know keeps the VM.
+//      A compiled cart declaring `moybyte.scenes`, `moybyte.images` or
+//      `moybyte.prefs` keeps it too (WHY_IMPORT, the extension named): the
+//      Python console hands its scenes and paint images to the run, and makes
+//      the grant its prefs are served from.
 // A cart that fails it runs with the VM up, and `why` names the first clause
 // it failed. Everything outside the native set keeps the VM, by name:
 // `network`, `console`, `pins`, `files` and every `files:<folder>`, `prefs`, and
@@ -65,7 +70,8 @@
 // a paced run notes its costs into; `open` asks the row whether its runtime
 // is open. `frame` runs the ticks the tick model planned: each takes the
 // latched press edges (a paced run), fills the snapshot the cart reads from
-// the input table and the pointer `input` published, runs the row's tick,
+// the input table and the pointer `input` published (its press edge kept
+// until a tick reads it, so a frame that runs none loses no tap), runs the row's tick,
 // notes its update half, and plays the audio it queued straight into the
 // session; a quit() ends the frame where it stands. `end` closes the books:
 // the run's upcalls by class since its launch, kept with its info for `state`,
@@ -100,7 +106,8 @@ enum {
 enum {
     MOY_PLAY_FREE = 0,          // no reason: the run needs no VM
     MOY_PLAY_WHY_BROKEN = 1,    // the manifest would not read
-    MOY_PLAY_WHY_RUNTIME = 2,   // the runtime is Python, or one no row runs VM-free
+    MOY_PLAY_WHY_RUNTIME = 2,   // the runtime is Python, or one no row runs VM-free, or
+                                // a native module beside the wasm one (the console picks)
     MOY_PLAY_WHY_NORT = 3,      // the runtime's row is not in this image
     MOY_PLAY_WHY_TYPE = 4,      // not a game
     MOY_PLAY_WHY_PERM = 5,      // a permission outside the native set

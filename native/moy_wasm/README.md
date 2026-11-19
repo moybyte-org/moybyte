@@ -92,11 +92,29 @@ product), with the owner's later calls dated where they land.
 - **A compiled cart keeps files (owner, 2026-10-03):** SPEC.md §16.12's
   `writable` paths, kept beside the carts store in its app folder
   `apps/<id>/` (`runtime/carts/cart_files.py`) on every tier, untouched by an
-  install, an update or a push. A user's own files are a separate
+  install, an update or a push. A Lua and a Python cart keep theirs in the
+  same folder since 2026-11-18 (SPEC.md §9.1, #261). A user's own files are a separate
   capability (#231): the console's picker (`docs/os_2026-11/between_apps.md`
   §2), which a compiled app reaches by its `moybyte.app` imports
   (`moybyte_pick`, the item a handle its `moybyte_item_read` and
-  `item_write` take; `docs/app_api_v1.md` §10) and a game holds none of.
+  `item_write` take; `docs/app_api_v1.md` §10), and a compiled game only
+  where it declares that extension (the next decision).
+- **A compiled game holds what a Python or Lua game holds (owner,
+  2026-11-18, #261).** A game that declares `moybyte.app` holds a run grant
+  of its own, as an app does (`runtime/run/player.py`'s `_wasm_ext_game`, a
+  VM stop's too), so its achievements and device handles answer under its
+  permissions and their consent. Its scenes, paint images and mouse are
+  three more Moybyte extensions, `moybyte.scenes`, `moybyte.images` and
+  `moybyte.mouse`, whose rows are one C body every engine registers
+  (`native/moycore/moycore_wasm_ext.h`: WAMR's sorted registration on the
+  boards and the host, the page's adapters in the browser) over the run's
+  own scene and image tables (`moycore_lua.h`) and its snapshot. The rows
+  are Moybyte's, never moy-spec's (SPEC.md §16.2), and a cart imports from
+  one only when it declares it.
+- **One source, two targets (owner, 2026-11-18, #261).** A cart's C builds
+  to its `main.wasm` and to a native module per chip, and the console picks
+  which runs: `docs/os_2026-11/tiers.md` §1, `sdk/README.md` ("A compiled
+  cart").
 - **WASI preview1 is an adapter of ours, not WAMR's libc-wasi
   (2026-11-08).** A command's imports are a table of natives registered
   under WASI's module name (`moy_wasi.h`), each over the C a shell built-in
@@ -250,7 +268,7 @@ evicted, a module simply counts toward the cart's size. **A cart with no
 module by this console's own name is not refused** (2026-09-30, "A cart
 survives its firmware", ESP 88): `device/moycore_glue.WasmRun` opens
 `main.wasm` itself on the interpreter instead, with no key and no signature,
-and the Player's notice says it needs an update to run at full speed (below).
+and the Player's notice says it has no fast copy for this console yet (below).
 A module that loaded and ran its `_init` (`moycore.wasm_ran`) is past every
 reason to retry: an error from it is a trap in the cart's own code, shown on
 the stop card as the cart's error, on the VM-stopped path
@@ -586,7 +604,7 @@ before the runtime sees a byte, after the signature.
 the engine's `refused: unsigned module` and retries the open on the
 interpreter, `main.wasm` itself, which needs neither signature nor consent, so
 the cart plays regardless -- natively with `full_access` granted, interpreted with
-a short "isn't signed" notice without it. The same retry covers a
+a short notice (`slow.unsigned`) without it. The same retry covers a
 corrupted or mismatched AOT module (rare: its file name matched this
 console's chip and format, its content did not; that one reads as "needs an
 update", the same as no module at all) and a module calling a helper this
@@ -600,13 +618,13 @@ which is not staleness.
 | the module file | no `full_access` | `full_access` granted |
 |---|---|---|
 | signed with a key the image trusts | loads natively | loads natively |
-| no signature trailer | interpreter, "isn't signed" | loads natively |
+| no signature trailer | interpreter, `slow.unsigned` | loads natively |
 | a byte changed after signing | `refused: bad signature` (panel) | `refused: bad signature` (panel) |
 | signed for another chip, or with a key the image does not trust | `refused: bad signature` (panel) | `refused: bad signature` (panel) |
 | a trailer whose length is out of range | `refused: malformed signature` (panel) | `refused: malformed signature` (panel) |
-| key content does not match this console (name matched by chance, or corrupt) | interpreter, "needs an update" | interpreter, "needs an update" |
-| no module by this console's name at all | interpreter, "needs an update" | interpreter, "needs an update" |
-| calls a helper this firmware's runtime does not register (the loader's `resolve symbol <name> failed`) | interpreter, "console needs an update" | interpreter, "console needs an update" |
+| key content does not match this console (name matched by chance, or corrupt) | interpreter, `slow.missing` | interpreter, `slow.missing` |
+| no module by this console's name at all | interpreter, `slow.missing` | interpreter, `slow.missing` |
+| calls a helper this firmware's runtime does not register (the loader's `resolve symbol <name> failed`) | interpreter, `slow.firmware` | interpreter, `slow.firmware` |
 
 Whatever is admitted goes on to the provenance key, which is checked
 either way: the consent says nothing about which format or chip a module was
@@ -845,9 +863,9 @@ console's task until the loop returns.
   Dir fixture's `read` of its own `src/` folder reading
   nothing, as a missing file does. **The interpreter tier, on every board**:
   a cart with no module, one built for another chip, and one named for a
-  stale format all play on the interpreter with the short "needs an update"
+  stale format all play on the interpreter with the short `slow.missing`
   notice and the hello cart's greeting check; an unsigned cart follows its
-  consent -- the interpreter and its "isn't signed" notice without `full_access`,
+  consent -- the interpreter and its `slow.unsigned` notice without `full_access`,
   native and no notice with it, a tampered one still refused either way. The suites build the
   modules with the pinned compilers (`python3 tools/wasm_module.py
   compilers`), sign them with the OTA signing key (a suite without it skips

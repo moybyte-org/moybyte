@@ -439,7 +439,7 @@ def test_a_zero_s_page_asks_the_board_for_an_official_cart(tmp_path):
     from test_ota_signing import TEST_KEYS
     from test_pkg import _sign
     seeds = tmp_path / "seeds"
-    for cid in ("moybyte.calc", "moybyte.tap_game"):
+    for cid in ("moybyte.calc", "moybyte.tap_only_red"):
         shutil.copytree(ROOT / "system_carts" / (cid + ".moy"), seeds / (cid + ".moy"))
     release = tmp_path / "release"
     release.mkdir()
@@ -473,8 +473,8 @@ def test_a_zero_s_page_asks_the_board_for_an_official_cart(tmp_path):
             {"note": "Get Carts asks the board for its list", "wait": 4000},
             {"js": "JSON.stringify((window.__moyUpdate || {}).services || null)"},
             {"shot": "list"},
-            {"note": "Tap Game: on the release, not on the board", "click": at["cards"][1]},
-            {"wait": 800}, {"shot": "tap_game"},
+            {"note": "Tap Only Red: on the release, not on the board", "click": at["cards"][1]},
+            {"wait": 800}, {"shot": "tap_only_red"},
             {"click": at["verb"]},
             {"note": "the board installs it, then the page pulls its copy", "wait": 8000},
             {"shot": "ready"},
@@ -485,9 +485,9 @@ def test_a_zero_s_page_asks_the_board_for_an_official_cart(tmp_path):
         assert len(js) == 2, "the scenario did not run to its end:\n%s" % out[-4000:]
         svc = json.loads(js[0])
         assert svc["cart_home"] == "headless" and svc["cart_board"] is True, svc
-        assert (store / "moybyte.tap_game.moy" / "manifest.json").exists(), out[-3000:]
+        assert (store / "moybyte.tap_only_red.moy" / "manifest.json").exists(), out[-3000:]
         st = json.loads(js[1])
-        assert st["cart"] == "Tap Game" and st["err"] is None, (st, out[-3000:])
+        assert st["cart"] == "Tap Only Red" and st["err"] is None, (st, out[-3000:])
     finally:
         p.terminate()
         p.wait(timeout=10)

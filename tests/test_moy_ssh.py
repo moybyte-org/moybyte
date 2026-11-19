@@ -383,6 +383,43 @@ def test_a_terminal_session_is_the_face_s_line_discipline(harness):
     assert b"^C\r\n" in out, out
 
 
+def test_a_secret_question_is_answered_unseen_and_kept_from_the_history(harness):
+    """A role's secret question (the harness's `pkg ask`, pkg's password's
+    stand-in) is a terminal session's prompt; what is typed to it is echoed by nothing, its
+    erase moves nothing, Up while it is asked brings nothing back, and the
+    line that asked runs again with the answer -- which Up after it does not
+    bring back either."""
+    out = terminal(harness, ((b"pkg ask\r", 0.6), (b"hunter22", 0.2), (b"\x1b[A", 0.2),
+                             (b"\x7f", 0.1), (b"2\r", 0.8), (b"\x1b[A", 0.4),
+                             (b"\x03", 0.3), (b"exit\r", 0.3)))
+    assert b"hunter2" not in out, out
+    assert b"Password: \r\n" in out and b"\b \b" not in out, out
+    assert out.count(b"pkg ask") == 2, "the line typed, and Up's line after the answer: %r" % out
+    harness["log"].seek(0)
+    assert "ANSWER hunter22\n" in harness["log"].read()
+    r = ssh(harness, PASSWORD, "moy@127.0.0.1", "pkg ask")
+    assert r.returncode == 1 and b"Password" not in r.stdout, \
+        "an exec asks no questions: its command reads its answers from stdin"
+
+
+def test_an_exec_with_a_terminal_answers_its_command_s_question_there(harness):
+    """`ssh -t host CMD`: a question CMD asks is the terminal's prompt, its
+    answer typed unseen, and the session ends once the line asks nothing."""
+    r = subprocess.Popen(["ssh"] + options(harness) + [
+        "-o", "PubkeyAuthentication=no", "-o", "PreferredAuthentications=password",
+        "-tt", "moy@127.0.0.1", "pkg ask"], env=env_of(harness, PASSWORD),
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    time.sleep(1.2)
+    r.stdin.write(b"sesame42\r")
+    r.stdin.flush()
+    time.sleep(1.0)                     # the session ends by itself, its stdin still open
+    out, _err = r.communicate(timeout=20)
+    assert r.returncode == 0, out
+    assert b"Password: " in out and b"sesame" not in out, out
+    harness["log"].seek(0)
+    assert "ANSWER sesame42\n" in harness["log"].read()
+
+
 def test_tab_completes_a_command_and_a_path_and_lists_what_it_cannot_choose(harness):
     """Tab is the Terminal's completion (moy_sh_cands): a command's name, a
     path's from its folder, and with nothing more to share the names listed

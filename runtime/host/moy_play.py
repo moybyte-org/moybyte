@@ -49,7 +49,7 @@ import host_native
 import native_build
 from moy_play_face import (
     moy_chrome_list_t as _ChList, moy_front_ops_t as _FrontOps, moy_match_io_t as _Io,
-    moy_match_peer_t as _Peer, moy_match_t as _MatchS,
+    moy_match_peer_t as _Peer, moy_match_t as _MatchS, moy_match_beam_info_t as _BeamInfo,
     moy_proc_row_t as _ProcRow, moy_tick_t)
 
 _PLAY = os.path.join(native_build.ROOT, "native", "moy_play")
@@ -763,6 +763,7 @@ _MSIGS = (
     ("moy_match_init", [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_char_p,
                         ctypes.c_char_p, _U32], None),
     ("moy_match_start", [ctypes.c_void_p, ctypes.c_char_p], None),
+    ("moy_match_set_frame", [ctypes.c_void_p, ctypes.c_uint32], None),
     ("moy_match_stop", [ctypes.c_void_p], None),
     ("moy_match_announce", [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int], None),
     ("moy_match_set_config", [ctypes.c_void_p, ctypes.c_char_p], None),
@@ -812,6 +813,19 @@ _MSIGS = (
     ("moy_lockstep_expand", [ctypes.c_void_p, _U32], _I32),
     ("moy_match_size", [], ctypes.c_size_t),
     ("moy_match_offset_s", [], ctypes.c_size_t),
+    ("moy_match_beam_send", [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint8, _U32, _U32],
+     ctypes.c_int),
+    ("moy_match_beam_room", [ctypes.c_void_p], _U32),
+    ("moy_match_beam_fill", [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t, ctypes.c_uint32],
+     ctypes.c_int),
+    ("moy_match_beam_listen", [ctypes.c_void_p, _U32], ctypes.c_int),
+    ("moy_match_beam_accept", [ctypes.c_void_p, _U32], ctypes.c_int),
+    ("moy_match_beam_refuse", [ctypes.c_void_p, ctypes.c_uint8], ctypes.c_int),
+    ("moy_match_beam_held", [ctypes.c_void_p], _U32),
+    ("moy_match_beam_take", [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, _U32],
+     ctypes.c_size_t),
+    ("moy_match_beam_end", [ctypes.c_void_p], None),
+    ("moy_match_beam_info", [ctypes.c_void_p, ctypes.c_void_p], _B),
 )
 _MREADY = [False]
 
@@ -972,6 +986,10 @@ class Match:
         s.arr_f[f & 63] = f
         s.arr_t[f & 63] = int(t) & 0xFFFFFFFF
 
+    def set_frame(self, n):
+        """The largest frame this console's link carries (a beam's chunk)."""
+        self._d.moy_match_set_frame(self._p, int(n))
+
     def start(self, mac):
         self._d.moy_match_start(self._p, bytes(mac)[:6].ljust(6, b"\0"))
 
@@ -1063,6 +1081,52 @@ class Match:
         msg = bytes(msg)
         self._d.moy_match_dispatch(self._p, bytes(mac)[:6], msg, len(msg),
                                    int(now) & 0xFFFFFFFF)
+
+    # -- beaming a file (moy_match.h, BEAMING A FILE) --
+    def beam_send(self, title, what, size, now):
+        return self._d.moy_match_beam_send(self._p, str(title).encode(), int(what), int(size),
+                                           int(now) & 0xFFFFFFFF)
+
+    def beam_room(self):
+        return self._d.moy_match_beam_room(self._p)
+
+    def beam_fill(self, buf, n, now):
+        """The first `n` bytes of `buf` offered: the count taken."""
+        n = max(0, min(int(n), len(buf)))
+        return self._d.moy_match_beam_fill(self._p, bytes(buf[:n]), n, int(now) & 0xFFFFFFFF)
+
+    def beam_listen(self, now):
+        return self._d.moy_match_beam_listen(self._p, int(now) & 0xFFFFFFFF)
+
+    def beam_accept(self, now):
+        return self._d.moy_match_beam_accept(self._p, int(now) & 0xFFFFFFFF)
+
+    def beam_refuse(self, why):
+        return self._d.moy_match_beam_refuse(self._p, int(why))
+
+    def beam_held(self):
+        return self._d.moy_match_beam_held(self._p)
+
+    def beam_take(self, buf, now):
+        """The next bytes held, into the writable `buf`: the count."""
+        n = len(buf)
+        tmp = ctypes.create_string_buffer(n)
+        got = self._d.moy_match_beam_take(self._p, tmp, n, int(now) & 0xFFFFFFFF)
+        buf[:got] = tmp.raw[:got]
+        return got
+
+    def beam_end(self):
+        self._d.moy_match_beam_end(self._p)
+
+    def beam_info(self):
+        """(role, state, why, title, peer, size, done, what, sent, resent,
+        refused, rate, ram), None with no beam."""
+        i = _BeamInfo()
+        if not self._d.moy_match_beam_info(self._p, ctypes.byref(i)):
+            return None
+        return (i.role, i.state, i.why, i.title.decode("utf-8", "replace"),
+                i.peer.decode("utf-8", "replace"), i.size, i.done, i.what, i.sent,
+                i.resent, i.refused, i.rate, i.ram)
 
     def peers(self):
         """[(mac, name, board, cart, state, seen)] of every peer row."""

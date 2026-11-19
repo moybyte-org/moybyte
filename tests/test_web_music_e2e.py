@@ -236,7 +236,7 @@ def test_site_a_station_plays_on_a_desk_that_booted_into_the_editor(tmp_path):
         out, js = web_e2e.run(tmp_path, "hero", _HERO, [
             {"js": _SPY}, {"wait": 2500},
             {"js": "__moyState().then(s => 'EDIT ' + JSON.stringify(s.edit))"},
-            {"click": [999, 19]}, {"wait": 1200},                   # the Editor's X
+            {"click": [1000, 70]}, {"wait": 1200},                  # the Editor window's X
             {"click": [143, 80]}, {"wait": 2500},                   # Music on the desk
             {"key": "Enter"}, {"wait": 800}]                         # Add a station: Address
             + [{"key": c} for c in url] + [{"wait": 300}, {"key": "Enter"}, {"wait": 300}]

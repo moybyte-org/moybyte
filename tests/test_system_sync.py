@@ -69,7 +69,8 @@ BOARD_DOC = {
 
 @pytest.mark.parametrize("key,cls", [
     ("theme", PORTABLE), ("theme_variant", PORTABLE),
-    ("layout_theme", PORTABLE), ("name", PORTABLE), ("author", PORTABLE),
+    ("layout_theme", PORTABLE), ("home_style", PORTABLE), ("name", PORTABLE),
+    ("author", PORTABLE),
     ("steady", PORTABLE), ("show_fps", PORTABLE), ("favorites", PORTABLE),
     ("plays", PORTABLE), ("desk_mru", PORTABLE),
     ("paint_doc", PORTABLE), ("paint_doc_kind", PORTABLE),

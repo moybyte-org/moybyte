@@ -19,7 +19,7 @@ import pytest
 
 from cart_store_fixtures import MemNet, Repo
 from runtime import host_app, moy_carts, ui_draw
-from ws_helpers import no_unlock_banner, quiesce, seed_stories, select_on_home
+from ws_helpers import no_unlock_banner, quiesce, seed_stories, select_on_home, shelf_cart
 
 _DT = 1 / 30
 _C = ui_draw._C
@@ -128,7 +128,7 @@ def _console(tmp_path, app, ships, desk=False, chip=False):
     if app.startswith("editor "):
         # an Editor tab over a cart: "editor TAB CART TITLE"
         _e, tab, title = app.split(" ", 2)
-        ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == title))
+        ws.open_in_editor(shelf_cart(ws, title))
         ws.editor_app.set_tab(tab)
     elif app in ("settings", "licences", "achievements"):
         ws.open_settings()
@@ -604,12 +604,12 @@ def test_a_change_the_page_shows_moves_its_gen(tmp_path, change, bufs):
 
 
 # The Editor's tabs on the verbs (docs/history/scroll_and_text_2026-10.md §15 P5).
-# A cart's picker of pictures (Hop Quest's, Moy Night's) is a part with no
+# A cart's picker of pictures (Star Catcher's, Space Desktop's) is a part with no
 # gen: its page draws whole, and its frames are held to a whole draw's alone.
-EDITOR_TABS = ("editor cards Coin Quest", "editor cards Bench", "editor cards Hop Quest",
-               "editor cards Moy Night", "editor blocks Coin Quest", "editor blocks Bench",
+EDITOR_TABS = ("editor cards Coin Quest", "editor cards Bench", "editor cards Star Catcher",
+               "editor cards Space Desktop", "editor blocks Coin Quest", "editor blocks Bench",
                "editor music Sky Run", "editor music Coin Quest")
-_PICTURES = ("editor cards Hop Quest", "editor cards Moy Night")
+_PICTURES = ("editor cards Star Catcher", "editor cards Space Desktop")
 
 
 @pytest.mark.parametrize("bufs", (1, 2, 3))

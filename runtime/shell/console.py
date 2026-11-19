@@ -288,6 +288,7 @@ import moy_app as _moy_app
 # in-process except cannot do this job.
 from crash_guard import CrashGuard, WALLPAPER_KEY
 import app_perms as _app_perms
+import moy_carts as _carts
 
 # Appearance (appearance.py): `ws.look`, the LOOK collaborator (#209 landing D)
 # -- theme + variant, the system font scale, the theme's wallpaper, `custom`
@@ -2276,9 +2277,9 @@ class Workstation:
             self.run.player.crash_line = None
             self.home.go_home()
             return True
-        # A compiled cart has no source to open: its trap stays on the stop
-        # card, which offers no See why (native/moy_wasm/README.md).
-        if self.cart.get("runtime") == "wasm":
+        # A compiled cart's trap has no line to open: it stays on the stop
+        # card, which offers See the code instead (`see_code`).
+        if _carts.is_compiled(self.cart):
             return False
         err = self.cart_error or "crashed"
         line = self.run.player.crash_line
@@ -2290,6 +2291,35 @@ class Workstation:
         # set that may only shrink (tests/test_console_facade.py), and this is a
         # new name with two readers.
         self.code_file = self.run.player.crash_file or None
+        self._open_code()
+        if line is not None:
+            # Land the caret on the line that raised (set_menu_view only marks
+            # it when it BUILDS the editor -- an editor kept open across the
+            # PLAY needs the explicit jump).
+            self.saves.mark_code_error(line - 1, err[:32])
+        self.crash_popup = err
+        self.frame_state.dirty = True
+        return True
+
+    def see_code(self):
+        """The stop card's See the code: a compiled cart's `src/` in the Code
+        tab, to read (`EditorApp.code_read_only`), on no line, since a
+        module's trap has none. True when it navigated; False (no project, a
+        parked console, a cart with no `src/`, or not a compiled one) keeps
+        the card."""
+        if self.run.project is None or self.cart is None or self.web.parked:
+            return False
+        if not _carts.is_compiled(self.cart) or not self.text.code_sources():
+            return False
+        self.cart_error = None
+        self.run.player.crash_line = None
+        self.code_file = None
+        self._open_code()
+        return True
+
+    def _open_code(self):
+        """The stopped run's world released as a normal exit's is, and the
+        Editor open on its Code tab over `code_file`."""
         self.run.player.release_world()
         # Windowed desk world (#73/#105): the crashed playtest window closes
         # like a normal exit (never truncating windows stacked above it);
@@ -2300,14 +2330,7 @@ class Workstation:
         self.editor_app.open(self.run.project)
         self.editor = None            # rebuild over the file that raised
         self.text.set_menu_view("code")
-        if line is not None:
-            # Land the caret on the line that raised (set_menu_view only marks
-            # it when it BUILDS the editor -- an editor kept open across the
-            # PLAY needs the explicit jump).
-            self.saves.mark_code_error(line - 1, err[:32])
-        self.crash_popup = err
         self.frame_state.dirty = True
-        return True
 
     def running_cart_shows_bar(self):
         """True while a TOOL/APP cart is PLAYING (screen "desktop", not crashed): it runs
@@ -2365,7 +2388,7 @@ class Workstation:
         # Returns True iff the workspace opened; False leaves ws.cart None with
         # cart_error set (see the rehydrate guard below).
         # Deferred pmem (#66): persist the OUTGOING project's unsaved cells before
-        # the fresh Project replaces it -- a re-open otherwise reloads pmem.json
+        # the fresh Project replaces it -- a re-open otherwise reloads pmem.bin
         # over progress that only ever reached RAM.
         _old = self.run.project
         if _old is not None and _old.pmem is not None:
@@ -2843,7 +2866,7 @@ class Workstation:
         """#184: the deferred-transition acknowledgment (GAPS 51) -- the
         toast's pill in flat fills, painted once on the frame between a tap
         and its heavy transition, which the panel retains through the load:
-        the cart's kind as an icon and what opens ("Opening Sky Run..."),
+        the cart's kind as an icon and what opens ("Opening Star Catcher..."),
         over the middle of the card being opened on a handheld and in the
         middle of the bar on the desk, the one band no window covers."""
         cv = self.sys_canvas
@@ -3091,7 +3114,10 @@ class Workstation:
         now = _ticks_ms()
         if self.toast_until and _ticks_diff(self.toast_until, now) > 0:
             return True
-        if self.notices.notice_active():
+        # A notice is still: its show, its change and its withdrawal mark the
+        # frame dirty (`Notices.notice`), so the gate opens for the one frame
+        # that takes it down once its time is up.
+        if self.notice_up is not None and not self.notices.notice_active(now):
             return True
         return _NOTES.banner is not None and _NOTES.up(now) is not None
 
@@ -3357,6 +3383,13 @@ class Workstation:
                 # backstop for the unexpected one, and it says so once rather
                 # than every idle frame forever.
                 try:
+                    # The pmem log's quiet work (moy_carts.tidy_pmem: a
+                    # logged save written back to its file, or a sector
+                    # erased ahead), one flash step a quiet frame and
+                    # nothing else on it.
+                    tidy = getattr(self.carts_store, "tidy_pmem", None)
+                    if tidy is not None and tidy():
+                        return
                     covers.prefetch_tick()
                     # Mint the home retained-frame buffer off the paint path too
                     # (idempotent after the first call; the device new_layer
@@ -3816,6 +3849,8 @@ def wire_workstation_core(ws, store, carts_root, make_api, wifi,
         ws.audio_out = audio_out
     if runtimes:
         ws.runtimes = dict(runtimes)
+    import app_perms
+    app_perms.wire_tiers(getattr(ws, "runtimes", None))
     ws.carts_store = store
     ws.carts_root = carts_root
     ws.can_manage = (carts_root is not None) if can_manage is None else can_manage

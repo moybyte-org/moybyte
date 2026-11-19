@@ -78,6 +78,17 @@ THEME = "theme"
 HOME_TAB = {"settings": "cards", "code": "code", "art": "paint",
             "world": "scene", "sound": "music"}
 
+# The panes that serve one Editor tab's work beside it, by that tab: where
+# the open cart has not got the tab (`EditorApp._offers`), they go with it.
+SERVES = {"sheet": "paint", "sprites": "paint", "maps": "map", "sounds": "music",
+          "song": "music", "actor": "scene", "stamps": "scene"}
+
+
+def tab_for(content):
+    """The Editor tab whose work pane `content` is: its own, else the one it
+    serves (SERVES), else None (the Game, the Log)."""
+    return CONTENTS[content][2] or SERVES.get(content)
+
 
 def wide(w):
     """Whether a panes area `w` wide takes the 1024 arrangement (a Run slot
@@ -208,9 +219,10 @@ class Arrangement:
     remembers (per project, per workspace and per screen size, never in the
     cart). `game` False is the workspace with no Game tab: the game plays
     in a desk window of its own (`WindowedWM.play_in_window`), and the
-    panes left hold the room."""
+    panes left hold the room. `lacks` are the panes the open cart has not
+    got (`EditorDesk.lacks`), and the panes left hold their room too."""
 
-    def __init__(self, key, area, unit=1, blocks=False, game=True):
+    def __init__(self, key, area, unit=1, blocks=False, game=True, lacks=()):
         self.key = key
         self.area = tuple(area)
         self.unit = unit
@@ -218,6 +230,8 @@ class Arrangement:
         root = tree(key, area[2], area[3], unit, blocks)
         if not game:
             root = without(root, "game") or root
+        for c in lacks:
+            root = without(root, c) or root
         self.root = root
         self.sizes = {}
         self._start = {}

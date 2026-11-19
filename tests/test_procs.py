@@ -184,12 +184,12 @@ def test_launching_a_running_game_brings_it_forward(tmp_path):
 
 def test_the_fifth_run_is_refused_naming_the_oldest(tmp_path):
     ws, drv, wa, wb = _two(tmp_path)
-    for t in ("Coin Quest", "Hop Quest"):
+    for t in ("Coin Quest", "Letter Blitz"):
         open_cart(ws, t)
         _windowed(ws, drv)
     assert len(ws.procs.list) == 3
     open_cart(ws, "Pin Light")
-    assert ws.cart["title"] == "Hop Quest" and len(ws.procs.list) == 3
+    assert ws.cart["title"] == "Letter Blitz" and len(ws.procs.list) == 3
     assert ws.confirm.open and ws.confirm.title == "Close Star Catcher?"
     assert ws.confirm.buttons == ("Cancel", "Close")
     # Close closes it and opens the one refused
@@ -198,7 +198,7 @@ def test_the_fifth_run_is_refused_naming_the_oldest(tmp_path):
     act()
     assert ws.cart["title"] == "Pin Light"
     assert sorted(p.title() for p in ws.procs.list) == [
-        "Brick Siege", "Coin Quest", "Hop Quest"]
+        "Brick Siege", "Coin Quest", "Letter Blitz"]
 
 
 LUA_GAME = """

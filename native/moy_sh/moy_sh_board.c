@@ -729,6 +729,17 @@ static int b_role(void *ctx, moy_sh_t *s, int argc, char **argv) {
     return code_of(r);
 }
 
+// A session's question is over: the door's `unask JOB` lets go of what its
+// role commands kept for the line's runs (runtime/shell/pkg.py's checked
+// download).
+static void b_unask(void *ctx, moy_sh_t *s) {
+    (void)ctx;
+    char job[2 * sizeof(uintptr_t) + 1];
+    job_of(s, job, sizeof job);
+    char *one[1] = { job };
+    moy_sh_board_door(s, "unask", 1, one);
+}
+
 // -- the virtual files ---------------------------------------------------------------------
 
 static void *text_alloc(size_t n) {
@@ -1443,6 +1454,7 @@ void moy_sh_board_host(moy_sh_host_t *h, void *ctx,
     h->procs = b_procs;
     h->roles = ROLES;
     h->role = b_role;
+    h->unask = b_unask;
     h->mem = b_mem;
     h->df = b_df;
     h->reboot = b_reboot;

@@ -27,10 +27,13 @@ class Saves:
         line for not having finished it -- and keep the syntax badge, WITHOUT
         yanking the caret, because leaving is not a request to be taken to the
         error. Broken code that reaches disk is caught at the next run, as
-        crash-to-code. Non-SD carts (no path) just no-op True."""
+        crash-to-code. Non-SD carts (no path) and a read-only buffer
+        (a compiled cart's `src/`) just no-op True."""
         ws = self.ws
         if not (ws.editor and ws.run.project.cart):
             return False
+        if ws.editor.read_only:
+            return True                    # nothing to write: a compiled cart's src/
         src = ws.editor.text()
         name = ws.text.code_file_name()
         # Always gate, even for embedded/non-SD carts, so the kid sees a syntax

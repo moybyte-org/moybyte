@@ -13,6 +13,7 @@
   "moybyte": {
     "type": "wallpaper",
     "system": true,
+    "fixture": true,
     "order": 60,
     "permissions": [
       "graphics",

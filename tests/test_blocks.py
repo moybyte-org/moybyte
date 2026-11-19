@@ -486,17 +486,17 @@ def test_tap_position_readers_compile_and_hit_test():
 
 
 # ----------------------------------------------------------------------------
-# The shipped moybyte.tap_game.moy: its blocks.json is the source of truth, compiles to
-# the shipped main.py, and the cart plays (tap the target -> score).
+# The shipped moybyte.tap_only_red.moy: its blocks.json is the source of truth,
+# compiles to the shipped main.py, and the cart plays (a red scores, a lure misses).
 # ----------------------------------------------------------------------------
 
-def _tap_game_dir():
-    return str(ROOT / "system_carts" / "moybyte.tap_game.moy")
+def _tap_only_red_dir():
+    return str(ROOT / "system_carts" / "moybyte.tap_only_red.moy")
 
 
-def test_tap_game_blocks_json_compiles_to_shipped_main():
+def test_tap_only_red_blocks_json_compiles_to_shipped_main():
     import json
-    base = _tap_game_dir()
+    base = _tap_only_red_dir()
     with open(base + "/blocks.json") as f:
         prog = json.loads(f.read())
     with open(base + "/main.py") as f:
@@ -506,19 +506,25 @@ def test_tap_game_blocks_json_compiles_to_shipped_main():
     assert blocks.is_block_authored_source(shipped)
 
 
-def test_tap_game_cart_loads_blocks_and_runs():
-    base = _tap_game_dir()
+def test_tap_only_red_cart_loads_blocks_and_a_scene():
+    base = _tap_only_red_dir()
     cart = moy_carts.load(base)
     assert cart is not None and cart["blocks"] is not None
-    # opening it in the block editor would see real blocks
-    assert cart["blocks"]["vars"]                       # declared variables present
-    _run_cart(cart["src"], frames=3)                    # plays clean headlessly
+    assert cart["blocks"]["vars"] and cart["blocks"]["objects"]
+    assert cart["scenes"], "its bubbles are the scene's actors"
 
 
-def test_tap_game_scores_on_a_tap_on_the_target(tmp_path):
+def _tap(ws, a):
+    x, y = a.x + 16, a.y + 16                           # the middle of a 32px bubble
+    ws.input.pointer.place(x, y)
+    ws.input.game_pointer = (x, y, True)
+    ws.frame(1 / 30)
+    ws.input.game_pointer = None
+
+
+def test_tap_only_red_scores_a_red_and_misses_a_lure(tmp_path):
     from runtime import host_app
-    base = _tap_game_dir()
-    cart = moy_carts.load(base)
+    cart = moy_carts.load(_tap_only_red_dir())
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.launcher.items = [cart]
     ws.launcher.sel = 0
@@ -527,35 +533,33 @@ def test_tap_game_scores_on_a_tap_on_the_target(tmp_path):
     ws.input.game_pointer = None
     for _ in range(3):
         ws.frame(1 / 30)
-    tx, ty = ws.ns["tx"], ws.ns["ty"]
-    before = ws.ns["score"]
-    ws.input.pointer.place(int(tx) + 14, int(ty) + 14)           # a tap touches the pointer
-    ws.input.game_pointer = (int(tx) + 14, int(ty) + 14, True)   # tap the target center
+    actors = ws.ns["actors"]
+    red = [a for a in actors("red") if 40 <= a.y <= 180][0]
+    assert red.flags.get("size") == 400, "a bubble is drawn, and tapped, 32px wide"
+    _tap(ws, red)
+    assert (ws.ns["score"], ws.ns["misses"]) == (1, 0)
+    assert red.y >= 230, "a popped bubble starts again below the screen"
+    lure = [a for a in actors("lure") if 40 <= a.y <= 180][0]
+    _tap(ws, lure)
+    assert (ws.ns["score"], ws.ns["misses"]) == (1, 1)
+    # a red that floats off the top is a miss too, and five misses start over
+    ws.ns["misses"] = 4
+    red = list(actors("red"))[0]
+    red.y = -40
     ws.frame(1 / 30)
-    assert ws.ns["score"] == before + 1                 # scored
-    # tapping empty space does not score
-    ws.ns["tx"], ws.ns["ty"] = 250, 180
-    ws.input.game_pointer = (5, 18, True)
-    s = ws.ns["score"]
     ws.frame(1 / 30)
-    assert ws.ns["score"] == s
-    # the clock runs out -> game over
-    ws.input.game_pointer = None
-    ws.ns["timer"] = 2
-    for _ in range(4):
-        ws.frame(1 / 30)
-    assert ws.ns["over"] == 1
+    assert (ws.ns["score"], ws.ns["misses"]) == (0, 0)
 
 
-def test_tap_game_is_in_the_device_cart_bundle():
-    # gen_device_carts must pick the new cart up (it scans system_carts/), and carry
+def test_tap_only_red_is_in_the_device_cart_bundle():
+    # gen_device_carts must pick the cart up (it scans system_carts/), and carry
     # its blocks.json so the on-device block editor opens it as blocks.
     import sys as _sys
     _sys.path.insert(0, str(ROOT / "tools"))
     import gen_device_carts
     carts = gen_device_carts.build_carts(str(ROOT / "system_carts"))
-    tg = [c for c in carts if c["title"] == "Tap Game"]
-    assert tg, "Tap Game not in the device bundle (add it to CART_ORDER)"
-    assert tg[0].get("blocks"), "Tap Game must carry blocks.json into the bundle"
+    tg = [c for c in carts if c["title"] == "Tap Only Red"]
+    assert tg, "Tap Only Red not in the device bundle"
+    assert tg[0].get("blocks"), "Tap Only Red must carry blocks.json into the bundle"
     # the rendered module is valid Python (repr round-trips)
     compile(gen_device_carts.render_module(carts), "<carts_data>", "exec")

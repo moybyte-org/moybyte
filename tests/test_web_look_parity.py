@@ -186,7 +186,7 @@ _STEADY = ("_ws.bar_layer.clock_text = lambda: '12:00'\n"
            "_ws.ach.mute = True\n"
            "_ws.ach.toast = None\n"
            "_ws.look.set_theme(%r, persist=False, variant=%r)\n")
-_EDITOR = ("_ws.open_in_editor([c for c in _ws.carts.all if c.get('title') == 'Sky Run'][0])\n"
+_EDITOR = ("_ws.open_in_editor([c for c in _ws.carts.all if c.get('title') == 'Star Catcher'][0])\n"
            "_ws.text.set_menu_view('cards')\n")
 _APP = "_ws.spine.open_app(_ws.app(%r))\n"
 # (arrangement, scene, theme, variant, what the scene does after the setup)
@@ -205,12 +205,13 @@ SIZES = {"handheld": (320, 240), "desk": (1024, 600)}
 
 def _host_frame(tmp_path, arrangement, src):
     from runtime import host_app
-    from ws_helpers import device_frames
+    from ws_helpers import device_frames, ship_shelf
     w, h = SIZES[arrangement]
     glass = _web_glass("DESK_DIAGONAL_IN") if arrangement == "desk" else None
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(w, h),
                                     windowed=arrangement == "desk",
                                     panel_diagonal_in=glass)
+    ship_shelf(ws, "web")                  # the browser bundle's shelf
     device_frames(ws, 30)
     exec(src, {"_ws": ws})
     ws.mark_dirty()

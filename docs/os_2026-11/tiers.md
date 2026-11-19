@@ -45,7 +45,7 @@ costs are #227's.
   SERVICE): no hook is dispatched to it, and a timer is a deadline it
   passes. It has **no raw RTOS**: the table exports no task, timer or ISR
   primitive, and the OS creates the module's task with a priority and core
-  cap (core 1 only on the S3s). Every registration is a handle under the
+  cap (core 1 only on the S3s, but a game's par lane, which has none). Every registration is a handle under the
   process's OWNER, so "leases end with the process" stays true.
   `pthread_create` is the one thread verb (below): it makes an OS-owned task
   under the OWNER with the module's caps, swept on stop, never a raw
@@ -159,11 +159,23 @@ costs are #227's.
   run, a service's start). So `clipboard` is Python's, wasm's and ELF's,
   `network` Python's and ELF's (its sockets), `notifications` and `front`
   every tier's, `alarms` too, and an install prompt
-  asks a cart only for what its tier can do (`tests/test_app_perms.py`).
+  asks a cart only for what its tier can do; one that asks for what none of
+  its tiers serves (a Lua or wasm cart's `network`, whose door is `http`) is
+  refused at install and launch, by name (`tests/test_app_perms.py`).
 - **Trust** is the overview's §4 C row: an ELF that has loaded runs at the
   kernel's trust, and no permission binds it past its consent. The strike ledger and crash record are the floor, keyed for
   an unsigned module by **content hash**, since an id is the author's to
   change (`processes.md` §10).
+
+**One source, two targets (owner, 2026-11-18, #261).** A compiled cart's C
+builds to a wasm module and to a native module per chip from one header
+(`sdk/README.md`, "A compiled cart"): the P4s run the native one, the S3s the
+wasm one unless the user chose the native one for the cart ("risk it": its
+full access is the user's choice, in plain words, remembered), the browser the
+wasm one, and a console lacking the wanted one runs the other. The routing is
+`runtime/shell/app_perms.py`'s `tier_of`, which the Player, the wallpaper and
+the consent share; `full_access` is asked for only where the native module
+runs.
 
 The deferred Rust rung (owner, 2026-11-02) uses this loader and table.
 
@@ -171,7 +183,8 @@ The deferred Rust rung (owner, 2026-11-02) uses this loader and table.
 uses the **cart's** PSRAM share (its text counting in its PROCS need); a
 background C service's text is the ELF row of THE SHARES
 (`native/moy_play/moy_play.h`), 256 KiB on each S3; its code lives in PSRAM, so no ISR, no
-internal SRAM, and core 1 only.
+internal SRAM, and core 1 only (a game's par lane runs on either core:
+`native/moy_elf/moy_os.h`'s `moy_os_caps_t`).
 
 **The function table (sketch).**
 

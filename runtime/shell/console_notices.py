@@ -117,6 +117,18 @@ class Notices:
         _ch._moy_play().chrome_notice(ws.notice_up[0], ws.notice_up[1], kind == "ok",
                                       ws._notice_until)
 
+    def withdraw(self, title):
+        """The notice titled `title` taken down before its time, where it is
+        the one up: a question about to open over the screen it would cover."""
+        ws = self.ws
+        up = ws.notice_up
+        if up is None or up[0] != str(title):
+            return
+        ws.notice_up = None
+        ws._notice_until = _ticks_ms()
+        ws.frame_state.dirty = True
+        _ch._moy_play().chrome_notice(up[0], up[1], up[2] == "ok", ws._notice_until)
+
     def notice_active(self, now=None):
         ws = self.ws
         if ws.notice_up is None:
@@ -273,7 +285,7 @@ class Notices:
         if not _perms.asks_first(cart, consent.get(aid)):
             return False
         title = str(cart.get("title") or "this cart")[:18]
-        perms = list(cart.get("permissions") or ())
+        perms = _perms.perms_of(cart)
 
         def allow():
             consent.record(aid, perms)

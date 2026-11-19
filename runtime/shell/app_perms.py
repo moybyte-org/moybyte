@@ -1,3 +1,23 @@
+# Map (grep -n a name to jump there):
+#   row                               a permission's row of the table
+#   line                              a permission's line on the install prompt
+#   asked                             the permissions a prompt asks for, on a tier
+#   wire_tiers                        which tiers this console runs
+#   tier_of                           the one router: the tier a cart runs on here
+#   native_choice                     whether Settings offers 'Run as native code'
+#   run_tier                          tier_of with the cart's consent record
+#   perms_of                          the permissions a cart needs where it runs
+#   tiers_of                          the tiers a cart's permissions are read on
+#   check                             (granted, absent, refusal) for running or installing a cart
+#   lacking                           the first required permission the console has nothing for
+#   manifest_cart                     a manifest read as the table reads a cart
+#   app_id                            the id a consent record is kept under
+#   prompt                            the install prompt's lines: the publisher, TRUSTED or UNREVIEWED
+#   warned                            whether a prompt carries the unreviewed warning
+#   regrant                           a live run's grants redone after its app's permissions changed
+#   Consent                           the consent records over the system store, and this console's checks
+#   Consent.opt                       turn one permission on or off, as Settings does
+#   Consent.revoke                    mark an app its store took back, so it will not launch
 """The permission table (`native/os_calls.json`'s "permissions") and the
 consent the install prompt records against it (docs/os_2026-11/processes.md
 §2). One table: the install prompt's lines, the install check and the launch
@@ -46,11 +66,27 @@ prompt would ask nothing, and a cart made on this console, whose record the
 making writes (`Consent.made`) and which runs on its manifest as written,
 less what Settings turned off.
 
+A PYTHON cart shares the shell's MicroPython, so its manifest binds
+nothing and its trust comes from review (#261): from a reviewed index
+(cart_index.is_reviewed) its prompt says it is a trusted app (TRUSTED);
+from any other it carries the UNREVIEWED warning, asked again only when an
+update comes from another source or adds a permission. The prompt names the
+cart's publisher first (FROM) where it came from an index.
+
 The consent record lives in system/settings under `KEY`, one entry per app id
 (`moy_app.id_for`, the grant's key): `{"perms": [...], "off": [...]}`, the
 manifest permissions consented at install or first run (None for a cart
 made here, and for a Settings switch on a cart with no record) and the ones
-turned off since. A malformed entry reads as no entry."""
+turned off since; `"unreviewed"`, the index whose unreviewed warning the
+user accepted for it; and `"revoked": true` once that cart's index withdrew
+the installed version (cart_index's "AN INDEX MAY REVOKE"), which refuses
+every launch (REVOKED_REFUSAL) until an install or a removal writes the
+record again. A malformed entry reads as no entry.
+
+A compiled cart carrying a native module beside its wasm one (`is_dual`)
+asks for `full_access` too where its native module runs (`perms_of`,
+`tier_of`); where that is the user's choice (`native_choice`), the record's
+`full_access`, consented and on, is the choice (`native_opted`)."""
 
 import moy_app as _moy_app
 from moy_store_base import builtin_name, id_in_folder, vendor
@@ -138,6 +174,15 @@ PERM, GRANTS, TIERS, PROMPT, NEEDS, NAMES = range(6)
 # binding (processes.md §2), so the prompt says what it is.
 TRUSTED = "A trusted app: Python can reach the whole console"
 
+# The install prompt's lines for a Python cart from an index nobody
+# reviewed (cart_index.is_reviewed): words a parent reads before saying yes.
+UNREVIEWED = ("Moybyte has not checked this cart.",
+              "It can do anything on this console: read what's kept on it, "
+              "change it, go online.")
+
+# The install prompt's first line: who publishes the cart (cart_index.publisher).
+FROM = "From %s"
+
 # The install prompt's line for a service (processes.md §5, owner
 # 2026-11-08): it holds its app's grant and uses it with no window open.
 BACKGROUND = "Runs in the background, and can do all of this with no window open"
@@ -149,6 +194,9 @@ KEY = "consent"
 # refusal saying where it is asked.
 UNASKED = {"perms": [], "off": []}
 UNASKED_REFUSAL = "needs your OK - open it to say yes"
+
+# A launch of a cart whose installed version its store withdrew.
+REVOKED_REFUSAL = "was taken back by its store - remove it, or update it in Get Carts"
 
 # A raw lease's line: full access to one of the board's resources (the
 # overview's section 4).
@@ -201,19 +249,108 @@ def asked(perms, tier=None):
     return out
 
 
-def tier_of(cart):
-    """The cart's tier: `elf` for a native cart (its manifest's
-    `"moybyte": {"native": [chips]}`), else its runtime, Python by default."""
-    if cart and cart.get("native"):
+# The compiled tiers this console runs, as its runtimes are wired
+# (`wire_tiers`, console.wire_workstation_core): the chip its native modules
+# are built for (None: no native tier) and whether it runs wasm.
+_HERE = {"chip": None, "wasm": False}
+
+# The chips whose consoles confine a native module (U-mode, PMP; docs/os_2026-11/
+# tiers.md section 1): a compiled cart's native module is what they run.
+CONFINING = ("esp32p4",)
+
+# Settings' switch for a compiled cart's native module on a console that does
+# not confine it (perms_ui): the user's choice, remembered as consent to
+# `full_access` (`Consent.opt`).
+NATIVE_LINE = "Run as native code: faster, with full access to the console"
+
+
+def wire_tiers(runtimes):
+    """This console's compiled tiers from its runtimes (`ws.runtimes`): the
+    native one's chip, and whether a wasm one is there."""
+    elf = (runtimes or {}).get("elf")
+    _HERE["chip"] = getattr(getattr(elf, "engine", None), "CHIP", None)
+    _HERE["wasm"] = (runtimes or {}).get("wasm") is not None
+
+
+def is_dual(cart):
+    """Whether `cart` is a compiled cart that carries a native module beside
+    its wasm one (`"runtime": "wasm"` and `"moybyte": {"native": [chips]}`,
+    sdk/include/moybyte/cart.h)."""
+    return bool(cart) and bool(cart.get("native")) and cart.get("runtime") == "wasm"
+
+
+def native_opted(rec):
+    """Whether consent record `rec` holds `full_access` on: the user's choice
+    of a compiled cart's native module (`NATIVE_LINE`)."""
+    return (isinstance(rec, dict) and isinstance(rec.get("perms"), list)
+            and "full_access" in rec["perms"] and "full_access" not in rec["off"])
+
+
+def _wants_native(rec, chip):
+    """A compiled cart's native module is wanted on a console that confines
+    it, unless Settings turned its `full_access` off, and elsewhere only by
+    the user's choice (`native_opted`)."""
+    if chip in CONFINING:
+        return not (isinstance(rec, dict) and "full_access" in rec["off"])
+    return native_opted(rec)
+
+
+def tier_of(cart, rec=None):
+    """The tier `cart` runs on here, under its consent record `rec`: `elf`
+    for a native cart (its manifest's `"moybyte": {"native": [chips]}`),
+    else its runtime, Python by default. A compiled cart that carries both
+    modules (`is_dual`) runs its native one where it is wanted
+    (`_wants_native`) and this console has it, else its wasm one, else its
+    native one; with neither here, the one the console would want, whose
+    absence the Player says. The Player, the wallpaper and the consent all
+    route by this."""
+    if not cart:
+        return "python"
+    if not cart.get("native"):
+        return cart.get("runtime") or "python"
+    if cart.get("runtime") != "wasm":
         return "elf"
-    return (cart.get("runtime") if cart else None) or "python"
+    chip = _HERE["chip"]
+    elf = chip is not None and chip in cart["native"]
+    if elf and _wants_native(rec, chip):
+        return "elf"
+    if _HERE["wasm"] or not elf:
+        return "wasm"
+    return "elf"
 
 
-def tiers_of(cart):
+def native_choice(cart):
+    """Whether running `cart`'s native module is the user's choice here: a
+    compiled cart carrying a module for this console's chip, on a console
+    that does not confine it (`NATIVE_LINE`, Settings' switch)."""
+    chip = _HERE["chip"]
+    return (is_dual(cart) and chip is not None and chip not in CONFINING
+            and chip in cart["native"])
+
+
+def run_tier(ws, cart):
+    """`tier_of` for a launch of `cart` on console `ws`, under the record it
+    runs under (`Consent.for_run`)."""
+    consent = getattr(ws, "consent", None) if ws is not None else None
+    rec = consent.for_run(cart) if consent is not None and is_dual(cart) else None
+    return tier_of(cart, rec)
+
+
+def perms_of(cart, rec=None):
+    """The permissions `cart` asks for here: its manifest's, and
+    `full_access` where it is a compiled cart running its native module
+    (`tier_of`), the consent that module runs under."""
+    perms = list((cart.get("permissions") if cart else None) or ())
+    if is_dual(cart) and "full_access" not in perms and tier_of(cart, rec) == "elf":
+        perms.append("full_access")
+    return perms
+
+
+def tiers_of(cart, rec=None):
     """The tiers `cart`'s programs run on: its own (`tier_of`), and its own
     service's where it declares one (scheduler.entry_of), whose permissions
     its one consent grants too."""
-    own = tier_of(cart)
+    own = tier_of(cart, rec)
     if not cart or cart.get("type") == "service":
         return (own,)
     import scheduler
@@ -300,7 +437,10 @@ def _refusal(perm, why, tier):
     if why == "folder":
         return 'needs "%s" - this console has no such folder' % perm
     if why == "tier":
-        return 'needs "%s" - not for a %s cart' % (perm, tier)
+        if perm == "network":
+            return ('asks for "network", which is a Python or native cart\'s: a %s cart '
+                    'reaches the internet through "http"' % tier)
+        return 'asks for "%s", which a %s cart cannot hold' % (perm, tier)
     return 'needs "%s" - this console does not know it' % perm
 
 
@@ -309,13 +449,16 @@ def check(cart, rec, have):
     console holding the services `have`, under consent record `rec` (None:
     none; UNASKED: every permission absent and the run refused).
     `granted` and `absent` split the manifest's permissions; `refusal` is
-    the message naming the first `required` permission that is absent, else
-    None."""
-    perms = (cart.get("permissions") if cart else None) or ()
+    the message naming the first `required` permission that is absent, or
+    the first that no tier of the cart's serves (`_served`: a Lua or wasm
+    cart's `network`, whose door is `http`), else None."""
+    perms = perms_of(cart, rec if rec is not UNASKED else None)
     if rec is UNASKED:
         return [], list(perms), UNASKED_REFUSAL
+    if rec is not None and rec.get("revoked"):
+        return [], list(perms), REVOKED_REFUSAL
     req = (cart.get("required") if cart else None) or ()
-    tier = tier_of(cart)
+    tier = tier_of(cart, rec)
     granted, absent = [], []
     refusal = None
     for p in perms:
@@ -324,7 +467,8 @@ def check(cart, rec, have):
             granted.append(p)
             continue
         absent.append(p)
-        if refusal is None and (p in req or why == "folder"):
+        if refusal is None and (p in req or why == "folder" or (
+                why == "tier" and not _served(p, cart, rec))):
             refusal = _refusal(p, why, tier)
     if refusal is None:
         for p in req:
@@ -335,6 +479,15 @@ def check(cart, rec, have):
         refusal = (_refusal("full_access", _why_absent("full_access", tier, have, rec), tier)
                    if "full_access" in perms else 'a native cart must ask for "full_access"')
     return granted, absent, refusal
+
+
+def _served(perm, cart, rec=None):
+    """Whether one of the tiers `cart`'s programs run on (`tiers_of`: its
+    own and its service's) serves `perm`. One none of them serves is the
+    cart's mistake, refused at install and at launch with what to ask for
+    instead, never a name that is silently absent."""
+    r = row(perm)
+    return r is not None and any(t in r[TIERS] for t in tiers_of(cart, rec))
 
 
 def lacking(cart, have):
@@ -396,28 +549,44 @@ def app_id(cart):
                            cart.get("title") if cart else None)
 
 
-def prompt(cart, rec=None):
+def prompt(cart, rec=None, origin=None):
     """The install prompt's lines for `cart`, or None when there is nothing
     to ask: no permission it lists has a line that `rec` does not already
-    hold, and it is not a Python app installed for the first time. A
-    service's lines, and an app's that declares its own service, end with
-    BACKGROUND: what it is granted, it uses with no
-    window open."""
-    perms = (cart.get("permissions") if cart else None) or ()
-    tiers = tiers_of(cart)
+    hold, it is not a Python app installed for the first time, and it is no
+    unreviewed Python app whose warning `rec` has not accepted from this
+    source. A service's lines, and an app's that declares its own service,
+    end with BACKGROUND: what it is granted, it uses with no window open.
+
+    `origin` is where an install comes from (`pkg.origin_of`: `publisher`,
+    `reviewed`, `index`), None for a cart that arrived as files: with one,
+    the first line names the publisher (FROM), and a Python cart from an
+    index that is not reviewed carries UNREVIEWED in place of TRUSTED."""
+    perms = perms_of(cart, rec)
+    tiers = tiers_of(cart, rec)
     want = asked(perms, tiers)
     held = rec["perms"] if rec is not None and rec["perms"] is not None else None
     new = want if held is None else [p for p in want if p not in held]
     first = held is None
     python = "python" in tiers
-    if not new and not (python and first):
+    unreviewed = python and origin is not None and not origin.get("reviewed")
+    again = unreviewed and (rec is None or rec.get("unreviewed") != origin.get("index"))
+    if not new and not (python and first) and not again:
         return None
-    lines = [line(p) for p in want]
-    if lines and (cart.get("type") == "service" or _has_service(cart)):
+    lines = [FROM % origin["publisher"]] if origin and origin.get("publisher") else []
+    lines.extend(line(p) for p in want)
+    if want and (cart.get("type") == "service" or _has_service(cart)):
         lines.append(BACKGROUND)
-    if python:
+    if unreviewed:
+        lines.extend(UNREVIEWED)
+    elif python:
         lines.append(TRUSTED)
     return lines
+
+
+def warned(lines):
+    """Whether install prompt `lines` carry the unreviewed warning: accepting
+    it takes the console's password where one is set (`pkg.gated`)."""
+    return bool(lines) and UNREVIEWED[0] in lines
 
 
 def asks_first(cart, rec):
@@ -441,14 +610,22 @@ def made_here(ws, cart):
 
 def show(ui, lines):
     """The install prompt's body, drawn into the dialog the public UI API
-    `ui` has open: "It can:" over the prompt's `lines`, TRUSTED in the
-    danger tone. Get Carts' install prompt and the shell's first-run one
+    `ui` has open: the publisher (FROM) dim, "It can:" over the prompt's
+    permission lines, TRUSTED and UNREVIEWED in the danger tone. Get Carts'
+    install prompt and the shell's first-run one
     (`shell_cards.DeleteConfirm`) both draw it."""
-    if any(ln != TRUSTED for ln in lines):
-        ui.label("It can:", {"tone": "dim"})
+    head = FROM.split("%")[0]
+    said = False
     for ln in lines:
-        ui.label(ln, {"wrap": True, "lines": 2, "tone": "danger"}
-                 if ln == TRUSTED else {"wrap": True, "lines": 2})
+        if ln.startswith(head):
+            ui.label(ln, {"tone": "dim"})
+            continue
+        danger = ln == TRUSTED or ln in UNREVIEWED
+        if not danger and not said:
+            ui.label("It can:", {"tone": "dim"})
+            said = True
+        ui.label(ln, {"wrap": True, "lines": 3, "tone": "danger"}
+                 if danger else {"wrap": True, "lines": 2})
 
 
 def _has_service(cart):
@@ -468,7 +645,12 @@ def _entry(v):
         return None
     if not (isinstance(off, list) and all(isinstance(p, str) for p in off)):
         return None
-    return {"perms": perms, "off": off}
+    out = {"perms": perms, "off": off}
+    if isinstance(v.get("unreviewed"), str):
+        out["unreviewed"] = v["unreviewed"]
+    if v.get("revoked") is True:
+        out["revoked"] = True
+    return out
 
 
 def regrant(ws, aid):
@@ -572,18 +754,43 @@ class Consent:
     def ids(self):
         return sorted(k for k in self._all() if self.get(k) is not None)
 
-    def record(self, aid, perms):
-        """Consent given at install to every permission of `perms`: what was
-        turned off before stays off."""
-        for _ in self.record_steps(aid, perms):
+    def record(self, aid, perms, unreviewed=None):
+        """Consent given at install to every permission of `perms`, and with
+        `unreviewed` (an index url) to the unreviewed warning of a Python
+        cart from that index: what was turned off before stays off, and a
+        revocation goes with the version it was about."""
+        for _ in self.record_steps(aid, perms, unreviewed):
             pass
 
-    def record_steps(self, aid, perms):
-        """`record`, its write stepped (`yield from` it)."""
+    def record_steps(self, aid, perms, unreviewed=None):
+        """`record`, its write stepped (`yield from` it). The user's choice of
+        a compiled cart's native module (`native_opted`) outlives a reinstall."""
         old = self.get(aid)
+        perms = list(perms)
+        if native_opted(old) and "full_access" not in perms:
+            perms.append("full_access")
         off = [p for p in (old["off"] if old else ()) if p in perms]
-        self._all()[aid] = {"perms": list(perms), "off": off}
+        rec = {"perms": perms, "off": off}
+        if unreviewed:
+            rec["unreviewed"] = unreviewed
+        self._all()[aid] = rec
         yield from self._put_steps()
+
+    def revoke(self, aid, on):
+        """Mark app `aid` revoked (`on`) or not: a revoked app's every launch
+        is refused (REVOKED_REFUSAL). Written only when it changes. True when
+        it did."""
+        rec = self.get(aid)
+        if bool(rec is not None and rec.get("revoked")) == bool(on):
+            return False
+        rec = dict(rec or {"perms": None, "off": []})
+        if on:
+            rec["revoked"] = True
+        else:
+            rec.pop("revoked", None)
+        self._all()[aid] = rec
+        self._put()
+        return True
 
     def made(self, *aids):
         """Carts made on this console, as apps `aids`: each a record
@@ -613,7 +820,25 @@ class Consent:
             off.append(perm)
         if off == rec["off"] and aid in self._all():
             return
-        self._all()[aid] = {"perms": rec["perms"], "off": off}
+        self._all()[aid] = dict(rec, off=off)
+        self._put()
+        if self._changed is not None:
+            self._changed(aid)
+
+    def opt(self, aid, perm, on, asked=()):
+        """Settings' switch for a permission app `aid` holds by the user's
+        choice rather than its manifest (`NATIVE_LINE`'s `full_access`): on
+        consents to it, off turns it off. A record that consents to nothing
+        in particular (a cart made here) consents to `asked`, its manifest's,
+        beside it."""
+        rec = self.get(aid) or {"perms": None, "off": []}
+        perms = list(rec["perms"] if rec["perms"] is not None else asked)
+        off = [p for p in rec["off"] if p != perm]
+        if on and perm not in perms:
+            perms.append(perm)
+        if not on:
+            off.append(perm)
+        self._all()[aid] = dict(rec, perms=perms, off=off)
         self._put()
         if self._changed is not None:
             self._changed(aid)

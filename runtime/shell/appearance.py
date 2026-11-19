@@ -249,6 +249,9 @@ class Appearance:
     # canvas + the responsive Layout, so a cart is never affected.
 
     FONT_SCALES = (1, 2, 3)
+    # The home's arrangements (console_home._HOME_CLASSES), in the order the
+    # Settings HOME STYLE row steps through them after THEME.
+    HOME_STYLES = ("carousel", "grid", "icons")
 
     def __init__(self, ws, font_scale=1):
         self.ws = ws
@@ -381,13 +384,13 @@ class Appearance:
         picture, copied into the theme) or None (NONE: the theme's `desktop`
         fill). A pick is a change to the theme (`change`), shown at the next
         frame; persist=False only shows `wp_id` now, until the next theme
-        switch (a bench, a test), an id no cart has showing the default. 0,
+        switch (a bench, a test), an id no cart has showing the fill. 0,
         or change()'s refusal."""
         if persist:
             return self.change("wallpaper", wp_id)
         if wp_id is not None and wp_id != self.PICTURE \
                 and self.wp_cart_by_id(wp_id) is None:
-            wp_id = self._default_wallpaper()
+            wp_id = None
         self._show_wallpaper(wp_id)
         return 0
 
@@ -405,30 +408,18 @@ class Appearance:
                 break
         return rc
 
-    def _default_wallpaper(self):
-        """The wallpaper of a theme that names none: the first wallpaper cart
-        (Moy's night on a seeded store), else the fill."""
-        for wp in self.wallpaper_options():
-            if wp != self.PICTURE:
-                return wp
-        return None
-
     def theme_wallpaper(self):
         """The wallpaper the active theme gives: the cart its `wallpapers`
-        names where it is installed, else its picture, else None (its
-        backdrop, or its fill) where it names its wallpapers and no cart among
-        them (NONE) or it has a backdrop, else the default. A SAFE start runs
-        no wallpaper cart."""
-        cart, img, said = wall_keys(self._theme_bytes())
+        names where it is installed, else its picture, else None: its
+        backdrop, or its fill. A SAFE start runs no wallpaper cart."""
+        cart, img = wall_keys(self._theme_bytes())[:2]
         safe = getattr(getattr(self.ws, "prefs", None), "safe", False)
         if cart is not None and cart != self.PICTURE and not safe \
                 and self.wp_cart_by_id(cart) is not None:
             return cart
         if img is not None:
             return self.PICTURE
-        if (said and cart is None) or safe or self._has_backdrop():
-            return None
-        return self._default_wallpaper()
+        return None
 
     def backdrop(self, surface):
         """The active theme's backdrop for `surface` ("home" or "desk") in the
@@ -443,10 +434,6 @@ class Appearance:
                 self.theme_name, self.theme_variant, self.look_gen,
                 _backdrop(self.theme_name, self.theme_variant, surface)]
         return got[3]
-
-    def _has_backdrop(self):
-        return any(_backdrop(self.theme_name, v, s)
-                   for v in THEME_VARIANTS for s in ("home", "desk"))
 
     def _theme_bytes(self):
         """The active theme's theme.json bytes where it is a package (the
@@ -1704,14 +1691,16 @@ class Appearance:
     def apply_layout(self):
         """Resolve `layout()` and put the host's bars where it says
         (`Workstation.place_bars`, which relayouts). Runs at a theme switch,
-        a `layout_theme` write and a mode switch; a no-op before the WM and
-        the bar exist. True when the bars moved (the shell relayouted)."""
+        a `layout_theme` or `home_style` write and a mode switch; a no-op
+        before the WM and the bar exist. True when the bars moved (the shell
+        relayouted)."""
         ws = self.ws
         self.layout_gen += 1
         if getattr(ws, "wm", None) is None or getattr(ws, "bar_layer", None) is None:
             return False
         bars, self.layout_notes = self.layout()
-        home = self._theme_layout(self.layout_theme() or self.theme_name)[2]
+        home = self.home_style() \
+            or self._theme_layout(self.layout_theme() or self.theme_name)[2]
         if home != self.home:
             self.home = home
             ws.home.set_home_arrangement(home)
@@ -1750,6 +1739,26 @@ class Appearance:
             self.ws.system.delete("layout_theme")
         else:
             self.ws.system.set("layout_theme", nxt)
+        self.apply_layout()
+
+    def home_style(self):
+        """The `home_style` row, read strictly: one of `HOME_STYLES`, the
+        home's arrangement in place of the layout's `home`, else None (the
+        layout's). A value of any other shape reads as absent."""
+        v = self.ws.system.get("home_style")
+        if type(v) is str and v in self.HOME_STYLES:
+            return v
+        return None
+
+    def cycle_home_style(self, d):
+        """Step the `home_style` row by d through THEME (the row deleted),
+        then each of `HOME_STYLES`; applies and persists."""
+        vals = (None,) + self.HOME_STYLES
+        nxt = vals[(vals.index(self.home_style()) + d) % len(vals)]
+        if nxt is None:
+            self.ws.system.delete("home_style")
+        else:
+            self.ws.system.set("home_style", nxt)
         self.apply_layout()
 
     def _install_fonts(self, name):

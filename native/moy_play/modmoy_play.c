@@ -349,6 +349,8 @@ static mp_obj_t mod_open(mp_obj_t run_obj) {
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_open_obj, mod_open);
 
 // frame(run, ticks, dt, render, x, y, touch[, face[, room]]) -> QUIT | VIEW bits.
+// With no ticks it only takes the pointer, whose press edge then waits for
+// the next tick (a paced run's frame that runs none).
 // The pointer is the console's, in the cart's coordinates; `face`, how the
 // run's ui frame draws (moy_play_in_t's); `room`, an app's ui frame (x, y, w,
 // h: its content_rect()), None for a game's whole canvas. A cart that raised
@@ -370,6 +372,9 @@ static mp_obj_t mod_frame(size_t n_args, const mp_obj_t *a) {
     }
     moy_play_input(run, &in);
     uint32_t out = 0;
+    if (mp_obj_get_int(a[1]) <= 0) {
+        return MP_OBJ_NEW_SMALL_INT(0);
+    }
     mp_int_t n = mp_obj_get_int(a[1]);
     int rc = moy_play_frame(run, (uint8_t)(n < 0 ? 0 : n > 255 ? 255 : n),
                             (float)mp_obj_get_float(a[2]), mp_obj_is_true(a[3]), &out);

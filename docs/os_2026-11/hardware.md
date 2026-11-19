@@ -50,7 +50,8 @@ security model").
    `headroom_floor_kib`, otherwise `https` is refused for apps, and
    `VERIFY_NONE` (`native/moy_net/moy_net_port.c`) stays for signed OTA only.
    As built (P3.4), every console carries ESP-IDF's common bundle
-   (`esp_crt_bundle`, in each `sdkconfig.board`), the S3s' included: every
+   (`esp_crt_bundle`, in each `sdkconfig.board`), the S3s' included, and so
+   does the XIAO Zero, whose page's Get Carts it fetches for: every
    https request but the updater's (`MOY_HTTPC_SIGNED`, `moy_ota.h`) checks
    the chain to a root of it, the host's name and the dates, `http`, media
    streams, Get Carts and `pkg` alike. The dates are read against a floor:
@@ -81,7 +82,7 @@ security model").
    tier; the bar's clock shows local time once synced and `--:--` before,
    where a board's clock would read as a time of day. The host, the unix
    port and the browser read their machine's clock, synced. A build
-   without the bundle (the host, the Zero) refuses those requests with
+   without the bundle (the host, the C3 Zero) refuses those requests with
    `EPROTONOSUPPORT`, and a certificate that does not verify fails with
    `EKEYREJECTED`. The bundle's flash cost and
    the handshake's memory are #246's.

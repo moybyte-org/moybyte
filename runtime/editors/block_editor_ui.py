@@ -924,6 +924,11 @@ class BlockEditorUI:
         be = self.blocks_ed
         if not (be and ws.run.project.cart):
             return False
+        if not ws.text.takes_blocks():
+            # Blocks compile to Python: a Lua or compiled cart's code is never
+            # theirs to write (moy_carts.is_python).
+            self.blk_status = "BLOCKS ARE PYTHON -- NOT SAVED"
+            return False
         if self.blk_graduated:
             # GRADUATED (Stage 8, spec Section 8): the kid has leveled up to code; the
             # blocks are a FROZEN, read-only render. Regenerating from them would

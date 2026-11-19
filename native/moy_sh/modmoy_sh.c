@@ -122,15 +122,17 @@ static mp_obj_t sh_read(mp_obj_t fd_in, mp_obj_t n_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(sh_read_obj, sh_read);
 
-// ask(prompt): a question of the running session's (moy_sh.h's moy_sh_ask);
-// answer(): the line typed to the one its command asked, once, or None.
-static mp_obj_t sh_ask(mp_obj_t prompt) {
-    if (moy_sh_ask(running(), mp_obj_str_get_str(prompt)) != 0) {
+// ask(prompt, secret=False): a question of the running session's (moy_sh.h's
+// moy_sh_ask), its answer hidden as it is typed where `secret`; answer(): the
+// next answer the line holds for its questions, or None.
+static mp_obj_t sh_ask(size_t n_args, const mp_obj_t *args) {
+    int flags = n_args > 1 && mp_obj_is_true(args[1]) ? MOY_SH_ASK_SECRET : 0;
+    if (moy_sh_ask(running(), mp_obj_str_get_str(args[0]), flags) != 0) {
         mp_raise_OSError(EIO);
     }
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(sh_ask_obj, sh_ask);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(sh_ask_obj, 1, 2, sh_ask);
 
 static mp_obj_t sh_answer(void) {
     const char *a = moy_sh_answer(running());
@@ -584,6 +586,12 @@ static mp_obj_t face_prompt(mp_obj_t self) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(face_prompt_obj, face_prompt);
 
+static mp_obj_t face_prompt_row(mp_obj_t self) {
+    const char *r = moy_sh_face_prompt_row(tface(self));
+    return mp_obj_new_str(r, strlen(r));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(face_prompt_row_obj, face_prompt_row);
+
 static mp_obj_t face_take(mp_obj_t self) {
     return mp_obj_new_bool(moy_sh_face_take(tface(self)));
 }
@@ -692,6 +700,7 @@ static const mp_rom_map_elem_t face_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_busy), MP_ROM_PTR(&face_busy_obj) },
     { MP_ROM_QSTR(MP_QSTR_more), MP_ROM_PTR(&face_more_obj) },
     { MP_ROM_QSTR(MP_QSTR_prompt), MP_ROM_PTR(&face_prompt_obj) },
+    { MP_ROM_QSTR(MP_QSTR_prompt_row), MP_ROM_PTR(&face_prompt_row_obj) },
     { MP_ROM_QSTR(MP_QSTR_take), MP_ROM_PTR(&face_take_obj) },
     { MP_ROM_QSTR(MP_QSTR_in_row), MP_ROM_PTR(&face_in_row_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_in_row), MP_ROM_PTR(&face_set_in_row_obj) },

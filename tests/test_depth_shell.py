@@ -211,7 +211,7 @@ def test_a_dragged_window_keeps_its_full_shadow_and_a_still_desk_casts_none(
         drv.touch_drag(hx + k, hy)
         drv.frame(0.0)
         mine = [c[5] if len(c) > 5 else ui_draw.UNDER_FULL
-                for c in calls if c[2] == (win.x, win.y, win.w, win.h)]
+                for c in calls if tuple(c[2]) == (win.x, win.y, win.w, win.h)]
         assert mine == [ui_draw.UNDER_FULL]
     drv.touch_up()
     for _ in range(4):

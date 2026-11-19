@@ -98,7 +98,7 @@ manifest says `"animates": true` (`docs/app_api_v1.md` §3).
 
 A cart can be **Lua instead of Python**: set `"runtime": "lua"` and
 `"main": "main.lua"` in `manifest.json`. **Every call in this document is valid
-verbatim in both languages** — `spr(1, x, y)`, `btn("left")`, `cfg("speed", 2)`,
+verbatim in both languages** (but `list_files`, below) — `spr(1, x, y)`, `btn("left")`, `cfg("speed", 2)`,
 `pmem`, `quit()`, `textmode()` — because the Lua globals *are* the same console
 API (the device bridges them natively; hot sprites append to the same batch the
 Python path uses). Same lifecycle too: define `_init` / `_update(dt)` / `_draw`
@@ -165,7 +165,8 @@ The few Lua-specific notes:
 - A crash opens the same stop card, and its See why drops on the offending
   `main.lua` line. The code editor's tap-palette offers `~` (for `~=`) in a
   Lua project.
-- The blocks editor stays Python-only for now (compiles to Python by design).
+- The blocks editor stays Python-only for now (compiles to Python by design):
+  a Lua or compiled cart has no Blocks tab.
 - **Numbers on the device are 32-bit** (`LUA_32BITS`, #67): floats carry ~7
   digits and integers wrap at ±2.1 billion — plenty for scores, timers and
   positions, and float math runs on the hardware FPU (part of why Lua is the
@@ -183,8 +184,8 @@ Without one, a Lua cart opens the "needs the Lua runtime" panel.)*
 ## Frame pacing
 
 A **game** cart's `_update` runs at its declared rate: **30 ticks a second**, or
-60 when `manifest.json` says `"fps": 60` (Hop Quest and Sky Run do — declare it
-only if your cart genuinely holds 60, and measure). The console never lowers
+60 when `manifest.json` says `"fps": 60` (declare it only if your cart
+genuinely holds 60, and measure). The console never lowers
 that rate: a cart that counts frames (`x += 1`) plays at the same speed on every
 board. When a board cannot also draw that often it draws every second (or
 third) tick instead, so motion coarsens evenly rather than the game slowing;
@@ -200,8 +201,8 @@ the game rather than teleporting it), and it draws as often as the board can
 (a P4 desk ~60, the 10.1" one ~45, a browser whatever its display does).
 Declare it only if nothing in the cart counts frames: a `x += 1` runs at a
 different speed on every board the moment it is free. Most seed games
-declare it; the two that hold a real 60 (Hop Quest, Sky Run) stay at 60, and
-an imported PICO-8 cart always carries its own 30 or 60.
+declare it; a cart that holds a real 60 declares 60, and an imported PICO-8
+cart always carries its own 30 or 60.
 
 ## The canvas
 
@@ -376,6 +377,8 @@ entry is the default active scene. Pure data: `scene()` never draws anything, an
 cart with no scenes just gets an empty list. Author them WYSIWYG in the Editor's
 **Scene** tab: pick a sprite, tap the world to place an actor, tap one to select it,
 drag to move, and set its tag in the props row — PLAY spawns what you placed.
+A compiled cart reads them through `moybyte.scenes`
+([A compiled cart's Moybyte verbs](#a-compiled-carts-moybyte-verbs)).
 
 | call | does |
 |---|---|
@@ -507,8 +510,8 @@ it's painting **more pixels than the frame needs**. Five habits keep any cart sm
    with `draw_layer(lay, 0, 0)`. One flat copy replaces `cls` + a full `map()`
    re-render, and it erases last frame's sprites for free. For scrolling worlds make
    the layer wider than the screen and pan with `draw_layer(lay, cam_x, 0)`.
-   (Hop Quest and Sky Run both do exactly this — read their `_build_layer` /
-   `_build_world`.)
+   (Letter Blitz draws its floor and arena into one layer this way — read where it
+   builds `_bg`.)
 4. **Lots of sprites? Just call `spr()` in a loop.** The engine coalesces consecutive
    `spr()` calls into one native batch automatically — there is no manual form and you
    do not need one. Likewise one `map()` call always beats drawing tiles one by one.
@@ -573,7 +576,7 @@ The console's key still works there.
 | `key(code=None)` | with a code (`key(ord("a"))`): is that ASCII key down this frame. No arg: the last key code (`0` if none). *One key at a time* (T-Deck reports 1 byte/frame) |
 | `keyp(code=None)` | same, but only the press edge this frame |
 | `touch()` | `(x, y, tapped, held)` in canvas space, or `None` if no pointer. `tapped` = press edge (one hit per tap); `held` = the finger/button is still down this frame, position following the drag (drawing, sliders). **A touch panel's pointer behaves like a mouse:** hold and drag, and on release it stays where you left it for ~1.5s before `touch()` reads `None` — a pointer that vanished on the release frame is not a mouse, and a cart's cursor or drag handle is written against one. A hovering source (desktop, browser) never expires |
-| `mouse()` | TIC-80 7-tuple `(x, y, left, middle, right, scrollx, scrolly)`; a tap = left. middle/right/scroll are always 0 on hardware |
+| `mouse()` | TIC-80 7-tuple `(x, y, left, middle, right, scrollx, scrolly)`; a tap = left. middle/right/scroll are always 0 on hardware. A compiled cart imports it from `moybyte.mouse` ([A compiled cart's Moybyte verbs](#a-compiled-carts-moybyte-verbs)) |
 | `textmode(on=True)` | opt a running cart into clean text-keyboard input (for typing a name/password) so `key()/keyp()` return typeable ASCII; `textmode(False)` restores game mode (held WASD/arrows drive `btn()`). Auto-resets to game mode on exit |
 | `view(w, h)` | declare the cart's LOGICAL viewport: the console composites the centered `w`x`h` region of the 320x240 canvas at the biggest integer scale that fits the screen (a 128x128 PICO-8 port fills the P4 glass at 4x instead of the full canvas's 2x); touch coords stay in full canvas space. `view()` restores the full canvas; auto-resets each run |
 
@@ -673,6 +676,10 @@ def _update(dt):
 Both `net` and `on_net` are **only present** when the manifest asks for
 `"multiplayer"` — a normal cart has no `net` name at all (just like `wifi`) —
 and are `None` while it is turned off in Settings.
+
+A Lua cart has the same two (`net.send(data)`, `on_net(function(msg) ... end)`).
+A message crosses as JSON, which is how the link carries it, so a Lua table
+arrives as a list or a dict, and a Python tuple as a list.
 
 > **Keeping two consoles in step:** if both sides run the same game logic, seed your
 > randomness the same way on both (share a start seed and use it for `rnd()`), and keep
@@ -905,14 +912,33 @@ same here as on any other console that implements the spec.
 | `time()` | milliseconds since the cart started |
 | `quit()` | END this cart and return to the launcher (or the editor it was run from). Bind it to a key or an on-screen ✕/back button. Optional: the console's key opens a pause menu with Quit in every mode. (It was a no-op for **Lua** carts until 2026-09-12: libmoy set a snapshot flag that nothing on either tier read back) |
 | `pmem(index, value=None)` | persistent memory: `pmem(i)` reads an int, `pmem(i, v)` writes+persists (high scores, saves) |
+| `prefs.get(key)`, `prefs.set(key, value)`, `prefs.clear(key)` | a game's settings: any value JSON carries, under its own key, kept across runs; `None` (Lua `nil`) for a key never set. Every game holds them without asking; an app asks for them with the `prefs` permission. They are Moybyte's, not moy-spec's, and `docs/app_api_v1.md` §5 is their guide |
 | `cfg(key, default=None)` | read a value from the cart's `config.json` — the **"Make it mine"** tuning a kid edits (speed, counts, colors…) |
 | `col(name_or_index)` | resolve a color **name** (0–15) or int to a `0–63` palette index |
 | `rnd(n=1.0)` | random float in `[0, n)` |
 | `srand(seed=0)` | seed `rnd`: the same seed replays the same sequence on the same tier |
 | `flr(x)` | floor to int |
 | `W`, `H` | canvas size (320, 240) |
-| `wifi` | **only present** if the cart's manifest `moybyte.permissions` include `"network"` (capability-gated, `#38`), and `None` while that is turned off in Settings. A normal cart has no `wifi` name at all |
+| `wifi` | Python's older, wider door to the radio: **only present** if the cart's manifest `moybyte.permissions` include `"network"` (capability-gated, `#38`), and `None` while that is turned off in Settings. A normal cart has no `wifi` name at all. The way in from every tier is `moybyte.http` under `"http"` (below); a Lua or wasm cart that asks for `"network"` is refused at install and launch, and `moy app check` says so |
 | `net` / `on_net` | **only present** if the cart's manifest `moybyte.permissions` include `"multiplayer"` (capability-gated, `#65`), and `None` while that is turned off in Settings. See **Multiplayer** above |
+
+### Files (SPEC.md §9.1)
+
+A cart keeps files when it outgrows `pmem`: its manifest lists the paths it
+writes, a folder by its trailing `/` (`"writable": ["saves/", "options.txt"]`),
+and the four verbs reach the cart's own folder and what it wrote.
+
+| call | does |
+|---|---|
+| `read(name, offset=0, n=None)` | the bytes of the cart's file `name` from `offset`, at most `n`: the written copy of a writable path first, else the file the cart shipped. Python answers `bytes`, Lua a string; `b""`/`""` for anything absent |
+| `write(path, data)` | replace the whole file at a declared `path` (at most 64 bytes) with `data` (bytes or text, at most 1 MiB), kept when it returns: `0`, `-1` not declared, `-2` no room or too big, `-3` the storage failed |
+| `erase(path)` | remove the written copy, so `read` answers the shipped file again: `0`, or `-1` when there was none |
+| `list(prefix="")` | every path of the cart's files, shipped and written, that begins with `prefix`, in bytewise order. **In Python it is `list_files`**: `list` is Python's own, which carts call |
+
+The written files live in the cart's private folder (`apps/<id>/` beside the
+carts store, `runtime/carts/cart_files.py`), outside its own: an update keeps
+them and removing the cart removes them. A compiled cart holds the same verbs
+in SPEC.md §16.12's form, over the same store.
 
 ### Moybyte-side verbs
 
@@ -921,6 +947,29 @@ moybyte` in Python; a Lua run holds the same `moybyte` table):
 notifications, alarms, opening with another app, picking a
 file, messages between processes and achievements. They are not moy-spec's,
 and `docs/app_api_v1.md` is their guide (§5 to §9).
+
+## A compiled cart's Moybyte verbs
+
+A `"runtime": "wasm"` cart imports moy-spec's verbs from module `"moy"`
+(SPEC.md §16). What this page adds to them it imports from a module named for
+a Moybyte extension, which its manifest declares (SPEC.md §16.2's
+vendor-extension rule): a module importing from an extension it does not
+declare is refused at load, the import named. `sdk/include/moybyte/cart.h`
+declares the rows for C, with moy-spec's verbs, and the same C builds to a
+native module per chip too (`sdk/README.md`, "A compiled cart"); `native/moycore/moycore_wasm_ext.h` is the one body
+the boards, the host and the browser run.
+
+| extension | imports | as |
+|---|---|---|
+| `moybyte.scenes` | `scene(name, name_n, out, cap)`, `load_scene(name, name_n)`, `scene_name(i, dst, cap)`, `scene_flags(name, name_n, i, dst, cap)` | `scene()`, `scene(name)` and `load_scene(name)` above: the actors as 32-byte records (tile, x, y, flip as `int32`, then the tag cut at 15 bytes), the count answered, -1 for no such scene; an empty name is the active scene, the first at each run. A scene's names and an actor's `flags` object (as JSON text) have their own rows. The live actor world is the cart's own arrays |
+| `moybyte.images` | `image(name, name_n)`, `image_size(h)`, `image_spr(h, x, y)` | `image(name)`: a handle, 0 for none; its size as `w << 16 \| h`; placed on the draw target (the screen, or the layer `target` chose) under its camera, clip, `pal` and `palt` |
+| `moybyte.mouse` | `mouse(out, cap)` | `mouse()`: the seven numbers as `int32` at `out`, 1 while a pointer is down |
+| `moybyte.prefs` | `get(key, key_n, json, cap)`, `set(key, key_n, json, json_n)`, `clear(key, key_n)` | `prefs.get`, `prefs.set` and `prefs.clear` (State & utility): a value as its JSON text, its length answered, -8 for a key never set, -7 for text that is no JSON value. `sdk/include/moybyte/cart.h` names them `game_prefs_get`, `game_prefs_set` and `game_prefs_clear` (an app's `prefs_get` is `moybyte.app`'s). The game's run holds a grant with the prefs role, and these are its app-extension rows `prefs_get`, `prefs_set` and `prefs_clear` |
+| `moybyte.app` | `moybyte_award`, `moybyte_progress`, `moybyte_dev_open`, ... | a game's achievements and device handles (`docs/app_api_v1.md` §9, §10): a compiled game that declares it holds a grant of its own, as an app does, under its permissions and their consent |
+
+A cart declaring `moybyte.scenes`, `moybyte.images` or `moybyte.prefs` keeps
+the VM up (`native/moy_play/moy_play.h`'s rule): the console hands the run its
+scenes and paint images, and makes the grant its prefs are served from. `tests/fixtures/wasm/game_ext.moy` uses every row.
 
 ---
 
@@ -954,4 +1003,4 @@ feature, add it to the ONE canvas class (`device_canvas.DeviceCanvas`) and keep 
 identical.
 
 **Fuller example:** `system_carts/moybyte.star_catcher.moy/main.py` (a complete game — sprites,
-particles, `cfg` tuning, `pmem`, hearts/score UI).
+particles, `cfg` tuning with a sprite-tile picker, autoplay, hearts/score UI).

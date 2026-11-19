@@ -79,9 +79,10 @@ CROSSINGS = {
                    ("intents",)),
     "editor_handle": ("the cart-facing text editor is a leaf over the Files role and the cart's canvas",
                       ("player",)),
-    "app_perms": ("the permission table every tier checks a cart against",
+    "app_perms": ("the permission table every tier checks a cart against, and the tier a "
+                  "cart runs on, which the Player and the wallpaper route alike",
                   ("elf_run", "player", "player_pace", "achievements", "perms_ui",
-                   "sched_python", "scheduler")),
+                   "sched_python", "scheduler", "wallpaper")),
     "layers": ("the Layer base every surface subclasses",
                ("cards_layer", "code_layer", "editor_desk", "paint_layer", "theme_editor",
                 "settings_layer", "tasks_ui")),

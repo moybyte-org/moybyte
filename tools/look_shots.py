@@ -178,14 +178,14 @@ def _setup_table():
     table = {
         **editor,
         "handheld_home": (HANDHELD, ("7", "11", "15", "17"), False, _home,
-                          "home, Games tab, Sky Run current"),
+                          "home, Games tab, Star Catcher current"),
         "handheld_home_wallpaper": (HANDHELD, ("17", "28"), True, _home,
-                                    "home over the current default wallpaper"),
+                                    "home over a wallpaper cart"),
         "desktop": (DESK, ("6", "7", "9", "13", "16", "21", "22", "25"),
                     False, _desk,
                     "desk: Files on Projects behind, Calc current"),
         "desktop_wallpaper": (DESK, ("25", "28"), True, _desk_wall,
-                              "the desk over the current default wallpaper"),
+                              "the desk over a wallpaper cart"),
         "desktop_home": (CONSOLE, ("18",), False, _console_home,
                          "the console-mode home on the 1024x600 board"),
         "handheld_settings": (HANDHELD, ("11", "12", "19"), False, _settings,
@@ -493,10 +493,10 @@ def _stopped(compiled=False):
 
 
 def _notice(g, ws):
-    """Sky Run refused for a name this console lacks, over the home."""
+    """Star Catcher refused for a name this console lacks, over the home."""
     from runtime import chrome_ops
     _home(g, ws)
-    ws.open_workspace(g._cart_by_title(ws, "Sky Run"))
+    ws.open_workspace(g._cart_by_title(ws, "Star Catcher"))
     p = ws.run.player
     p._notice = p.cart_error = chrome_ops.newer_text(["tilemap2"])
     p.notice_title = chrome_ops.say_title(chrome_ops.SAY_NEWER)
@@ -890,12 +890,12 @@ def _app_open(app, page=None, window=False):
 
 # The targets' shelf (rounds/round13.py's STORE): name, the seed cart whose
 # cover it shows (None: none), its genre, where it stands, its size in KB.
-_STORE = (("Pixel Pet", "pixel_pet", "toy", "installed", 40),
-          ("Hop Quest", "hop_quest", "platformer", "update", 18),
+_STORE = (("Tap Only Red", "tap_only_red", "toy", "installed", 40),
+          ("Brick Siege", "brick_siege", "shooter", "update", 18),
           ("Bullet Storm", "bullet_storm", "shooter", "get", 96),
           ("Doom", None, "shooter", "too_big", 4100),
           ("Letter Blitz", "letter_blitz", "puzzle", "get", 22),
-          ("Tiny Runner", "tiny_runner", "platformer", "noplay", 14),
+          ("Sakura Lua", "sakura_lua", "toy", "noplay", 14),
           ("Star Catcher", "star_catcher", "arcade", "installed", 12),
           ("Harpoon Pop", "harpoon_pop", "arcade", "get", 31))
 
@@ -945,9 +945,9 @@ def _getcarts(g, ws, state, window):
         e = repo.add(name.lower().replace(" ", "_"), version=3, name=name, cover=cover,
                      main=b"\0" * (kb * 1024 - 400))
         e["genre"] = genre
-        if name == "Hop Quest":
-            e["description"] = ("Hop across the hills, grab every coin before the clouds "
-                                "roll in, and find the flag at the end of the day.")
+        if name == "Brick Siege":
+            e["description"] = ("Roll your tank through the brick maze, blast every enemy "
+                                "tank and keep your base standing.")
     repo.files["index.json"] = repo.index()
     net = MemNet(repo.routes())
     ws.cart_net = net
@@ -978,21 +978,21 @@ def _getcarts(g, ws, state, window):
     app._inst.find = have.get
     order = [s[0] for s in _STORE]
     app.rows.sort(key=lambda r: order.index(r["cart"]["name"]))
-    hop = [r for r in app.rows if r["cart"]["name"] == "Hop Quest"]
-    hop = hop[0] if hop else None
-    if hop is None:
+    focus = [r for r in app.rows if r["cart"]["name"] == "Brick Siege"]
+    focus = focus[0] if focus else None
+    if focus is None:
         pass
     else:
         app._ui.reset()               # the shelf from its top, as a fresh open shows it
-        app._focus = app._card_id(hop)
-    if hop is None:
+        app._focus = app._card_id(focus)
+    if focus is None:
         pass
     elif state == "cart" and not window:
-        app.cur = hop
+        app.cur = focus
         app._go("cart")
         app._focus_go()
     elif state == "getting":
-        app.cur = hop
+        app.cur = focus
         app.job = _Job()
         app._go("getting")
         app.armed = True
@@ -1410,8 +1410,8 @@ def _paint(g, ws, state, window):
     _settle(g, ws, 3)
     if state == "game" and app.game is not None:
         titles = [c.get("title") for c in app.game.carts]
-        if "Sky Run" in titles:
-            app.game.cur = titles.index("Sky Run")
+        if "Star Catcher" in titles:
+            app.game.cur = titles.index("Star Catcher")
         _settle(g, ws, 3)
 
 
@@ -1561,8 +1561,8 @@ def _place(ws, key, x, y, w, h):
 def _pick_home(g, ws):
     ws.home.set_home_tab("games")
     titles = [it.get("title") for it in ws.launcher.items]
-    if "Sky Run" in titles:
-        ws.launcher.sel = titles.index("Sky Run")
+    if "Star Catcher" in titles:
+        ws.launcher.sel = titles.index("Star Catcher")
 
 
 def _home(g, ws):
@@ -1780,12 +1780,14 @@ EDITOR_WORKSPACES = _ws_scenes()
 
 
 def _workspace(key, full, cart="Sky Run"):
-    """The Editor on `cart` (Sky Run; Coin Quest, a blocks cart, for the
-    Blocks workspace) on the desk, showing workspace `key`: full screen, or
-    restored over the whole desk under the bar."""
+    """The Editor on `cart` (Sky Run, the test shape cart with every asset a
+    tab edits, tests/ws_helpers.py SHAPE_CARTS; Coin Quest, a blocks cart, for
+    the Blocks workspace) on the desk, showing workspace `key`: full screen,
+    or restored over the whole desk under the bar."""
     def setup(g, ws):
+        import ws_helpers
         ws.home.open_desk()
-        ws.open_in_editor(g._cart_by_title(ws, cart))
+        ws.open_in_editor(ws_helpers.shelf_cart(ws, cart))
         _settle(g, ws, 2)
         win = ws.wm.windows["menu"]
         if win.full() != full:
@@ -1882,10 +1884,12 @@ def render(g, config, theme, mode, setup, wallpaper, inputs=None):
         if inputs is not None:
             # the host's own source is the one the board's input becomes
             ws.use_inputs([("local", inputs)])
-        # A wallpaper scene shows the console's default wallpaper cart (Moy's
-        # night on a seeded store), the rest the theme's backdrop.
-        ws.look.select_wallpaper(ws.look._default_wallpaper() if wallpaper
-                                 else None, persist=False)
+        # A wallpaper scene shows the first wallpaper cart on the shelf (a
+        # theme names none, so it is a kid's pick), the rest the theme's
+        # backdrop.
+        ws.look.select_wallpaper(
+            next((o for o in ws.look.wallpaper_options() if o != ws.look.PICTURE), None)
+            if wallpaper else None, persist=False)
         # Every target's status: Wi-Fi on Home, the battery at 82%.
         ws.wifi = _HomeWifi()
         ws.battery_level = lambda: 82
@@ -2176,7 +2180,7 @@ def _desk_files(g, ws):
     ws.home.open_desk()
     ws.spine.open_app(ws.app("files"))
     _settle(g, ws, 2)
-    _place(ws, "files", 112, 54, 548, 380)
+    _place(ws, "files", 112, 54, 548, 376)
     _app(ws, "files").open_place("projects", keep="Harpoon Pop")
 
 

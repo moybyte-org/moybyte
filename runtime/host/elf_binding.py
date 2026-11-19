@@ -76,7 +76,8 @@ def _lib():
         d.moy_os_stats.restype = None
         d.moy_os_set_net.argtypes = [_NET_FN, _P]
         d.moy_os_set_net.restype = None
-        d.hl_elf_game.argtypes = [_C, _U32, _C, _U32, _I, _I, _I, _C, _C, _I]
+        d.hl_elf_game.argtypes = [_C, _U32, _C, _U32, _I, _I, _I, _C, _C, ctypes.c_size_t,
+                                  _C, _C, ctypes.c_size_t, _C, _I]
         d.hl_elf_game.restype = _I
         d.moy_os_game_frame.argtypes = [_U32, _U32, _U32, _U32, _U32, _P, _I]
         d.moy_os_game_frame.restype = _I
@@ -85,6 +86,12 @@ def _lib():
         d.moy_os_game_screen.restype = _P
         d.moy_os_game_stop.argtypes = [_U32]
         d.moy_os_game_stop.restype = _I
+        d.moy_os_game_sound.argtypes = [_U32, _P, _I]
+        d.moy_os_game_sound.restype = _I
+        d.moy_os_game_snd.argtypes = [_U32, _P]
+        d.moy_os_game_snd.restype = _I
+        d.moy_os_game_pmem.argtypes = [_U32, _P]
+        d.moy_os_game_pmem.restype = _I
         d.moy_os_faults.argtypes = [ctypes.POINTER(Fault), _U32]
         d.moy_os_faults.restype = _U32
         _LIB[0] = d
@@ -223,16 +230,55 @@ ENDED = -4              # moy_os.h's MOY_OS_ENDED
 FRAME_SENT, FRAME_SHOWN = 1, 2
 
 
-def game(path, pid, cid="", flags=0, w=0, h=0, run=None, depth=1):
+def game(path, pid, cid="", flags=0, w=0, h=0, run=None, depth=1, data=None, dir=None,
+         writable=None):
     """Start the native game at `path` as process `pid` (its Player run's),
-    its screen `w` x `h` pixels of `depth` bytes (palette indices, or an
-    app's RGB565), as the boards' `moy_elf.game`: None, or why not."""
+    its screen `w` x `h` pixels of `depth` bytes (palette indices, an app's
+    RGB565, or MIXED's either a frame), `data` the bytes its moy_game_data
+    reads, `dir` its cart's folder and `writable` its "writable" entries
+    NUL-joined (its files), as the boards' `moy_elf.game`: None, or why
+    not."""
     d = _lib()
     err = ctypes.create_string_buffer(256)
+    blob = bytes(data) if data else None
+    wr = bytes(writable) if writable else None
     if d.hl_elf_game(path.encode(), int(pid), (cid or "").encode(), int(flags), int(w), int(h),
-                     int(depth), _run(run), err, len(err)) != 0:
+                     int(depth), _run(run), blob, len(blob) if blob else 0,
+                     dir.encode() if dir else None, wr, len(wr) if wr else 0,
+                     err, len(err)) != 0:
         return err.value.decode("utf-8", "replace")
     return None
+
+
+def game_sound(pid, out):
+    """The audio verbs game `pid` queued since the last ask, 3 int32 each into
+    the array('i') `out` (moy_os_game_sound): how many."""
+    return _lib().moy_os_game_sound(int(pid), out.buffer_info()[0], len(out) // 3)
+
+
+def _snd_sink():
+    """The host speaker's render-ahead stream, the audio library's
+    moy_audio_snd (runtime/host/audio_binding.py), or None."""
+    try:
+        from . import audio_binding
+        d = getattr(audio_binding.get(), "_d", None)
+    except Exception:  # noqa: BLE001 -- no compiler: no stream
+        return None
+    return ctypes.cast(d.moy_audio_snd, ctypes.c_void_p).value if d is not None else None
+
+
+def game_snd(pid, on):
+    """Game `pid`'s snd into the host speaker's stream (which the caller
+    opened) while `on`, else nowhere (moy_os_game_snd): 0, or -1."""
+    return _lib().moy_os_game_snd(int(pid), _snd_sink() if on else None)
+
+
+def game_pmem(pid, out):
+    """1 where game `pid`'s pmem moved since the last ask, its 256 cells into
+    the array('i') `out`; 0 where not, -1 for no such game."""
+    if len(out) < 256:
+        raise ValueError("pmem holds 256 cells")
+    return _lib().moy_os_game_pmem(int(pid), out.buffer_info()[0])
 
 
 def frame(pid, held, pressed, ms, max_us, words=None):

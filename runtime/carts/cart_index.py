@@ -3,7 +3,7 @@
 #   -- references               is_url, resolve, plain_name, mirror_ok
 #   -- the sources              parse_sources, sources_text, load_indexes, save_sources
 #   -- the signature            split_signed, check_signature
-#   -- the index                check_cart, cover_ref, parse_index (_read_listing)
+#   -- the index                check_cart, cover_ref, parse_index (_read_listing, _revocations); is_reviewed, is_revoked, publisher
 #   -- depends                  needs
 #   -- what this console takes  plan, need_bytes
 #   -- the record               load_record, save_record, record_entry, staged, recover_steps, remove_steps, drain, stepped
@@ -65,10 +65,26 @@ What it does differently, because a console is not a PC:
     a page and a console lists only the one that fits it (`fitting`). A
     board's TLS checks the server's certificate,
     but a server is not proof of what it serves; what lands is sandboxed,
-    signed or validated data. The one exception is the console's own
-    release: its index, signature verified, lists every seed cart of that
-    build as an OFFICIAL cart (`parse_index`'s `own`), which installs as the
-    image's seed would, Python included.
+    signed or validated data -- and Python carts (`runs_on`), which share
+    the shell's MicroPython, so nothing seals them and their trust comes
+    from review (#261, owner 2026-11-18):
+      - a REVIEWED cart comes from an index whose signature verifies (the
+        console's own release, or moybyte-org/carts under its review key,
+        REVIEW_KEYS) and installs as a trusted app (`is_reviewed`);
+      - from any other index a Python cart installs only behind the
+        unreviewed warning (runtime/shell/app_perms.py's UNREVIEWED), which
+        the user accepts per cart, behind the console's password where one
+        is set (runtime/shell/pkg.py's `gated`).
+    The console's own release's index, signature verified, also lists every
+    seed cart of that build but a test fixture as an OFFICIAL cart
+    (`parse_index`'s `own`), which installs as the image's seed would.
+
+AN INDEX MAY REVOKE: its `revoked` member maps a cart id to the versions it
+withdrew (`{"<id>": [<version>, ...]}`). A withdrawn version is refused at
+install (`Install`, REVOKED), and an installed copy of one is marked in its
+consent record when the store next reads that index (runtime/shell/pkg.py's
+`revocations`), so it will not launch until it is removed or updated. An
+index revokes only the carts installed from it.
 
 The store layout sits BESIDE the carts folder (moy_store_base._sibling_path):
 `installed.json`, the record of what this store installed (index, id, version,
@@ -85,7 +101,11 @@ covers SIG_SCHEME and the document as it was before. A signed index whose
 signature does not verify is refused, wherever this console can verify (the
 kernel's `moy_net.ota_verify` on a board, its host twin on CPython); the
 browser has no verifier and needs none, its fetch checking the server's
-certificate. An unsigned index is read.
+certificate. An unsigned index is read. A signature
+verifies against the image's keys (INDEX_KEYS, else device/moy_ota.py's) or
+moybyte-org/carts' review keys (REVIEW_KEYS), and an index signed by either
+is REVIEWED; in the browser, which cannot verify, moybyte-org/carts'
+index (DEFAULT_INDEXES) is, its fetch having checked GitHub's certificate.
 
 An entry's `depends` (a list of cart ids, optional) names the carts it needs
 on the console first; `needs` resolves them over the indexes.
@@ -177,6 +197,22 @@ RECORD_NAME = "installed.json"
 SIG_SCHEME = b"moybyte-index-v1\n"
 SIG_TAIL = b', "sig": "'
 INDEX_KEYS = None             # the keys an index verifies against; None: the image's
+# moybyte-org/carts' review key: ((modulus_hex, exponent), ...), the public
+# half of the key its CI signs index.json with (`tools/ota_sign.py
+# sign-index`); `tools/ota_sign.py keygen --out FILE` makes one and prints
+# its public half. The key itself is the CI secret MOYBYTE_REVIEW_KEY there.
+REVIEW_KEYS = (
+    (
+        'accd6a20281504cdd055ea6ad08414b31621608ddd9ee538af48c63394b81829'
+        'a27dc2d34f954d7b44a75a4c009de764fc28585de1e29fff0620c8f6b7421c13'
+        'fc602fbd80fcc37b47ecd901761fe385712c334d49ed1950b17c9d0fd1fbcae2'
+        'a3f4a758e7edf3dd820a66a595183d1243c8532e161a9c06b9ef70796b68f234'
+        '9410a174bebcd154474fbc610c64e86570332736786af0f2f0c20cee6e016bf7'
+        '61a50fc8827f29c2d2898a506419b9454a5b84590d0cc45d6655f27ec9b03cb0'
+        '7a2da538d4abd045233fa29f1f9d9cf546f2ca5050bedd2c02598262a201b09d'
+        'ec42c4bbef67d2565281a72cd2742979383d6f5b3926db2951ff1adff9ce068d',
+        65537),
+)
 STAGE_DIR = "install"
 RUNTIMES = ("wasm", "lua", "theme", "web")
 # The runtimes whose carts need no engine of this console's: a theme is data
@@ -217,7 +253,7 @@ GATE = 4 + 26 + 65535 + 65535
 # again from where it begins.
 TAIL_SLACK = 256
 
-SAVES = "pmem.json"           # always carried across an update
+SAVES = "pmem.bin"            # always carried across an update
 CONFIG = "config.json"        # carried when the kid changed it
 
 # What the kid reads when an install stops. The detail goes to serial.
@@ -232,6 +268,8 @@ NO_MEMORY = "Not enough memory free to unpack it."
 NET_MEMORY = "Not enough memory free to download. Restart the console, then try again."
 BAD_SIGNATURE = "The cart shelf's signature is wrong."
 NOT_FOR_APPS = "It uses a part of the console apps can't: %s."
+NOT_HERE = "This cart can't be installed on this console."
+REVOKED = "Its store took this cart back, so it can't be installed."
 
 _MP = getattr(sys, "implementation", None) is not None \
     and sys.implementation.name == "micropython"
@@ -379,6 +417,32 @@ def is_official(c):
     return c.get("official") is True
 
 
+def is_reviewed(c):
+    """Whether index entry `c` came from a reviewed index (parse_index
+    stamps it): a Python cart from one installs as a trusted app, from any
+    other behind the unreviewed warning."""
+    return c.get("reviewed") is True
+
+
+def is_revoked(c, version=None):
+    """Whether index entry `c`'s index withdrew `version` of it (its own
+    version when None)."""
+    return (c["version"] if version is None else version) in (c.get("revoked") or ())
+
+
+def publisher(c):
+    """Who publishes index entry `c`, as the install prompt names it: its
+    index's name, else the index's host."""
+    name = c.get("shelf")
+    if name:
+        return name
+    url = c.get("index") or ""
+    start = url.find("://")
+    rest = url[start + 3:] if start >= 0 else url
+    cut = rest.find("/")
+    return rest if cut < 0 else rest[:cut]
+
+
 def check_cart(c, official=False):
     """None when `c` is an index entry this console can install, else why not.
     An `official` entry (the console's own release index, its signature
@@ -459,12 +523,33 @@ def _read_listing(c):
             del c[key]
 
 
-def parse_index(data, url, own=None):
+def _revocations(index, url):
+    """The index's `revoked` member as {id: [version, ...]}; a malformed one
+    is logged and read as none."""
+    got = index.get("revoked")
+    if got is None:
+        return {}
+    out = {}
+    if isinstance(got, dict):
+        for cid, vers in got.items():
+            if isinstance(vers, list) and all(isinstance(v, int) for v in vers):
+                out[cid] = vers
+            else:
+                _log("%s: %r's revoked versions left out" % (url, cid))
+    else:
+        _log("%s: its revoked member left out" % url)
+    return out
+
+
+def parse_index(data, url, own=None, revoked=None):
     """The carts in an index document, each stamped with the index it came
-    from (`index`) and that index's name (`shelf`). An entry this console
-    cannot read is left out and logged, and so is a `cover` it cannot (the
-    cart stays); a document that is not an index, or whose signature does not
-    verify (`check_signature`), is an InstallError.
+    from (`index`), that index's name (`shelf`), whether it is reviewed
+    (`reviewed`) and the versions of it the index withdrew (`revoked`, when
+    any). An entry this console cannot read is left out and logged, and so is
+    a `cover` it cannot (the cart stays); a document that is not an index, or
+    whose signature does not verify (`check_signature`), is an InstallError.
+    With a dict `revoked`, `revoked[url]` is set to the index's revocations,
+    {id: [version, ...]}, the carts it no longer lists among them.
 
     `own` is the index this console's release publishes (load_indexes). Read
     from there with its signature verified, an entry in the built-ins'
@@ -474,6 +559,7 @@ def parse_index(data, url, own=None):
         data = data.encode()
     signed = check_signature(data, url)
     trusted = own is not None and url == own and signed is True
+    reviewed = signed is True or (signed is None and url in DEFAULT_INDEXES)
     try:
         index = json.loads(data.decode())
     except (ValueError, UnicodeError) as exc:
@@ -484,6 +570,9 @@ def parse_index(data, url, own=None):
     if "sig" in index and signed is False:
         raise InstallError(BAD_SIGNATURE, "%s: a sig that is not the last member"
                            % url)
+    gone = _revocations(index, url)
+    if revoked is not None:
+        revoked[url] = gone
     out = []
     for c in index.get("carts") or ():
         official = trusted and isinstance(c, dict) and builtin_ns(c.get("id"))
@@ -518,8 +607,13 @@ def parse_index(data, url, own=None):
         c["index"] = url
         c["shelf"] = str(index.get("name") or "")
         c["signed"] = bool(signed)
+        c["reviewed"] = bool(reviewed)
+        for key in ("official", "revoked"):
+            c.pop(key, None)              # stamped here, never read from the entry
         if official:
             c["official"] = True
+        if gone.get(c["id"]):
+            c["revoked"] = list(gone[c["id"]])
         out.append(c)
     return out
 
@@ -588,11 +682,12 @@ def fitting(carts, want=None):
 
 def runs_on(c, have):
     """Whether a cart of index entry `c` runs on a console whose engines are
-    `have` (`ws.runtimes`' names). An official Python cart runs on the
-    console's own interpreter, as its seed does."""
+    `have` (`ws.runtimes`' names). A Python cart runs on the console's own
+    interpreter: a reviewed one as a trusted app, any other behind the
+    unreviewed warning (the module docstring)."""
     rt = c["runtime"]
     if rt == "python":
-        return is_official(c)
+        return True
     return rt in RUNTIMES and (rt in have or rt in DATA_RUNTIMES)
 
 
@@ -636,9 +731,10 @@ def _verifier():
 
 
 def check_signature(data, url):
-    """True for an index whose signature verifies, False for an unsigned one,
-    None for a signed one where nothing can verify it (the browser). An
-    InstallError for a signature that does not verify."""
+    """True for an index whose signature verifies (the image's keys, or the
+    review keys), False for an unsigned one, None for a signed one where
+    nothing can verify it (the browser). An InstallError for a signature that
+    does not verify."""
     got = split_signed(data)
     if got is None:
         return False
@@ -647,6 +743,8 @@ def check_signature(data, url):
         return None
     ok = verify(got[0], got[1]) if INDEX_KEYS is None \
         else verify(got[0], got[1], INDEX_KEYS)
+    if not ok and REVIEW_KEYS:
+        ok = verify(got[0], got[1], REVIEW_KEYS)
     if not ok:
         raise InstallError(BAD_SIGNATURE, "%s: its signature does not verify" % url)
     return True
@@ -778,6 +876,23 @@ def plan(cart, chip=None, fmt=None, ranges=False):
             "store_bytes": store, "download_bytes": down}
 
 
+def size_text(n):
+    """A size the way the screens say it: whole KB below a megabyte, one
+    decimal above. Integer arithmetic, so every tier prints the same."""
+    if n < 1048576:
+        return "%d KB" % max(1, (n + 1023) // 1024)
+    return "%d.%d MB" % (n // 1048576, (n % 1048576) * 10 // 1048576)
+
+
+def room_why(need, free):
+    """What an install that needs `need` bytes says where `free` are free:
+    None when it fits."""
+    if need <= free:
+        return None
+    return "Not enough room: needs %s, %s free." % (size_text(need),
+                                                   size_text(free) if free > 0 else "nothing")
+
+
 def need_bytes(p, block):
     """Store space `p` takes, each file rounded up to the store's block (a FAT
     cluster on a card, a littlefs block on flash), plus the folder itself."""
@@ -840,6 +955,8 @@ def cart_state(cart, p, entry, present, manifest=None):
       "get"        not here
       "installed"  here, and what the index lists for this console
       "update"     here, and the index has something newer or different
+      "revoked"    here, a version its index withdrew, and nothing newer
+                   that it did not
       "taken"      a different cart already has its folder name
 
     `entry` is the record's entry for the cart's folder (or None), `present`
@@ -858,7 +975,11 @@ def cart_state(cart, p, entry, present, manifest=None):
             have = 0
         return "update" if have < cart["version"] else "installed"
     if entry is not None and entry.get("id") == cart["id"]:
-        if int(entry.get("version") or 0) < cart["version"]:
+        ver = int(entry.get("version") or 0)
+        if is_revoked(cart, ver):
+            return "update" if ver < cart["version"] and not is_revoked(cart) \
+                else "revoked"
+        if ver < cart["version"]:
             return "update"
         had = entry.get("files") or {}
         want = p["files"]
@@ -1672,6 +1793,9 @@ class Install:
 
     def _begin(self):
         self._started = _ticks_ms()
+        if is_revoked(self.cart):
+            raise InstallError(REVOKED, "%s %d: its index revoked it"
+                               % (self.folder, self.cart["version"]))
         for e in self.plan["external"]:
             if e["path"] not in self.accepted:
                 raise InstallError(NO_LICENCE, "%s: %s not accepted"

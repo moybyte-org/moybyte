@@ -163,8 +163,10 @@ def test_the_rows_strip_names_its_keys(tmp_path):
     ws, drv = _home(tmp_path)
     seen = []
     real = ui_draw.hints
+    # (the strip draws the line it laid out: `ui_draw.hint_line`'s bytes)
     ui_draw.hints = lambda cv, th, rect, items, *a, **k: (
-        seen.append(tuple(items)), real(cv, th, rect, items, *a, **k))[1]
+        seen.append(tuple(items.decode().split("\0")) if type(items) is bytes
+                    else tuple(items)), real(cv, th, rect, items, *a, **k))[1]
     try:
         _press(drv, "up")
         ws.launcher_layer._full_streak = 0

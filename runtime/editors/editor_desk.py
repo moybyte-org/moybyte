@@ -49,6 +49,9 @@ _OWNERS = {"cards": ("cards_layer", "layout"), "blocks": ("block_ui", "block_lay
            "theme_config": ("theme_config_layer", "layout"),
            "theme_sprites": ("theme_sprites_layer", "layout")}
 
+# The Editor's tabs (`EditorApp._offers` answers for these).
+_OPENED = ("cards", "code", "blocks", "paint", "map", "scene", "music")
+
 # The tabs whose pane layouts `warm_step` builds ahead: those `_pane_layout`
 # knows how to lay out.
 _OWNERS_OR_CODE = tuple(_OWNERS) + ("code",)
@@ -100,6 +103,7 @@ _CODE_MORE = (("select", "Select", "sel"), ("copy", "Copy\tCtrl+C", "copy"),
               ("linenums", "Line numbers", "gutter"), ("code", "Complete", "auto"))
 
 _TAB_PAD = 28               # a header tab's room beside its word
+_TAB_LEAD = 12              # the tabs row's lead before its first tab (the desk's group pad)
 LOUPE = 3                   # the Sheet's loupe: a held tile at 3x its 16 px
 _DOUBLE_MS = 400            # a second press this soon on a header or handle
 _FULL_MS = 1000
@@ -237,7 +241,18 @@ class EditorDesk(Layer):
 
     def _blocks(self):
         cart = self.ws.cart
-        return bool(cart is not None and cart.get("blocks"))
+        return bool(cart is not None and cart.get("blocks") and self.ws.text.takes_blocks())
+
+    def lacks(self):
+        """The panes the open cart has not got: each whose Editor tab, or
+        the tab it serves, the Editor does not offer it (`_offers`)."""
+        offers = self.ws.editor_app._offers
+        return tuple(c for c in P.CONTENTS
+                     if P.tab_for(c) in _OPENED and not offers(P.tab_for(c)))
+
+    def keys(self):
+        """The workspace keys the open cart has, in the row's order."""
+        return [k for k, _l, _i in self.ws.editor_app.workspaces()]
 
     def arrangement(self):
         """The workspace on show at the surface's size, its dividers as the
@@ -259,7 +274,7 @@ class EditorDesk(Layer):
         return arr
 
     def _new_arrangement(self, key, area, u):
-        arr = P.Arrangement(key, area, u, self._blocks(), self.shows_game())
+        arr = P.Arrangement(key, area, u, self._blocks(), self.shows_game(), self.lacks())
         arr.restore(self._saved().get(self._mem_key(arr)))
         return arr
 
@@ -274,7 +289,7 @@ class EditorDesk(Layer):
     def _warm_sig(self, key, area, u):
         cart = self.ws.cart or {}
         return (key, area, u, self._blocks(), cart.get("path") or cart.get("title"),
-                self.shows_game())
+                self.shows_game(), self.lacks())
 
     def warm_step(self):
         """On a quiet frame, one workspace not on show made ready as its first
@@ -303,7 +318,7 @@ class EditorDesk(Layer):
         if self._warm_for != mark:
             self._warm_for = mark
             self._warm.clear()
-            self._warm_left = [k for k in P.KEYS if k != self.key]
+            self._warm_left = [k for k in self.keys() if k != self.key]
         left = self._warm_left
         self._warm_due = len(left) > 1
         while left:
@@ -366,7 +381,7 @@ class EditorDesk(Layer):
     def switch(self, key):
         """Show workspace `key`. The panes left behind that hold an edit owe
         their commit (`EditorApp.commit_later`); focus lands where it was."""
-        if key == self.key or key not in P.KEYS or self.key == P.THEME:
+        if key == self.key or key not in self.keys() or self.key == P.THEME:
             return False
         app = self.ws.editor_app
         for pane, _r, _p in self.panes():
@@ -385,10 +400,11 @@ class EditorDesk(Layer):
         return True
 
     def step(self, d):
-        if self.key not in P.KEYS:
+        keys = self.keys()
+        if self.key not in keys:
             return False
-        i = (P.KEYS.index(self.key) + d) % len(P.KEYS)
-        return self.switch(P.KEYS[i])
+        i = (keys.index(self.key) + d) % len(keys)
+        return self.switch(keys[i])
 
     def _land(self):
         """The workspace's panes built, and the focused pane's tab the
@@ -729,6 +745,9 @@ class EditorDesk(Layer):
         `c`'s header shows: an edit's undo step, the sounds, the blocks'
         object, the Map's tools, the Code pane's file and find tool."""
         ws = self.ws
+        if c == "cards":
+            h = getattr(ws.run.project, "config_hist", None)
+            return None if h is None else (id(h), h.gen)
         if c in ("code", "theme_config"):
             return (ws.text.code_file_name(), bool(ws.layer_of(c)._find_open))
         if c == "blocks":
@@ -853,6 +872,15 @@ class EditorDesk(Layer):
                 cv.clip()
         else:
             self._tab_pane(tab, body, dt, True)
+            if c == "cards" and self._own_data(c) != data:
+                # a card's value is set by the page's draw, an undo step the
+                # Editor's strip shows: the strip drawn over this frame too
+                ws.bar_layer.draw_status_strip("menu")
+                for bx, by, bw, bh in ws.bar_layer.bar_rects("menu"):
+                    x0, y0 = min(x0, bx), min(y0, by)
+                    x1, y1 = max(x1, bx + bw), max(y1, by + bh)
+                self._changed = [x0, y0, x1, y1]
+                return True
             w = self._within
             if self._host.within(w):
                 # it drew inside that rect of the pane alone (a modal's band
@@ -1066,7 +1094,15 @@ class EditorDesk(Layer):
                 self._still_tool(pid, u)
                 continue
             c = self.tab_of(pane)
-            tools_w = cell + 4 * u + (7 * cell if c in _ON_VERBS else cell if c == "sounds" else 0)
+            # The header's tools, right to left: Grow, the Game's pause and
+            # the Sound and Sounds headers' own, then the tools that fit and
+            # the more menu of the rest. The title or tabs keep left of them
+            # all; tabs that would not fit labelled are short (`_short_tabs`).
+            fixed = (cell * (1 + (c == "game")) + 4 * u
+                     + (7 * cell if c in _ON_VERBS else cell if c == "sounds" else 0))
+            short = len(pane) > 1 and self._tabs_w(pane, -1, u) > w - fixed - 8 * u
+            tools, folded = self._head_fit(pane, c, x, w, u, short)
+            tools_w = fixed + cell * (len(tools) + bool(folded))
             if c == "code" and len(pane) == 1:
                 pass                            # its file tabs: `_code_head`
             elif len(pane) == 1:
@@ -1082,10 +1118,13 @@ class EditorDesk(Layer):
                     ui.at(sx, y + (hh - lh) // 2, max(0, x + w - tools_w - sx), lh)
                     ui.label(status, {"tone": "dim"})
             else:
-                items = [P.CONTENTS[c][0] for c in pane]
-                ui.at(x + 4 * u, y + 2 * u, max(0, w - tools_w - 8 * u), hh - 4 * u)
                 cur = self._tabs.get(pane, 0)
-                got = ui.tabs(pid, items, cur, {"id": pid})
+                if short:
+                    got = self._short_tabs(pid, pane, cur, x + 4 * u, y, hh, u)
+                else:
+                    items = [P.CONTENTS[c][0] for c in pane]
+                    ui.at(x + 4 * u, y + 2 * u, max(0, w - tools_w - 8 * u), hh - 4 * u)
+                    got = ui.tabs(pid, items, cur, {"id": pid})
                 if got != cur and got is not None and got >= 0:
                     self._tabs[pane] = got
                     if n == self._focus.get(self.key, 0):
@@ -1094,7 +1133,6 @@ class EditorDesk(Layer):
             if ui.tool("maximize", "Grow\tCtrl+Shift+Enter", {"id": pid + " grow"}):
                 self.grow(pane)
             tx = x + w - cell - 2 * u
-            tools, folded = self._head_fit(pane, c, x, w, u)
             if folded:
                 tx -= cell
                 ui.at(tx, y, cell, hh)
@@ -1179,7 +1217,34 @@ class EditorDesk(Layer):
             ws.text.open_code_file(names[got])
         return tx
 
-    def _head_fit(self, pane, c, x, w, u):
+    def _tabs_w(self, pane, cur, u):
+        """The width a pane's header tabs take: every one labelled, or with
+        `cur` an index, short -- that one labelled, the others icons."""
+        if cur == -1:
+            return sum(ui.text_size(P.CONTENTS[k][0])[0] + _TAB_PAD * u for k in pane)
+        return (32 * u * (len(pane) - 1) + (_TAB_PAD + _TAB_LEAD) * u
+                + ui.text_size(P.CONTENTS[pane[cur]][0])[0])
+
+    def _short_tabs(self, pid, pane, cur, x, y, hh, u):
+        """A short pane's tabs (EDITOR_LAYOUT.md): the current one labelled,
+        the others as icons in tool cells, in the tabs' order. The tab tapped
+        or None."""
+        got = None
+        for j, k in enumerate(pane):
+            label, icon = P.CONTENTS[k][0], P.CONTENTS[k][1]
+            if j == cur:
+                tw = ui.text_size(label)[0] + (_TAB_PAD + _TAB_LEAD) * u
+                ui.at(x, y + 2 * u, tw, hh - 4 * u)
+                ui.tabs(pid, [label], 0, {"id": pid})
+                x += tw
+            else:
+                ui.at(x, y, 32 * u, hh)
+                if ui.tool(icon, label, {"id": "%s tab %s" % (pid, k)}):
+                    got = j
+                x += 32 * u
+        return got
+
+    def _head_fit(self, pane, c, x, w, u, short=False):
         """The header tools a pane shows and the ones its more menu holds:
         as many as fit right of its name or tabs, the rest (the leftmost)
         folded, as the Code header's are."""
@@ -1190,7 +1255,7 @@ class EditorDesk(Layer):
         if len(pane) == 1:
             lead = 8 * u + 28 * u + ui.text_size(self._title(c, P.CONTENTS[c][0]))[0]
         else:
-            lead = 4 * u + sum(ui.text_size(P.CONTENTS[k][0])[0] + _TAB_PAD * u for k in pane)
+            lead = 4 * u + self._tabs_w(pane, self._tabs.get(pane, 0) if short else -1, u)
         room = (w - lead - 2 * u - cell - 4 * u) // cell
         if room >= len(tools):
             return tools, ()
@@ -1801,7 +1866,9 @@ class EditorDesk(Layer):
         if ctrl and mods & _ALT and code in (_LEFT, _RIGHT, _UP, _DOWN):
             return self._nudge(code)
         if ctrl and not mods & (_ALT | _SHIFT) and ord("1") <= code <= ord("5"):
-            return self.switch(P.KEYS[code - ord("1")]) or True
+            keys = self.keys()
+            n = code - ord("1")
+            return (n < len(keys) and self.switch(keys[n])) or True
         if ctrl and code == 9:                          # Ctrl+Tab, Ctrl+Shift+Tab
             self.step(-1 if mods & _SHIFT else 1)
             return True

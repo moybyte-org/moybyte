@@ -24,6 +24,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CARTS = ROOT / "system_carts"
+SHAPES = ROOT / "tests" / "fixtures" / "shape_carts"     # Sky Run's 100 columns
 
 # The golden matrix's tiers (tests/test_shell_goldens.py CONFIGS), as the map
 # layout sees them: (w, h, font_scale). The 320x240 row is the tightest view and
@@ -109,10 +110,11 @@ def test_tile_color_memo_is_dropped_by_an_edit_to_a_DIFFERENT_tile():
 # -- the fit, against the shipped maps ---------------------------------------
 
 def _shipped_maps():
-    """(cart folder name, w, h) for every seed cart that ships a tilemap."""
+    """(cart folder name, w, h) for every seed cart that ships a tilemap, and
+    every shape cart (tests/ws_helpers.py SHAPE_CARTS) that has one."""
     from runtime.editors_sheet import TileMap
     out = []
-    for d in sorted(CARTS.glob("*.moy")):
+    for d in sorted(CARTS.glob("*.moy")) + sorted(SHAPES.glob("*.moy")):
         f = d / "map.moymap"
         if f.exists():
             tm = TileMap.from_hex(f.read_text())
@@ -136,8 +138,8 @@ def test_the_seed_store_still_ships_a_map_bigger_than_the_view():
 # complement of "everything else fits". Sky Run's 100 columns need 400px and
 # the bench twins' 64 need 256; the 320x240 view has 192, the 480x320 one 352.
 PANS_AT_THE_FLOOR = {
-    (320, 240, 1): {"moybyte.bench.moy", "moybyte.bench_lua.moy", "moybyte.sky_run.moy"},
-    (480, 320, 1): {"moybyte.sky_run.moy"},
+    (320, 240, 1): {"moybyte.bench.moy", "moybyte.bench_lua.moy", "sky_run.moy"},
+    (480, 320, 1): {"sky_run.moy"},
     (800, 480, 3): set(),
     (1024, 600, 2): set(),
 }
@@ -210,10 +212,11 @@ def test_fit_cell_stays_between_its_two_bounds_and_never_divides_by_zero():
 
 # -- the rung, through the shared console ------------------------------------
 
-def _open_map(tmp_path, title="Hop Quest"):
+def _open_map(tmp_path, title="Harpoon Pop"):
     from runtime import host_app
     import ws_helpers
     ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws_helpers.shelf_cart(ws, title)
     ws_helpers.open_cart(ws, title)
     ws.text.open_map()
     assert ws.menu_view == "map" and ws.map_ui.mapedit is not None
@@ -269,8 +272,8 @@ def _cell_px(ws, cx, cy):
 
 
 def test_overview_shows_a_fitting_map_whole_and_pins_the_camera(tmp_path):
-    # Hop Quest's 40x26 pans at every detail rung and fits whole at the 4px floor.
-    ws, _drv = _open_map(tmp_path, "Hop Quest")
+    # Harpoon Pop's 40x30 pans at every detail rung and fits whole at the 4px floor.
+    ws, _drv = _open_map(tmp_path, "Harpoon Pop")
     tm = ws.run.project.tilemap
     x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
     assert cols < tm.w                                   # ...it pans at the default
@@ -326,7 +329,7 @@ def test_overview_is_the_default_rung_for_nobody(tmp_path):
     # edit gesture, and a per-map default would make the editor open differently
     # for every cart.
     from runtime import map_editor_ui as M
-    for title in ("Sky Run", "Hop Quest", "Brick Siege"):
+    for title in ("Sky Run", "Harpoon Pop", "Brick Siege"):
         ws, _drv = _open_map(tmp_path / title.replace(" ", "_"), title)
         assert ws.map_ui.map_zoom == 0
         assert not ws.map_ui._mv_overview()
@@ -343,7 +346,7 @@ def test_zoom_button_and_title_name_the_overview_rung(tmp_path):
 
 
 def test_overview_paints_each_cell_its_tiles_dominant_colour(tmp_path):
-    ws, drv = _open_map(tmp_path)            # Hop Quest, 40x26 -> a 4px cell
+    ws, drv = _open_map(tmp_path)            # Harpoon Pop, 40x30 -> a 4px cell
     tm = ws.run.project.tilemap
     sheet = ws.run.project.sheet
     _to_overview(ws)
@@ -451,7 +454,7 @@ def test_overview_hit_tests_and_paints_the_cell_under_the_pointer(tmp_path):
 def test_overview_marquee_selects_the_dragged_cells(tmp_path):
     # SELECT (#91) at sub-8px cells: the marquee is cell-space, so it rubber-bands
     # over the whole level here rather than over one screenful of it.
-    ws, drv = _open_map(tmp_path, "Hop Quest")
+    ws, drv = _open_map(tmp_path, "Harpoon Pop")
     me = ws.map_ui.mapedit
     _to_overview(ws)
     ws.map_ui.map_tool = "select"
@@ -558,6 +561,7 @@ def test_the_map_editor_renders_at_overview_on_every_tier(tmp_path):
     for w, h, fs in TIERS:
         ws = host_app.build_workstation(
             str(tmp_path / ("t%dx%d" % (w, h))), sys_size=(w, h), font_scale=fs)
+        ws_helpers.shelf_cart(ws, "Sky Run")
         ws_helpers.open_cart(ws, "Sky Run")
         ws.text.open_map()
         drv = host_app.ConsoleDriver(ws)
@@ -566,7 +570,7 @@ def test_the_map_editor_renders_at_overview_on_every_tier(tmp_path):
         x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
         where = "%dx%d fs%d" % (w, h, fs)
         assert M._MV_FIT_MIN <= cell <= M._MV_FIT_MAX, where
-        whole = "moybyte.sky_run.moy" not in PANS_AT_THE_FLOOR[(w, h, fs)]
+        whole = "sky_run.moy" not in PANS_AT_THE_FLOOR[(w, h, fs)]
         assert (cols >= tm.w and rows >= tm.h) == whole, where
         _paint(ws, drv)
         assert ws.sys_canvas.pix(x0 + cell // 2, y0 + cell // 2) >= 0
@@ -575,8 +579,8 @@ def test_the_map_editor_renders_at_overview_on_every_tier(tmp_path):
 def test_the_issue_numbers_still_describe_the_shipped_maps():
     # #215 measured four maps that no longer fit; if a seed cart's map is retitled
     # or resized, this names it rather than letting a fit test quietly widen.
-    want = {"moybyte.hop_quest.moy": (40, 26), "moybyte.harpoon_pop.moy": (40, 30),
-            "moybyte.bench.moy": (64, 30), "moybyte.sky_run.moy": (100, 30)}
+    want = {"moybyte.harpoon_pop.moy": (40, 30), "moybyte.bench.moy": (64, 30),
+            "sky_run.moy": (100, 30)}
     got = {n: (w, h) for n, w, h in _shipped_maps() if n in want}
     assert got == want
 

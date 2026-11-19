@@ -25,6 +25,9 @@ from runtime import moy_play  # noqa: E402
 # The seed carts the Player runs with no VM. Every other seed is Python.
 SEED_FREE = {"moybyte.bench_lua.moy", "moybyte.brick_siege_lua.moy",
              "moybyte.bullet_storm.moy", "moybyte.sakura_lua.moy"}
+# The seed carts that carry their source alone, which the census leaves out
+# until a build: the compiled ones (the release builds them, tools/web_pack.py).
+SEED_UNBUILT = {"moybyte.sakura_c.moy"}
 
 
 def _cart(tmp_path, name, man, main="main.lua", extra=()):
@@ -42,7 +45,7 @@ def test_every_seed_cart_has_its_verdict():
         os.path.join(ROOT, "system_carts", n) for n in os.listdir(os.path.join(ROOT, "system_carts"))
         if n.endswith(".moy")))
     assert len(rows) == len([n for n in os.listdir(os.path.join(ROOT, "system_carts"))
-                             if n.endswith(".moy")])
+                             if n.endswith(".moy") and n not in SEED_UNBUILT])
     for name, rt, free, why in rows:
         if name in SEED_FREE:
             assert (rt, free, why) == ("lua", True, "free"), name
@@ -67,16 +70,36 @@ def test_the_compiled_carts_run_with_no_vm(tmp_path):
     for i, path in enumerate(mans):
         with open(path) as fh:
             man = json.load(fh)
-        if (man.get("moybyte") or {}).get("type") == "app":
-            continue        # a compiled app's verdict reads its module: test_wasm_app.py
+        if ((man.get("moybyte") or {}).get("type") == "app"
+                or "moybyte.app" in (man.get("extensions") or ())):
+            # a compiled app's verdict, and a game's declaring the app
+            # extension, reads its module: test_wasm_app.py, test_wasm_game_ext.py
+            continue
         d = _cart(tmp_path, "c%d.moy" % i, man, main=man.get("main", "main.wasm"))
         if (man.get("moybyte") or {}).get("type") in ("command", "service"):
             # a command runs in the shell and a service on a task of its own,
             # neither as the Player's run
             assert moy_play.census(d)[1:] == (False, "type"), path
             continue
+        if {"moybyte.scenes", "moybyte.images"} & set(man.get("extensions") or ()):
+            # the console hands the run its scenes and paint images
+            got = moy_play.census(d)
+            assert got[1] is False and got[2].startswith("import"), path
+            continue
         assert moy_play.census(d) == ("wasm", True, "free"), path
         assert moy_play.census(d, wasm=False) == ("wasm", False, "absent"), path
+
+
+def test_a_compiled_cart_carrying_a_native_module_keeps_the_vm(tmp_path):
+    """The Python console picks which of its modules runs
+    (runtime/shell/app_perms.py's tier_of)."""
+    man = {"format": "moy-1", "title": "T", "runtime": "wasm", "main": "main.wasm",
+           "moybyte": {"type": "game", "native": ["esp32p4"]}}
+    assert moy_play.census(_cart(tmp_path, "n.moy", man, main="main.wasm")) \
+        == ("wasm", False, "runtime")
+    man["moybyte"]["native"] = []
+    assert moy_play.census(_cart(tmp_path, "e.moy", man, main="main.wasm")) \
+        == ("wasm", True, "free")
 
 
 def test_each_clause_keeps_the_vm_by_name(tmp_path):

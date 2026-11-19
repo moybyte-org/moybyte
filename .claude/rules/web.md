@@ -116,7 +116,7 @@ nor those docs will warn you about:
   (`moy_seed.seed_folders`, the worker's `seedLocal` only moving the bytes):
   one the store has never had (a new app, a new seed game) is seeded whole,
   and one whose bundled manifest `version` is newer replaces the store's copy,
-  its `pmem.json` and `config.json` kept, by the board's own `_make_room`. Without the first, nobody who had visited
+  its `pmem.bin` and `config.json` kept, by the board's own `_make_room`. Without the first, nobody who had visited
   before a system cart shipped would ever see it; without the second, an app
   kept from an older console runs its old manifest on the new one (Notes'
   `files:docs` after the folders took their names: no `files`, a NameError).
@@ -137,12 +137,18 @@ nor those docs will warn you about:
   Settings choice always wins and booting on the scheme saves nothing; `?start=1`
   skips the play button; `?edit=<cart>&tab=code` opens that cart in the Editor
   (`web_boot.start_edit`, without the First Steps badge) from whatever the
-  browser's store holds, so a visitor's edits are kept. The framed player posts
+  browser's store holds, so a visitor's edits are kept, and on the desk as a
+  window unless this browser left it full screen; `&play=1` presses its Play,
+  which on the desk runs the cart in the Editor's Game pane (the site's
+  Desktop tab passes it, its Handheld tab does not). The framed player posts
   `{moyChrome}` and, at its first painted frame, `{moyLive}`.
   `tests/test_web_first_run_e2e.py` drives them. The hero's two stills (Night,
   Day) are CAPTURED by `site/build.py` from the player it ships, through
-  `browsershot.mjs` (node 22 + Chrome, which pages.yml installs): a capture that
-  fails fails the build.
+  `browsershot.mjs` (node 22 + Chrome, which pages.yml installs), on a frame
+  whose game is not mid catch-flash: a capture that fails fails the build. The
+  site's scheme is one attribute, `<html data-scheme>` (the visitor's switch in
+  the top bar, else the system's), which the page's colours, the still and the
+  console's `?scheme=` all read; a flip restarts a running console.
 - **The journal lives with the STORE OF RECORD** (owner call) — there is one
   durable journal per cart, where the cart durably lives, so a kid gets undo on
   both ends without a byte of history on the wire. **The wire predicate itself
@@ -200,9 +206,11 @@ nor those docs will warn you about:
   wire could not carry a module anyway. A Zero's page also gets `ws.cart_board`
   (`carts_link.BoardCarts`, which boot binds when the worker's probe of the
   sealed `/official` answered, `web_boot.official_enable`): Get Carts lists the
-  official carts of the board's own release and Get or Remove asks the board
+  carts of the board's indexes (its `system/sources`, else moybyte-org/carts,
+  and its own release's) and a licence, Get or Remove asks the board
   (`runtime/carts/web_addon.py`'s `OfficialCarts`, a slice per poll like
-  `/update`), which fetches from its release and writes its own store; once
+  `/update`), which fetches and writes its own store, the page answering the
+  install prompt over the manifest the board checked; once
   it has, the worker pulls the board's carts again and replaces the page's
   copy of that one folder in one turn of its thread, and the watcher adopts
   it, so nothing the board wrote travels back as an edit. A board with glass
@@ -253,6 +261,10 @@ nor those docs will warn you about:
   - **The site-mode sweep must pass a file it cannot carry by stat**
     (`moy_sync.StoreWatcher`, crc None): when it re-read every binary file on
     every sweep, an installed Doom drew a frame a second.
+  - **The sweep re-reads the files of its newest second only for
+    `moy_sync.HOT_MS`** after it first saw that second: a browser seeds every
+    file in one second, and a hot set with no end re-read and hashed the whole
+    store every sweep for as long as nothing wrote a newer file.
 - **The site's Terminal runs WASI commands on the BROWSER'S engine, through
   the boards' adapter**, compiled into the site's wasm alone; the README of
   `native/moy_wasm_web` says how ("A WASI command here"). What bites:
@@ -287,6 +299,15 @@ nor those docs will warn you about:
   - **The page's frame pulls the mix while a stream plays** (`web_boot`'s
     step ticks `_RunnerPump` when no Player did): a board's feeder task
     pulls it whatever runs, and on the web nothing else would.
+  - **A station playing on behind a still desk allocates little a frame**:
+    the step leaves the frame's samples as four numbers at `pcm_addr()`
+    (`web_boot._PCM`) and returns "" unless it painted, the pull and the
+    media face's feed reuse their buffers, and the page's reader finds a
+    segment's growth by reading it, not by a stat. The browser's VM boxes
+    every float, which a board's does not. `?meter=1` counts the heap's
+    allocation each frame (`__moyState().alloc`), and
+    `tests/test_web_audio_stream_e2e.py` holds a station's frames and the
+    loop around them to a stated bound.
   - **A station without CORS headers cannot be read**, and from the page
     that looks like no network; a `no-cors` fetch that answers tells them
     apart, and the face fails the entry with EACCES. A page on https asks
@@ -430,7 +451,13 @@ nor those docs will warn you about:
   time until the decoder starved (the owner's stutter on the P4-served desk,
   2026-11-10). The pull tops the sink's depth up by COUNT (`_RunnerPump`:
   samples sent against the sink's `played`); a dry sink plays silence and
-  counts it (`__moyState().sink`: `under`, `dry`, `gap`, `dup`, `over`);
-  `tests/test_web_audio_stream_e2e.py` plays a live station a minute on both
-  sinks.
+  counts it (`__moyState().sink`: `under`, `dry`, `gap`, `dup`, `over`),
+  and its longest wait between chunks (`lull`) stands beside the worker
+  loop's longest frame, step, collect, send and count (`__moyState().loop`),
+  each with the play time it ended at, so an underrun names the side that
+  stalled; `tests/test_web_audio_stream_e2e.py` plays a live station a
+  minute on both sinks. The loop's own collect waits for a stream to end
+  (`worker.js`, IDLE_QUIET_FRAMES): what a playing frame allocates the VM's
+  threshold collects, and a pause the worker added would come out of the
+  sink's lead.
 

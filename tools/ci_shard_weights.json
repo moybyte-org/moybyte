@@ -191,7 +191,6 @@
  "tests/test_notes_rows.py": 16.44,
  "tests/test_old_look_surfaces.py": 3.4,
  "tests/test_op_history_wiring.py": 5.73,
- "tests/test_open_machine_wallpaper.py": 0.21,
  "tests/test_ota_health.py": 3.97,
  "tests/test_ota_signing.py": 0.65,
  "tests/test_outline_faces.py": 1.39,

@@ -78,7 +78,7 @@ typedef struct {
         extensions, edit, permissions, required, handles, receives, achievements, writable,
         pictures, entries,
         native;                 // moybyte.native: a native cart's chips, when a list
-    int writable_ok;            // a compiled cart's "writable" is a list of strings
+    int writable_ok;            // the cart's "writable" is a list of strings
     moy_cat_int_t version, memory;
     moy_cat_int_t audio_ring;   // moybyte.audio_ring: the render-ahead ring's depth
     int graduated;

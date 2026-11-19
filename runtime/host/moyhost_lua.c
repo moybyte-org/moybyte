@@ -43,6 +43,7 @@
 
 #include "moy.h"
 #include "moycore_run.h"
+#include "moycore_files.h"
 #include "moycore_lua.h"
 #include "moycore_layers.h"
 #include "moy_gfx_kernels.h"     /* the layer restore draw_layer takes */
@@ -71,8 +72,9 @@ void hl_kernel(int which, void *fn)
 #define AUD(i, T, ...) (K[i] ? ((T)K[i])(__VA_ARGS__) : MOY_AUD_STALE)
 int moy_aud_sfx(uint32_t s, int n, int chan)
 { return AUD(HK_SFX, int (*)(uint32_t, int, int), s, n, chan); }
+/* The audio library is built double-widened (runtime/host/audio_binding.py). */
 int moy_aud_beep(uint32_t s, float f, float d)
-{ return AUD(HK_BEEP, int (*)(uint32_t, float, float), s, f, d); }
+{ return AUD(HK_BEEP, int (*)(uint32_t, double, double), s, (double)f, (double)d); }
 int moy_aud_music(uint32_t s, int track, int loop)
 { return AUD(HK_MUSIC, int (*)(uint32_t, int, int), s, track, loop); }
 int moy_aud_music_stop(uint32_t s)
@@ -450,6 +452,11 @@ int hl_pmem_image(host_lua *r, int32_t *out, int n)
 void hl_pmem_load(host_lua *r, const int32_t *in, int n)
 { if (LIVE(r)) moycore_run_pmem_load(&RUN.c, in, n); }
 
+/* The cart's files (moycore_files.h): its folder and its "writable" entries,
+ * NUL-joined; 0, or -1 when the store would not open. */
+int hl_files(host_lua *r, const char *dir, const char *writable, int n)
+{ return LIVE(r) ? moycore_lua_files(dir, writable, n > 0 ? (size_t)n : 0) : -1; }
+
 /* A cart global as a double: 1, or 0 when absent or not a number. An integer
  * goes through lua_tointeger, which a double holds exactly. */
 int hl_get_global_num(host_lua *r, const char *name, double *out)
@@ -569,6 +576,10 @@ int hl_play_frame(uint32_t run, int ticks, float dt, int render, int x, int y, i
     if (rc != MOY_PLAY_OK) {
         *out = 0;
         return rc;
+    }
+    if (ticks <= 0) {
+        *out = 0;                       /* the pointer alone (modmoy_play.c's frame) */
+        return MOY_PLAY_OK;
     }
     return moy_play_frame(run, (uint8_t)ticks, dt, render != 0, out);
 }

@@ -13,7 +13,7 @@ import pytest
 
 from runtime import host_app
 from runtime import moy_input as mi
-from ws_helpers import no_unlock_banner, quiesce, settle_badges
+from ws_helpers import no_unlock_banner, quiesce, settle_badges, shelf_cart
 
 DT = 1 / 30
 _NOW = [100000]
@@ -34,7 +34,8 @@ def clock(monkeypatch):
 # surface -> (cart, workspace, tab)
 SURFACES = {"blocks": ("Coin Quest", "code", "blocks"),
             "cards": ("Coin Quest", "settings", "cards"),
-            "cards pictures": ("Hop Quest", "settings", "cards"),
+            "cards pictures": ("Space Desktop", "settings", "cards"),
+            "cards values": ("Star Catcher", "settings", "cards"),
             "music": ("Sky Run", "sound", "music"),
             "map": ("Sky Run", "art", "map")}
 
@@ -46,7 +47,7 @@ def _desk(path, cart, key, tab, ships, window=False):
     no_unlock_banner(ws)
     quiesce(ws)
     ws.home.open_desk()
-    ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == cart))
+    ws.open_in_editor(shelf_cart(ws, cart))
     drv = host_app.ConsoleDriver(ws)
     for _ in range(3):
         drv.frame(DT)
@@ -177,6 +178,26 @@ def test_a_drag_in_a_pane_draws_as_a_whole_draw_does(tmp_path, surface, bufs):
     x, y, w, h = p.pane()
     p.drag(x + w // 2, y + h * 3 // 4, -h // 3)
     p.drag(x + w // 2, y + h // 4, h // 3)
+
+
+@pytest.mark.parametrize("window", (False, True), ids=("full", "window"))
+@pytest.mark.parametrize("bufs", (1, 2, 3))
+def test_a_cards_value_shows_its_undo_step_in_the_frame_that_sets_it(tmp_path, bufs, window):
+    """A card's value is set by the Settings page's own draw, an undo step
+    the Editor's strip shows: the frame the pane draws alone shows the
+    strip's Undo as a whole draw does, and every value after it too."""
+    p = Pair(tmp_path, "cards values", bufs, window)
+    hist = p.a.run.project.config_hist
+    assert not hist.can_undo()
+    p.key(mi.KEY_RIGHT)                         # Drop 6 stars: 7, the first step
+    assert hist.can_undo()
+    p.key(mi.KEY_DOWN)
+    p.key(mi.KEY_LEFT, 2)                       # the fall speed
+    p.key(mi.KEY_DOWN)
+    p.key(mi.KEY_RIGHT)                         # the catcher's picture
+    assert p.a.run.project.config == p.b.run.project.config
+    assert p.a.run.project.config["basket"] == 1
+    assert sum(p.own) >= len(p.own) // 2, p.own
 
 
 @pytest.mark.parametrize("bufs", (1, 2))

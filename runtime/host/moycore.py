@@ -108,12 +108,13 @@ def _bytes(s):
     return s.encode() if isinstance(s, str) else bytes(s)
 
 
-def svc_start(pid, name, src, env=None, app=None):
+def svc_start(pid, name, src, env=None, app=None, start_ms=0):
     """Service `pid` started (moycore_svc_start): its handle. `src` is its
     one script, or its scripts as (text, chunkname) pairs in load order
     (a None chunkname the service's own);
     `env` what the console hands it, the JSON text [values, calls], or None;
-    `app` its app's run, moy_app's `run()` bytes, or None."""
+    `app` its app's run, moy_app's `run()` bytes, or None; `start_ms` its
+    start's limit of CPU (0: a service's, MOYCORE_SVC_STOP_MS)."""
     pairs = [(src, None)] if isinstance(src, (str, bytes)) else list(src)
     chunks = (_lb.SvcChunk * len(pairs))()
     for i, (text, chunk) in enumerate(pairs):
@@ -125,7 +126,7 @@ def svc_start(pid, name, src, env=None, app=None):
     _svc_check(_lb.play_lib().moycore_svc_start(pid, name.encode(), chunks, len(pairs), e,
                                                 len(e) if e is not None else 0,
                                                 bytes(app) if app is not None else None,
-                                                _lb.ctypes.byref(h)))
+                                                start_ms, _lb.ctypes.byref(h)))
     return h.value
 
 
@@ -240,6 +241,70 @@ def get_global(name):
 def get_global_len(name):
     r = _cur()
     return r.get_global_len(name) if r is not None else None
+
+
+def lua_files(path, writable):
+    """The current run's files (native/moycore/moycore_files.h): the cart's
+    folder and its "writable" entries NUL-joined (None for none); whether
+    the store opened."""
+    return _run().files(path, writable)
+
+
+class CartFiles:
+    """A Python cart's files (native/moycore/moycore_files.h), modmoycore.c's
+    CartFiles by ctypes: the cart's folder and its "writable" entries
+    NUL-joined (None for none); OSError when the store cannot be opened."""
+
+    def __init__(self, path, writable):
+        self._d = d = _lb._lib()
+        w = writable.encode() if writable else None
+        self._s = d.moycore_files_open(path.encode(), w, len(w) if w else 0)
+        if not self._s:
+            raise OSError("moycore_files_open")
+
+    def read(self, name, offset, n):
+        raw = name.encode() if isinstance(name, str) else bytes(name)
+        if offset < 0 or n == 0:
+            return b""
+        have = self._d.moycore_files_read(self._s, raw, len(raw), offset, None, 0)
+        size = max(have, 0) if n < 0 else min(max(have, 0), n)
+        if not size:
+            return b""
+        out = _lb.ctypes.create_string_buffer(size)
+        got = self._d.moycore_files_read(self._s, raw, len(raw), offset, out, size)
+        return out.raw[:max(0, min(got, size))]
+
+    def write(self, path, data):
+        raw = path.encode() if isinstance(path, str) else bytes(path)
+        data = data.encode() if isinstance(data, str) else bytes(data)
+        return self._d.moycore_files_write(self._s, raw, len(raw), data, len(data))
+
+    def erase(self, path):
+        raw = path.encode() if isinstance(path, str) else bytes(path)
+        return self._d.moycore_files_erase(self._s, raw, len(raw))
+
+    def list(self, prefix):
+        raw = prefix.encode() if isinstance(prefix, str) else bytes(prefix)
+        out, name, i = [], _lb.ctypes.create_string_buffer(256), 0
+        while True:
+            r = self._d.moycore_files_list(self._s, raw, len(raw), i, name, 256)
+            if r < 0:
+                return out
+            if r <= 256:
+                out.append(name.raw[:r].decode("utf-8", "replace"))
+            i += 1
+
+    def close(self):
+        if self._s:
+            self._d.moycore_files_close(self._s)
+            self._s = None
+
+
+def pmem_to(path):
+    """Where the run saves its pmem while it plays: False, the host's runs
+    have no saver in their library (native/moycore/moycore_run.h), so the
+    console's frame reads the image and saves it."""
+    return False
 
 
 def pmem_image(out):

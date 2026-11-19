@@ -1,3 +1,14 @@
+# Map (grep -n a name to jump there):
+#   console_text                 /proc/console: what only the console knows of itself
+#   -- a program's streams       stdio_names, run_program, exit_code
+#   Out                          stream fd 1 or 2 of the session through the door
+#   In                           stream fd 0 of the session
+#   lua_command                  a Lua command's body: its scripts as a Lua service
+#   -- the installed commands    command_name, commands, wasi_roots, find_command
+#   ShellDoor                    the door's verbs, `v_<verb>`
+#   ShellDoor.run_command        an installed command run as a process
+#   ShellDoor.run_compiled       a wasm or native command, a job in steps
+#   ShellDoor.v_role             a role command (runtime/shell/sh_roles.py)
 """The C shell's crossings into the console (native/moy_sh/moy_sh_board.h):
 the ROLE door's row `moy_sh.DOOR`, `verb NUL arg NUL ...`, answered here.
 
@@ -22,6 +33,11 @@ a line of fd 0. It runs under the guard for COMMAND_MS at most, and its end
 sweeps what it held (`moybyte.WAKES.end`). A command run with `&` runs to its
 end before the door answers, its output into the OS log under its pid; the
 pid answers, and `wait` reads its exit code (`status`).
+
+A LUA COMMAND (`"runtime": "lua"`) is the same process row and consent, its
+scripts run as a Lua service of its own (`lua_command`, sched_lua) with
+`print` and `input` over the same streams and then `main(argv)`; its chunks
+run under the service start's limit, a console call's wait apart.
 
 A COMPILED COMMAND (`"runtime": "wasm"`) is a WASI program: the same process
 row and consent, its module's `_start` run by the wasm runtime's `command`
@@ -244,6 +260,100 @@ def stdio_names(stdin, stdout, stderr):
     return {"print": _print, "input": _input}
 
 
+# A Lua command's scripts are a Lua service's (native/moycore/moycore_svc.h),
+# between these two: `print` and `input` over the session's streams, then
+# `main(argv)`, whose answer is the exit code.
+LUA_HEAD = """
+do
+  local out, inp, tostring, select, concat = __out, __in, tostring, select, table.concat
+  __out, __in = nil, nil
+  function print(...)
+    local t = {}
+    for i = 1, select("#", ...) do t[i] = tostring((select(i, ...))) end
+    out(concat(t, "\\t") .. "\\n")
+  end
+  function input(prompt) return inp(prompt or "") end
+end
+"""
+LUA_TAIL = """
+local code = 0
+if type(main) == "function" then code = main(__argv) end
+moybyte.exit(code == nil and 0 or math.tointeger(code) or 1)
+"""
+
+
+def lua_command(run, pid, name, argv, env, stdin, stdout):
+    """Lua command `run`'s body for `run_program`: its scripts run as a Lua
+    service of process `pid` (sched_lua: a state of its own, stepped here
+    where the tier gives it no task), handed `env`, `argv` and its streams
+    as console calls the door answers (the scheduler's `calls`). Its start
+    (the chunks, then `main`) runs under COMMAND_MS of CPU, a Python
+    command's budget, its console calls' waits apart, where a service's
+    start has MOYCORE_SVC_STOP_MS; past COMMAND_MS of wall time it is
+    stopped too. Its exit code."""
+    import sched_lua
+
+    def _out(text):
+        stdout.write(text)
+
+    def _in(prompt):
+        if prompt:
+            stdout.write(prompt)
+        line = stdin.readline()
+        if not line:
+            return None
+        return line[:-1] if line[-1:] == "\n" else line
+
+    calls = dict(env or {})
+    calls.update({"__out": _out, "__in": _in, "__argv": list(argv)})
+
+    def body():
+        svc = sched_lua.runtime()
+        if svc is None:
+            raise RuntimeError("a Lua command does not run on this console")
+        chunks = ([(LUA_HEAD, "=" + name)] + sched_lua.lua_chunks(run)
+                  + [(LUA_TAIL, "=" + name)])
+        S = _sched.SCHED
+        S.procs[pid].args = (None, None, calls)     # what `calls` answers it from
+        h = svc.svc_start(pid, name, chunks, sched_lua.env_text(calls), None, COMMAND_MS)
+        stepped = not svc.svc_tasks()
+        t0 = _ticks_ms()
+        stopped = False
+        try:
+            while True:
+                if stepped:
+                    svc.svc_step()
+                S.calls()
+                got = svc.svc_info(h)
+                if got is None or got[0] == sched_lua.SVC_EXITED:
+                    break
+                if not stopped and _ticks_diff(_ticks_ms(), t0) > COMMAND_MS:
+                    svc.svc_stop(h)
+                    stopped = True
+                if not stepped:
+                    _sleep_ms(1)
+        except BaseException:
+            svc.svc_stop(h)
+            raise
+        svc.svc_reap(h)
+        if got is None:
+            return KILLED
+        if got[1] and got[5]:
+            raise RuntimeError(got[5])
+        return KILLED if stopped else got[1]
+
+    return body
+
+
+def _sleep_ms(ms):
+    import time
+    sl = getattr(time, "sleep_ms", None)
+    if sl is not None:
+        sl(ms)
+    else:
+        time.sleep(ms / 1000)
+
+
 def exit_code(v, stderr):
     """A program's answer or SystemExit's argument as an exit code."""
     if v is None:
@@ -349,6 +459,7 @@ class ShellDoor:
         self.io = io if io is not None else _io()
         self.exits = []                 # [(pid, code)] of background commands
         self.jobs = {}                  # JOB -> (name, generator): role commands going on
+        self.job = None                 # the session the role command started last runs in
 
     def __call__(self, args):
         fields = bytes(args).split(b"\0")
@@ -494,18 +605,21 @@ class ShellDoor:
         stdin = In(None if bg else self.io)
         stdout = Out(self.io, 1, pid if bg else None)
         stderr = Out(self.io, 2, pid if bg else None)
-        ns = {"__name__": "__main__", "moybyte": _moybyte}
-        if env:
-            ns.update(env)
-        for n in app_perms.absent_names(absent, rec):
-            ns[n] = None
-        ns.update(stdio_names(stdin, stdout, stderr))
-        src = run["src"]
+        if tier == "lua":
+            body = lua_command(run, pid, name, argv, env, stdin, stdout)
+        else:
+            ns = {"__name__": "__main__", "moybyte": _moybyte}
+            if env:
+                ns.update(env)
+            for n in app_perms.absent_names(absent, rec):
+                ns[n] = None
+            ns.update(stdio_names(stdin, stdout, stderr))
+            src = run["src"]
 
-        def body():
-            exec(compile(src, "<%s>" % name, "exec"), ns)
-            main = ns.get("main")
-            return main(argv) if main is not None else None
+            def body():
+                exec(compile(src, "<%s>" % name, "exec"), ns)
+                main = ns.get("main")
+                return main(argv) if main is not None else None
 
         try:
             code = run_program(pid, body, stderr)
@@ -690,6 +804,7 @@ class ShellDoor:
         if fn is None:
             return ABSENT
         self.v_stop(job)
+        self.job = job
         r = self._as_shell(argv[0], lambda: fn(self, list(argv[1:])))
         if not hasattr(r, "send"):
             return r
@@ -711,6 +826,13 @@ class ShellDoor:
         if r != RUNNING:
             self.jobs.pop(job, None)
         return r
+
+    def v_unask(self, job):
+        """Session `job`'s question is over (moy_sh.h's `unask`): what pkg
+        kept for its line's runs goes."""
+        import pkg
+        self._as_shell("pkg", lambda: pkg.forget(job))
+        return 0
 
     def v_stop(self, job):
         got = self.jobs.pop(job, None)

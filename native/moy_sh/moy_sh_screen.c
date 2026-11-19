@@ -292,6 +292,10 @@ int moy_sh_screen_status(moy_sh_screen_t *f) {
     return moy_sh_status(f->s);
 }
 
+int moy_sh_screen_secret(moy_sh_screen_t *f) {
+    return moy_sh_asking_secret(f->s);
+}
+
 void moy_sh_screen_cancel(moy_sh_screen_t *f) {
     moy_sh_cancel(f->s);
 }

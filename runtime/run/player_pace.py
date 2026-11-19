@@ -262,6 +262,7 @@ class Pace:
         if pl.paused_at:
             return
         pl.paused_at = _ticks_ms() or 1
+        pl._pmem_flush()                # a pause persists, as an exit does
         na = _audio_native()
         if na is not None:
             try:

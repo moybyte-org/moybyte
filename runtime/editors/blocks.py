@@ -676,13 +676,15 @@ _HELPER_ATEDGE = (
     "        return False\n"
     "    return a.x < 0 or a.x > 312 or a.y < 0 or a.y > 232\n"
 )
-# "when I'm tapped" (on_tap): true on the frame the pointer taps INSIDE the actor's box.
+# "when I'm tapped" (on_tap): true on the frame the pointer taps INSIDE the box
+# draw_scene paints the actor in (8px times its whole size multiple).
 _HELPER_TAPHIT = (
     "def _taphit(a):\n"
     "    t = touch()\n"
     "    if not a or not t or not t[2]:\n"
     "        return False\n"
-    "    return a.x <= t[0] < a.x + 8 and a.y <= t[1] < a.y + 8\n"
+    "    s = 8 * max(1, a.flags.get('size', 100) // 100)\n"
+    "    return a.x <= t[0] < a.x + s and a.y <= t[1] < a.y + s\n"
 )
 
 # Direction / steps (Scratch's default motion). Direction lives in the per-actor

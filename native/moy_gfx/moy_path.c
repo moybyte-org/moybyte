@@ -151,12 +151,24 @@ static inline int64_t phi2(int64_t X, int64_t xa, int64_t xb) {
     if (X >= xb) {
         return 2 * X - xa - xb;
     }
-    int64_t d = X - xa;
-    return d * d / (xb - xa);
+    // d < xb - xa: under 2^16 the square fits 32 bits, and the 32-bit
+    // divide is the 64-bit one's answer without libgcc's call.
+    int64_t d = X - xa, L = xb - xa;
+    if (L <= 0xffff) {
+        uint32_t u = (uint32_t)d;
+        return (int64_t)(u * u / (uint32_t)L);
+    }
+    return d * d / L;
 }
 
+// y lies on the edge's rows (0 <= y - y0 <= y1 - y0): under 46341 a side,
+// the product fits 32 bits and truncates as the 64-bit divide does.
 static inline int64_t x_at(const edge_t *e, int64_t y) {
-    return e->x0 + (int64_t)(e->x1 - e->x0) * (y - e->y0) / (e->y1 - e->y0);
+    int32_t dx = e->x1 - e->x0, dy = e->y1 - e->y0;
+    if (dx > -46341 && dx < 46341 && dy < 46341) {
+        return (int64_t)e->x0 + dx * (int32_t)(y - e->y0) / dy;
+    }
+    return e->x0 + (int64_t)dx * (y - e->y0) / dy;
 }
 
 // The edges into the rows [by0, by1) over columns [bx0, bx1) of the target,

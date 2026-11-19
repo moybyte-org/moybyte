@@ -197,7 +197,7 @@ class WifiPanel:
         ws.settings_layer.wifi_page(popover=True, scroll=rect[3] < self.need)
         if self._radio() != before:
             ws.mark_dirty()          # the radio's state shows outside the panel
-        elif self.host.owed or self.host.tap == 2 or self.host.moved:
+        elif self.host.due() or self.host.tap == 2:
             ws.popover_touch()        # a tap's release, next frame
 
     def _radio(self):
@@ -278,7 +278,7 @@ class PowerRows:
                 ws.mark_dirty()
         if desk:
             _ui.hints(("change", "Change", "back", "Close"))
-        if self.host.owed or self.host.tap == 2 or self.host.moved:
+        if self.host.due() or self.host.tap == 2:
             ws.popover_touch()
 
     def handle_input(self, i):
@@ -397,7 +397,7 @@ class ControlCenter:
         if self.gen != _ITEMS.gen:
             self.gen = _ITEMS.gen
             _fit(ws, self)
-        if self.host.owed or self.host.tap == 2 or self.host.moved:
+        if self.host.due() or self.host.tap == 2:
             ws.popover_touch()
 
     def _network(self):
@@ -468,7 +468,7 @@ class StatusMenu:
         if self.gen != _ITEMS.gen:
             self.gen = _ITEMS.gen
             _fit(ws, self)
-        if self.host.owed or self.host.tap == 2 or self.host.moved:
+        if self.host.due() or self.host.tap == 2:
             ws.popover_touch()
 
     def handle_input(self, i):

@@ -237,7 +237,7 @@ import pytest
 
 import pixel_goldens
 from cart_store_fixtures import INDEX_URL, MemNet, snapshot
-from ws_helpers import open_cart, settle_badges
+from ws_helpers import open_cart, settle_badges, ship_shelf
 from runtime import crash_guard
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -259,8 +259,9 @@ _MAX_FRAMES = 6           # settle cap -- every surface settles at 2 today
 _CLOCK = "00:00"          # the pinned OS-bar clock text
 _COVER_SLICE_UNBOUNDED = 10 ** 9   # ms: build every cover in its own frame
 
-# The cart whose Editor tabs are rendered. A seeded GAME with a sprite sheet,
-# a tilemap, a scene and a sound bank, so all seven tabs have real content.
+# The cart whose Editor tabs are rendered: a seeded GAME with a sprite sheet
+# and cards. It has no tilemap, scene or sound bank, so those tabs render
+# their empty state.
 _EDITOR_CART = "Star Catcher"
 
 # Seed carts the golden matrix deliberately does NOT show.
@@ -277,9 +278,13 @@ _EDITOR_CART = "Star Catcher"
 # decisions; neither is a shrug. Excluding a cart costs nothing this file
 # measures: no golden here renders a cart's own pixels (a running cart is the
 # game domain, pinned by tests/test_spec_conformance.py), only the tile the
-# shelf draws for it, and 34 tiles already exercise every shelf branch there is.
-# Empty today, and deliberately kept: the mechanism is what makes the choice
-# above a decision rather than a shrug. Notes lived here as "the #181 demo
+# shelf draws for it, and the seed set's tiles already exercise every shelf
+# branch there is. Empty today, and deliberately kept: the mechanism is what
+# makes the choice above a decision rather than a shrug.
+#
+# The test fixtures (`"moybyte": {"fixture": true}`) are left out by rule, not
+# listed (ws_helpers.ship_shelf): the host seeds them, but no console image
+# carries one, so the shelf these goldens draw is a board's. Notes lived here as "the #181 demo
 # cart" until step 3 of docs/theme_and_shell_2026-11.md §10 made it the console's ONE
 # text app -- a shipped surface with a golden of its own (`app_notes`), which
 # is exactly the case an exclusion must not cover.
@@ -662,6 +667,7 @@ def _build(cfg, carts_dir):
     # persist=False: the two tdeck rows must differ by the token set ALONE, so
     # neither may leave a theme_variant behind in its store.
     ws.look.set_theme(theme, persist=False, variant=cfg["variant"])
+    ship_shelf(ws, "device")            # a board's shelf: no test fixture
     keep = [c for c in ws.carts.all if c.get("title") not in GOLDEN_EXCLUDE]
     if len(keep) != len(ws.carts.all):
         ws.carts.apply(keep)            # pin the roster -- see GOLDEN_EXCLUDE
@@ -1473,7 +1479,7 @@ def _status_plan(ws, cfg):
 
     def paused():
         ws.confirm.cancel()
-        open_cart(ws, "Sky Run")
+        open_cart(ws, "Star Catcher")
         for _ in range(3):
             ws.frame(_DT)
         ws.pause.show()

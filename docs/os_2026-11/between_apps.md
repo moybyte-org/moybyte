@@ -68,7 +68,7 @@ the real picture" (2026-11-03):
 | folder | holds | who reaches it |
 |---|---|---|
 | `carts/` | installed carts and the kid's projects | the shell (`carts`, `install`), the Editor; an app only through `nav` |
-| `apps/<id>/` | **app-private storage**: a compiled cart's written files (`runtime/carts/cart_files.py`, `native/moy_store/moy_files.h`; `<id>` its folder less `.moy`), and an app's prefs to come (they are `system/settings` rows today) | its own app, no permission |
+| `apps/<id>/` | **app-private storage**: a cart's written files (`runtime/carts/cart_files.py`, `native/moy_store/moy_files.h`; `<id>` its folder less `.moy`), and an app's prefs to come (they are `system/settings` rows today) | its own app, no permission |
 | `files/` | the **shared user folders**, named on disk as the OS shows them: `Documents/` (notes; stories in `Documents/Stories/`), `Pictures/` (drawings; sprite sheets in `Pictures/Sprites/`), `Music/`, `Recordings/`, `Downloads/`, and the layer's own `.Trash/` and `.history/` | an app with `files:<folder>` (`files:documents`, `files:pictures`, `files:music`, `files:recordings`; one folder a grant), or one file at a time through the picker |
 | `system/` | the console's documents as plain-text files (`system.md` §5) | the shell |
 
@@ -94,8 +94,15 @@ kind (documents' notes, pictures' drawings). A compiled command (WASI or
 native) is given the same folder by path, its only preopened root
 (`sh_door.wasi_roots`, from the same policy). One folder a grant on every
 tier: a manifest naming two is refused, at launch and at a command's run.
-Downloads, `.Trash` and `.history` are no grant's: the user moves a download
-into a folder with Files, or hands one file over through the picker.
+Downloads, `.Trash` and `.history` are no grant's (`files:downloads` names
+no folder and grants nothing): a download reaches an app one file at a time,
+opened with it from Files or handed over through the picker. Downloads is
+where a file beamed from a console nearby lands (`docs/netplay_v1.md` §7),
+under its own name made safe and never over another file. It is the layer's
+`downloads` kind, its one WHOLE kind: any file, under the whole name it
+arrived with, its extension any (`moy_ufiles.h`, "a whole kind"); the
+console's own reach to it is the shell's files grant, which holds no folder.
+No verb moves a download into another kind's folder.
 
 **The picker** is OS chrome: an app with no `files:*` permission calls
 `moybyte.pick(mime, mode)` and the console's one question
@@ -113,10 +120,16 @@ notification, and opening that brings the asking run to the front with the
 picker over it, where the pick reaches it.
 
 **The Files app** (`runtime/apps/files_app.py`) is the tree's browser: its
-places are Projects, the shared folders by their names, Themes and the
-Trash, and a file's verbs include **Open with…**, which asks the "open
-with" menu of §1 always (`open_with(item, True)`), the app picked becoming
-the choice for the type.
+places are Projects, Documents, Pictures, Music (recordings with the
+songs), Downloads, Themes once there are any, and the Trash, and a file's
+verbs include **Open with…**, which asks the "open with" menu of §1 always
+(`open_with(item, True)`), the app picked becoming the choice for the type,
+and **Send** where the console's radio link can come up, which offers the
+file, or a project as its cart, to a console nearby (`Intents.send`, the
+shell's verb: a beam streams the file from the store, where `share` hands an
+app its bytes). A download's row shows its whole name and its type, and
+takes Open (the app its type routes to, as a grant), Open with…, Send and
+Delete (to the Trash, restorable, never asked): no Run, whatever it is.
 
 **Sync, the web and USB see the same tree**: the sync RPC's files root
 takes and walks the shared folders alone (`moy_sync.file_folders`, the one

@@ -1296,3 +1296,83 @@ int moy_ui_tell(uint32_t answers)
     return ((moy_os_fn_moy_ui_tell *)__moy_os->fn[126])(answers);
 }
 #endif
+
+#if MOY_OS_ROW(127)
+#include "moybyte/os.h"
+typedef int moy_os_fn_moy_game_data(size_t off, void *dst, size_t n);
+MOY_OS_USED(127);
+int moy_game_data(size_t off, void *dst, size_t n)
+{
+    return ((moy_os_fn_moy_game_data *)__moy_os->fn[127])(off, dst, n);
+}
+#endif
+
+#if MOY_OS_ROW(128)
+#include "moybyte/os.h"
+typedef int moy_os_fn_moy_game_sound(int op, int a, int b);
+MOY_OS_USED(128);
+int moy_game_sound(int op, int a, int b)
+{
+    return ((moy_os_fn_moy_game_sound *)__moy_os->fn[128])(op, a, b);
+}
+#endif
+
+#if MOY_OS_ROW(129)
+#include "moybyte/os.h"
+typedef int moy_os_fn_moy_game_snd(const int16_t *pcm, size_t n);
+MOY_OS_USED(129);
+int moy_game_snd(const int16_t *pcm, size_t n)
+{
+    return ((moy_os_fn_moy_game_snd *)__moy_os->fn[129])(pcm, n);
+}
+#endif
+
+#if MOY_OS_ROW(130)
+#include "moybyte/os.h"
+typedef int moy_os_fn_moy_game_pmem(const int32_t *cells, size_t n);
+MOY_OS_USED(130);
+int moy_game_pmem(const int32_t *cells, size_t n)
+{
+    return ((moy_os_fn_moy_game_pmem *)__moy_os->fn[130])(cells, n);
+}
+#endif
+
+#if MOY_OS_ROW(131)
+#include "moybyte/os.h"
+typedef int moy_os_fn_moy_game_read(const char *name, size_t n, uint32_t off, void *dst, size_t len);
+MOY_OS_USED(131);
+int moy_game_read(const char *name, size_t n, uint32_t off, void *dst, size_t len)
+{
+    return ((moy_os_fn_moy_game_read *)__moy_os->fn[131])(name, n, off, dst, len);
+}
+#endif
+
+#if MOY_OS_ROW(132)
+#include "moybyte/os.h"
+typedef int moy_os_fn_moy_game_write(const char *path, size_t n, const void *data, size_t len);
+MOY_OS_USED(132);
+int moy_game_write(const char *path, size_t n, const void *data, size_t len)
+{
+    return ((moy_os_fn_moy_game_write *)__moy_os->fn[132])(path, n, data, len);
+}
+#endif
+
+#if MOY_OS_ROW(133)
+#include "moybyte/os.h"
+typedef int moy_os_fn_moy_game_erase(const char *path, size_t n);
+MOY_OS_USED(133);
+int moy_game_erase(const char *path, size_t n)
+{
+    return ((moy_os_fn_moy_game_erase *)__moy_os->fn[133])(path, n);
+}
+#endif
+
+#if MOY_OS_ROW(134)
+#include "moybyte/os.h"
+typedef int moy_os_fn_moy_game_list(const char *prefix, size_t n, uint32_t index, void *dst, size_t cap);
+MOY_OS_USED(134);
+int moy_game_list(const char *prefix, size_t n, uint32_t index, void *dst, size_t cap)
+{
+    return ((moy_os_fn_moy_game_list *)__moy_os->fn[134])(prefix, n, index, dst, cap);
+}
+#endif

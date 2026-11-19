@@ -45,7 +45,7 @@ so in place.
 | D4 | **Apps follow the theme.** Settings, Calc and every shipped app restyle with it, because they draw through the one toolkit. App carts read it through `theme()` (§5). |
 | D5 | **Layout: both.** A theme sets the default bar layout (its `layout`'s bars, §2); the user can override it in Settings, and the override survives a theme switch. A window's mode is its own button, not a theme's (§12.2, owner 2026-10-13). §8. |
 | D6 | **Themes bring wallpapers**: one wallpaper for the desk and the home (owner, 2026-10-14, replacing the per-slot wallpapers of 2026-09-27: a screen-sized bake per slot is memory a board does not have, and the home already shows the desk's wallpaper behind its cards). **The wallpaper is the theme's** (owner, 2026-10-14, the modern-Windows rule, replacing 2026-09-27's separate user override): picking a theme brings its wallpaper, and the user's pick is a change to the theme like any other, landing in `custom` and travelling with it; there is no persisted `wallpaper` setting. A theme ships a static image and may name an installed wallpaper cart (§3.9). |
-| D7 | **The home is one component on every board**: tabs (Games / Mine / Apps / Make) over the carts, themeable, over the one wallpaper (D6), in an arrangement a theme or the user picks (the layout's `home`: the cover carousel by default, the grid, or the icon grid; owner, 2026-10-14, §8.10). **The desk's PLAY opens this same home** (owner, 2026-09-27): the windowed tier has no separate games-only Library. |
+| D7 | **The home is one component on every board**: tabs (Games / Mine / Apps / Make) over the carts, themeable, over the one wallpaper (D6), in an arrangement a theme or the user picks (the layout's `home`, or Settings' HOME STYLE over it: the cover carousel by default, the grid, or the icon grid; owner, 2026-10-14, §8.10). **The desk's PLAY opens this same home** (owner, 2026-09-27): the windowed tier has no separate games-only Library. |
 | D8 | **Format 1 carries four more keys** (owner, 2026-10-11, before format 1 froze): **content colour roles** for code syntax and the block editor's block colours (§3.1); a **corner radius of 0 to 3** (§3.2); a **pressed-label offset** (§3.2); and a **text effect** per part and state, `none`, `shadow` or `emboss` with the role it paints in (§3.3). Their defaults reproduce the pixels from before them. The Paint, sprite, map and scene canvases stay exempt. |
 
 The pictures for D1 and D7, with the shell as it rendered before, are in
@@ -67,14 +67,14 @@ Each was mocked and judged worse (§12.1).
 | L4 | **The content rectangle is derived from the bars**; `content_rect()` is the app-cart contract, `bar_h()` a shim; the surface row grows additively; bars are global, every surface lays out off them; compiled apps and games are untouched | §8.5 |
 | L5 | **One popover mechanism**: the system-menu `Popup` generalised, riding the quiet stack with its own rect as damage. Its contents are **components** that draw in a popover, in both modes (docs/history/look_2026-10.md step 33, 2026-10-26; console mode's fullscreen pages before it) | §8.6 |
 | L6 | **One safety rule**: `menu`, `zone` and `close` placed after every drop, else the tier default; caps, the tap floor and a minimum content area checked once, deterministically | §8.7 |
-| L7 | **Precedence: user, then theme, then default.** The user's override is one strict-read row, `layout_theme`; `set_theme` never touches it (D5) | §8.9 |
+| L7 | **Precedence: user, then theme, then default.** The user's overrides are strict-read rows: `layout_theme` for the whole layout, `home_style` for the home's arrangement alone; `set_theme` never touches either (D5) | §8.9 |
 | L8 | **A bar is a cached strip re-rendered whole when its key moves**, as today, and blitted otherwise; a layout change is a relayout; no per-cell repaint and no new invalidation mechanism | §8.11 |
 | L9 | **The home is the carousel with the animated centre card**, console mode's root; its scale is a function of position, never of time; the fullscreen home hands its band to the compositor as damage; a board degrades by measurement, never by data | §8.10 |
 | L10 | Pixels move only where a step restyles on purpose: new bar, popover and console-mode rows are NEW golden configs; the home is one named re-baseline; every other step holds every golden byte-identical | `docs/history/shell_layout_2026-10.md` §13 |
 | L11 | **The HOME key backs out one level, everywhere** (owner, 2026-10-13). In desktop mode it shows the desktop, `show_desk()`: every window minimised to its chip and kept, HOME again restores them, and it never closes a window (Win+D's shape). In console mode it goes home, and from the home on a P4 to the desktop | §8.1 |
 | L12 | **The input model assumes a keyboard on every board** (owner, 2026-10-13): the T-Deck's own, a BLE keyboard on the Guition S3 and both P4s. Touch is supplementary -- a fullscreen game on a P4 is left by the keyboard alone -- and there is no on-screen home button: it would spend bar space on what the HOME key does | §8.2, §12.2 |
 | L13 | **Every bar widget is compact** (owner, 2026-10-14: "I only want the calendar to pop out"; "that should be the default for every widget, why would we want giant bars?"): an icon or a short value. Anything bigger opens as its component -- its popover -- and no widget is ever docked large in a bar, so a bar's `size` is a slim range, 16..32. Side bars stay, as thin bars | §8.2, §8.3, §8.6 |
-| L14 | **The home has arrangements** (owner, 2026-10-14: carousel, the old big grid, and later a small icon-only grid; "we don't have to do it now"): one home component, its tabs, sources, taps and bar verbs shared, its card layout the layout's `home` key -- `carousel` (default), `grid` or `icons` | §8.3, §8.10 |
+| L14 | **The home has arrangements** (owner, 2026-10-14: carousel, the old big grid, and later a small icon-only grid; "we don't have to do it now"): one home component, its tabs, sources, taps and bar verbs shared, its card layout the user's `home_style` row, else the layout's `home` key -- `carousel` (default), `grid` or `icons` | §8.3, §8.10 |
 | L15 | **One projects list** (owner, 2026-10-14): the project picker is deleted on every tier; the home's Make tab is the one list of projects (L0) | §8.10 |
 | L16 | **The Editor's bar has no PROJECTS button** (owner, 2026-10-14), in every console-mode Editor: its X backs out one level, to wherever the Editor was opened from -- CHANGE works from any home tab -- which is the back-stack's pop | §8.10 |
 | L17 | **The desk's PROJECTS opens the home in a window** (owner, 2026-10-14): on its Make tab, a normal window whose X closes it and never switches modes; a Make pick opens the Editor in its own window, a Games cart runs full screen (owner, 2026-10-31, §8.1), an Apps entry opens its app window. It draws the console home's design (owner, 2026-10-20: the hero, its details, the shelf) whatever the fullscreen home's arrangement | §8.1, §8.10 |
@@ -1103,11 +1103,11 @@ there is no setting beside it (owner, 2026-10-14). A cart is
 picture, the wallpaper copy WALL wrote); NONE is `"wallpapers": {}` with no
 `images`, the theme naming its wallpapers and none of them, so the desk is
 `desktop`'s fill under the theme's backdrop. A theme naming neither key shows
-its backdrop where its `look` has one (`moy`), and else the console's default,
-the first wallpaper cart (Moy's night on a seeded store). The look reads the
-keys at every switch (`Appearance.theme_wallpaper`): the named cart where it
-is installed, else the picture, else NONE or the backdrop, else the default;
-a SAFE start runs no cart. The backdrop is rastered into the picture's own
+its backdrop where its `look` has one (`moy`), and else its fill: no wallpaper
+cart is a console's default (the seed set's Moy Night, which was, left it on
+2026-11-18). The look reads the keys at every switch
+(`Appearance.theme_wallpaper`): the named cart where it is installed, else the
+picture, else the backdrop or the fill; a SAFE start runs no cart. The backdrop is rastered into the picture's own
 bake when its records or the colour its fill paints move (a theme load or
 mode switch; an accent change keeps it, `Wallpaper._draw_backdrop`): the
 desk draws `backdrop.desk`, the home and the handheld's every screen
@@ -1131,11 +1131,27 @@ host runs instead).
   `system_api.py` never grants (`carts`, "the single most important entry"). A
   theme that names a cart does not install it: the cart comes from the store
   like any other, and an absent one falls back to the theme's image.
-- **The default is static.** An animated wallpaper defeats the redraw gate and
-  the home's retained stamp (`launcher_layer._try_stamp_retained` is skipped
-  while `ws.animating(dt)`). That is the open live-wallpaper defect (#66, #73). So
-  Moy's night, the default, is a still image, or animates only small dirty
-  rects.
+- **The default is static.** A live wallpaper (a cart with `_update`) keeps
+  the redraw gate open and every frame of the surface behind it a full paint:
+  the home's band frame, its retained stamp and the desk's drag cache all
+  stand aside while `ws.animating(dt)` (#66, #73). So the default is a theme's
+  backdrop or fill, a still image, and a wallpaper cart runs only where a
+  theme or a kid names one.
+- **A gesture holds a live wallpaper still** (owner, 2026-11-18). While the
+  home's cards are dragged or flung, a desk window is dragged or resized, a
+  window's content is scrolled or flung, or a verbs page coasts
+  (`Wallpaper.held`), its `_update` does not run and it is a still picture:
+  the cheap paths take the gesture's frames, a paint of the backdrop draws
+  the same frame again, and the frame the gesture ends it animates again. At
+  rest a live wallpaper runs at the console's full rate; a lower rate was
+  tried and refused ("looks bad").
+- **A wallpaper cart runs on its own runtime.** A Python cart's code runs in
+  the namespace `make_api` builds for it; a Lua or compiled (`"runtime":
+  "wasm"`) cart, or a native one, is started by the factory `ws.runtimes`
+  maps it to, the Player's, over that namespace and a run of its own
+  (`wallpaper._Hosted`), with the same per-frame contract and the same
+  cover-scale. Such a run takes one of moycore's run rows (`MOYCORE_RUNS`)
+  while it is the wallpaper. Only a Python cart may draw per glass.
 - **A wallpaper per glass** (docs/history/look_2026-10.md step 28, GAPS 23). A
   wallpaper cart whose manifest says `"moybyte": {"glass": true}` draws on
   the system canvas itself, so `W` and `H` are the glass's, and lays out
@@ -1147,9 +1163,8 @@ host runs instead).
   (`WindowedWM._clear_of_subject`). Its preview renders at the glass's size
   around the quiet rectangles it last drew with. Any other wallpaper draws
   its 320×240 frame on the game canvas, cover-cropped onto a bigger glass.
-  Moy's night draws per glass; over any wallpaper the home's title,
-  metadata and hint labels are white, the title and metadata over a black
-  shadow, as the desk's labels are.
+  Over any wallpaper the home's title, metadata and hint labels are white,
+  the title and metadata over a black shadow, as the desk's labels are.
 - **Readability at home.** A wallpaper with its own text or characters
   mid-screen fights the carousel (mocked 2026-09-27 with Space Desktop). The
   home's card band has no surface of its own: the cards lie on the
@@ -2068,7 +2083,8 @@ active one (a switch would rewrite its `inherits`).
 **One component, one place.** The home is console mode's root; desktop mode
 has no home of its own — its root is the desk, and PLAY enters console mode
 (§8.1). So there is one home component on every board, drawn by one layer, in
-an **arrangement** the layout's `home` key picks (L14, owner 2026-10-14): the
+an **arrangement** the user's `home_style` row or else the layout's `home` key
+picks (L14, owner 2026-10-14): the
 `carousel` (the default, below), the `grid` -- a shelf of cover cards, each
 titled under it, in the rows the glass holds, scrolling sideways -- or
 `icons`, the small icon-only grid (Nintendo-style; `docs/history/theming_2026-09.md` §9
@@ -2091,6 +2107,20 @@ the hero beside a details pane (its metadata, its play record, its
 buttons) over a shelf that bleeds off the right edge, the tabs in the bar
 and the hint strip along the foot as on the handheld, still the `carousel`
 arrangement (look step 18).
+
+**The user's pick.** `home_style` in `ws.system` holds `carousel`, `grid`
+or `icons`; any other value reads as absent, and absent means the layout's
+`home`, the theme's or the `layout_theme` package's.
+`Appearance.apply_layout` is its one door: the arrangement it shows is
+`home_style() or` the layout's `home`, at every theme switch, layout write,
+mode switch and `home_style` write, and the switch keeps the tab and the
+card (`Home.set_home_arrangement`). Settings' General group has one row
+for it after FONT SIZE and LAYOUT, HOME STYLE: THEME (the row deleted),
+CAROUSEL, GRID, ICONS, a `ui.cycle` like its neighbours. It crosses to and
+from the page a board serves as a PORTABLE string, as `layout_theme` does
+(`runtime/carts/moy_sync.py`), and a write from there re-applies the layout
+(`console_spine.apply_system_keys`). The home in a window draws the
+carousel whatever the pick (L17).
 
 | tab | source | tap (console mode, every board) | verbs (the hint strip; on the desk its buttons, and the strip naming them, add COPY beside CHANGE; Make's buttons on a real card are its own, CHANGE first, NEW kept on the + tile and the strip's N) |
 |---|---|---|---|

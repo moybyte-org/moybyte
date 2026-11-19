@@ -119,8 +119,9 @@ What deliberately does NOT sync, recorded so it is not read as a gap:
     manifest, assets and `src/` cross like any cart's and its module does not,
     so a compiled cart does NOT sync between a browser and a board. It plays
     where its module was put (native/moy_wasm/README.md). The binary
-    files that DO cross are a cart's cover, `cover.png` (SPEC.md 3.6,
-    BINARY_FILES), and a theme package's fonts and sheets, `*.fnt` and
+    files that DO cross are a cart's cover, `cover.png` (SPEC.md 3.6), and
+    its saves, `pmem.bin` (native/moy_store/moy_pmem.h), by name
+    (BINARY_FILES), and a theme package's fonts and sheets, `*.fnt` and
     `*.moygfx` (BINARY_SUFFIXES; docs/history/theming_2026-09.md §9 phase 6 step 2):
     as base64, `"b"` where text rides as `"t"`. The apps root is the one
     root whose every file crosses so (`Root.binary`).
@@ -240,7 +241,7 @@ BATCH_BUDGET = 32 * 1024
 # rule has two more copies, each pinned to this one by its test:
 # native/moy_net/moy_sync_apply.c and moy_webhost.c (tests/test_moy_sync.py,
 # tests/test_moy_webhost.py).
-BINARY_FILES = ("cover.png",)
+BINARY_FILES = ("cover.png", "pmem.bin")
 BINARY_SUFFIXES = (".fnt", ".moygfx")
 BINARY_PART = PART_MAX * 3 // 4
 
@@ -610,6 +611,24 @@ def local_segs(root_id, rel, dc=False):
 # there and a browser's store reads none back (moy_store.mjs's walk).
 WALK_DEPTH = 6
 
+# How long the files at a sweep's newest second stay hot (re-read each
+# sweep), counted on the sweep's own monotonic clock from when that second
+# was first seen: past it the VFS's clock has moved on by more than a
+# second-granularity mtime (two seconds on FAT) can hide, so a later write
+# shows in size or mtime. Without it a store nothing writes to keeps its
+# newest files hot forever, and a browser seeds every file in one second.
+HOT_MS = 3000
+
+if hasattr(time, "ticks_ms"):
+    _ticks_ms = time.ticks_ms
+    _ticks_diff = time.ticks_diff
+else:
+    def _ticks_ms():
+        return int(time.monotonic() * 1000)
+
+    def _ticks_diff(a, b):
+        return a - b
+
 
 def local_folder(root_id, rel):
     """Whether the browser's store of record for `root_id` reads folder `rel`
@@ -842,6 +861,7 @@ SYSTEM_KEYS = {
     "theme": (PORTABLE, str),
     "theme_variant": (PORTABLE, str),
     "layout_theme": (PORTABLE, str),
+    "home_style": (PORTABLE, str),
     "name": (PORTABLE, str),
     USER_NS_KEY: (PORTABLE, str),
     "steady": (PORTABLE, bool),
@@ -1088,6 +1108,11 @@ class StoreWatcher:
         self._inflight = None        # (paths, dcs) awaiting ack
         self._partial = None         # (rel, text, next_part) mid-file resume
         self._hot = ()
+        self._newest = None          # the newest mtime a sweep saw
+        self._newest_at = 0          # and when (_ticks_ms) it first saw it
+        self._sweep_hot = ()         # a sweep's own: the files it re-reads,
+        self._sweep_newest = 0       # the newest mtime it walked
+        self._sweep_known = 0        # and how many snapshot files it found
         self.shipped = 0             # batches acked ok (diag)
         self.rebase()
 
@@ -1104,6 +1129,7 @@ class StoreWatcher:
         self._inflight = None
         self._partial = None
         self._hot = ()
+        self._newest = None
         for rel, size, mtime in self._walk():
             self._snap[rel] = (size, mtime, self._crc_of(rel))
 
@@ -1135,29 +1161,59 @@ class StoreWatcher:
     def sweep(self):
         """One pass over the store; queue every difference. Returns True when
         anything is pending (including carried-over failures)."""
+        now = _ticks_ms()
+        self._sweep_hot = self._hot if self._warm(now) else ()
+        self._sweep_newest = 0
+        self._sweep_known = 0
+        before = len(self._snap)
+        self._visit(self._swept)
+        maxm = self._sweep_newest
+        self._sweep_hot = ()
+        if self._sweep_known != before:
+            self._vanished()
+        # Files written in the newest observed second get re-read next sweep:
+        # a second write inside that same second is invisible to stat. Not a
+        # file the wire cannot carry: there is nothing such a write could ship.
+        # Only for HOT_MS after that second was first seen; a watcher over an
+        # injected listing has no mtimes, so its files are always hot.
+        if maxm != self._newest:
+            self._newest = maxm
+            self._newest_at = now
+        if self._warm(now):
+            self._hot = tuple(rel for rel, v in self._snap.items()
+                              if v[1] >= maxm - 1 and v[2] is not None)
+        else:
+            self._hot = ()
+        return bool(self._pending or self._pending_dc or self._partial)
+
+    def _swept(self, rel, size, mtime):
+        """One file of a sweep's walk: queued if its bytes changed."""
+        if mtime > self._sweep_newest:
+            self._sweep_newest = mtime
+        old = self._snap.get(rel)
+        if old is not None:
+            self._sweep_known += 1
+            if old[0] == size and old[1] == mtime and rel not in self._sweep_hot:
+                return                        # the fast path: nothing moved
+        c = self._crc_of(rel)
+        if c is None:                         # unreadable, or binary: not synced
+            self._snap[rel] = (size, mtime, None)
+            return
+        self._snap[rel] = (size, mtime, c)
+        if old is not None and old[2] == c:
+            return                            # touched, not changed
+        self._pending[rel] = "w"
+
+    def _vanished(self):
+        """The files the snapshot holds that a walk no longer finds: each
+        queued for deletion, as its folder where the whole folder went."""
         seen = {}
         units = set()
-        maxm = 0
-        for rel, size, mtime in self._walk():
+        for rel, _size, _mtime in self._walk():
             seen[rel] = True
             unit = self._unit(rel)
             if unit is not None:
                 units.add(unit)
-            if mtime > maxm:
-                maxm = mtime
-            old = self._snap.get(rel)
-            if old is not None and old[0] == size and old[1] == mtime \
-                    and rel not in self._hot:
-                continue                      # the fast path: nothing moved
-            c = self._crc_of(rel)
-            if c is None:                     # unreadable, or binary: not synced
-                self._snap[rel] = (size, mtime, None)
-                continue
-            if old is not None and old[2] == c:
-                self._snap[rel] = (size, mtime, c)
-                continue                      # touched, not changed
-            self._snap[rel] = (size, mtime, c)
-            self._pending[rel] = "w"
         for rel in list(self._snap):
             if rel in seen:
                 continue
@@ -1171,12 +1227,11 @@ class StoreWatcher:
                     self._pending_dc.append(unit)
             else:
                 self._pending[rel] = "d"
-        # Files written in the newest observed second get re-read next sweep:
-        # a second write inside that same second is invisible to stat. Not a
-        # file the wire cannot carry: there is nothing such a write could ship.
-        self._hot = tuple(rel for rel, v in self._snap.items()
-                          if v[1] >= maxm - 1 and v[2] is not None)
-        return bool(self._pending or self._pending_dc or self._partial)
+
+    def _warm(self, now):
+        """Whether the newest second's files are still hot at `now`."""
+        return self._listdir is not None or self._newest is None \
+            or _ticks_diff(now, self._newest_at) < HOT_MS
 
     def _unit(self, rel):
         """The FOLDER a vanished `rel` would be deleted as part of, or None when
@@ -1202,11 +1257,26 @@ class StoreWatcher:
         return d + "/" + rest[0] if len(rest) > 1 else None
 
     def _walk(self):
-        """Yield (rel, size, mtime) for every syncable file, skip-filtered at
+        """[(rel, size, mtime)] of every syncable file (`_visit`)."""
+        out = []
+        self._visit(lambda rel, size, mtime: out.append((rel, size, mtime)))
+        return out
+
+    def _walk_dir(self, path, prefix, depth):
+        """[(rel, size, mtime)] of every syncable file under `path`."""
+        out = []
+        self._visit_dir(path, prefix, depth,
+                        lambda rel, size, mtime: out.append((rel, size, mtime)))
+        return out
+
+    def _visit(self, fn):
+        """`fn(rel, size, mtime)` for every syncable file, skip-filtered at
         every level. A store of named top-level files (`top`, the system root)
         is those files and nothing beside them; in every other root top-level
         FILES are never syncable, and in the files root a top-level dir must be
-        a shared folder -- which is what leaves `.history` and `.Trash` unwalked."""
+        a shared folder -- which is what leaves `.history` and `.Trash` unwalked.
+        A callback and not a generator: the sweep runs every second in the
+        browser, and a walk that yields a tuple per file is garbage per file."""
         if self.top is not None:
             listed = {}
             for name in sorted(self.top):
@@ -1216,10 +1286,7 @@ class StoreWatcher:
                         store_path(self.root, head) if head else self.root)
                 if (leaf, False) not in listed[head]:
                     continue
-                full = store_path(self.root, name)
-                st = _stat_file(full) if self._listdir is None else (0, 0)
-                if st is not None:
-                    yield name, st[0], st[1]
+                self._visit_file(store_path(self.root, name), name, fn)
             return
         kinds = file_folders() if self.root_id == FILES_ROOT_ID else None
         for top, isdir in self._sorted_entries(self.root):
@@ -1227,24 +1294,28 @@ class StoreWatcher:
                 continue
             if kinds is not None and top not in kinds:
                 continue
-            for item in self._walk_dir(store_path(self.root, top), top, 0):
-                yield item
+            self._visit_dir(store_path(self.root, top), top, 0, fn)
 
-    def _walk_dir(self, path, prefix, depth):
+    def _visit_dir(self, path, prefix, depth, fn):
         if depth > WALK_DEPTH:
             return
         for name, isdir in self._sorted_entries(path):
             if self.skip(name):
                 continue
-            full = path + "/" + name
-            rel = prefix + "/" + name
             if isdir:
-                for item in self._walk_dir(full, rel, depth + 1):
-                    yield item
-                continue
-            st = _stat_file(full) if self._listdir is None else (0, 0)
-            if st is not None:
-                yield rel, st[0], st[1]
+                self._visit_dir(path + "/" + name, prefix + "/" + name, depth + 1, fn)
+            else:
+                self._visit_file(path + "/" + name, prefix + "/" + name, fn)
+
+    def _visit_file(self, full, rel, fn):
+        if self._listdir is not None:
+            fn(rel, 0, 0)
+            return
+        try:
+            st = os.stat(full)
+        except OSError:
+            return
+        fn(rel, st[6], st[8])
 
     def _sorted_entries(self, path):
         try:

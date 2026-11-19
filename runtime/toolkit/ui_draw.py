@@ -1214,18 +1214,27 @@ def hint_kind(name=None):
     return INPUTS[_C.hint_input()]
 
 
-def hints(cv, th, rect, items, desk=False, draw=True):
+def hints(cv, th, rect, items, desk=False, draw=True, answer=True):
     """Keycap hints in band `rect`, from its left (the public `ui.hints`'s
     part, for chrome that lays itself out): `items` alternate an action --
     `confirm`, `back`, `change`, `tabs`, `menu` or `cancel`, drawn as the keys of the
     hint input (`hint_kind`) -- or keys spelled out -- space-separated;
     `enter`, `left`, `right`, `up` and `down` draw as signs -- and what they
-    do. Answers
-    each pair's (x0, x1) across the band, what a tap hit-tests (x0 == x1 for
-    a pair the input has no key for; none under touch); `draw` False only
-    measures."""
-    b = b"\0".join([str(t).encode("utf-8") for t in items])
-    return _C.hints(cv, _LOOK if th is _TH else _look(th), rect, b, desk, draw)
+    do; or the line `hint_line` made of them, which draws with nothing made.
+    Answers each pair's (x0, x1) across the band, what a tap hit-tests (x0 ==
+    x1 for a pair the input has no key for; none under touch); `draw` False
+    only measures, `answer` False draws and answers None."""
+    b = items if type(items) is bytes else hint_line(items)
+    look = _LOOK if th is _TH else _look(th)
+    if answer:
+        return _C.hints(cv, look, rect, b, desk, draw)
+    _C.hints(cv, look, rect, b, desk, draw, False)
+
+
+def hint_line(items):
+    """`hints`'s items as the one line the C reads, their texts joined by
+    NUL: made once, drawn every frame after."""
+    return b"\0".join([str(t).encode("utf-8") for t in items])
 
 
 def status_row(cv, th, rect, items):
@@ -1361,11 +1370,14 @@ def frame_buttons(rect, title_h, title, btns, fs):
             for b in _C.frame_buttons(rect, title_h, title, int(btns), fs)]
 
 
-def frame_icon(rect, title_h, btns=0):
+def frame_icon(rect, title_h, btns=0, out=None):
     """The slot (x, y, w, h) the frame leaves for the window's line icon left
     of its title, past a back chevron `btns` asks for, or None where it draws
-    none (a frame style's frame, `win.icon` off)."""
-    return _C.frame_icon(rect, title_h, int(btns))
+    none (a frame style's frame, `win.icon` off). With `out`, a list of four,
+    the slot is written into it and it is the answer."""
+    if out is None:
+        return _C.frame_icon(rect, title_h, int(btns))
+    return _C.frame_icon(rect, title_h, int(btns), out)
 
 
 # --- depth: the theme's radii, shadow and edges (docs/history/look_2026-10.md step 6) ---
@@ -1415,7 +1427,8 @@ def frame_under_fill(cv, th, rect, title_h, active, src, outer, inner, mode=UNDE
     """`frame_under` over `src`, a buffer laid out as the canvas's: `src`
     laid into buffer rect `outer` but `inner` (the clip does not apply), the
     shadow blended over it where it falls, each pixel once -- a cache's
-    restore and the first window's shadow over it in one pass."""
+    restore and the first window's shadow over it in one pass. The window's
+    body is left on the shadow's rows: the window paints it."""
     _C.frame_under_fill(cv, _LOOK if th is _TH else _look(th), rect, title_h, active, mode,
                         src, outer, inner)
 

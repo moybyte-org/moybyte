@@ -501,7 +501,7 @@ else:
                     return
                 with official[1]:
                     ok, msg = official[0].request(doc.get("action") or "",
-                                                  doc.get("folder"))
+                                                  doc.get("folder"), doc)
                     body = official[0].answer(ok, msg).encode()
                 self._send(200 if ok else 409, body)
                 return

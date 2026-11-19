@@ -154,7 +154,8 @@ dist/p4/moybyte_p4.bin`; board.toml's `[flash]` has why that rate and stub.)
   custom partition table) + `partitions-moybyte-p4.csv` (OTA-shaped 2×6.5 MiB app
   slots — the default 4MiBplus table's ~1.94MB app can't hold the frozen
   console — then the 128 KiB coredump partition a panic writes its ESP-IDF
-  core dump to (`tools/coredump.py` reads it), with the tail from 0xD30000
+  core dump to (`tools/coredump.py` reads it), then `pmem` (128 KiB,
+  `native/moy_store/moy_plog.h`), with the tail from 0xD50000
   left unlisted so mainline auto-builds the vfs over it; a cable flash that moves it erases the new store's first
   blocks and the store re-seeds, see the CSV).
 - `native/p4/moy_dsi/` (repo root — the P4 SILICON tier since 2026-09-06, shared

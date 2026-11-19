@@ -42,8 +42,8 @@ def _home(ws):
         ws.home.open_library()
     ws.home.set_home_tab("games")
     titles = [it.get("title") for it in ws.launcher.items]
-    if "Sky Run" in titles:
-        ws.launcher.sel = titles.index("Sky Run")
+    if "Star Catcher" in titles:
+        ws.launcher.sel = titles.index("Star Catcher")
 
 
 @pytest.fixture(autouse=True)

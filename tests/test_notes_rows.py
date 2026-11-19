@@ -125,7 +125,7 @@ class Pair:
             self.frame(check=False)
         del self.kinds[:]
 
-    def frame(self, idle=False, check=True):
+    def frame(self, idle=False, check=True, gates=True):
         _NOW[0] += 33
         for ws, drv in ((self.a, self.da), (self.b, self.db)):
             if not idle:
@@ -135,7 +135,7 @@ class Pair:
             drv.frame(_DT)
             ws.painted = ws.frame_state.frames_drawn != k
         a, b = self.a, self.b
-        assert a.painted == b.painted, "the two consoles' gates parted"
+        assert a.painted == b.painted or not gates, "the two consoles' gates parted"
         if not a.painted:
             return
         self.kinds.append(a.frame_change)
@@ -308,6 +308,98 @@ def test_an_app_that_draws_its_note_alone_draws_rows(tmp_path):
     p.keys("down", 2)
     p.settle()
     assert p.share() > 0.5, p.kinds
+
+
+# -- frames the app has nothing to draw in ----------------------------------------
+
+
+def _passes(ws):
+    """The count of the run's passes from here on (its `_draw` called)."""
+    pl = ws.run.player
+    n = [0]
+    draw = pl.draw
+
+    def counted():
+        n[0] += 1
+        draw()
+    pl.draw = counted
+    return n
+
+
+@pytest.mark.parametrize("note", (True, False))
+@pytest.mark.parametrize("bufs", (1, 2, 3))
+def test_desk_frames_painted_for_the_wallpaper_run_no_pass(tmp_path, bufs, note):
+    """The desk paints every frame under a live wallpaper; an idle Notes
+    window, a note open or the list, has nothing to draw in them and runs no
+    pass: its canvas holds its page and the window's composite copies only
+    what the buffer it paints lags (`AppFace.still`). Every frame is held to
+    the bytes of a console whose run draws its page every frame, and a key
+    after them is a pass again."""
+    p = Pair(tmp_path, bufs, desk=True)
+    p.b.run.player._ui_still = lambda: False
+    if not note:
+        for ws in (p.a, p.b):
+            ws.run.player.ns["_close"]()
+    p.keys("down", 2)
+    for _ in range(6):
+        p.frame(idle=True, gates=False)  # the debt a planned frame leaves is the first's alone
+    for ws in (p.a, p.b):
+        ws.wallpaper.is_animating = lambda dt: True
+    n, m = _passes(p.a), _passes(p.b)
+    k = len(p.kinds)
+    for _ in range(4 * bufs + 4):
+        p.frame(idle=True)
+    assert len(p.kinds) - k == 4 * bufs + 4, "the wallpaper painted no frame"
+    assert n[0] == 0, "an idle Notes ran %d passes in %d painted frames" % (n[0], 4 * bufs + 4)
+    assert m[0] == 4 * bufs + 4
+    p.keys("up", 1)
+    assert n[0] >= 1, "a key reached no pass"
+
+
+@pytest.mark.parametrize("closed", (False, True))
+@pytest.mark.parametrize("size", ((1024, 600), None, (320, 240)))
+def test_an_idle_note_paints_nothing_on_any_tier(tmp_path, size, closed):
+    """A note open and let be, or the list after a note closed -- on the
+    desk, the full-screen console and the handheld's 320x240 -- paints no
+    frame and runs no pass: the caret is steady, nothing shown moves on its
+    own, and a closed note's handle owes no frame (`EditorHandle.owes`)."""
+    kw = {"sys_size": size, "font_scale": 2, "windowed": True} if size == (1024, 600) else (
+        {"sys_size": size} if size else {})
+    ws = host_app.build_workstation(str(tmp_path / "carts"), **kw)
+    no_unlock_banner(ws)
+    quiesce(ws)
+    moy_carts.save_file("docs", "alpha", _BODY, ws.carts_root)
+    assert select_on_home(ws, "Notes") is not None
+    ws.open()
+    _pin_clock()
+    drv = host_app.ConsoleDriver(ws)
+    ns = ws.run.player.ns
+    for _ in range(4):
+        _NOW[0] += 33
+        quiesce(ws)
+        drv.frame(_DT)
+    if ns["ed"] is None:
+        ns["_open"]("alpha")
+    for press in (lambda: drv.press("down"), lambda: drv.type_char(ord("a"))):
+        press()
+        for _ in range(3):
+            _NOW[0] += 33
+            drv.frame(_DT)
+    assert ns["ed"].dirty(), "the typed key reached no note"
+    if closed:
+        ns["_close"]()
+        ws.mark_dirty()
+    for _ in range(90):                 # past the idle save, the one frame a pause owes
+        _NOW[0] += 33
+        quiesce(ws)
+        drv.frame(_DT)
+    n = _passes(ws)
+    k = ws.frame_state.frames_drawn
+    for _ in range(90):                 # three seconds
+        _NOW[0] += 33
+        quiesce(ws)
+        drv.frame(_DT)
+    assert (ws.frame_state.frames_drawn - k, n[0]) == (0, 0)
 
 
 # -- shift frames: the view moved ------------------------------------------------

@@ -41,6 +41,7 @@ static int over_slot(qstr q) {
         case MP_QSTR_tag: return MOY_UI_OV_TAG;
         case MP_QSTR_focus: return MOY_UI_OV_FOCUS;
         case MP_QSTR_follow: return MOY_UI_OV_FOLLOW;
+        case MP_QSTR_secret: return MOY_UI_OV_SECRET;
         default: return -1;
     }
 }

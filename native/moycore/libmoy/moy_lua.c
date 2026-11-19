@@ -26,6 +26,7 @@
 #include "lualib.h"
 
 #include "moy.h"
+#include "moy_cartpath.h"
 
 #define CONSOLE_KEY "moy.console"
 
@@ -420,6 +421,116 @@ static int l_cfg(lua_State *L)
     return 1;
 }
 
+/* -- the cart's files (SPEC.md 9.1) ----------------------------------------
+ *
+ * The compiled binding's read, write, erase and list (moy_wasm.c), in Lua's
+ * shape: a string where that one passes a pointer and a length, and list's
+ * whole listing as one table. Every name is held to moy_cartpath.h's rules and
+ * write to MOY_FILE_WRITE_MAX before the host sees it. */
+
+/* read(name, offset, len): a writable path's written copy when it has one,
+ * and otherwise the file in the cart's folder; "" for anything absent. */
+static int l_read(lua_State *L)
+{
+    moy_host *h = &con_of(L)->host;
+    size_t nlen;
+    const char *nm = luaL_checklstring(L, 1, &nlen);
+    lua_Integer off = luaL_optinteger(L, 2, 0);
+    lua_Integer want = lua_isnoneornil(L, 3) ? -1 : luaL_checkinteger(L, 3);
+    int from_written = 0;
+    uint32_t n = 0, got;
+    luaL_Buffer b;
+    char *dst;
+    if (nlen <= MOY_FILE_NAME_MAX && !memchr(nm, 0, nlen) && moy_path_inside(nm)
+        && off >= 0 && want != 0) {
+        if (h->written && nlen <= MOY_FILE_PATH_MAX && moy_path_writable(h->writable, nm)) {
+            int32_t r = h->written(h->files_user, nm, (uint32_t)off, NULL, 0);
+            if (r >= 0) {
+                from_written = 1;
+                n = (uint32_t)r;
+            }
+        }
+        if (!from_written && h->read)
+            n = h->read(h->files_user, nm, (uint32_t)off, NULL, 0);
+        if (want > 0 && (uint32_t)want < n) n = (uint32_t)want;
+    }
+    if (!n) {
+        lua_pushliteral(L, "");
+        return 1;
+    }
+    dst = luaL_buffinitsize(L, &b, n);
+    if (from_written) {
+        int32_t r = h->written(h->files_user, nm, (uint32_t)off, (uint8_t *)dst, n);
+        got = r < 0 ? 0 : (uint32_t)r;
+    } else {
+        got = h->read(h->files_user, nm, (uint32_t)off, (uint8_t *)dst, n);
+    }
+    luaL_pushresultsize(&b, got > n ? n : got);
+    return 1;
+}
+
+/* write(path, data): the whole written copy, replaced; 0 or SPEC.md 16.12's
+ * -1, -2 or -3. */
+static int l_write(lua_State *L)
+{
+    moy_host *h = &con_of(L)->host;
+    size_t plen, len;
+    const char *path = luaL_checklstring(L, 1, &plen);
+    const char *data = luaL_checklstring(L, 2, &len);
+    char buf[MOY_FILE_PATH_MAX + 1];
+    const char *p = moy_path_written(h->writable, (const uint8_t *)path, plen, buf);
+    int32_t r;
+    if (!p) r = MOY_FILE_NOT_WRITABLE;
+    else if (len > MOY_FILE_WRITE_MAX) r = MOY_FILE_NO_ROOM;
+    else if (!h->write) r = MOY_FILE_FAILED;
+    else {
+        r = h->write(h->files_user, p, (const uint8_t *)data, (uint32_t)len);
+        if (r != 0 && r != MOY_FILE_NO_ROOM) r = MOY_FILE_FAILED;
+    }
+    lua_pushinteger(L, r);
+    return 1;
+}
+
+/* erase(path): 0, or -1 when there was no written copy or path is not
+ * writable. */
+static int l_erase(lua_State *L)
+{
+    moy_host *h = &con_of(L)->host;
+    size_t plen;
+    const char *path = luaL_checklstring(L, 1, &plen);
+    char buf[MOY_FILE_PATH_MAX + 1];
+    const char *p = moy_path_written(h->writable, (const uint8_t *)path, plen, buf);
+    lua_pushinteger(L, p && h->erase && h->erase(h->files_user, p) == 0 ? 0 : -1);
+    return 1;
+}
+
+/* list(prefix): every path of the cart's files that begins with the bytes
+ * of prefix, shipped and written, each once, in bytewise order. */
+static int l_list(lua_State *L)
+{
+    moy_host *h = &con_of(L)->host;
+    size_t plen;
+    const char *prefix = luaL_optlstring(L, 1, "", &plen);
+    uint32_t i;
+    lua_newtable(L);
+    if (!h->list || plen > MOY_FILE_NAME_MAX || memchr(prefix, 0, plen)) return 1;
+    for (i = 0; i < (uint32_t)INT32_MAX; i++) {
+        uint8_t name[MOY_FILE_NAME_MAX + 1];
+        int32_t r = h->list(h->files_user, prefix, i, name, sizeof name);
+        if (r < 0) break;
+        if ((uint32_t)r <= sizeof name) {
+            lua_pushlstring(L, (const char *)name, (size_t)r);
+        } else {
+            luaL_Buffer b;
+            char *dst = luaL_buffinitsize(L, &b, (size_t)r);
+            int32_t again = h->list(h->files_user, prefix, i, (uint8_t *)dst, (uint32_t)r);
+            luaL_pushresultsize(&b, again == r ? (size_t)r : 0);
+        }
+        lua_rawseti(L, -2, (lua_Integer)i + 1);
+    }
+    return 1;
+}
+
 static int l_rnd(lua_State *L)
 {
     lua_Number n = lua_isnoneornil(L, 1) ? 1.0 : lua_tonumber(L, 1);
@@ -722,6 +833,7 @@ static const luaL_Reg VERBS[] = {
     {"sget", l_sget}, {"sset", l_sset}, {"fget", l_fget}, {"fset", l_fset},
     {"btn", l_btn}, {"btnp", l_btnp}, {"players", l_players},
     {"time", l_time}, {"pmem", l_pmem}, {"cfg", l_cfg},
+    {"read", l_read}, {"write", l_write}, {"erase", l_erase}, {"list", l_list},
     {"rnd", l_rnd}, {"srand", l_srand}, {"flr", l_flr}, {"quit", l_quit},
     {"sfx", l_sfx}, {"music", l_music}, {"beep", l_beep},
     {"music_stop", l_music_stop}, {"sound_stop", l_sound_stop},

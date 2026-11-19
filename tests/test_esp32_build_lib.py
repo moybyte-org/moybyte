@@ -959,6 +959,44 @@ def test_the_patched_slice_store_writes_what_the_stock_one_does(tmp_path):
     assert r.returncode == 0 and r.stdout.strip() == "0", r.stdout
 
 
+# -- a hash map grows at three quarters full ------------------------------------
+
+def _map_load_c(tmp_path, hunks):
+    p = tmp_path / "py"
+    p.mkdir(parents=True, exist_ok=True)
+    f = p / "map.c"
+    f.write_text("#include \"py/runtime.h\"\n\n" + "\n// ...\n\n".join(hunks),
+                 encoding="utf-8")
+    return f, sh("moybyte_patch_map_load", MPY_DIR=str(tmp_path),
+                 REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+
+
+def test_the_map_load_patch_is_idempotent_and_refuses_a_changed_hunk(tmp_path):
+    """Both hunks land, the rehash and the insert; a warm tree is left as it
+    is, and a stock tree where either hunk changed shape stops the build with
+    nothing written."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    try:
+        import patch_map_load as pml
+    finally:
+        sys.path.pop(0)
+    stock = [s for s, _p in pml.HUNKS]
+    f, r = _map_load_c(tmp_path, stock)
+    assert r.returncode == 0, r.stderr
+    once = f.read_text(encoding="utf-8")
+    assert pml.MARKER in once
+    assert once.count("MOY_MAP_CROWDED(") == 3
+    r = sh("moybyte_patch_map_load", MPY_DIR=str(tmp_path),
+           REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+    assert r.returncode == 0 and f.read_text(encoding="utf-8") == once
+    for i in range(len(stock)):
+        changed = list(stock)
+        changed[i] = changed[i].replace("    ", "  ", 1)
+        g, r = _map_load_c(tmp_path / ("b%d" % i), changed)
+        assert r.returncode != 0 and "did not apply" in r.stderr
+        assert pml.MARKER not in g.read_text(encoding="utf-8")
+
+
 # -- a found extensible built-in enters sys.modules ------------------------------
 
 def _import_cache():

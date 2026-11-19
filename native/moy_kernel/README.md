@@ -58,6 +58,7 @@ every lock is empty and nothing blocks.
 | `moy_svc` (a Lua service), `moy_elf` (a compiled program's thread) | the kernel's tables through their APIs: status, notes, items, devices, leases | `moy_sync.h`'s lock, the lease lock; the VM only by a hop |
 | `moy_sh` (a shell runner), a terminal's face (SSH, serial, web) | the store, the process table, their session | the store's lock (`moy_store_lock`); the VM only by a hop |
 | `moy_pake`, the web login's key job | its one job record | atomics and a task notification (`moy_webauth.c`) |
+| `moy_save`, the saver | the store, a cart's queued pmem | the store's lock and the bus gate around each record it writes (`native/moy_store/moy_save.h`); its slots' mutex; woken by a task notification |
 
 **The VM is reached from another task through `moy_vmq.h` only**: a hop
 (`moy_vmq_hop`, the door a compiled program's file rows and a wasm row take:

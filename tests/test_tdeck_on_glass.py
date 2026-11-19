@@ -102,8 +102,15 @@ TAP_FONTS_SRAM = 24
 # digest and the first `recv`), which is why a board pass reboots after it
 # installs the add-on.
 STATICS_1116_SRAM = 256
+# And PMEM_SRAM, the pmem saver and its raw log (native/moy_store): the
+# saver's mutex, stats and slots (moy_save.c, 128), the reader's error
+# (moy_pmem.c, 8), the log's handle and state pointer (moy_plog.c, 12; its
+# state is a store block in PSRAM), the audio overflow ISR (22) and the IDF's
+# internal bookkeeping for the `pmem` partition's mmap, against dev
+# 164ecd289, 2026-11-19.
+PMEM_SRAM = 160
 WASM_IDLE_BASELINE = (125863 + 1849 - CORE_DUMP_SRAM - BATCH6_SRAM + MOVED_SRAM - TAP_FONTS_SRAM
-                      - STATICS_1116_SRAM,
+                      - STATICS_1116_SRAM - PMEM_SRAM,
                       86016)
 WASM_BOARD_DIR = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 

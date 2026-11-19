@@ -138,6 +138,10 @@ typedef struct {
     // the board's runner (moy_sh_board.h): the record of the session's own
     // stack, its runs' (may be NULL: a run is the calling task's)
     struct moy_sh_runner *runner;
+    // the question a line asked is over (moy_sh_ask): its last run asked
+    // nothing, Ctrl-C dropped it, or the session ends; what the asker kept
+    // for the line's runs goes (may be NULL)
+    void (*unask)(void *ctx, moy_sh_t *s);
 } moy_sh_host_t;
 
 // A session over `arena` bytes; NULL when the host's alloc refuses. `host` is
@@ -175,18 +179,46 @@ void moy_sh_cancel(moy_sh_t *s);
 int moy_sh_status(const moy_sh_t *s);
 
 // A QUESTION, asked from inside a host callback (the door's first run of a
-// command nobody consented to, runtime/shell/sh_door.py): the rest of the line
-// is dropped, the prompt shows `prompt` in place of PS1, and the next text
-// moy_sh_run takes is its answer, with which the line that asked runs again
-// (the whole line: dash parses a line as one command, so what ran on it
-// before the question runs again too); moy_sh_answer gives that answer once
-// to the callback asking again. A face asks nothing of its own, and needs no keys
-// while a run goes on. moy_sh_cancel drops the question. 0, or -1 with no run.
+// command nobody consented to, runtime/shell/sh_door.py; pkg's licence,
+// password and install questions, runtime/shell/sh_roles.py): the rest of
+// the line is dropped, the prompt shows `prompt` in place of PS1, and the
+// next text moy_sh_run takes is its answer, with which the line that asked
+// runs again (the whole line: dash parses a line as one command, so what ran
+// on it before the question runs again too). A line that asks again keeps
+// every answer typed to it, and in each run moy_sh_answer gives them back
+// one a call, in the order they were typed, so the line's run reaches its
+// next question with its earlier ones answered. What such a run writes to
+// the terminal before it takes its last answer was shown by the run before
+// it and is not shown again; what it writes to a file it writes. Once a run
+// of the line asks nothing, its answers are zeroed and freed and the host's
+// `unask` hears it, so an asker may keep its work (pkg's checked download)
+// from run to run of one line and no longer. A face asks nothing of its
+// own, and needs no keys while a run goes on. moy_sh_cancel drops the
+// question and the answers. 0, or -1 with no run, MOY_SH_ANSWERS answers
+// held, or questions off (moy_sh_set_questions).
+//
+// A SECRET question (MOY_SH_ASK_SECRET, the console's password): while it
+// waits, a face shows its answer as it is typed by none of its characters
+// (the screen face a `*` each, the stream face nothing), keeps it from its
+// history and offers no completion; Enter echoes the prompt alone.
 #define MOY_SH_ASK_MAX 64
-int moy_sh_ask(moy_sh_t *s, const char *prompt);
-// The answer typed to the question this run's command asked, without its
-// newline (NULL: none, or already taken).
+#define MOY_SH_ANSWERS 8
+#define MOY_SH_ASK_SECRET 1
+int moy_sh_ask(moy_sh_t *s, const char *prompt, int flags);
+// The next answer this run's line holds for its questions, without its
+// newline (NULL: none left).
 const char *moy_sh_answer(moy_sh_t *s);
+// Whether a question waits for its answer, and whether one that is secret
+// (MOY_SH_ASK_SECRET).
+int moy_sh_asking(const moy_sh_t *s);
+int moy_sh_asking_secret(const moy_sh_t *s);
+// Whether this run is replaying its line's answers (moy_sh_answer has more
+// to give): its writes to the terminal are dropped.
+int moy_sh_replaying(const moy_sh_t *s);
+// Whether the session asks questions: on for a new session; a face whose
+// commands read their answers from their stdin (a stream with no terminal:
+// `ssh host pkg ...`) turns them off, and moy_sh_ask refuses.
+void moy_sh_set_questions(moy_sh_t *s, int on);
 
 // Ctrl-C while a host callback runs (a role command waiting): the host's
 // poll asked, and an interrupt it answers kept, so the rest of the line is

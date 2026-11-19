@@ -9,6 +9,7 @@ not BUILD -- a C compiler, not a wheel -- and the store passthrough tests always
 run.
 """
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -236,6 +237,10 @@ def test_bullet_storm_runs_on_moycore(tmp_path):
     from runtime import lua_binding
     if not lua_binding.HostLuaRun.available():
         pytest.skip("host lua binding not built")
+    # an official cart no store is seeded with: the store holds it, as Get
+    # Carts installs it
+    shutil.copytree(str(ROOT / "system_carts" / "moybyte.bullet_storm.moy"),
+                    str(tmp_path / "carts" / "moybyte.bullet_storm.moy"))
     ws = _ws(tmp_path)
     _open(ws, "Bullet Storm")
     assert ws.run.player.cart_error is None
@@ -253,5 +258,5 @@ def test_missing_runtime_opens_the_panel_not_a_hang(tmp_path):
     ws.runtimes.pop("lua", None)                       # a device-shaped build
     _open(ws, "Sakura Lua")
     assert ws.run.player.cart_error is not None
-    assert "Lua runtime" in ws.run.player.cart_error
+    assert "Lua runtime" in ws.run.player.notice_detail      # the cause, under Details
     ws.frame(1 / 30)                                     # panel frame must not raise

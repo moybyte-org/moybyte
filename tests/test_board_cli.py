@@ -564,7 +564,7 @@ def test_the_counter_refuses_a_run_of_another_cart(clock):
 
 
 def _perf_run(tmp_path, monkeypatch, uncap):
-    """Coin Quest -- the paced fixture, 30 by default -- on the REAL host
+    """Coin Quest -- the paced seed cart, 30 by default -- on the REAL host
     console for 7 s of 60 Hz loop, under the kernel's loop and its PERF
     sampler (the trace tier's clock) with PERF DIAG on: each PERF line's
     drawn fps, beside the drawn-frame counter read the way tools/p4_perf.py

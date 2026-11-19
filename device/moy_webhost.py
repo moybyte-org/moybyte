@@ -20,9 +20,9 @@ console behind it:
     POST /run       play a cart on the BOARD's own glass (#197)         [sealed]
     GET  /update    this board's FIRMWARE state (#41/#53)               [sealed]
     POST /update    ask it to update                                    [sealed]
-    GET  /official  where a list, install or removal of its official    [sealed]
-    POST /official  carts stands, and asking for one (a board with no
-                    screen, `web_addon.OfficialCarts`)                   [sealed]
+    GET  /official  where a list, install or removal of the carts of    [sealed]
+    POST /official  its shelves stands, and asking for one (a board with
+                    no screen, `web_addon.OfficialCarts`)                [sealed]
     GET  /console.json  the console's portable Settings and its badges  [sealed]
     POST /sync      a batch for the system root, merged into them       [sealed]
 
@@ -674,8 +674,8 @@ class WebHost:
     def _official(self, body):
         """The official carts' endpoint (web_addon.OfficialCarts, a board
         with no screen); `body` is None on the GET. A POST only queues
-        `{"action": "check" | "install" | "remove" | "cancel", "folder"}`; the
-        work is the poll's slice, and a GET reads where it stands."""
+        `{"action", "folder", ...}` (OfficialCarts.request); the work is the
+        poll's slice, and a GET reads where it stands."""
         o = self.official
         if body is None:
             return http_response(200, o.answer())
@@ -687,7 +687,7 @@ class WebHost:
             folder = sent.get("folder")
         except (ValueError, AttributeError):
             return http_response(400, '{"error":"bad json"}')
-        ok, msg = o.request(action, folder)
+        ok, msg = o.request(action, folder, sent)
         return http_response(200 if ok else 409, o.answer(ok, msg))
 
     def _update(self, target, body):

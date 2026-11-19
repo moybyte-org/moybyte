@@ -43,6 +43,8 @@
 #     function (node-only path; assertions abort).
 #   - py/obj.h: an equal-length slice store moves no tail
 #     (tools/patch_slice_store.py, the VM patch every board takes).
+#   - py/map.c: a hash map grows at three quarters full
+#     (tools/patch_map_load.py, as every console board does).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -145,6 +147,8 @@ if bad in src:
 PYEOF
   # The VM patch every board takes: an equal-length slice store moves no tail.
   "${PY}" "${REPO_ROOT}/tools/patch_slice_store.py" "${MPY_DIR}"
+  # A hash map grows at three quarters full, as on every console board.
+  "${PY}" "${REPO_ROOT}/tools/patch_map_load.py" "${MPY_DIR}"
 
   # The moybyte variant (canonical copy lives in variant/, re-staged every build).
   mkdir -p "${PORT_DIR}/variants/moybyte"
@@ -360,11 +364,11 @@ echo "== packing carts"
 # ships everywhere unless its own manifest.json says otherwise, so this build
 # asks tools/gen_device_carts.py which folders declare a "web" target instead
 # of carrying a hand-written list that nothing compared against system_carts/.
-# (The WALLPAPER carts -- moy_night + ocean_desktop/open_machine/space_desktop --
-# ride along even though they never appear on the run-grid: they are the
-# Appearance app's CARTS catalog, and shipping only moy_night left that tab
-# with one choice, owner report 2026-07-31. Excluded here are the dev/test
-# carts, each by a `"targets"` line in its OWN manifest.)
+# (The WALLPAPER carts ride along even though they never appear on the
+# run-grid: they are the Appearance app's CARTS catalog, owner report
+# 2026-07-31. Excluded here are the test fixtures, each by `"fixture": true` in
+# its OWN manifest, the official carts no store is seeded with, each by
+# `"seed": false`, and any cart whose `"targets"` line leaves out "web".)
 ROSTER="${MOYBYTE_WEB_CARTS:-$("${PY}" "${REPO_ROOT}/tools/gen_device_carts.py" --roster web)}"
 "${PY}" - "${REPO_ROOT}/system_carts" "${STAGE_DIR}/carts.json" ${ROSTER} <<'PYEOF'
 import base64, json, os, sys

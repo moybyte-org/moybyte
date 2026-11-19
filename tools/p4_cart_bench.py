@@ -23,6 +23,10 @@ the same cells), and this tool reads it live through `moycore.pmem_image` over
 the dev channel, synthesizing the same BENCHCART lines -- so `show`, `--json`
 and `--diff` speak one format for both twins. `--frame` still captures the
 final screen if you want the glass itself.
+
+Both twins are test fixtures, which no image carries: the tool pushes the one
+it runs from system_carts/ and removes it after (push_cart.push_fixtures),
+unless the store already held it.
 """
 
 from __future__ import annotations
@@ -224,9 +228,11 @@ def main(argv=None):
         return 0
 
     import p4_conformance as PC
+    import push_cart
 
     log = print if a.verbose else (lambda *x: None)
     board = board_from_args(a, log=(lambda s: log("  | " + s[:120])))
+    pushed = []
     try:
         board.drain(0.5)
         if board.pyval("1", timeout=8.0) != 1:
@@ -235,6 +241,7 @@ def main(argv=None):
                     "board not answering, and it declares attach_only -- there "
                     "is no reset to give it (see P4Board.reset)")
             board.reset()
+        pushed = push_cart.push_fixtures(board, board.board_dir, [a.cart])
         res = parse(run_bench(board, a.cart, a.secs, log))
         show(res)
         if a.frame:
@@ -247,7 +254,10 @@ def main(argv=None):
             print("  -> %s" % a.json)
         board.leave_cart()
     finally:
-        board.close()
+        try:
+            push_cart.drop_folders(board, pushed)
+        finally:
+            board.close()
     return 0
 
 

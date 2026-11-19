@@ -17,6 +17,7 @@
 // mirrors moy_gfx.blit565_scale so run_ppa_smoke can A/B them on glass.
 
 #include "moy_ppa.h"
+#include "moy_present.h"
 
 #include <string.h>
 #include "py/obj.h"
@@ -41,6 +42,8 @@
 // signature and the linker joins the single body; no transcribed twin.
 #include "moy_gfx_kernels.h"
 #include "moy_text.h"
+
+_Static_assert(MOY_ROT_ALIGN_PX == MOY_LINE_PX, "the rotated compositor lays rows out on this line");
 
 // The least block the DMA fill takes from moy_gfx's target: P4SystemCanvas's
 // PPA_FILL_MIN_PX, below which the submit costs more than the CPU's fill.
@@ -312,7 +315,7 @@ static esp_err_t srm_do(void *dbuf, size_t dlen, mp_int_t dw, mp_int_t dh, mp_in
     if (dw > 0 && dh > 0 && dx >= 0 && dy >= 0
             && dx + ow <= dw && dy + oh <= dh
             && (mp_int_t)dlen >= dw * dh * 2
-            && ((uintptr_t)dbuf & 63u) == 0 && (((size_t)dw * 2u) & 63u) == 0) {
+            && ((uintptr_t)dbuf & MOY_CACHE_MASK) == 0 && (((size_t)dw * 2u) & MOY_CACHE_MASK) == 0) {
         out = (uint8_t *)dbuf + (size_t)dy * (size_t)dw * 2u;
         out_len = (size_t)oh * (size_t)dw * 2u;
         out_h = oh;
@@ -360,10 +363,13 @@ static esp_err_t srm_do(void *dbuf, size_t dlen, mp_int_t dw, mp_int_t dh, mp_in
     // quiet-game composite never hit this because nothing else CPU-draws on
     // those frames. Scoped to the block's rows, which is exactly what the
     // driver invalidates (see the out picture above).
-    esp_cache_msync(out, out_len,
-                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    esp_err_t err = esp_cache_msync(out, out_len,
+                                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    if (err != ESP_OK) {
+        return err;
+    }
     s_submitted++;
-    esp_err_t err = ppa_submit_srm(&op);
+    err = ppa_submit_srm(&op);
     if (err != ESP_OK) {
         s_submitted--;   // no transaction queued -> no done callback will fire
     }
@@ -518,14 +524,19 @@ static mp_obj_t moy_ppa_rotate(size_t n_args, const mp_obj_t *args) {
     // skipped for a CPU-painted destination -- the paint buffer the drag
     // stamp lands in -- or that frame's chrome is discarded (the 2026-07-10
     // desktop trails this msync was added for).
+    esp_err_t err = ESP_OK;
     if (wb) {
-        esp_cache_msync(rows, rows_len,
-                        ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+        err = esp_cache_msync(rows, rows_len,
+                              ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
     }
-    s_submitted++;
-    esp_err_t err = ppa_submit_srm(&op);
+    if (err == ESP_OK) {
+        s_submitted++;
+        err = ppa_submit_srm(&op);
+        if (err != ESP_OK) {
+            s_submitted--;
+        }
+    }
     if (err != ESP_OK) {
-        s_submitted--;
         mp_raise_msg_varg(&mp_type_OSError,
                           MP_ERROR_TEXT("ppa rotate failed: %d"), (int)err);
     }
@@ -772,8 +783,11 @@ static void rb_worker(void *arg) {
             }
             if (!copied) {
                 // This core's cache may hold the rows from an earlier job.
-                esp_cache_msync((void *)from, n,
-                                ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+                // Whole lines: rotate_bounce takes only a line-aligned source
+                // whose rows are whole lines, and M2C takes no other range.
+                if (esp_cache_msync((void *)from, n, ESP_CACHE_MSYNC_FLAG_DIR_M2C) != ESP_OK) {
+                    s_rb_stalls++;
+                }
                 memcpy(band, from, n);
                 s_rb_fallbacks++;
             }
@@ -885,7 +899,7 @@ static mp_obj_t moy_ppa_rotate_bounce(size_t n_args, const mp_obj_t *args) {
     // -1: this picture never bounces (the caller stops asking); 0: not this
     // time (the queue is full), rotate() it and ask again next frame.
     mp_int_t band_rows = (mp_int_t)RB_BAND_BYTES / (sw * 2);
-    if (band_rows < 1 || ((uintptr_t)src.buf & 63u) != 0 || ((sw * 2) & 63) != 0
+    if (band_rows < 1 || ((uintptr_t)src.buf & MOY_CACHE_MASK) != 0 || ((sw * 2) & MOY_CACHE_MASK) != 0
             || !rb_setup()) {
         return MP_OBJ_NEW_SMALL_INT(-1);
     }
@@ -900,9 +914,11 @@ static mp_obj_t moy_ppa_rotate_bounce(size_t n_args, const mp_obj_t *args) {
     }
     mp_int_t nbands = (h + band_rows - 1) / band_rows;
     // The CPU's paints of these rows reach memory before the DMA reads them.
-    esp_cache_msync((uint8_t *)src.buf + (size_t)sy * (size_t)sw * 2u,
-                    (size_t)h * (size_t)sw * 2u,
-                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    if (esp_cache_msync((uint8_t *)src.buf + (size_t)sy * (size_t)sw * 2u,
+                        (size_t)h * (size_t)sw * 2u,
+                        ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED) != ESP_OK) {
+        return MP_OBJ_NEW_SMALL_INT(-1);
+    }
     rb_job_t job = {
         .dst = (uint8_t *)dst.buf, .dw = (int32_t)dw, .dh = (int32_t)dh,
         .dx = (int32_t)dx, .dy = (int32_t)dy,
@@ -987,7 +1003,10 @@ static mp_obj_t moy_ppa_dma_copy(size_t n_args, const mp_obj_t *args) {
     }
     uint8_t *d = (uint8_t *)dst.buf + doff;
     uint8_t *sp = (uint8_t *)src.buf + soff;
-    esp_cache_msync(sp, (size_t)n, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    if (esp_cache_msync(sp, (size_t)n,
+                        ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED) != ESP_OK) {
+        return MP_OBJ_NEW_SMALL_INT(-2);
+    }
     uint32_t want = s_mcp_done + 1;
     int64_t t0 = esp_timer_get_time();
     esp_err_t err = esp_async_memcpy(s_mcp, d, sp, (size_t)n, rb_dma_diag_cb, NULL);
@@ -1014,8 +1033,8 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_dma_copy_obj, 5, 5, moy_ppa_d
 //   of both stays true: the source's lines are written back first, the
 //   destination's written back and dropped before and dropped again after,
 //   so no line this core painted outlives the copy and none from before it
-//   is read. False when the engine is not to be had, the span is not 64-byte
-//   aligned at both ends, the engine refuses it or it does not land in time:
+//   is read. False when the engine is not to be had, the span is not
+//   cache-line aligned at both ends, the engine refuses it or it does not land in time:
 //   the caller copies on the CPU.
 //
 //   The copy has an engine of its own for the call, installed and removed
@@ -1050,15 +1069,16 @@ static mp_obj_t moy_ppa_copy(size_t n_args, const mp_obj_t *args) {
     async_memcpy_config_t cfg = ASYNC_MEMCPY_DEFAULT_CONFIG();
     cfg.backlog = 1;
     cfg.dma_burst_size = 64;
-    if ((((uintptr_t)d | (uintptr_t)sp | (uintptr_t)n) & 63u) != 0 || s_copy_dead
+    if ((((uintptr_t)d | (uintptr_t)sp | (uintptr_t)n) & MOY_CACHE_MASK) != 0 || s_copy_dead
             || esp_async_memcpy_install_gdma_axi(&cfg, &mcp) != ESP_OK) {
         s_copy_refused++;
         return mp_const_false;
     }
-    esp_cache_msync(sp, (size_t)n, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
-    esp_cache_msync(d, (size_t)n, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_INVALIDATE);
     s_copy_busy = true;
-    if (esp_async_memcpy(mcp, d, sp, (size_t)n, copy_done_cb, NULL) != ESP_OK) {
+    if (esp_cache_msync(sp, (size_t)n, ESP_CACHE_MSYNC_FLAG_DIR_C2M) != ESP_OK
+            || esp_cache_msync(d, (size_t)n,
+                               ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_INVALIDATE) != ESP_OK
+            || esp_async_memcpy(mcp, d, sp, (size_t)n, copy_done_cb, NULL) != ESP_OK) {
         s_copy_busy = false;
         esp_async_memcpy_uninstall(mcp);
         s_copy_refused++;
@@ -1080,7 +1100,10 @@ static mp_obj_t moy_ppa_copy(size_t n_args, const mp_obj_t *args) {
         return mp_const_false;
     }
     esp_async_memcpy_uninstall(mcp);
-    esp_cache_msync(d, (size_t)n, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+    if (esp_cache_msync(d, (size_t)n, ESP_CACHE_MSYNC_FLAG_DIR_M2C) != ESP_OK) {
+        s_copy_refused++;
+        return mp_const_false;      // the caller's CPU copy writes the same bytes
+    }
     s_copies++;
     return mp_const_true;
 }
@@ -1150,7 +1173,9 @@ static void fb_wait_inner(void) {
     }
     int64_t t1 = esp_timer_get_time();
     s_fb_flight_us = s_fb_t_landed >= s_fb_t0 ? (uint32_t)(s_fb_t_landed - s_fb_t0) : 0;
-    esp_cache_msync(s_fb_dst, s_fb_dst_n, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+    if (esp_cache_msync(s_fb_dst, s_fb_dst_n, ESP_CACHE_MSYNC_FLAG_DIR_M2C) != ESP_OK) {
+        s_fb_dead = true;           // its rows could be read stale: the CPU's from now on
+    }
     s_fb_dst = NULL;
     s_fb_wait_us = (uint32_t)(t1 - t0);
     s_fb_inval_us = (uint32_t)(esp_timer_get_time() - t1);
@@ -1180,7 +1205,7 @@ static mp_obj_t moy_ppa_fbcpy(size_t n_args, const mp_obj_t *args) {
     fb_wait_inner();
     uint8_t *drow = (uint8_t *)dst.buf + (size_t)dy * (size_t)dw * 2u;
     size_t dn = (size_t)h * (size_t)dw * 2u;
-    if (s_fb_dead || (((uintptr_t)drow | dn) & 63u) != 0) {
+    if (s_fb_dead || (((uintptr_t)drow | dn) & MOY_CACHE_MASK) != 0) {
         s_fb_refused++;
         return mp_const_false;
     }
@@ -1194,10 +1219,14 @@ static mp_obj_t moy_ppa_fbcpy(size_t n_args, const mp_obj_t *args) {
         }
     }
     int64_t t0 = esp_timer_get_time();
-    esp_cache_msync((uint8_t *)src.buf + (size_t)sy * (size_t)sw * 2u,
-                    (size_t)h * (size_t)sw * 2u,
-                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
-    esp_cache_msync(drow, dn, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_INVALIDATE);
+    if (esp_cache_msync((uint8_t *)src.buf + (size_t)sy * (size_t)sw * 2u,
+                        (size_t)h * (size_t)sw * 2u,
+                        ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED) != ESP_OK
+            || esp_cache_msync(drow, dn,
+                               ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_INVALIDATE) != ESP_OK) {
+        s_fb_refused++;
+        return mp_const_false;
+    }
     int64_t t1 = esp_timer_get_time();
     esp_async_fbcpy_trans_desc_t tr = {
         .src_buffer = src.buf,
@@ -1279,8 +1308,8 @@ static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_fbcpy_stats_obj, moy_ppa_fbcpy_stats);
 // 2.4 ms. It shares PSRAM with the PPA's read of the same frame, and the
 // engine's widest burst (rb_dma_install's 64) is the cheapest overlap: a
 // narrower one stretched the copy over more of the scale and measured slower
-// on glass (2026-10-01). The engine wants 64-aligned ends and a frame sits
-// wherever the cart's allocator put it, so the copy is the 64-aligned span
+// on glass (2026-10-01). The engine wants cache-line aligned ends and a frame
+// sits wherever the cart's allocator put it, so the copy is the line-aligned span
 // around the frame and the frame starts a few bytes into the scratch -- the
 // same shape as moy_fold's snapshot on the S3 boards.
 //
@@ -1326,17 +1355,17 @@ static void snap_wait_inner(void) {
 }
 
 // snap(scratch, frame) -> where in `scratch` the frame's first byte lands.
-//   Copy the 64-aligned span around `frame` into the start of `scratch`
-//   (64-aligned, at least the span long), by DMA when the engine takes it;
+//   Copy the cache-line aligned span around `frame` into the start of
+//   `scratch` (line-aligned, at least the span long), by DMA when the engine takes it;
 //   fence with snap_wait(). A frame that already sits where its copy would
 //   land -- the last frame shown, shown again -- is not copied.
 // snap's body, shared with the kernel's front: the frame's offset in `scr`,
 // or -1 where `scr` cannot hold the span.
 static long snap_do(uint8_t *dst, size_t len, const uint8_t *frame, size_t n) {
-    uintptr_t a0 = (uintptr_t)frame & ~(uintptr_t)63u;
+    uintptr_t a0 = (uintptr_t)frame & ~MOY_CACHE_MASK;
     size_t off = (size_t)((uintptr_t)frame - a0);
-    size_t span = (off + n + 63u) & ~(size_t)63u;
-    if (n == 0 || len < span || ((uintptr_t)dst & 63u) != 0) {
+    size_t span = (off + n + MOY_CACHE_MASK) & ~(size_t)MOY_CACHE_MASK;
+    if (n == 0 || len < span || ((uintptr_t)dst & MOY_CACHE_MASK) != 0) {
         return -1;
     }
     snap_wait_inner();
@@ -1475,14 +1504,19 @@ static mp_obj_t moy_ppa_rotate_scale(size_t n_args, const mp_obj_t *args) {
         .alpha_update_mode = PPA_ALPHA_NO_CHANGE,
         .mode = nb ? PPA_TRANS_MODE_NON_BLOCKING : PPA_TRANS_MODE_BLOCKING,
     };
+    esp_err_t err = ESP_OK;
     if (wb) {                                     // see rotate()
-        esp_cache_msync(rows, rows_len,
-                        ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+        err = esp_cache_msync(rows, rows_len,
+                              ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
     }
-    s_submitted++;
-    esp_err_t err = ppa_submit_srm(&op);
+    if (err == ESP_OK) {
+        s_submitted++;
+        err = ppa_submit_srm(&op);
+        if (err != ESP_OK) {
+            s_submitted--;
+        }
+    }
     if (err != ESP_OK) {
-        s_submitted--;
         mp_raise_msg_varg(&mp_type_OSError,
                           MP_ERROR_TEXT("ppa rotate_scale failed: %d"), (int)err);
     }
@@ -1541,9 +1575,9 @@ static uint32_t s_sh_moves, s_sh_refused;
 // moved) or never landed it.
 static bool sh_go(uint8_t *src, int sw, int sh, int sx, int sy, uint8_t *dst, int dw, int dh,
                   int dx, int dy, int w, int h) {
-    uintptr_t a = ((uintptr_t)dst + (size_t)dy * (size_t)dw * 2u) & ~(uintptr_t)63u;
-    uintptr_t e = ((uintptr_t)dst + (size_t)(dy + h) * (size_t)dw * 2u + 63u)
-                  & ~(uintptr_t)63u;
+    uintptr_t a = ((uintptr_t)dst + (size_t)dy * (size_t)dw * 2u) & ~MOY_CACHE_MASK;
+    uintptr_t e = ((uintptr_t)dst + (size_t)(dy + h) * (size_t)dw * 2u + MOY_CACHE_MASK)
+                  & ~MOY_CACHE_MASK;
     esp_async_fbcpy_trans_desc_t tr = {
         .src_buffer = src,
         .dst_buffer = dst,
@@ -1601,19 +1635,20 @@ static mp_obj_t moy_ppa_shift_in(size_t n_args, const mp_obj_t *args) {
     uint8_t *px = (uint8_t *)bi.buf;
     size_t rb = (size_t)W * 2u;
     int r0 = b[1] < b[3] ? b[1] : b[3], r1 = (b[1] > b[3] ? b[1] : b[3]) + b[5];
-    uintptr_t lo = ((uintptr_t)px + (size_t)r0 * rb) & ~(uintptr_t)63u;
-    uintptr_t hi = ((uintptr_t)px + (size_t)r1 * rb + 63u) & ~(uintptr_t)63u;
+    uintptr_t lo = ((uintptr_t)px + (size_t)r0 * rb) & ~MOY_CACHE_MASK;
+    uintptr_t hi = ((uintptr_t)px + (size_t)r1 * rb + MOY_CACHE_MASK) & ~MOY_CACHE_MASK;
     fb_wait_inner();
-    if (s_fb_dead || ((uintptr_t)px & 63u) != 0 || hi > (uintptr_t)px + (bi.len & ~(size_t)63u)
+    if (s_fb_dead || ((uintptr_t)px & MOY_CACHE_MASK) != 0
+        || hi > (uintptr_t)px + (bi.len & ~(size_t)MOY_CACHE_MASK)
         || ppa_inflight() != 0 || s_copy_busy || s_snap_busy) {
         s_sh_refused++;
         return mp_const_false;
     }
-    int sw = (b[4] + 31) & ~31;         // the scratch's rows: whole lines
+    int sw = (b[4] + MOY_LINE_PX - 1) & ~(MOY_LINE_PX - 1);  // the scratch's rows: whole lines
     if (dy > 0 && s_sh_cap < (size_t)sw * SHIFT_BAND * 2u) {
         heap_caps_free(s_sh_scr);
         s_sh_cap = 0;
-        s_sh_scr = heap_caps_aligned_calloc(64, 1, (size_t)sw * SHIFT_BAND * 2u,
+        s_sh_scr = heap_caps_aligned_calloc(MOY_CACHE_LINE, 1, (size_t)sw * SHIFT_BAND * 2u,
                                             MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
         if (s_sh_scr == NULL) {
             s_sh_refused++;
@@ -1630,8 +1665,11 @@ static mp_obj_t moy_ppa_shift_in(size_t n_args, const mp_obj_t *args) {
             return mp_const_false;
         }
     }
-    esp_cache_msync((void *)lo, (size_t)(hi - lo),
-                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_INVALIDATE);
+    if (esp_cache_msync((void *)lo, (size_t)(hi - lo),
+                        ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_INVALIDATE) != ESP_OK) {
+        s_sh_refused++;
+        return mp_const_false;
+    }
     if (dy < 0) {
         if (!sh_go(px, W, rows, b[2], b[3], px, W, rows, b[0], b[1], b[4], b[5])
             && s_fb_dst == NULL && !s_fb_dead) {
@@ -1643,8 +1681,11 @@ static mp_obj_t moy_ppa_shift_in(size_t n_args, const mp_obj_t *args) {
     }
     // down: the bottom band first, each through the scratch; a band the
     // engine fails is finished on the CPU with every band above it
-    esp_cache_msync(s_sh_scr, s_sh_cap,
-                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_INVALIDATE);
+    if (esp_cache_msync(s_sh_scr, s_sh_cap,
+                        ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_INVALIDATE) != ESP_OK) {
+        s_sh_refused++;
+        return mp_const_false;
+    }
     int top = b[5];
     while (top > 0) {
         int n = top >= SHIFT_BAND ? SHIFT_BAND : top;
@@ -1823,7 +1864,7 @@ int moy_ppa_k_crisp(uint16_t *dst_px, int dw, int dh, int dx, int dy, const uint
     // Each ship's out picture starts at a ROW of dst: that address and the
     // strip size must be cache-line aligned or the driver rejects the op.
     // (dw*2 == 2048 on the DSI framebuffer, so rows inherit its alignment.)
-    if (((uintptr_t)dst_px & 63u) != 0 || (((size_t)dw * 2u) & 63u) != 0) {
+    if (((uintptr_t)dst_px & MOY_CACHE_MASK) != 0 || (((size_t)dw * 2u) & MOY_CACHE_MASK) != 0) {
         return -1;
     }
     int band_rows = (int)(CRISP_BAND_BYTES / 2 / (size_t)out_w);
@@ -1890,9 +1931,12 @@ int moy_ppa_k_crisp(uint16_t *dst_px, int dw, int dh, int dx, int dy, const uint
         // srm_blit's cache contract, band-scoped: the driver invalidates the
         // whole out picture at submit, so any dirty CPU line in the strip
         // (window chrome beside the game content) must be written back first.
-        esp_cache_msync(strip, strip_len,
-                        ESP_CACHE_MSYNC_FLAG_DIR_C2M
-                        | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+        if (esp_cache_msync(strip, strip_len,
+                            ESP_CACHE_MSYNC_FLAG_DIR_C2M
+                            | ESP_CACHE_MSYNC_FLAG_UNALIGNED) != ESP_OK) {
+            ppa_wait(0);                        // fence what already flew
+            return -1;              // caller repaints via the CPU
+        }
         s_submitted++;
         if (ppa_submit_srm(&op) != ESP_OK) {
             s_submitted--;
@@ -1925,9 +1969,9 @@ static int ppa_fill_block(void *buf, size_t len, int dw, int dh, int x, int y, i
     // several times per gesture on glass (2026-07-26) -- the fill fell back to the
     // CPU correctly, but only after a pointless full-buffer writeback and a driver
     // error line. Decline here instead: the caller's CPU path is the same either
-    // way, minus the noise. 64 is the P4's PSRAM cache line (internal SRAM's 32
-    // divides it, so this is the conservative test for both).
-    if (((uintptr_t)buf & 63u) != 0 || (len & 63u) != 0) {
+    // way, minus the noise. The PSRAM line is the test: internal SRAM's line
+    // divides it.
+    if (((uintptr_t)buf & MOY_CACHE_MASK) != 0 || (len & MOY_CACHE_MASK) != 0) {
         return 0;
     }
     // The PPA fill colour is ARGB8888; expand the RGB565 the console works in.
@@ -1957,7 +2001,10 @@ static int ppa_fill_block(void *buf, size_t len, int dw, int dh, int x, int y, i
     // out-picture buffer at submit, so every dirty CPU line in it must be
     // written back first or this frame's CPU drawing is silently discarded. The
     // whole buffer, not just the block -- the invalidate is not block-scoped.
-    esp_cache_msync(buf, len, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    if (esp_cache_msync(buf, len,
+                        ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED) != ESP_OK) {
+        return 0;
+    }
     return ppa_do_fill(s_fill, &op) == ESP_OK;
 }
 
@@ -1991,6 +2038,7 @@ static const mp_rom_map_elem_t moy_ppa_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_ppa) },
     { MP_ROM_QSTR(MP_QSTR_init), MP_ROM_PTR(&moy_ppa_init_obj) },
     { MP_ROM_QSTR(MP_QSTR_deinit), MP_ROM_PTR(&moy_ppa_deinit_obj) },
+    { MP_ROM_QSTR(MP_QSTR_CACHE_LINE), MP_ROM_INT(MOY_CACHE_LINE) },
     { MP_ROM_QSTR(MP_QSTR_blit_scale), MP_ROM_PTR(&moy_ppa_blit_scale_obj) },
     { MP_ROM_QSTR(MP_QSTR_fill), MP_ROM_PTR(&moy_ppa_fill_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_async), MP_ROM_PTR(&moy_ppa_blit_async_obj) },

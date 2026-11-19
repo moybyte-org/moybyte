@@ -54,6 +54,9 @@
 #include "moy_seed.h"
 #include "moy_shelf.h"
 #include "moy_removed.h"
+#include "moy_plog.h"
+#include "moy_pmem.h"
+#include "moy_save.h"
 
 // -- the allocator -------------------------------------------------------------
 //
@@ -805,7 +808,7 @@ static mp_obj_t entry_dict(const cat_ctx_t *c, const moy_cat_entry_t *e) {
                                     MP_OBJ_NEW_QSTR(e->spec ? MP_QSTR_lua : MP_QSTR_python)));
     put(d, MP_QSTR_main, new_str(e->main, e->main_n));
     put(d, MP_QSTR_memory, e->compiled ? int_or(&e->memory, mp_const_none) : mp_const_none);
-    put(d, MP_QSTR_writable, e->compiled && e->writable_ok ? json_or(e->writable, mp_const_none)
+    put(d, MP_QSTR_writable, e->writable_ok ? json_or(e->writable, mp_const_none)
                                                           : mp_const_none);
     put(d, MP_QSTR_audio_ring, int_or(&e->audio_ring, mp_const_none));
     put(d, MP_QSTR_version, int_or(&e->version, MP_OBJ_NEW_SMALL_INT(0)));
@@ -1589,6 +1592,98 @@ static mp_obj_t mod_lock_stats(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_lock_stats_obj, 0, 1, mod_lock_stats);
 
+// A cart's pmem (moy_pmem.h) through THE SAVER (moy_save.h).
+// pmem_read(path) -> the 256 cells of its newest valid record, all zero with
+// none. pmem_save(path, cells) hands a list of up to 256 ints (the rest zero)
+// to the saver, which queues it or writes it now. save_wait(path=None) waits,
+// the VM let go, until no save of `path` (of any) is queued or being written.
+// save_stats(reset=False) -> (saves, errors, replaced, last us, longest us,
+// saves written on the caller's task, busy slots).
+static mp_obj_t mod_pmem_read(mp_obj_t path) {
+    const char *p = path_arg(path);
+    int32_t cells[MOY_PMEM_CELLS];
+    GUARD_BEGIN
+    table_sync(0);
+    moy_pmem_read(p, cells);
+    GUARD_END
+    mp_obj_t l = mp_obj_new_list(MOY_PMEM_CELLS, NULL);
+    mp_obj_t *items = ((mp_obj_list_t *)MP_OBJ_TO_PTR(l))->items;
+    for (int i = 0; i < MOY_PMEM_CELLS; i++) {
+        items[i] = mp_obj_new_int(cells[i]);
+    }
+    return l;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_pmem_read_obj, mod_pmem_read);
+
+static mp_obj_t mod_pmem_save(mp_obj_t path, mp_obj_t cells) {
+    const char *p = path_arg(path);
+    size_t n;
+    mp_obj_t *items;
+    mp_obj_get_array(cells, &n, &items);
+    int32_t c[MOY_PMEM_CELLS] = { 0 };
+    for (size_t i = 0; i < n && i < MOY_PMEM_CELLS; i++) {
+        c[i] = (int32_t)mp_obj_get_int_truncated(items[i]);
+    }
+    int rc = 0;
+    GUARD_BEGIN
+    table_sync(0);
+    rc = moy_save_pmem(p, c);
+    GUARD_END
+    if (rc) {
+        raise_rc(rc);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_pmem_save_obj, mod_pmem_save);
+
+static mp_obj_t mod_save_wait(size_t n_args, const mp_obj_t *args) {
+    const char *p = n_args > 0 && args[0] != mp_const_none ? path_arg(args[0]) : NULL;
+    MP_THREAD_GIL_EXIT();
+    moy_save_wait(p);
+    MP_THREAD_GIL_ENTER();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_save_wait_obj, 0, 1, mod_save_wait);
+
+static mp_obj_t mod_save_stats(size_t n_args, const mp_obj_t *args) {
+    moy_save_stats_t st;
+    moy_save_stats(&st, n_args > 0 && mp_obj_is_true(args[0]));
+    mp_obj_t t[7] = { mp_obj_new_int_from_uint(st.saves), mp_obj_new_int_from_uint(st.errors),
+                      mp_obj_new_int_from_uint(st.replaced), mp_obj_new_int_from_uint(st.last_us),
+                      mp_obj_new_int_from_uint(st.max_us), mp_obj_new_int_from_uint(st.now),
+                      mp_obj_new_int_from_uint(st.busy) };
+    return mp_obj_new_tuple(7, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_save_stats_obj, 0, 1, mod_save_stats);
+
+// The pmem log (moy_plog.h). pmem_tidy() -> 1 when it wrote a logged path
+// back to its file or erased a sector, 0 when nothing is left: one step, what
+// an idle frame calls. pmem_log(reset=False) -> (sectors, blank, alive,
+// appends, erases, erases on the save path, write-backs, refused); sectors
+// is 0 where there is no log.
+static mp_obj_t mod_pmem_tidy(void) {
+    int did = 0;
+    GUARD_BEGIN
+    table_sync(0);
+    did = moy_pmem_tidy();
+    GUARD_END
+    return MP_OBJ_NEW_SMALL_INT(did);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_pmem_tidy_obj, mod_pmem_tidy);
+
+static mp_obj_t mod_pmem_log(size_t n_args, const mp_obj_t *args) {
+    moy_plog_stats_t st;
+    moy_store_lock();
+    moy_plog_stats(&st, n_args > 0 && mp_obj_is_true(args[0]));
+    moy_store_unlock();
+    mp_obj_t t[8] = { mp_obj_new_int_from_uint(st.sectors), mp_obj_new_int_from_uint(st.blank),
+                      mp_obj_new_int_from_uint(st.alive), mp_obj_new_int_from_uint(st.appends),
+                      mp_obj_new_int_from_uint(st.erases), mp_obj_new_int_from_uint(st.erases_now),
+                      mp_obj_new_int_from_uint(st.settles), mp_obj_new_int_from_uint(st.refused) };
+    return mp_obj_new_tuple(8, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_pmem_log_obj, 0, 1, mod_pmem_log);
+
 #if defined(__unix__) && !defined(__EMSCRIPTEN__) && MICROPY_PY_THREAD
 // THE TESTS' TASK: a thread of no VM working the store as a program's own task
 // does, each op inside the store's gate (tests/test_store_tasks.py).
@@ -1826,6 +1921,12 @@ static const mp_rom_map_elem_t moy_store_globals_table[] = {
     #endif
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_store) },
     { MP_ROM_QSTR(MP_QSTR_lock_stats), MP_ROM_PTR(&mod_lock_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_pmem_read), MP_ROM_PTR(&mod_pmem_read_obj) },
+    { MP_ROM_QSTR(MP_QSTR_pmem_save), MP_ROM_PTR(&mod_pmem_save_obj) },
+    { MP_ROM_QSTR(MP_QSTR_save_wait), MP_ROM_PTR(&mod_save_wait_obj) },
+    { MP_ROM_QSTR(MP_QSTR_pmem_tidy), MP_ROM_PTR(&mod_pmem_tidy_obj) },
+    { MP_ROM_QSTR(MP_QSTR_pmem_log), MP_ROM_PTR(&mod_pmem_log_obj) },
+    { MP_ROM_QSTR(MP_QSTR_save_stats), MP_ROM_PTR(&mod_save_stats_obj) },
     #if defined(MOY_STORE_TASK)
     { MP_ROM_QSTR(MP_QSTR_task), MP_ROM_PTR(&mod_task_obj) },
     { MP_ROM_QSTR(MP_QSTR_task_join), MP_ROM_PTR(&mod_task_join_obj) },

@@ -60,6 +60,17 @@ extern "C" {
 #define MOY_MAP_MAX_ID   254     /* a cell holds id+1 in one byte */
 
 /* SPEC.md 7.1 flip bits. */
+/* The cart's files (SPEC.md 9.1, 16.6, 16.12): the longest name `read` and
+ * `list` accept, the longest path `write` and `erase` accept, in bytes, the
+ * most one `write` keeps, and write's answers past 0, which a host's `write`
+ * returns as they are. */
+#define MOY_FILE_NAME_MAX      255
+#define MOY_FILE_PATH_MAX      64
+#define MOY_FILE_WRITE_MAX     1048576
+#define MOY_FILE_NOT_WRITABLE  (-1)
+#define MOY_FILE_NO_ROOM       (-2)
+#define MOY_FILE_FAILED        (-3)
+
 #define MOY_FLIP_NONE 0
 #define MOY_FLIP_X    1
 #define MOY_FLIP_Y    2
@@ -354,6 +365,26 @@ typedef struct {
      * the verb always works. A host takes it over when it can do better than a
      * full clear, e.g. restoring a cached backdrop. */
     void (*background)(void *user, int col);
+
+    /* The cart's files, for the Lua binding's read, write, erase and list
+     * (SPEC.md 9.1). Each has the contract of moy_wasm's field of the same
+     * name (moy_wasm.h), and every call is handed `files_user`: `read` the
+     * cart's own folder, `writable` the manifest's entries in moy_wasm's form
+     * ("saves/\0options.cfg\0\0", or NULL for none), and `written`,
+     * `write`, `erase` and `list` the written files. The binding holds every
+     * path to the rules and the declaration first. NULL degrades as moy_wasm's
+     * does: read answers "", write -3, erase -1 and list {}. A host on a
+     * filesystem fills all six with port/moy_files.c's moy_files_bind_host. */
+    uint32_t (*read)(void *user, const char *name, uint32_t offset,
+                     uint8_t *dst, uint32_t len);
+    const char *writable;
+    int32_t (*written)(void *user, const char *path, uint32_t offset,
+                       uint8_t *dst, uint32_t len);
+    int32_t (*write)(void *user, const char *path, const uint8_t *data, uint32_t len);
+    int32_t (*erase)(void *user, const char *path);
+    int32_t (*list)(void *user, const char *prefix, uint32_t index,
+                    uint8_t *dst, uint32_t len);
+    void *files_user;
 } moy_host;
 
 /* What a cart is given: the canvas it draws on, the assets it draws from, and

@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "moy_evq.h"
+#include "moy_screen_slot.h"
 #include "moy_sync.h"
 
 // The OS log (moy_log.h), where the image has it.
@@ -55,8 +56,15 @@ static row_t *row_of(uint32_t pid, bool make) {
     return oldest;
 }
 
+// Whether `pid` has a screen the console shows (moy_super.h: its wakes are
+// frames).
+static bool on_screen(uint32_t pid) {
+    int w, h, depth;
+    return moy_screen_slot_size(pid, &w, &h, &depth) == 0;
+}
+
 int moy_super_charge(uint32_t pid, uint32_t cost_us, bool aborted) {
-    if (pid <= 1u || (!aborted && cost_us <= MOY_SUPER_SLICE_US)) {
+    if (pid <= 1u || (!aborted && (cost_us <= MOY_SUPER_SLICE_US || on_screen(pid)))) {
         return MOY_SUPER_FINE;
     }
     if (MOY_SYNC_TABLE(s_row) == NULL) {

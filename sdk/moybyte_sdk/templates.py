@@ -80,6 +80,34 @@ EXPORT(_draw) void draw(void) {
 }
 '''
 
+# A compiled cart, a game: one source that builds to main.wasm and to a
+# native module per chip (moybyte/cart.h, sdk/README.md "A compiled cart").
+CART_GAME = '''#include <stdint.h>
+
+#include "moybyte/cart.h"
+
+static const char TITLE[] = "%(title_c)s";
+static int32_t x = 160, y = 120;
+
+void init(void) {
+}
+
+void update(float dt) {
+    (void)dt;
+    x += moy_btn(MOY_RIGHT, 0) - moy_btn(MOY_LEFT, 0);
+    y += moy_btn(MOY_DOWN, 0) - moy_btn(MOY_UP, 0);
+    if (moy_btnp(MOY_B, 0)) {
+        moy_quit();
+    }
+}
+
+void draw(void) {
+    moy_cls(1);
+    moy_circ(x, y, 8, 8);
+    moy_print(TITLE, sizeof TITLE - 1, 4, 4, 7);
+}
+'''
+
 # A command: a WASI program or a native module, main and its exit code.
 C_COMMAND = '''#include <stdio.h>
 

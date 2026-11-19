@@ -3,7 +3,7 @@
 reaches on each tier, with the permissions each answers under (any one of
 them), from native/os_calls.json."""
 
-VERSION = 127
+VERSION = 135
 SPEC_NAMES = ('print',)
 
 # a wasm app's "moybyte.app" imports
@@ -322,6 +322,14 @@ ELF = {
     124: ('moy_name', ()),
     125: ('moy_clock', ()),
     126: ('moy_ui_tell', ()),
+    127: ('moy_game_data', ()),
+    128: ('moy_game_sound', ()),
+    129: ('moy_game_snd', ()),
+    130: ('moy_game_pmem', ()),
+    131: ('moy_game_read', ()),
+    132: ('moy_game_write', ()),
+    133: ('moy_game_erase', ()),
+    134: ('moy_game_list', ()),
 }
 
 # the ordinals of the retired rows, which no module built now calls
@@ -462,6 +470,7 @@ LUA = {
     'moybyte.status_show': (),
     'moybyte.status_state': (),
     'moybyte.x25519': (),
+    'net': ('multiplayer',),
     'on_net': ('multiplayer',),
     'open_app': ('launch', 'front'),
     'pin_read': ('pins',),

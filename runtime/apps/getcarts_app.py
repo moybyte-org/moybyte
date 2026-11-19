@@ -50,6 +50,13 @@ The screens, in the order a kid meets them:
              and the shelf is as it was. A cart that asks for nothing a game
              does not, or an update that adds nothing, is not asked about.
              One that requires what this console lacks is not installed.
+             It names the publisher first. A Python cart from an index
+             nobody reviewed carries the unreviewed warning (app_perms.
+             UNREVIEWED), and where the console has a password a field
+             under it takes that password before Install goes on (pkg.
+             gated); one typed wrong keeps the prompt up, saying so. A
+             version its index took back is not installed, and one on the
+             console says so (Taken back), offering only Remove.
   YOUR COPY  a console that can be handed a file (the browser) first asks
              whether it can read that file from anywhere the index names --
              its mirror beside the index, then its archive's hosts; where it
@@ -68,11 +75,15 @@ The screens, in the order a kid meets them:
   ON THE CONSOLE  a page a board serves: the carts it shows are the board's,
              and the board gets its own, so this one fetches nothing.
   A ZERO'S PAGE  a page a console with no screen serves (`install.board()`,
-             its sealed /official): the shelf is that console's official
-             carts, from its own release, and Get and Remove ASK it -- it
-             fetches and writes its own store, the page waiting with its
-             progress, then brings its copy of the cart over this page's.
-             A cover shows for a cart the console holds.
+             its sealed /official): the shelf is the carts of that
+             console's shelves (its sources and its own release), each
+             where it stands in that console's store, its room the
+             console's, and a licence, Get and Remove ASK it -- it fetches
+             and checks, the page shows the licence and the install prompt
+             (`pkg.manifest_check` over the manifest it checked), and it
+             writes its own store, the page waiting with its progress,
+             then brings its copy of the cart over this page's. A cover
+             shows for a cart the console holds.
 
 The installing is cart_index's; this module is the screens and the lease. The
 radio is held while something is fetched -- the indexes, a licence and the
@@ -108,11 +119,11 @@ REFRESH_MS = 600000
 # Where a card stands, as its sub line and its badge say it; a cart that is
 # only for the getting says its size instead.
 STATE_WORD = {"installed": "On console", "update": "Update ready", "taken": "Name taken",
-              "too_big": "Too big", "noplay": "Can't play"}
-BADGE = {"installed": "check", "update": "getcarts", "taken": "warn", "too_big": "warn",
-         "noplay": "warn"}
+              "revoked": "Taken back", "too_big": "Too big", "noplay": "Can't play"}
+BADGE = {"installed": "check", "update": "getcarts", "taken": "warn", "revoked": "warn",
+         "too_big": "warn", "noplay": "warn"}
 # The states a card's sub line and badge say in the danger ink, its cover veiled.
-BLOCKED = ("taken", "too_big", "noplay")
+BLOCKED = ("taken", "revoked", "too_big", "noplay")
 
 # A verb's words and icon, by its name.
 VERB = {"GET": ("Get", "getcarts"), "UPDATE": ("Update", "getcarts"),
@@ -153,7 +164,7 @@ def _asked(job):
     while job.step():
         yield
     if job.error is not None:
-        raise _ci.InstallError(job.error)
+        raise _ci.InstallError(job.error, getattr(job, "detail", None))
 
 
 def _host_of(url):
@@ -365,10 +376,14 @@ class GetCartsAppLayer(ListShellApp):
         self.accepted = []
         self.asking = False           # Remove's dialog is up
         self.question = None          # the install prompt's lines, while it is up
-        self._consented = None        # (app id, permissions) the install records
+        self._consented = None        # (app id, permissions, unreviewed) the install records
+        self.password = ""            # typed into the prompt's password field (pkg.gated)
+        self.password_bad = False     # the last one typed was not the console's
+        self._revoked = {}            # parse_index's revocations, this check's indexes
         self._tail = None             # (steps, then, failed): a landing's or a removal's, a frame a step
         self._sweep = None            # what install/ holds going, a store op a frame, no key held
         self.why = ""                 # the NOT INSTALLED page's reason
+        self.why_detail = None        # ...and its cause exact, under it
         self.toast = None             # (text, icon, until ms): a passing message
         self.thumbs = {}              # cover sha256 -> (side, RGB565) or None
         self._pane_k = None           # the desk pane's parts (`_pane_parts`)
@@ -592,7 +607,7 @@ class GetCartsAppLayer(ListShellApp):
                 self._pump_get()
         except _ci.InstallError as exc:
             _ci._log(exc.detail)
-            self._fail(exc.text)
+            self._fail(exc.text, exc.detail)
         except Exception as exc:  # noqa: BLE001 -- the store never takes the shell down
             _ci._log("%r" % (exc,))
             self._fail(_ci.STOPPED)
@@ -676,7 +691,8 @@ class GetCartsAppLayer(ListShellApp):
                 data = self._fetched(lambda: _ci.index_fetch(net, url), ("index", i))
                 if data is None:
                     return
-                self._found.extend(_ci.fitting(_ci.parse_index(data, url, self._inst.own())))
+                self._found.extend(_ci.fitting(_ci.parse_index(data, url, self._inst.own(),
+                                                               self._revoked)))
             except _ci.InstallError as exc:
                 self.unreached += 1
                 self.starved = self.starved or exc.text == _ci.NET_MEMORY
@@ -690,6 +706,8 @@ class GetCartsAppLayer(ListShellApp):
             return
         self.carts = self._found
         self._found = []
+        revoked, self._revoked = self._revoked, {}
+        self._mark_revoked(lambda: _pkg.revocations(self._inst, revoked))
         self.fetched_at = _ticks_ms()
         self._covers = self._covers_to_fetch(self.carts)
         if not self._covers:
@@ -699,6 +717,16 @@ class GetCartsAppLayer(ListShellApp):
         self._go("list")
         if self.rows:
             self._focus = self._card_id(self.cur if self.cur in self.rows else self.rows[0])
+
+    def _mark_revoked(self, mark):
+        """The consent records of carts whose store revoked their version
+        marked (`mark()`, pkg's `revocations` or `revoked_rows`), so they
+        will not launch; a store that fails here never takes the shelf
+        down."""
+        try:
+            mark()
+        except Exception as exc:  # noqa: BLE001
+            _ci._log("revocations: %r" % (exc,))
 
     def _pump_board_check(self, board):
         """The console's official carts, asked of it: its list as this
@@ -721,11 +749,13 @@ class GetCartsAppLayer(ListShellApp):
         self._board_free = (free[0], free[1]) if isinstance(free, list) and len(free) == 2 \
             else None
         self.indexes = ()
-        self.carts = [dict(c, official=True) for c in doc.get("carts") or ()
+        self.carts = [c for c in doc.get("carts") or ()
                       if isinstance(c, dict) and isinstance(c.get("assets"), list)]
+        self.unreached = doc.get("unreached") or 0
         self.fetched_at = _ticks_ms()
         self._covers = self._covers_to_fetch(self.carts)
         self._build_rows()
+        self._mark_revoked(lambda: _pkg.revoked_rows(self._inst, self.rows))
         self._go("list")
         if self.rows:
             self._focus = self._card_id(self.cur if self.cur in self.rows else self.rows[0])
@@ -834,6 +864,11 @@ class GetCartsAppLayer(ListShellApp):
             out = []
             for c in carts:
                 p = _ci.plan(c, chip, fmt, ranges)
+                if board is not None:       # where it stands is the board's store's
+                    out.append({"cart": c, "plan": p, "state": c.get("state") or "get",
+                                "had": c.get("had"), "runs": _ci.runs_on(c, have),
+                                "fit": None})
+                    continue
                 folder = "%s/%s" % (root, c["folder"])
                 present = root is not None and _exists(folder)
                 entry = rec.get(c["folder"])
@@ -901,6 +936,8 @@ class GetCartsAppLayer(ListShellApp):
             return rm + (self._go_verb(),)
         if st == "update":
             return rm + (self._go_verb(), "UPDATE")
+        if st == "revoked":
+            return rm
         return ()
 
     def blocker(self, row):
@@ -966,6 +1003,10 @@ class GetCartsAppLayer(ListShellApp):
             self._go("connecting")
 
     def _pump_licence(self):
+        board = self._inst.board()
+        if board is not None:
+            self._pump_board_licence(board)
+            return
         up = self._online()
         if up is None:
             return
@@ -984,6 +1025,29 @@ class GetCartsAppLayer(ListShellApp):
         self.lic[2] = 0
         self._go("licence")
         self._focus = vid("NO")             # No has the focus
+
+    def _pump_board_licence(self, board):
+        """The licence asked of the console with no screen, which fetches
+        and checks it as this console would."""
+        ext = self.lic[0]
+        what = ("licence", ext["path"])
+        if self._fetching != what:
+            self._drop_fetch()
+            self._fetch = board.licence(self.cur["cart"], ext["path"])
+            self._fetching = what
+        job = self._fetch
+        if job.step():
+            return
+        self._fetch = None
+        self._fetching = None
+        if job.error is not None:
+            self._fail(job.error, getattr(job, "detail", None))
+            return
+        self._lic_text = str(job.doc.get("text") or "")
+        self.lic[1] = self._wrap(self._lic_text)
+        self.lic[2] = 0
+        self._go("licence")
+        self._focus = vid("NO")
 
     # -- YOUR COPY: an external file this console cannot fetch -----------------
 
@@ -1108,7 +1172,7 @@ class GetCartsAppLayer(ListShellApp):
     def _pump_connect(self):
         board = self._inst.board()
         if board is not None:
-            self.job = board.install(self.cur["cart"]["folder"])
+            self.job = board.install(self.cur["cart"], self.accepted, self._ask_board)
             self._go("getting")
             self.armed = True
             return
@@ -1137,9 +1201,19 @@ class GetCartsAppLayer(ListShellApp):
         (`cart_index.Install`'s `ask`): the prompt's lines, or None to go
         on. A permission the cart requires that this console lacks refuses
         the install."""
-        aid, perms, lines = _pkg.install_check(self._inst, stage, self.cur["cart"]["folder"],
-                                               self._carts_role.all())
-        self._consented = (aid, perms)
+        c = self.cur["cart"]
+        aid, perms, lines, src = _pkg.install_check(self._inst, stage, c["folder"],
+                                                    self._carts_role.all(), c)
+        self._consented = (aid, perms, src)
+        return lines
+
+    def _ask_board(self, man):
+        """`_ask` over the manifest of the build a console with no screen
+        checked (carts_link.BoardAsk's `ask`)."""
+        c = self.cur["cart"]
+        aid, perms, lines, src = _pkg.manifest_check(self._inst, man, c["folder"],
+                                                     self._carts_role.all(), c)
+        self._consented = (aid, perms, src)
         return lines
 
     def _pump_get(self):
@@ -1147,19 +1221,25 @@ class GetCartsAppLayer(ListShellApp):
         if job.step():
             if job.asking is not None and self.question is None:
                 self.question = job.asking
+                self.password = ""
+                self.password_bad = False
                 self._release()           # nothing left to fetch
                 self._go("consent")
             return
         self._release()
         self._unpick()
         if job.path and self._inst.board() is not None:
-            self._got()                 # the console landed it, its copy is here
+            consented, self._consented = self._consented, None   # the console landed it
+            self.cur["cart"]["state"] = "installed"
+            self.cur["cart"]["had"] = self.cur["cart"]["version"]
+            self._run(_pkg.consent_steps(self._inst, consented), self._got,
+                      lambda exc: self._fail(_ci.STOPPED))
         elif job.path:
             consented, self._consented = self._consented, None
             self._run(_pkg.landed(self._inst, job.path, consented), self._got,
                       lambda exc: self._fail(_ci.STOPPED))
         elif job.error:
-            self._fail(job.error)
+            self._fail(job.error, getattr(job, "detail", None))
         else:
             self._go("cart")
             self._focus_go()
@@ -1187,11 +1267,14 @@ class GetCartsAppLayer(ListShellApp):
         if self.phase == "cart":
             self._focus_go()
 
-    def _fail(self, why):
+    def _fail(self, why, detail=None):
+        """The NOT INSTALLED page: `why` in a kid's words, `detail` the
+        cause exact, its Details line, where it says more."""
         self._drop_fetch()
         self._unpick()
         self._release()
         self.why = why
+        self.why_detail = detail if detail and detail != why else None
         self._go("failed")
 
     def _play(self):
@@ -1214,9 +1297,26 @@ class GetCartsAppLayer(ListShellApp):
 
     def _answer(self, install):
         """The install prompt answered: Install puts the build on the shelf,
-        No removes it."""
-        self.question = None
+        No removes it. Where the prompt carries the unreviewed warning and
+        the console has a password (pkg.gated), Install takes it: one typed
+        wrong keeps the prompt up, saying so; a console with no screen
+        checks it itself, with its yes."""
         job = self.job
+        if install and _pkg.gated(self._inst, self.question):
+            pw = self.password
+            if self._inst.board() is not None:
+                self.question = None
+                job.agree(pw)
+                self._go("getting")
+                self.armed = True
+                return
+            if not (pw and self._inst.unlock(pw)):
+                self.password = ""
+                self.password_bad = True
+                self._damage.all()
+                return
+        self.question = None
+        self.password = ""
         if install:
             job.agree()
             self._go("getting")
@@ -1236,9 +1336,19 @@ class GetCartsAppLayer(ListShellApp):
         self.asking = False
         row = self.cur
         board = self._inst.board()
-        steps = _asked(board.remove(row["cart"]["folder"])) if board is not None \
+        steps = self._board_removed(board, row) if board is not None \
             else _pkg.removed(self._inst, row["cart"]["folder"])
         self._run(steps, lambda: self._removed(row), self._not_removed)
+
+    def _board_removed(self, board, row):
+        """`yield from` it: the console with no screen takes the cart off its
+        store, and the consent it was installed with is forgotten here."""
+        had = self._inst.find(row["cart"]["folder"])
+        yield from _asked(board.remove(row["cart"]["folder"]))
+        row["cart"]["state"] = "get"
+        row["cart"]["had"] = None
+        if had is not None:
+            yield from self._inst.consent().forget_steps(_perms.app_id(had))
 
     def _removed(self, row):
         self._build_rows()
@@ -1642,6 +1752,9 @@ class GetCartsAppLayer(ListShellApp):
         if st == "taken":
             return ("Another cart here is already called %s." % c["folder"], "warn",
                     "danger")
+        if st == "revoked":
+            return ("Its store took this cart back. It won't run: remove it.", "warn",
+                    "danger")
         why = self.blocker(row) if st == "get" else None
         if why:
             return (why, "warn", "danger")
@@ -2033,7 +2146,10 @@ class GetCartsAppLayer(ListShellApp):
         if ph == "nomemory":
             return ("warn", "Memory full", self._lines(_ci.NET_MEMORY))
         if ph == "failed":
-            return ("warn", "Not installed", self._lines(self.why) + ["Nothing changed."])
+            lines = self._lines(self.why) + ["Nothing changed."]
+            if self.why_detail:
+                lines += self._lines("Details: " + self.why_detail)
+            return ("warn", "Not installed", lines)
         return ("getcarts", "", [])
 
     def _lines(self, text):
@@ -2177,8 +2293,16 @@ class GetCartsAppLayer(ListShellApp):
         pick = ui.dialog("Install %s?" % self.cur["cart"]["name"], ("No", "Install"),
                          "primary")
         _perms.show(ui, lines)
+        done = False
+        if _pkg.gated(self._inst, lines):
+            ui.label(_pkg.WRONG_PASSWORD if self.password_bad
+                     else "A grown-up types the console's password to say yes:",
+                     {"wrap": True, "lines": 2,
+                      "tone": "danger" if self.password_bad else "dim"})
+            self.password, done = ui.field("Password", self.password, 64,
+                                           {"id": "password", "secret": True})
         ui.dialog()
-        if pick == 1:
+        if pick == 1 or done:
             self._answer(True)
         elif pick == 0:
             self._answer(False)

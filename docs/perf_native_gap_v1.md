@@ -308,6 +308,41 @@ would remove `find_qstr`'s walk (≈0.3 ms). The `qstr_find_strn` 1–1.6%
 beside them is runtime string building (`str(score)` each frame) checking
 whether the result is already interned — the cart's code, priced.
 
+### Shipped 2026-11-18 — a hash map grows at three quarters full (#77)
+
+The miss in the table above was longer than it had to be. `py/map.c` grows a
+hash table only when an insert finds it FULL, and a lookup that misses walks
+the linear probe until it meets an empty slot, so in a nearly full table the
+miss reads most of it before the class (or the builtins) is asked. The
+console's long-lived objects sit there: the home carousel held 70 attributes
+in 73 slots, `BarLayer` 37 in 37. Adding three
+attributes to the carousel cost 12M instructions over a 150-frame fling.
+`moybyte_patch_map_load` (`tools/patch_map_load.py`) grows a table above
+twelve slots while a quarter of it is still empty; twelve and under keep the
+stock rule. Every console board and the browser console take it, and so does
+the board model (`make unix-micropython`); both Zeros decline it, having no
+frame loop to buy it for and, on the C3, a 32 KB heap to pay it from.
+
+Measured on the board-model unix MicroPython under callgrind (instructions,
+deterministic; the model has no `gc_alloc` run hints, so its allocator's walk
+is excluded as not a board's):
+
+| scenario | interpreter, stock → patched | `mp_map_lookup` self, stock → patched |
+|---|---|---|
+| carousel fling, 150 frames | 353.8M → 332.1M (−6.1%) | 87.6M → 65.3M (−25%) |
+| five carousel flicks | 1025.0M → 964.5M (−5.9%) | 239.0M → 178.8M (−25%) |
+| icons fling | 298.3M → 271.5M (−9.0%) | 63.8M → 43.8M (−31%) |
+| icons drag | 286.3M → 263.3M (−8.0%) | 64.0M → 43.3M (−32%) |
+| desk window drag, 90 frames | 283.5M → 267.0M (−5.8%) | 42.5M → 25.1M (−41%) |
+| Brick Siege, 150 play frames | 305.4M → 284.1M (−7.0%) | 38.2M → 28.1M (−26%) |
+
+The cost is heap: a booted T-Deck home holds 44.6 KB more (2874 → 2919 KB
+live on the model, whose total includes the bytecode a board keeps in flash),
+the windowed desk 48.4 KB more. Growing at seven eighths instead halved both
+the heap (+20.0 / +23.1 KB) and the gain (`mp_map_lookup` −3 to −34%, and
+Brick Siege's interpreter total no better than stock), so three quarters is
+the line.
+
 ### Shipped 2026-09-23 — size-class run hints for `gc_alloc` (#66)
 
 The same Brick Siege profiles that priced the map cache put `gc_alloc` at

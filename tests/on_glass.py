@@ -1667,10 +1667,9 @@ def a_lua_app_s_every_runs_beside_a_python_app_s(board, title="Brick Siege Lua",
     Lua run's `moybyte.every` (native/moycore/moycore_moybyte.h, served as
     each of the run's frames starts, wherever the frame runs) and a Python
     process's `every` are both rows of the kernel's table, and both go off
-    while the run plays."""
-    titles = board.pyval("[c['title'] for c in ws.carts.all]", strict=True)
-    if title not in titles:
-        pytest.skip("%s is not in this board's store" % title)
+    while the run plays. Brick Siege Lua is a test fixture, pushed for the
+    check (`push_fixture`)."""
+    push_fixture(board, title)
     with radio_room(title):
         _lua_every_beside_python(board, title, seconds)
 
@@ -2416,17 +2415,21 @@ def cart_runs_and_exits(board, spec, title=None, door="quit", clear=0):
 # census gives that verdict: Bullet Storm asks for a colour by name and
 # composites a layer every frame (col, draw_layer), Sakura Lua composites the
 # static layer whose restore rides the DMA engine, Brick Siege Lua arms the
-# radio link (multiplayer), Bench Lua draws every verb family.
+# radio link (multiplayer), Bench Lua draws every verb family. No image
+# carries Bullet Storm (an official cart no store is seeded with), Brick Siege
+# Lua or Bench Lua (test fixtures), which `_in_the_room` pushes for the check.
 VM_FREE_SEEDS = (("bullet", "Bullet Storm"), ("sakura lua", "Sakura Lua"),
                  ("brick siege lua", "Brick Siege Lua"), ("bench lua", "Bench Lua"))
 
 
 def _in_the_room(check):
-    """`check(board, spec, title, ...)` run inside `radio_room(title)`."""
+    """`check(board, spec, title, ...)` run inside `radio_room(title)`, the
+    cart pushed first where no image carries it (`push_fixture`)."""
     import functools
 
     @functools.wraps(check)
     def run(board, spec, title, *args, **kw):
+        push_fixture(board, title)
         with radio_room(title):
             return check(board, spec, title, *args, **kw)
     return run
@@ -2504,8 +2507,10 @@ def a_ctrl_c_ends_a_front_run(board, spec="bullet", title="Bullet Storm", clear=
     closes the run the console never closed, so the next VM runs the cart
     again. `front` False: a board with no kernel front, where the console's
     frame is the one the Ctrl-C interrupts; the same REPL, and the cart runs
-    again after the soft reset."""
+    again after the soft reset. No image carries Bullet Storm, so it is
+    pushed for the check (`push_fixture`)."""
     import time
+    push_fixture(board, title)
     _clear_to_console(board, clear)
     line = board.cmd("run %s" % spec, wait_for="REMOTE run")
     assert line is not None and "no cart match" not in line, line
@@ -3786,6 +3791,24 @@ def _push_folder(board, board_dir, local, dest):
         mark_pushed(board, dest)
 
 
+def push_fixture(board, title):
+    """The seed cart `title` on the board's store for a check, where no image
+    carries it (tools/gen_device_carts.in_image: a test fixture, or an
+    official cart no store is seeded with): pushed from system_carts/ under
+    its seed folder (`_push_folder`, which marks a folder the store did not
+    hold, so the session's `give_store_back` removes it) and rescanned. A
+    cart every image carries is the image's own, and nothing is pushed."""
+    from tools import gen_device_carts as gen
+    mans = dict(gen.read_manifests(str(ROOT / "system_carts")))
+    folder = gen.title_to_folder(str(ROOT / "system_carts")).get(title)
+    if folder is None or gen.in_image(mans[folder]):
+        return
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
+    _push_folder(board, board.board_dir, str(ROOT / "system_carts" / (folder + ".moy")),
+                 root.rstrip("/") + "/" + folder + ".moy")
+    board.pyval(RESCAN, timeout=60)
+
+
 def wasm_carts_push(board, board_dir):
     """Build the compiled fixture carts for this board's chip, push each into
     the store as `<name>.moy`, and rescan so the launcher lists them. Returns
@@ -4472,9 +4495,13 @@ def hello_read_its_greeting(board):
     """The hello cart's `read` crossed to the VM and back: its greeting's
     black band spans the text (8 pixels a character) only when the read
     returned the file's bytes; with nothing read it is 8 pixels wide and row 9
-    at x=24 is the blit's gradient. x=24 is left of the system notice an
-    interpreted run shows ("RUNNING SLOWLY"), which the kernel's front draws
-    centred over the top of the run's canvas."""
+    at x=24 is the blit's gradient. The system notice an interpreted run
+    shows ("RUNNING SLOWLY"), which the kernel's front draws centred over the
+    top of the run's canvas, spans the band, so it is said again for no time
+    and the band read from a frame drawn after it is down."""
+    if board.pyval("ws.notice_up is not None", strict=True):
+        board.pyval("ws.notices.notice(*ws.notice_up, ms=0)", strict=True)
+        board.drain(0.5)
     px = board.pyval("(lambda b, i: b[i] | b[i + 1] << 8)"
                      "(ws.run.canvas._buf, 2 * (9 * ws.run.canvas.w + 24))", strict=True)
     black = board.pyval("ws.run.canvas._wire[0]", strict=True)
@@ -4936,12 +4963,14 @@ INTERP_NOTICE_TITLE = "RUNNING SLOWLY"
 # importing the runtime): "missing" covers no module for this console at
 # all, one built for another chip, and one left over from an older format --
 # every one of those is simply the wrong file name to this console, so the
-# Player cannot tell them apart and shows the same "needs an update"; a
+# Player cannot tell them apart and shows the same "missing" line; a
 # module that matched this console's name but carried no signature, its cart
 # not granted "full_access", is "unsigned"; one whose load stopped on a helper
-# this firmware does not register is "firmware".
-INTERP_NOTICE_SUB = {"missing": "needs an update", "unsigned": "isn't signed",
-                     "firmware": "console needs an update"}
+# this firmware does not register is "firmware". The words are the shell's
+# strings (`slow.<cause>`, native/moy_spine/strings/en.json).
+INTERP_NOTICE_SUB = {c: json.loads((ROOT / "native" / "moy_spine" / "strings" / "en.json")
+                                   .read_text())["strings"]["slow." + c]
+                     for c in ("missing", "unsigned", "firmware")}
 
 
 def _runs_on_interpreter(board, title, check=None, cause="missing"):
@@ -5569,7 +5598,9 @@ def _front_proof(shift):
 def a_lua_run_folds_to_the_glass_in_front(board, title="Brick Siege Lua", seconds=4.0):
     """`title` runs in the kernel's front, its frames folded through the
     flush (the fold's count climbs), and the proof above reads 0 -- and not 0
-    for the composite one pixel off. Returns the folds counted."""
+    for the composite one pixel off. Returns the folds counted. A test
+    fixture is pushed for the check (`push_fixture`)."""
+    push_fixture(board, title)
     line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=60)
     assert line is not None and "no cart match" not in line, line
     try:

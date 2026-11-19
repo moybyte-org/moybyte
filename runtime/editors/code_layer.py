@@ -57,6 +57,7 @@ _TXO_ERR, _TXO_FIND_CI, _TXO_LEFT, _TXO_TOP = (_ui.TXO_ERR, _ui.TXO_FIND_CI, _ui
 _FIND_FIELD = {"id": "find", "hint": "Find"}
 _JUMP_FIELD = {"id": "goto", "hint": "Go to a definition"}
 _DIM = {"tone": "dim"}
+_BANNER = {"wrap": True, "lines": 2}
 _NEW_SCRIPT = "New script"
 _FIND_KEYS = ("confirm", "Next", "Shift+enter", "Back", "cancel", "Close")
 _CMP_KEYS = ("scroll", "Pick", "confirm", "Insert", "cancel", "Close")
@@ -348,6 +349,8 @@ class CodeLayer(Layer):
         self._files_open = False      # the scripts menu is shown
         self._files_sel = 0           # the highlighted row (opens on the current file)
         self._ov_host = _ui_draw.AppHost()   # the overlays' UI context (look step 33)
+        self._ro_host = _ui_draw.AppHost()   # the read-only banner's
+        self._bk = [0, -1, 0]         # the banner's height, made once a scale and look
 
     def reset(self):
         """Called by ws.text.set_menu_view when the editor is (re)built: drops the
@@ -1089,8 +1092,45 @@ class CodeLayer(Layer):
         return (lay.cx, top - h, lay.cw, h)
 
     def _find_rect(self, lay):
-        """The find strip over the code's top: a field's row and its ring."""
-        return (lay.cx, lay.y0, lay.cw, 38 if _desk() else 28 * lay.fs)
+        """The find strip over the code's top, under the read-only banner:
+        a field's row and its ring."""
+        return (lay.cx, lay.y0 + self._banner_h(lay), lay.cw, 38 if _desk() else 28 * lay.fs)
+
+    def _banner_h(self, lay):
+        """The read-only banner's height over the code's top: two lines of
+        the ui face where the buffer is read-only (a compiled cart's `src/`,
+        EditorApp.code_read_only), else 0."""
+        ed = self.ws.editor
+        if ed is None or not ed.read_only:
+            return 0
+        k = self._bk
+        gen = self.ws.look.look_gen
+        if k[0] != lay.fs or k[1] != gen:
+            _ui.face("ui")
+            try:
+                th = _ui.text_size("A", lay.fs)[1]
+            finally:
+                _ui.face()
+            k[0] = lay.fs
+            k[1] = gen
+            k[2] = 2 * th + 12 * lay.fs     # two lines, their leading and the pads
+        return k[2]
+
+    def _draw_banner(self, lay, t):
+        """The read-only banner: the code is the module's source, read here
+        and rebuilt on a computer (`code.read_only`)."""
+        h = self._banner_h(lay)
+        if not h:
+            return
+        ws = self.ws
+        cv = ws.sys_canvas
+        r = (lay.cx, lay.y0, lay.cw, h)
+        cv.rect(r[0], r[1], r[2], r[3], t["sym_bg"])
+        host = self._ro_host
+        host.begin(cv, ws.theme_colors, r, _desk(), False)
+        pad = 3 * lay.fs
+        _ui.at(r[0] + pad, r[1] + pad, r[2] - 2 * pad, r[3] - 2 * pad)
+        _ui.label(_ui_draw.s("code.read_only"), _BANNER)
 
     def _gutter_cols(self, ed):
         # Line-number gutter width in cells (0 == off). Narrow: the digits of the
@@ -1120,10 +1160,12 @@ class CodeLayer(Layer):
             ed.set_view_size(target, rows)
 
     def _top_rows(self, lay):
-        """The lines the find strip takes from the code's top, 0 closed."""
-        if not self._find_open:
-            return 0
-        return -(-self._find_rect(lay)[3] // lay.lh)
+        """The lines the read-only banner and the find strip take from the
+        code's top, 0 with neither."""
+        h = self._banner_h(lay)
+        if self._find_open:
+            h += self._find_rect(lay)[3]
+        return -(-h // lay.lh)
 
     def _y0(self, lay):
         """Where the code's first line draws: under the find strip, open."""
@@ -1174,6 +1216,7 @@ class CodeLayer(Layer):
             self._rows(cv, r, ed)
         if lay.status_band is not None and ed is not None:
             self._draw_status(cv, lay, ed)
+        self._draw_banner(lay, t)
         self._draw_tools(lay, ed, t)             # #89: tools toggle + palette + find bar
         self._draw_symbols()
 

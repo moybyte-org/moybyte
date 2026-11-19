@@ -71,7 +71,7 @@
 #endif
 
 #define PSRAM_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
-#define INTERNAL_CAPS (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
+#define INTERNAL_CAPS MOY_KMEM_SRAM_CAPS
 #define FILE_MAX (4u * 1024u * 1024u)
 #define ERR_MAX 160
 
@@ -507,8 +507,11 @@ static mp_obj_t mod_service(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_service_obj, 3, 5, mod_service);
 
-// game(path, pid, id, flags, w, h, run=None, depth=1) -> None, or why it did
-// not start: its screen w x h pixels of `depth` bytes (moy_os_game).
+// game(path, pid, id, flags, w, h, run=None, depth=1, data=None, dir=None,
+// writable=None) -> None, or why it did not start: its screen w x h pixels
+// of `depth` bytes, `data` the bytes its moy_game_data reads, `dir` its
+// cart's folder and `writable` its "writable" entries NUL-joined, its files
+// (moy_os_game).
 static mp_obj_t mod_game(size_t n_args, const mp_obj_t *args) {
     char err[ERR_MAX];
     moy_app_run_t run;
@@ -518,15 +521,60 @@ static mp_obj_t mod_game(size_t n_args, const mp_obj_t *args) {
         return mp_obj_new_str(err, strlen(err));
     }
     int depth = n_args > 7 ? mp_obj_get_int(args[7]) : 1;
+    mp_buffer_info_t data = { 0 };
+    if (n_args > 8 && args[8] != mp_const_none) {
+        mp_get_buffer_raise(args[8], &data, MP_BUFFER_READ);
+    }
+    const char *dir = n_args > 9 && args[9] != mp_const_none ? mp_obj_str_get_str(args[9]) : NULL;
+    mp_buffer_info_t wr = { 0 };
+    if (n_args > 10 && args[10] != mp_const_none) {
+        mp_get_buffer_raise(args[10], &wr, MP_BUFFER_READ);
+    }
     if (moy_os_game(&m, NULL, (uint32_t)mp_obj_get_int(args[1]), mp_obj_str_get_str(args[2]),
-                    mp_obj_get_int(args[4]), mp_obj_get_int(args[5]), depth, rp, err,
-                    sizeof err)
+                    mp_obj_get_int(args[4]), mp_obj_get_int(args[5]), depth, rp, data.buf,
+                    data.len, dir, wr.buf, wr.len, err, sizeof err)
             == NULL) {
         return mp_obj_new_str(err, strlen(err));
     }
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_game_obj, 6, 8, mod_game);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_game_obj, 6, 11, mod_game);
+
+// game_sound(pid, out) -> the audio verbs game `pid` queued since the last
+// ask, 3 int32 each into the array('i') `out` (moy_os_game_sound).
+static mp_obj_t mod_game_sound(mp_obj_t pid, mp_obj_t out) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(out, &b, MP_BUFFER_WRITE);
+    return MP_OBJ_NEW_SMALL_INT(moy_os_game_sound((uint32_t)mp_obj_get_int(pid),
+                                                  (int32_t *)b.buf,
+                                                  (int)(b.len / (3 * sizeof(int32_t)))));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_game_sound_obj, mod_game_sound);
+
+// The speaker's render-ahead stream, where the image has one (moy_audio_snd.h).
+uint32_t moy_audio_snd(const uint8_t *pcm, uint32_t n);
+#pragma weak moy_audio_snd
+
+// game_snd(pid, on) -> 0, or -1: game `pid`'s snd into the speaker's stream
+// (which the caller opened) while `on`, else nowhere (moy_os_game_snd).
+static mp_obj_t mod_game_snd(mp_obj_t pid, mp_obj_t on) {
+    moy_os_snd_fn sink = mp_obj_is_true(on) && moy_audio_snd != NULL ? moy_audio_snd : NULL;
+    return MP_OBJ_NEW_SMALL_INT(moy_os_game_snd((uint32_t)mp_obj_get_int(pid), sink));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_game_snd_obj, mod_game_snd);
+
+// game_pmem(pid, out) -> 1 where game `pid`'s pmem moved since the last ask,
+// its 256 cells into the array('i') `out`; 0 where not, -1 for no such game.
+static mp_obj_t mod_game_pmem(mp_obj_t pid, mp_obj_t out) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(out, &b, MP_BUFFER_WRITE);
+    if (b.len < 256 * sizeof(int32_t)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("pmem holds 256 cells"));
+    }
+    return MP_OBJ_NEW_SMALL_INT(moy_os_game_pmem((uint32_t)mp_obj_get_int(pid),
+                                                 (int32_t *)b.buf));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_game_pmem_obj, mod_game_pmem);
 
 // frame(pid, held, pressed, ms, max_us, words=None) -> moy_os_game_frame's
 // answer; `words` an array('i') of the frame's input words.
@@ -695,6 +743,9 @@ static const mp_rom_map_elem_t moy_elf_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_frame), MP_ROM_PTR(&mod_frame_obj) },
     { MP_ROM_QSTR(MP_QSTR_screen), MP_ROM_PTR(&mod_screen_obj) },
     { MP_ROM_QSTR(MP_QSTR_game_stop), MP_ROM_PTR(&mod_game_stop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_game_sound), MP_ROM_PTR(&mod_game_sound_obj) },
+    { MP_ROM_QSTR(MP_QSTR_game_snd), MP_ROM_PTR(&mod_game_snd_obj) },
+    { MP_ROM_QSTR(MP_QSTR_game_pmem), MP_ROM_PTR(&mod_game_pmem_obj) },
     { MP_ROM_QSTR(MP_QSTR_ENDED), MP_ROM_INT(MOY_OS_ENDED) },
     { MP_ROM_QSTR(MP_QSTR_stop), MP_ROM_PTR(&mod_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_info), MP_ROM_PTR(&mod_info_obj) },

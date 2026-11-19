@@ -63,6 +63,7 @@ typedef struct moycore_run {
     void       *lay;             // the layers made here, `nlay` of `caplay`
     int         nlay, caplay;
     void       *scenes;          // the .moyscene texts (moycore_scenes_t)
+    struct moycore_files *files; // a Lua run's files (moycore_files.h), or NULL
     uint32_t    owner;           // its OWNER row (moycore_lua_owner), or 0
     uint32_t    proc;            // its process row's handle (the binding's), or 0
     moycore_mb_t mb;             // an app run's `moybyte` table (moycore_lua_own)
@@ -198,10 +199,6 @@ void moycore_stuck(const char *what);
 // holds its 256 or there is no memory. The run's close frees them.
 int moycore_lua_image_put(const char *name, const char *text, size_t n);
 
-// A scene's .moyscene text, copied, for the run's scene verbs
-// (moycore_scene.h), in the order the cart's scenes are kept, the first the
-// default active one: 0, or -1 past MOYCORE_SCENES or with no memory. Put
-// again by name, it replaces. The run's close frees them.
 // Layer `i`'s pixels and size, as the cart made it (its handle): 0, or -1
 // for no such layer. What a harness reads a layer's drawing through.
 int moycore_lua_layer(int i, moy_pixel **pix, int *w, int *h);
@@ -212,7 +209,46 @@ int moycore_lua_layer(int i, moy_pixel **pix, int *w, int *h);
 // allocations.
 void moycore_lua_owner(uint32_t owner);
 
+// A scene's .moyscene text, copied, for the run's scene verbs
+// (moycore_scene.h, and a compiled cart's below), in the order the cart's
+// scenes are kept, the first the default active one: 0, or -1 past
+// MOYCORE_SCENES or with no memory. Put again by name, it replaces. The run's
+// close frees them (moycore_lua_close, which a compiled run's close calls too).
 int moycore_lua_scene_put(const char *name, const char *text, size_t n);
+
+// A compiled cart's paint images and scenes (moycore_wasm_ext.h): the run's
+// own tables above, read as a Lua run's prelude reads them, with a name a
+// pointer and its length.
+//
+//   moycore_image_find   image `name`'s handle, decoded at its first ask:
+//                        above 0, 0 for no such image or not a picture, -1
+//                        for no memory to decode it
+//   moycore_image_pix    a handle's indices (w*h, row by row, an index past
+//                        the palette transparent) and size, or NULL
+//   moycore_scene_rows   scene `name`'s actors (NULL: the active one) as
+//                        MOYCORE_ACTOR-byte records at `out`, as many whole
+//                        ones as `cap` holds; the scene's actor count, or -1
+//                        for no such scene
+//   moycore_scene_load   make `name` the active scene: its actor count, or
+//                        -1 for no such scene, the active one unchanged
+//   moycore_scene_name   the i-th scene's name (0 the default) into `dst`, at
+//                        most `cap` bytes; its whole length, -1 past the last
+//   moycore_scene_flags  the i-th actor's "flags" object of scene `name` (NULL:
+//                        the active one) as its JSON text into `dst`, at most
+//                        `cap` bytes; its whole length, 0 for none, -1 for no
+//                        such scene or actor
+//
+// An actor's record: its tile, x, y and flip as four little-endian int32 (a
+// number int() would refuse is 0), then its tag as Python's str() spells it,
+// cut at MOYCORE_ACTOR_TAG - 1 bytes and NUL-padded.
+#define MOYCORE_ACTOR 32
+#define MOYCORE_ACTOR_TAG 16
+int32_t moycore_image_find(const char *name, size_t n);
+const uint8_t *moycore_image_pix(int32_t h, uint32_t *w, uint32_t *ht);
+int32_t moycore_scene_rows(const char *name, size_t n, uint8_t *out, uint32_t cap);
+int32_t moycore_scene_load(const char *name, size_t n);
+int32_t moycore_scene_name(int32_t i, uint8_t *dst, uint32_t cap);
+int32_t moycore_scene_flags(const char *name, size_t n, int32_t i, uint8_t *dst, uint32_t cap);
 
 // The p8 machine's buffers (65536 and 0x4300 bytes), or NULLs: no machine.
 // The next moycore_lua_open's: its row holds them from then, so two runs at

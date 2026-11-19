@@ -15,6 +15,7 @@
 #include "lualib.h"
 
 #include "moy.h"
+#include "moycore_files.h"
 #include "moycore_layers.h"
 #include "moycore_lua.h"
 #include "moycore_run.h"
@@ -165,11 +166,11 @@ static void *big_realloc(void *ptr, size_t osize, size_t nsize)
 #ifdef MOY_ON_BOARD
     int tried_sram = 0;
     np = NULL;
-    size_t sram_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    size_t sram_free = heap_caps_get_free_size(MOY_KMEM_SRAM_CAPS);
     if (sram_free < g_sram_free_min) g_sram_free_min = sram_free;
     if (sram_free >= nsize + g_sram_floor) {
         tried_sram = 1;
-        np = heap_caps_realloc(ptr, nsize, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        np = heap_caps_realloc(ptr, nsize, MOY_KMEM_SRAM_CAPS);
     }
     if (np == NULL) {
         if (!tried_sram) g_sram_denied++;   // the FLOOR turned it away, not a
@@ -1073,6 +1074,9 @@ int moycore_lua_image_put(const char *name, const char *text, size_t n)
 
 int moycore_lua_scene_put(const char *name, const char *text, size_t n)
 {
+    // A Lua run's table is made at its state's open (media_open); a compiled
+    // run, which has no state, makes it at its first scene.
+    if (g_scenes == NULL) g_scenes = (moycore_scenes_t *)media_alloc(sizeof(*g_scenes));
     if (g_scenes == NULL) return -1;
     return moycore_scenes_put(g_scenes, name, text, n, media_alloc, media_free);
 }
@@ -1110,15 +1114,12 @@ static mc_image_t *image_row(lua_Integer h)
     return (mc_image_t *)row;
 }
 
-// __image_handle(name) -> the image's IMAGE handle, or -1: no such image, or
-// not a picture.
-static int l_image_handle(lua_State *L)
+int32_t moycore_image_find(const char *name, size_t n)
 {
-    const char *name = luaL_checkstring(L, 1);
     for (uint32_t s = 0; g_imgs != NULL && s < moy_htab_slots(g_imgs); s++) {
         if (!moy_htab_live(g_imgs, s)) continue;
         mc_image_t *im = (mc_image_t *)moy_htab_row(g_imgs, s);
-        if (strcmp(im->name, name) != 0) continue;
+        if (strlen(im->name) != n || memcmp(im->name, name, n) != 0) continue;
         if (!im->pix && !im->bad) {
             uint32_t w = 0, h = 0;
             void *work = NULL;
@@ -1132,7 +1133,7 @@ static int l_image_handle(lua_State *L)
                     px_free(im->pix, im->buf);
                     im->pix = NULL;
                     im->buf = 0;
-                    return luaL_error(L, "image: out of memory for \"%s\"", name);
+                    return -1;
                 }
                 if (moy_img_decode(im->text, im->n, im->pix, cap, &im->w, &im->h, work)
                     != MOY_IMG_OK) {
@@ -1144,11 +1145,163 @@ static int l_image_handle(lua_State *L)
             }
             if (!im->pix) im->bad = 1;
         }
-        lua_pushinteger(L, im->pix ? (lua_Integer)moy_htab_handle(g_imgs, s) : -1);
-        return 1;
+        return im->pix ? (int32_t)moy_htab_handle(g_imgs, s) : 0;
     }
-    lua_pushinteger(L, -1);
+    return 0;
+}
+
+const uint8_t *moycore_image_pix(int32_t h, uint32_t *w, uint32_t *ht)
+{
+    const mc_image_t *im = image_row(h);
+    if (im == NULL || !im->pix) return NULL;
+    *w = im->w;
+    *ht = im->h;
+    return im->pix;
+}
+
+// __image_handle(name) -> the image's IMAGE handle, or -1: no such image, or
+// not a picture.
+static int l_image_handle(lua_State *L)
+{
+    size_t n;
+    const char *name = luaL_checklstring(L, 1, &n);
+    int32_t h = moycore_image_find(name, n);
+    if (h < 0) return luaL_error(L, "image: out of memory for \"%s\"", name);
+    lua_pushinteger(L, h > 0 ? (lua_Integer)h : -1);
     return 1;
+}
+
+// -- a compiled cart's scenes (moycore_lua.h) ---------------------------------
+
+// Scene `name`'s index (NULL: the active one), or -1.
+static int scene_at(const char *name, size_t n)
+{
+    const moycore_scenes_t *s = g_scenes;
+    if (s == NULL || s->n == 0) return -1;
+    if (name == NULL) return s->active < s->n ? s->active : 0;
+    for (int i = 0; i < s->n; i++)
+        if (strlen(s->name[i]) == n && memcmp(s->name[i], name, n) == 0) return i;
+    return -1;
+}
+
+// Scene `i`'s rows, as Scenes._parse reads them: each object of the list it
+// is, in order, to fn(ctx, k, row) until it answers non-zero. The rows seen.
+typedef int (*scene_row_fn)(void *ctx, int32_t k, const char *o, const char *oe);
+
+static int32_t scene_walk(int i, scene_row_fn fn, void *ctx)
+{
+    const char *t = g_scenes->text[i], *end = t + g_scenes->len[i];
+    const char *v = moy_json_ws(t, end), *ve, *k, *ke, *e, *ee;
+    moy_json_iter_t it;
+    int32_t n = 0;
+    ve = moy_json_value(v, end, 0);
+    if (!ve || moy_json_ws(ve, end) != end || moy_json_kind(v, ve) != MOY_JSON_ARR) return 0;
+    moy_json_iter(&it, v, ve);
+    while (moy_json_next(&it, &k, &ke, &e, &ee)) {
+        if (moy_json_kind(e, ee) != MOY_JSON_OBJ) continue;
+        if (fn != NULL && fn(ctx, n, e, ee)) return n + 1;
+        n++;
+    }
+    return n;
+}
+
+static void put_i32(uint8_t *p, int32_t v)
+{
+    uint32_t u = (uint32_t)v;
+    p[0] = (uint8_t)u;
+    p[1] = (uint8_t)(u >> 8);
+    p[2] = (uint8_t)(u >> 16);
+    p[3] = (uint8_t)(u >> 24);
+}
+
+typedef struct {
+    uint8_t *out;
+    uint32_t cap;
+} rows_t;
+
+// One actor's record (moycore_lua.h), its tag as mcs_push_tag spells it.
+static int row_record(void *ctx, int32_t k, const char *o, const char *oe)
+{
+    rows_t *r = (rows_t *)ctx;
+    const char *v, *ve, *tag = "";
+    size_t tn = 0;
+    if ((uint32_t)(k + 1) * MOYCORE_ACTOR > r->cap) return 0;
+    uint8_t *p = r->out + (size_t)k * MOYCORE_ACTOR;
+    put_i32(p, (int32_t)mcs_int_field(o, oe, "tile"));
+    put_i32(p + 4, (int32_t)mcs_int_field(o, oe, "x"));
+    put_i32(p + 8, (int32_t)mcs_int_field(o, oe, "y"));
+    put_i32(p + 12, (int32_t)mcs_int_field(o, oe, "flip"));
+    memset(p + 16, 0, MOYCORE_ACTOR_TAG);
+    if (moy_json_get(o, oe, "tag", &v, &ve)) {
+        switch (moy_json_kind(v, ve)) {
+        case MOY_JSON_STR:
+            moy_json_strcut(v, ve, (char *)p + 16, MOYCORE_ACTOR_TAG - 1);
+            return 0;
+        case MOY_JSON_TRUE: tag = "True"; break;
+        case MOY_JSON_FALSE: tag = "False"; break;
+        case MOY_JSON_NULL: tag = "None"; break;
+        default:
+            tag = v;
+            tn = (size_t)(ve - v);
+            break;
+        }
+    }
+    if (tn == 0) tn = strlen(tag);
+    memcpy(p + 16, tag, tn < MOYCORE_ACTOR_TAG - 1 ? tn : MOYCORE_ACTOR_TAG - 1);
+    return 0;
+}
+
+int32_t moycore_scene_rows(const char *name, size_t n, uint8_t *out, uint32_t cap)
+{
+    int i = scene_at(name, n);
+    rows_t r = { out, out != NULL ? cap : 0u };
+    return i < 0 ? -1 : scene_walk(i, row_record, &r);
+}
+
+int32_t moycore_scene_load(const char *name, size_t n)
+{
+    int i = name != NULL ? scene_at(name, n) : -1;
+    if (i < 0) return -1;
+    g_scenes->active = i;
+    return scene_walk(i, NULL, NULL);
+}
+
+int32_t moycore_scene_name(int32_t i, uint8_t *dst, uint32_t cap)
+{
+    const moycore_scenes_t *s = g_scenes;
+    if (s == NULL || i < 0 || i >= s->n) return -1;
+    size_t n = strlen(s->name[i]);
+    if (dst != NULL) memcpy(dst, s->name[i], n < cap ? n : cap);
+    return (int32_t)n;
+}
+
+typedef struct {
+    int32_t want;
+    const char *o, *oe;
+} pick_t;
+
+static int row_pick(void *ctx, int32_t k, const char *o, const char *oe)
+{
+    pick_t *p = (pick_t *)ctx;
+    if (k != p->want) return 0;
+    p->o = o;
+    p->oe = oe;
+    return 1;
+}
+
+int32_t moycore_scene_flags(const char *name, size_t n, int32_t i, uint8_t *dst, uint32_t cap)
+{
+    int si = scene_at(name, n);
+    pick_t p = { i, NULL, NULL };
+    const char *v, *ve;
+    if (si < 0 || i < 0) return -1;
+    scene_walk(si, row_pick, &p);
+    if (p.o == NULL) return -1;
+    if (!moy_json_get(p.o, p.oe, "flags", &v, &ve) || moy_json_kind(v, ve) != MOY_JSON_OBJ)
+        return 0;
+    size_t len = (size_t)(ve - v);
+    if (dst != NULL) memcpy(dst, v, len < cap ? len : cap);
+    return (int32_t)len;
 }
 
 // __layer_new(w, h) -> the layer's handle, its pixels parked for the
@@ -1588,6 +1741,7 @@ void moycore_lua_close(void)
     RUN.mb_open = 0;
     if (RUN.L) lua_close(RUN.L);
     RUN.L = NULL;
+    moycore_files_bind(&RUN.c.con, &RUN.files, NULL, NULL, 0);
     media_release();                 // after the VM: its canvases point at the layers
 #if MOYCORE_POOL
     // AFTER lua_close, never before: until it returns, the chunks still hold

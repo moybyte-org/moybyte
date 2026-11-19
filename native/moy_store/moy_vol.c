@@ -453,6 +453,7 @@ static int vol_open(const moy_vol_t *v, const char *path, int mode,
             rc = fat_err(FF(f_open)((FATFS *)v->fs, &f->u.fil, path,
                                 mode == MOY_VOL_WRITE ? FA_WRITE | FA_CREATE_ALWAYS
                                 : mode == MOY_VOL_APPEND ? FA_WRITE | FA_OPEN_APPEND
+                                : mode == MOY_VOL_UPDATE ? FA_READ | FA_WRITE | FA_OPEN_ALWAYS
                                 : FA_READ));
             break;
         #endif
@@ -463,6 +464,7 @@ static int vol_open(const moy_vol_t *v, const char *path, int mode,
                 (lfs2_t *)v->fs, &f->u.lf, path,
                 mode == MOY_VOL_WRITE ? LFS2_O_WRONLY | LFS2_O_CREAT | LFS2_O_TRUNC
                 : mode == MOY_VOL_APPEND ? LFS2_O_WRONLY | LFS2_O_CREAT | LFS2_O_APPEND
+                : mode == MOY_VOL_UPDATE ? LFS2_O_RDWR | LFS2_O_CREAT
                 : LFS2_O_RDONLY, &f->lcfg));
             break;
         #endif
@@ -473,6 +475,8 @@ static int vol_open(const moy_vol_t *v, const char *path, int mode,
                       ? open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666)
                       : mode == MOY_VOL_APPEND
                       ? open(path, O_WRONLY | O_CREAT | O_APPEND, 0666)
+                      : mode == MOY_VOL_UPDATE
+                      ? open(path, O_RDWR | O_CREAT, 0666)
                       : open(path, O_RDONLY);
             rc = f->u.fd < 0 ? px_err() : 0;
             if (rc == 0 && mode == MOY_VOL_READ) {

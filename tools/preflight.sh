@@ -294,9 +294,18 @@ if [ "${FIRMWARE}" = "0" ] && [ "${NOFIRMWARE}" = "0" ] && firmware_touched; the
   printf 'preflight: the change reaches the board images (CI builds them) -- the firmware lane is on (--no-firmware skips it)\n'
   FIRMWARE=1
 fi
+# The image builds hold the machine's build lock, the one a single board's
+# build takes outside a preflight (`flock ~/.cache/moybyte-build.lock`), so
+# such a build runs beside this preflight's host steps and never beside its
+# image builds.
+BUILD_LOCK=("${NO_INFLATER[@]}")
+if command -v flock >/dev/null 2>&1; then
+  mkdir -p "${HOME}/.cache"
+  BUILD_LOCK+=(flock "${HOME}/.cache/moybyte-build.lock")
+fi
 if [ "${FIRMWARE}" = "1" ]; then
   step "every board's image builds, above its headroom floor" \
-    "${NO_INFLATER[@]}" "${PY}" tools/board.py pass --all --build-only
+    "${BUILD_LOCK[@]}" "${PY}" tools/board.py pass --all --build-only
 fi
 
 if [ "${fails}" -ne 0 ]; then

@@ -1,0 +1,19 @@
+{
+  "format": "moy-1",
+  "title": "Dual C",
+  "id": "local.dual",
+  "runtime": "wasm",
+  "main": "main.wasm",
+  "memory": 6,
+  "canvas": "320x240",
+  "input": ["buttons", "touch"],
+  "extensions": ["moybyte.scenes", "moybyte.images", "moybyte.mouse", "moybyte.prefs"],
+  "writable": ["notes/"],
+  "moybyte": {
+    "type": "game",
+    "native": [],
+    "permissions": [],
+    "config": {"step": 3, "word": "dual"},
+    "assets": {"scenes": ["main", "second"]}
+  }
+}

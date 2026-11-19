@@ -53,7 +53,8 @@
 // its adapters call: a C function by its table index (the table's rows), the
 // table itself and the trap (embed.c's exports), and the allocator.
 EM_JS_DEPS(moy_wasm_web, "$stringToUTF8,$getWasmTableEntry,malloc,free,"
-                         "moy_web_natives,moy_web_app_natives,moy_web_trapped,"
+                         "moy_web_natives,moy_web_app_natives,moy_web_ext_module,"
+                         "moy_web_ext_natives,moy_web_trapped,"
                          "moy_web_item_trap");
 
 // The app ABI's import adapter (native/moy_app/moy_app_wasm.h): the rows of
@@ -72,11 +73,35 @@ EMSCRIPTEN_KEEPALIVE const void *moy_web_app_natives(uint32_t *count)
     return moy_app_wasm_natives != NULL ? moy_app_wasm_natives(count) : NULL;
 }
 
+// Moybyte's own extensions (native/moycore/moycore_wasm_ext.h), by index: the
+// i-th module's name (NULL past the last) and its rows, which the page's
+// adapters wrap as they wrap the app extension's. Weak: an image without
+// moycore's compiled run has none.
+#if __has_include("moycore_run.h")
+#include "moycore_run.h"
+#else
+const char *moycore_wasm_ext_module(uint32_t i);
+const void *moycore_wasm_ext_rows(uint32_t i, uint32_t *count);
+#endif
+#pragma weak moycore_wasm_ext_module
+#pragma weak moycore_wasm_ext_rows
+EMSCRIPTEN_KEEPALIVE const char *moy_web_ext_module(uint32_t i)
+{
+    return moycore_wasm_ext_module != NULL ? moycore_wasm_ext_module(i) : NULL;
+}
+
+EMSCRIPTEN_KEEPALIVE const void *moy_web_ext_natives(uint32_t i, uint32_t *count)
+{
+    *count = 0;
+    return moycore_wasm_ext_rows != NULL ? moycore_wasm_ext_rows(i, count) : NULL;
+}
+
 EM_JS(int, web_open, (const uint8_t *bytes, uint32_t len, char *err, int errlen), {
     var e = Module.moyEngine;
     var why = e ? e.open(HEAPU8.subarray(bytes, bytes + len), {
                       fn: getWasmTableEntry, natives: _moy_web_natives,
                       appNatives: _moy_web_app_natives,
+                      extModule: _moy_web_ext_module, extNatives: _moy_web_ext_natives,
                       trapped: _moy_web_trapped, itemTrap: _moy_web_item_trap,
                       malloc: _malloc, free: _free })
                 : "instantiate: this page has no WebAssembly cart engine";

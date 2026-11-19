@@ -707,7 +707,7 @@ def test_an_update_keeps_the_saves_and_an_edited_config(tmp_path):
     assert _install(_cart(repo, "jet"), root, MemNet(repo.routes())).path
     assert _state(repo, root, "jet") == "installed"
     folder = Path(root) / "jet.moy"
-    (folder / "pmem.json").write_text('{"0": 900}')
+    (folder / "pmem.bin").write_bytes(b"saves")
     (folder / "config.json").write_text('{"speed": 9}')         # the kid's own
     written = Path(root).parent / "apps" / "jet"
     written.mkdir(parents=True)
@@ -716,7 +716,7 @@ def test_an_update_keeps_the_saves_and_an_edited_config(tmp_path):
     assert _state(repo, root, "jet") == "update"
     job = _install(_cart(repo, "jet"), root, MemNet(repo.routes()))
     assert job.error is None
-    assert (folder / "pmem.json").read_text() == '{"0": 900}'
+    assert (folder / "pmem.bin").read_bytes() == b"saves"
     assert (folder / "config.json").read_text() == '{"speed": 9}'
     assert (written / "saves%2fslot1.sav").read_bytes() == b"level 3"
     assert (folder / "main.wasm").read_bytes().endswith(b"2")
@@ -779,7 +779,7 @@ def test_a_crash_at_any_point_of_the_swap_is_put_right(tmp_path, left):
     _install(_cart(repo, "jet"), root, MemNet(repo.routes()))
     target = Path(root) / "jet.moy"
     stage = Path(root).parent / ci.STAGE_DIR
-    (target / "pmem.json").write_text("saves")
+    (target / "pmem.bin").write_text("saves")
     if left in ("aside", "both"):             # old moved out, new never moved in
         target.rename(stage / "jet.moy.old")
     if left in ("staging", "both"):           # an unfinished build
@@ -789,7 +789,7 @@ def test_a_crash_at_any_point_of_the_swap_is_put_right(tmp_path, left):
         (stage / "other.moy.gone").mkdir()
         (stage / "jet.moy.archive").write_bytes(b"half an archive")
     assert ci.recover(root) >= 1
-    assert (target / "pmem.json").read_text() == "saves"
+    assert (target / "pmem.bin").read_text() == "saves"
     assert os.listdir(stage) == []
 
 
@@ -1670,8 +1670,10 @@ def test_an_install_out_of_memory_says_to_restart(tmp_path):
     _frames(ws, app, n=400)
     assert app.phase == "failed"
     icon, title, lines = app._empty_words()
-    assert title == "Not installed" and " ".join(lines[:-1]) == ci.NET_MEMORY
-    assert lines[-1] == "Nothing changed."
+    n = lines.index("Nothing changed.")
+    assert title == "Not installed" and " ".join(lines[:n]) == ci.NET_MEMORY
+    # the cause exact under the kid's words, for a parent or the shelf's author
+    assert " ".join(lines[n + 1:]).startswith("Details: ") and app.why_detail
     assert "carts" not in ws.leases.holders()
 
 

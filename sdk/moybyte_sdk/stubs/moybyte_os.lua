@@ -80,6 +80,8 @@ function moybyte.cancel(...) end
 function moybyte.pick(...) end
 --- moybyte.log(level: int, text: str): the row moybyte.log
 function moybyte.log(...) end
+--- net(): the row net; needs multiplayer
+net = {}
 --- on_net(): the row net; needs multiplayer
 function on_net(...) end
 --- pin_write(): the row pins; needs pins

@@ -810,14 +810,26 @@ class PaintLayer(Layer):
             how = hold.under(ws, key, rect, self._dt, False, True)
             if how == _ui_draw.HOLD_DRAW:
                 self._draw_look(sheet)
-                if not hold.copies(cv):
-                    hold.keep(ws, cv, rect, key, True, self._dt)
+            elif how == _ui_draw.HOLD_LAST and self.layout.hints is not None:
+                # the page as the frame before drew it, but for its hint
+                # strip, which names the pickers' keys now
+                lay = self.layout
+                cv.rect(*(lay.hints + (ws.theme_colors["surface"],)))
+                self._draw_hints(cv, lay, pe, ws.theme_colors)
+            if how in (_ui_draw.HOLD_DRAW, _ui_draw.HOLD_LAST) and not hold.copies(cv):
+                hold.keep(ws, cv, rect, key, True, self._dt)
             self._draw_pickers(how == _ui_draw.HOLD_LEFT)
+            if self._pop == "pickers" and self._host.box("Sprites") != key[-1]:
+                after = self._pick_key(sheet)
+                if after[:-1] == key[:-1]:
+                    hold.drew(after)
             return
         hold.under(ws, None, None, self._dt)
         self._draw_look(sheet)
         if self._pop == "more" and pe is not None:
             self._draw_more()
+        elif not self._pop:
+            hold.shown(ws, ws.sys_canvas, True, self._dt)
 
     # -- the 2026-10 look ---------------------------------------------------------
 
@@ -1288,6 +1300,7 @@ class PaintLayer(Layer):
         else:
             self._host.reset()
         self._pop = "pickers"
+        self._hold.opened(self.ws)        # over the page as the frame before drew it
         self.ws.mark_dirty()
 
     def _pick_key(self, sheet):

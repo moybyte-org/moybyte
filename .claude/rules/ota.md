@@ -57,7 +57,7 @@ paths:
     the manifest names the cart (`cart`, unsigned). **No add-on published is
     removed** and each index keeps the entries of the one it replaces, so a
     console a step behind its channel, rolled back or installed by hand still
-    finds its own. The seed carts' zips and covers (the official carts,
+    finds its own. The official carts' zips and covers (the seed carts but the test fixtures,
     `.claude/rules/carts.md`) are the one thing a publish deletes: every
     changed cart adds two assets and a release holds at most 1,000, so after
     the upload one that no index on the release references, now or before

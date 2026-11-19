@@ -42,17 +42,19 @@ WHAT IT MEASURES, with the meters the `perf` skill names and nothing new:
                     frame work times PERF's loop frames per drawn frame, the
                     work behind one frame on the glass (a paced cart's
                     tick-only frames included), absent where the loop spins
-                    between frames (a run in the kernel's front). A title
-                    that is not a run tile on the board's home is not run:
-                    `run` would start the first tile holding the name (Sakura
-                    is a wallpaper, and `run Sakura` starts Sakura Lua)
+                    between frames (a run in the kernel's front). A test
+                    fixture of the roster (Brick Siege Lua), which no image
+                    carries, is pushed from system_carts/ for the run and
+                    removed after it. A title that is not a run tile on the
+                    board's home is not run: `run` would start the first tile
+                    holding the name
     compiled cart   Jet Teapot (`tools/jet_cart.py`), built for the board's
                     chip, pushed, run uncapped as the suites' floor runs it,
                     measured as a roster cart and removed again; absent (with
                     the reason) when the OTA signing key is not on this machine
 
 and leaves the board as it found it: no cart, diag, uncap and the FPS chip as
-they were, the window it opened closed, the cart it pushed gone.
+they were, the window it opened closed, the carts it pushed gone.
 
 THE RECORD. One JSON object a run (`record`): the board, the date, the commit
 the image was built from, the image (its stamp, sha256 and whether this pass
@@ -94,10 +96,8 @@ remembers them for the next pass, it does not publish them.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import datetime
 import hashlib
-import io
 import json
 import os
 import re
@@ -714,22 +714,9 @@ class Stage:
 
     def _compiled(self, local):
         import push_cart
-        from tools import board_config
         b = self.b
-        had = {f for f, _m in (push_cart.store_folders(b) or ())}
-        root = str(b.pyval("str(ws.carts_root)", timeout=20, strict=True))
-        dest = root.rstrip("/") + "/" + COMPILED_FOLDER
-        ser = board_config.load(self.board_dir)["serial"]
-        names = push_cart.cart_files(local)
-        link = push_cart.raw_link(b, ser)
-        if not b.pyexec(push_cart.HELPERS):
-            raise RuntimeError("could not install the upload helpers")
         t = time.monotonic()
-        with contextlib.redirect_stdout(io.StringIO()):
-            push_cart.push_files(b, {n: os.path.join(local, n) for n in names},
-                                 names, dest, link)
-        b.pyval("len(ws.carts.synced() or ())", timeout=60)
-        b.pyval(push_cart.CONSENT % dest, timeout=60)
+        fresh = push_cart.push_folder(b, self.board_dir, local, COMPILED_FOLDER)
         self.phases["compiled push"] = round(time.monotonic() - t, 1)
         uncap_was = bool(b.pyval("getattr(ws, 'uncap', False)", timeout=10))
         try:
@@ -737,23 +724,34 @@ class Stage:
             self.cart(COMPILED, "%s uncapped" % COMPILED, COMPILED_SAMPLES)
         finally:
             b.cmd("uncap %d" % uncap_was, wait_for="REMOTE uncap")
-            if COMPILED_FOLDER not in had:
-                push_cart.remove_folders(b, [COMPILED_FOLDER])
-                b.pyval("len(ws.carts.synced() or ())", timeout=60)
+            if fresh:
+                push_cart.drop_folders(b, [COMPILED_FOLDER])
 
     # -- the whole stage ---------------------------------------------------
 
     def put_back(self, roster):
-        """The roster's seed carts a removal took off this board's store put
-        back before anything is measured (CartManager.put_back), and said: a
-        dev board's removal record never costs a pass its fixtures."""
+        """The roster's official seed carts a removal took off this board's
+        store put back before anything is measured (CartManager.put_back),
+        and said: a dev board's removal record never costs a pass its carts."""
         back = self.b.pyval("ws.carts.put_back(%r)" % list(roster), timeout=60)
         if back:
             self.log("put back %s: a removal record had taken %s off this board"
                      % (", ".join(back), "it" if len(back) == 1 else "them"))
             self.conditions["put_back"] = list(back)
 
+    def push_fixtures(self, roster):
+        """The roster's test fixtures, which no image carries, pushed for the
+        run (push_cart.push_fixtures) and said. Returns the folders this
+        pushed, which `run` removes after."""
+        import push_cart
+        pushed = push_cart.push_fixtures(self.b, self.board_dir, roster)
+        if pushed:
+            self.log("pushed %s for the run: a test fixture no image carries"
+                     % ", ".join(pushed))
+        return pushed
+
     def run(self, roster, compiled=True):
+        import push_cart
         b = self.b
         st = b.state()
         if st.get("cart"):
@@ -766,6 +764,7 @@ class Stage:
                            "windowed": self.windowed}
         if self.diag_was:
             self.diag(False)
+        pushed = []
         try:
             self._phase("desk idle", self.desk_idle)
             self._phase("heap", self.heap)
@@ -773,6 +772,7 @@ class Stage:
             if self.windowed:
                 self._phase("window drag", self.drag)
             self.put_back(roster)
+            pushed = self.push_fixtures(roster)
             # an image from before phase 9 has no ws.home: its console's own
             tiles = set(b.pyval("[c.get('title') for c in (getattr(getattr(ws, 'home', None), "
                                 "'runnable_items', None) or ws._runnable_items)()]",
@@ -788,6 +788,7 @@ class Stage:
         finally:
             if b.state().get("cart"):
                 b.leave_cart()
+            push_cart.drop_folders(b, pushed)
             if self.diag_was:
                 b.cmd("diag 1", wait_for="REMOTE diag")
             b.pyexec("ws.show_fps = %r" % self.chip)

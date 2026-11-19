@@ -912,6 +912,8 @@ void mua_edits_drop(moy_ui_inst_t *I, const moy_ui_ctx_t *c, uint32_t id) {
     }
 }
 
+#define MOY_UI_SECRET_MAX 64           // the most `*`s a secret field draws
+
 int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,
                          uint8_t *buf, size_t cap, size_t len, const moy_ui_over_t *o) {
     o = mua_over(o);
@@ -1030,9 +1032,21 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
     if (!disabled) {
         mua_sig_mix(c, buf, len);
     }
+    // `secret`: a `*` a character in place of the text (at most a box's worth)
+    uint8_t dots[MOY_UI_SECRET_MAX];
+    moy_ui_span_t t = {buf, (uint16_t)len};
+    if (o->flags2 & MOY_UI_O2_SECRET) {
+        size_t n = 0;
+        for (size_t i = 0; i < len && n < sizeof dots; i++) {
+            if ((buf[i] & 0xC0) != 0x80) {
+                dots[n++] = '*';
+            }
+        }
+        t.p = dots;
+        t.n = (uint16_t)n;
+    }
     EACH_ROW(c, k, s, b, stacked, c->page) {
         mua_band(c, s, b, stacked);
-        moy_ui_span_t t = {buf, (uint16_t)len};
         moy_ui_box_t fb = b;
         moy_ui_span_t lb = label;
         if (caph) {
@@ -1075,6 +1089,51 @@ void moy_ui_api_wash(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
     mua_wash(c, s);
 }
 
+// A dialog's card `w` wide, its title band `top` high and its foot `foot`,
+// for a body `body` high: centred on the surface, the body cut to the room
+// the surface leaves it (never under one row), its height in *bh.
+static moy_ui_box_t dlg_card(const moy_ui_ctx_t *c, int w, int top, int foot, int body,
+                             int *bh_out) {
+    moy_ui_box_t sf = c->surface;
+    int pad = moy_ui_modal_band(c->fs, c->cls), rh = mua_row_h(c);
+    int bh = body;
+    if (top + bh + foot > sf.h - 2 * pad) {
+        bh = sf.h - 2 * pad - top - foot;
+        if (bh < rh) {
+            bh = rh;
+        }
+    }
+    int h = top + bh + foot;
+    moy_ui_box_t card = {(int16_t)(sf.x + moy_ui_fdiv(sf.w - w, 2)),
+                         (int16_t)(sf.y + moy_ui_fdiv(sf.h - h, 2)), (int16_t)w, (int16_t)h};
+    if (card.y < sf.y) {
+        card.y = sf.y;
+    }
+    *bh_out = bh;
+    return card;
+}
+
+// A dialog's first frame drawn tall (mua_lend) has closed its body, `took`
+// high: the card moves to its place, its title band and body where they
+// stand in it, its foot (the buttons) as far up from its foot, and the
+// stops they recorded move with them.
+static void dlg_land(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int took) {
+    moy_ui_box_t t = c->dlg.card;
+    int rh = mua_row_h(c), pad = moy_ui_modal_band(c->fs, c->cls), bh;
+    int top = pad + rh + pad / 2, foot = t.y + t.h - c->dlg.foot;
+    moy_ui_box_t card = dlg_card(c, t.w, top, foot, took > 0 ? took : rh, &bh);
+    mua_lend_put(c, s, card, top + bh, 0, 1);
+    mua_lend_stops(c, card.y - t.y, card.y + card.h - (t.y + t.h));
+    for (int i = 0; i < c->n_cur; i++) {
+        if (c->cur[i].id == c->dlg.id && (c->cur[i].flags & STOP_PAGE)) {
+            c->cur[i].b.h = (int16_t)bh;        // the body as it shows
+        }
+    }
+    c->dlg.card = card;
+    c->dlg.foot = (int16_t)(card.y + top + bh);
+    mua_lend_end(c);
+}
+
 int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
                           const uint8_t *buttons, size_t len, int kind, const moy_ui_over_t *o) {
     o = mua_over(o);
@@ -1082,7 +1141,9 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
         if (c->n_nest && c->nest[c->n_nest - 1].kind == 2) {
             int used = c->nest[c->n_nest - 1].used;
             int took = mua_nest_close(c, s, 2);
-            if (took != used) {
+            if (mua_lent_of(c, 2) != NULL) {
+                dlg_land(c, s, took);
+            } else if (took != used) {
                 c->owe = 1;             // laid out for another body: the next frame redraws
             }
         }
@@ -1121,19 +1182,23 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     if (w > sf.w - 2 * pad) {
         w = sf.w - 2 * pad;
     }
-    int bh = body;
-    if (top + bh + foot > sf.h - 2 * pad) {
-        bh = sf.h - 2 * pad - top - foot;
-        if (bh < rh) {
-            bh = rh;
+    int bh;
+    moy_ui_box_t card = dlg_card(c, w, top, foot, body, &bh);
+    // no size kept for it yet (its first frame): drawn as tall as the
+    // surface lets it, its body laid out in that room, and moved to its
+    // place once the body closes (dlg_land); where the canvas cannot lend
+    // that, it shows at a one-row body and the next frame at its size
+    int lent = 0;
+    if (kb == NULL && !rows) {
+        int tbh;
+        moy_ui_box_t t = dlg_card(c, w, top, foot, sf.h, &tbh);
+        if (mua_lend(c, s, t, 2)) {
+            lent = 1;
+            card = t;
+            bh = tbh;
         }
     }
-    int h = top + bh + foot;
-    moy_ui_box_t card = {(int16_t)(sf.x + moy_ui_fdiv(sf.w - w, 2)),
-                         (int16_t)(sf.y + moy_ui_fdiv(sf.h - h, 2)), (int16_t)w, (int16_t)h};
-    if (card.y < sf.y) {
-        card.y = sf.y;
-    }
+    int h = card.h;
     uint32_t btn = mua_hash(buttons, len, id);
     c->dlg.held = (uint8_t)(o->wash == 0 && o->has_gen);
     c->dlg.gen = o->gen;
@@ -1148,6 +1213,9 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     }
     if (o->wash != 0 && !c->fl.mute) {
         mua_wash(c, s);                     // everything under a dialog dims (D-01)
+    }
+    if (lent) {
+        mua_lend_keep(c, s);
     }
     clip_t mk;
     moy_ui_box_t cast = {card.x, card.y, card.w, (int16_t)(card.h + MOY_UI_DROP * fs)};

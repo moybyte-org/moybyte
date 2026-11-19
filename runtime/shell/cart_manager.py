@@ -16,7 +16,7 @@ re-seed and browser sync. So the consumers read `ws.carts.all` and they all
 migrated in the landing that moved it: the desk icon column and its statics key
 (`wm_windowed`), the dev channel's `state` snapshot, the sysmenu's delete
 detection, `app_context`'s `Carts.all()` role, the cover prefetch and icon
-prune, `tools/make_site_gifs.py`, `tools/p4_conformance.py`'s serial surgery and
+prune, `tools/p4_conformance.py`'s serial surgery and
 the web runner's boot + re-scan.
 
 ## What stays on the kernel, and why

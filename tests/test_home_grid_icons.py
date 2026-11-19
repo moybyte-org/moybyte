@@ -15,7 +15,7 @@ import pytest
 from runtime import host_app, launcher_layer, ui_draw
 from runtime import home_grid
 from runtime.cover_cache import BASE, HALF
-from ws_helpers import build_ws_with_shelf
+from ws_helpers import build_ws_with_shelf, shelf
 
 
 @pytest.fixture(autouse=True)
@@ -32,6 +32,8 @@ def _home(tmp_path, arrangement, n=30, **kw):
         ws = host_app.build_workstation(str(tmp_path / "carts"), **kw)
         ws.home.go_home()
         ws.home.open_library()
+        ws.launcher.items = [c for c in shelf(str(tmp_path / "carts"))
+                             if c.get("type") == "game"]     # the top-up's games too
     else:
         ws = build_ws_with_shelf(tmp_path, n)
     drv = host_app.ConsoleDriver(ws)
@@ -68,10 +70,7 @@ def test_a_layouts_home_picks_the_arrangement(tmp_path):
 
     ws = build_ws_with_shelf(tmp_path, 4)
     for home, cls in (("icons", IconHome), ("grid", Launcher)):
-        rc, _n = moy_ui.theme_install(json.dumps({"format": 2, "name": "hi" + home, "layout": {
-            "home": home, "bars": [{"edge": "top", "left": ["zone"],
-                                    "right": ["clock", "close", "menu"]}]}}).encode())
-        assert rc == 0
+        _hi_layout(home)
         ws.home.set_home_tab("apps")
         ws.launcher.sel = 1
         want = ws.launcher.selected()
@@ -84,6 +83,83 @@ def test_a_layouts_home_picks_the_arrangement(tmp_path):
         ws.look.apply_layout()
         assert ws.look.home == "carousel" and type(ws.launcher) is Carousel
         moy_ui.theme_uninstall()
+
+
+def _hi_layout(home):
+    import moy_ui
+
+    rc, _n = moy_ui.theme_install(json.dumps({"format": 2, "name": "hi" + home, "layout": {
+        "home": home, "bars": [{"edge": "top", "left": ["zone"],
+                                "right": ["clock", "close", "menu"]}]}}).encode())
+    assert rc == 0
+
+
+def test_the_home_style_setting_overrides_the_themes(tmp_path):
+    import moy_ui
+    from runtime.home_icons import IconHome
+    from runtime.home_grid import Launcher
+
+    ws = build_ws_with_shelf(tmp_path, 4)
+    _hi_layout("icons")
+    ws.system.set("layout_theme", "hiicons")
+    ws.look.apply_layout()
+    assert type(ws.launcher) is IconHome
+    ws.home.set_home_tab("apps")
+    ws.launcher.sel = 1
+    want = ws.launcher.selected()
+    ws.system.set("home_style", "grid")
+    ws.look.apply_layout()
+    assert ws.look.home == "grid" and type(ws.launcher) is Launcher
+    assert ws.launcher.tab == "apps" and ws.launcher.selected() is want
+    # THEME (the row deleted) falls back to the theme layout's
+    ws.system.delete("home_style")
+    ws.look.apply_layout()
+    assert ws.look.home == "icons" and type(ws.launcher) is IconHome
+    assert ws.launcher.tab == "apps" and ws.launcher.selected() is want
+    ws.system.set("layout_theme", None)
+    moy_ui.theme_uninstall()
+
+
+@pytest.mark.parametrize("value", ["", "Grid", "tiles", 2, None, ["grid"], {"home": "grid"}])
+def test_a_bad_home_style_reads_as_absent(tmp_path, value):
+    from runtime.home_carousel import Carousel
+
+    ws = build_ws_with_shelf(tmp_path, 4)
+    ws.system.set("home_style", value)
+    assert ws.look.home_style() is None
+    ws.look.apply_layout()
+    assert ws.look.home == "carousel" and type(ws.launcher) is Carousel
+
+
+def test_the_home_style_row_steps_through_auto_and_the_arrangements(tmp_path):
+    from runtime.home_icons import IconHome
+    from runtime.home_carousel import Carousel
+    from runtime.home_grid import Launcher
+
+    ws = build_ws_with_shelf(tmp_path, 4)
+    sl = ws.settings_layer
+    rows = [r[0] for r in sl._settings_rows()]
+    sl.set_msel = rows.index("home_style")
+    assert rows[rows.index("font_scale") + 1] == "home_style"
+    assert sl._value("home_style", "home") == 0
+    steps = (("carousel", Carousel), ("grid", Launcher), ("icons", IconHome),
+             (None, Carousel))
+    for i, (style, cls) in enumerate(steps):
+        sl.settings_adjust(1)
+        assert ws.system.get("home_style") == style
+        assert type(ws.launcher) is cls
+        assert sl._value("home_style", "home") == (i + 1) % 4
+    sl.settings_adjust(-1)
+    assert ws.system.get("home_style") == "icons" and type(ws.launcher) is IconHome
+
+
+def test_a_home_style_from_the_served_page_applies(tmp_path):
+    from runtime.home_grid import Launcher
+
+    ws = build_ws_with_shelf(tmp_path, 4)
+    ws.system.set("home_style", "grid")
+    ws.spine.apply_system_keys(("home_style",))
+    assert type(ws.launcher) is Launcher
 
 
 @pytest.mark.parametrize("size, side, rows", ((None, 64, 2), ((1024, 600), 128, 3)))
@@ -301,3 +377,20 @@ def test_a_tap_on_a_card_runs_it(tmp_path):
     drv.frame(1 / 30)
     drv.frame(1 / 30)
     assert ws.screen != "launcher" and home_grid.PSEUDO_TILE_TYPES
+
+
+def test_the_home_style_row_takes_the_arrow_keys(tmp_path):
+    from runtime.home_grid import Launcher
+    from runtime.home_carousel import Carousel
+
+    ws = build_ws_with_shelf(tmp_path, 4)
+    ws.open_settings()
+    sl = ws.settings_layer
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    sl.set_msel = sl.row_index("home_style")
+    drv.frame(1 / 30)
+    for name, style, cls in (("right", "carousel", Carousel), ("right", "grid", Launcher),
+                             ("left", "carousel", Carousel), ("left", None, Carousel)):
+        _press(drv, name)
+        assert ws.system.get("home_style") == style and type(ws.launcher) is cls

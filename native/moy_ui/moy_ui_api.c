@@ -80,6 +80,7 @@ void moy_ui_inst_free(moy_ui_inst_t *I) {
     KEPT_FREE(I->text);
     KEPT_FREE(I->blocks);
     KEPT_FREE(I->edits);
+    KEPT_FREE(I->lent);
     moy_ui_inst_init(I);
 }
 
@@ -230,6 +231,9 @@ void moy_ui_over_put(moy_ui_over_t *o, int k, const int32_t *v) {
         case MOY_UI_OV_CARD: o->card = (int8_t)v[0]; break;
         case MOY_UI_OV_FOLLOW:
             o->flags2 = v[0] ? o->flags2 | MOY_UI_O2_FOLLOW : o->flags2 & ~MOY_UI_O2_FOLLOW;
+            break;
+        case MOY_UI_OV_SECRET:
+            o->flags2 = v[0] ? o->flags2 | MOY_UI_O2_SECRET : o->flags2 & ~MOY_UI_O2_SECRET;
             break;
         default: break;
     }
@@ -1150,6 +1154,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->pop.gone = 0;
     c->pop.id = 0;
     c->pop.hide = 0;
+    mua_lent_drop(c);                   // a first frame's card its pass never closed
     c->pa_box.w = 0;
     c->pa_st = 0;
     c->sp_n = 0;
@@ -1177,7 +1182,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->tip_shown = 0;
     c->bar.seen = 0;
     c->page_title[0] = 0;
-    int settled = !c->owe;
+    int settled = 1;
     int owed_last = c->owe;
     int over_last = c->fl.dirty;
     int moved = 0;
@@ -2454,7 +2459,11 @@ int mua_stop(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t b, int flags, moy_ui_spa
         if (c->focus_name[0] == 0) {
             name_copy(c->focus_name, name);
         }
-        st |= MOY_UI_ST_FOCUS;
+        // a popover's or a dialog's first frame shows no focus in it: the
+        // surface the keys were on still shows its own this frame
+        if (mua_lent(c) == NULL) {
+            st |= MOY_UI_ST_FOCUS;
+        }
     }
     if (c->act == id) {
         st |= MOY_UI_ST_ACTIVATED;

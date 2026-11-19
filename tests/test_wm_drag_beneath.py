@@ -98,7 +98,7 @@ def test_a_window_beneath_a_drag_shows_its_fresh_render(tmp_path, beneath, how):
         elif op == "up":
             drv.touch_up()
         drv.frame(1 / 30)
-        ext = wm._win_extent(top)
+        ext = tuple(wm._win_extent(top))     # the WM's own list, written in place
         shown.append((bytes(cv._buf), ext))
     assert top.x == x_was + 12 * 30, "the drag moved the window all the way"
     # The truth: the window beneath rendered afresh, into its own buffer.

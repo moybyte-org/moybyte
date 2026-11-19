@@ -274,7 +274,7 @@ def test_space_desktop_bg_picker_applies_a_preset(tmp_path):
 
 def test_existing_seed_carts_still_render_their_cards(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    for title in ("Pixel Pet", "Tiny Runner", "Hop Quest", "Tap Only Red"):
+    for title in ("Star Catcher", "Harpoon Pop", "Tap Only Red"):
         _open(ws, title)
         if not ws.cart.get("edit"):
             ws.home.go_home()

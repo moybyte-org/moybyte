@@ -272,7 +272,7 @@ def test_save_persists_a_2x2_sprite(tmp_path):
 # `mset`s there (Bench does) arrives in the editor already dirty and no
 # assertion about "a pan wrote nothing" can mean anything. Named, not indexed --
 # the shelf order is content and moves whenever a seed does.
-_MAP_CART = "Hop Quest"
+_MAP_CART = "Harpoon Pop"
 
 
 def _open_map_cart(ws):

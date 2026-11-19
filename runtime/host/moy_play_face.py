@@ -289,7 +289,37 @@ class moy_match_t(_c.Structure):
         ("pinned", _c.c_bool),
         ("probe", _c.c_uint8),
         ("probe_at", _c.c_uint8),
+        ("tuned_at", _c.c_uint32),
+        ("away", _c.c_bool),
         ("ports_budget", moy_match_budget_t),
+        ("beam", _c.c_void_p),
+        ("frame_max", _c.c_uint16),
+        ("frame", _c.c_uint8 * 1470),
+        ("kept_id", _c.c_uint32),
+        ("kept_at", _c.c_uint32),
+        ("kept_said", _c.c_uint32),
+        ("kept_peer", _c.c_uint8 * 6),
+        ("kept", _c.c_uint8),
+        ("kept_why", _c.c_uint8),
+        ("polled", _c.c_uint32),
+    ]
+
+
+class moy_match_beam_info_t(_c.Structure):
+    _fields_ = [
+        ("role", _c.c_uint8),
+        ("state", _c.c_uint8),
+        ("why", _c.c_uint8),
+        ("what", _c.c_uint8),
+        ("size", _c.c_uint32),
+        ("done", _c.c_uint32),
+        ("sent", _c.c_uint32),
+        ("resent", _c.c_uint32),
+        ("refused", _c.c_uint32),
+        ("rate", _c.c_uint32),
+        ("ram", _c.c_uint32),
+        ("title", _c.c_char * 121),
+        ("peer", _c.c_char * 24),
     ]
 
 

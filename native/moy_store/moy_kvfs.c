@@ -64,6 +64,7 @@
 // Each littlefs call under the store's lock (native/moy_store/moy_vol.h, THE
 // STORE'S LOCK): the instance is the kernel's, and a program's task works it too.
 #include "moy_vol.h"
+#include "moy_plog.h"
 #define KL(call) __extension__({ moy_store_lock(); __typeof__(call) r_ = (call); \
     moy_store_unlock(); r_; })
 
@@ -234,6 +235,7 @@ lfs2_t *moy_kvol_lfs(void) {
         #if MOY_KVFS_FLASH
         if (s_kv->err == 0) {
             moy_vol_table_set("/", MOY_VOL_KIND_LFS2, &s_kv->lfs);
+            moy_plog_board(&s_kv->lfs);     // the store's pmem log, where the table has one
         }
         #endif
     }

@@ -377,6 +377,7 @@ static void *sh_open(moy_tty_t *f) {
     moy_sh_board_go_home(h->s, sys != NULL);
     if (!moy_tty_pty(f)) {
         moy_sh_setvar(h->s, "TERM", "dumb");   // a command's bytes, not a screen
+        moy_sh_set_questions(h->s, 0);         // its commands read their answers from stdin
     }
     return h;
 }
@@ -467,7 +468,18 @@ static int sh_sftp(void *sh) {
     return moy_tty_sftp(h->f, h->s);
 }
 
+static int sh_asking(void *sh) {
+    sh_t *h = sh;
+    return h->app == NULL && moy_sh_asking(h->s);
+}
+
+static int sh_secret(void *sh) {
+    sh_t *h = sh;
+    return h->app == NULL && moy_sh_asking_secret(h->s);
+}
+
 const moy_tty_shell_t moy_tty_moy_sh = {
     sh_open, sh_run, sh_prompt, sh_status, sh_cancel, sh_close,
-    sh_front, sh_keys, sh_line, sh_show, sh_tick, sh_resize, sh_complete, sh_sftp,
+    sh_front, sh_keys, sh_line, sh_show, sh_tick, sh_resize, sh_complete, sh_sftp, sh_secret,
+    sh_asking,
 };

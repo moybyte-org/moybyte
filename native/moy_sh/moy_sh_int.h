@@ -40,12 +40,15 @@ struct moy_sh {
     size_t cmd_start;                   // where in it the running line began
 
     // a question asked (moy_sh_ask): the line that asked, run again with the
-    // next line typed as its answer
+    // lines typed to its questions so far as their answers, in order
     char *ask_line;
     char ask_prompt[MOY_SH_ASK_MAX];
-    char *answer;                       // that line, while the command runs again
-    char *answered;                     // its block, freed when that run ends
+    int ask_flags;                      // the question's MOY_SH_ASK_* flags
+    char *answers[MOY_SH_ANSWERS];      // zeroed when the line asks no more
+    int nanswers;
+    int next_answer;                    // the one moy_sh_answer gives next this run
     int asked;                          // asked during this run
+    int no_questions;                   // moy_sh_set_questions(s, 0)
 
     jmp_buf run_jb;                     // the session's own exit
     int status;

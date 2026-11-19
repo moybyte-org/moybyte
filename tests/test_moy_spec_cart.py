@@ -450,11 +450,11 @@ def test_duplicate_leaves_behind_saves_and_undo_history(tmp_path):
     Path(root).mkdir(parents=True)
     cart = moy_carts.create("Saved", root, src="def _draw():\n    pass\n", type="game")
     p = Path(cart["path"])
-    (p / "pmem.json").write_text(json.dumps([7] * 8))
+    moy_carts.save_pmem(cart, [7] * 8)
     (p / "journal.jsonl").write_text('{"seq": 1}\n')
     dup = moy_carts.duplicate(moy_carts.load(str(p)), root)
     names = set(x.name for x in Path(dup["path"]).iterdir())
-    assert "pmem.json" not in names
+    assert "pmem.bin" not in names
     assert not any(n.startswith("journal") for n in names)
 
 
@@ -559,17 +559,17 @@ def test_pmem_round_trips_negative_values():
     assert p.cell(0) == -2147483648
 
 
-def test_pmem_load_reinterprets_legacy_unsigned_saves(tmp_path):
-    """Saves written before the width was pinned stored a negative as a huge
-    unsigned value; reading them back signed is the migration."""
+def test_pmem_is_signed_and_a_json_save_is_not_read(tmp_path):
+    """pmem.bin holds signed 32-bit cells; the console reads nothing else, so
+    a pmem.json from before it is ignored (owner, 2026-11-18)."""
     from runtime import moy_carts
     d = Path(tmp_path) / "c.moy"
     d.mkdir()
-    (d / "pmem.json").write_text(json.dumps([4294967295, 7, 2147483648]))
+    (d / "pmem.json").write_text(json.dumps([41, 7]))
+    assert moy_carts.load_pmem(str(d)) == [0] * 256
+    moy_carts.save_pmem({"path": str(d)}, [4294967295, 7, 2147483648])
     cells = moy_carts.load_pmem(str(d))
-    assert cells[0] == -1
-    assert cells[1] == 7
-    assert cells[2] == -2147483648
+    assert cells[:3] == [-1, 7, -2147483648]
 
 
 # -- a cart is a FOLDER; a .moy archive is transport, not storage --------------

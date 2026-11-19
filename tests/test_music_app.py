@@ -165,7 +165,7 @@ def test_music_plays_as_the_shell_while_a_game_is_current(tmp_path, face):
     from runtime import moybyte
     ws = build_desktop_ws(tmp_path)
     ws.home.open_desk()
-    cart = next(c for c in ws.carts.all if c.get("title") == "Sky Run")
+    cart = next(c for c in ws.carts.all if c.get("title") == "Star Catcher")
     ws.open_in_editor(cart)
     _settle(ws)
     game = ws.run.player.pid

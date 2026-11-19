@@ -164,6 +164,103 @@ def test_the_verbs_are_the_current_rows(tmp_path):
     assert app._action_labels() == app.TRASH_ACTIONS
 
 
+# -- Downloads ---------------------------------------------------------------------
+
+def _arrive(carts, name, data):
+    """A file landed in Downloads as a beam lands one: written there whole."""
+    d = Path(moy_carts.files_root(carts)) / "Downloads"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / name).write_bytes(data if isinstance(data, bytes) else data.encode())
+
+
+def test_downloads_lists_what_arrived_under_its_whole_name_and_type(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = _ws(tmp_path)
+    _arrive(carts, "Trip Notes.md", "# trip")
+    _arrive(carts, "photo.jpg", b"\xff\xd8\xff")
+    _arrive(carts, "tool.py", "print(1)")
+    _arrive(carts, "readme", "plain")
+    _arrive(carts, "tool.py.bak", "a store backup")
+    _arrive(carts, ".hidden", "x")
+    app, drv = _files(ws)
+    keys = [p[0] for p in app.shown_places()]
+    _press(drv, *(["down"] * keys.index(files_app.DOWNLOADS) + ["a"]))
+    assert (app.place, app.level) == (files_app.DOWNLOADS, "files")
+    assert app._count(files_app.DOWNLOADS) == 4
+    kinds = {r[0]: r[2] for r in app.rows}
+    assert kinds == {"Trip Notes.md": "Note", "photo.jpg": "JPG", "tool.py": "Script",
+                     "readme": "File"}
+    for name in kinds:
+        app.select(name)
+        assert app._action_labels() == app.DOWNLOAD_ACTIONS, "no RUN, whatever it is"
+
+
+def test_a_download_opens_as_data_in_the_app_its_type_takes(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = _ws(tmp_path)
+    _arrive(carts, "tool.py", "print('ran')")
+    _arrive(carts, "photo.jpg", b"\xff\xd8\xff")
+    app, drv = _files(ws)
+    app.open_place(files_app.DOWNLOADS, keep="photo.jpg")
+    app._act("OPEN")
+    assert app.status == "No app opens it"
+    app.open_place(files_app.DOWNLOADS, keep="tool.py")
+    app._act("OPEN")
+    _frames(drv)
+    assert ws.cart.get("title") == "Notes", "a script that arrived is text to edit"
+    assert ws.cart_error is None
+
+
+def test_a_download_is_sent_on_as_it_arrived(tmp_path, monkeypatch):
+    from runtime import intents
+    carts = str(tmp_path / "carts")
+    ws = _ws(tmp_path)
+    _arrive(carts, "Trip Notes.md", "# trip")
+    sent = []
+    monkeypatch.setattr(intents.INTENTS, "beam_ok", lambda: True)
+    monkeypatch.setattr(intents.INTENTS, "beam", lambda item: sent.append(item) or True)
+    app, _drv = _files(ws)
+    app.open_place(files_app.DOWNLOADS, keep="Trip Notes.md")
+    assert app._action_labels() == ("OPEN", "WITH", "SEND", "DEL")
+    app._act("SEND")
+    assert sent == ["Downloads/Trip Notes.md"]
+
+
+def test_a_download_deletes_to_the_trash_and_restores(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = _ws(tmp_path)
+    _arrive(carts, "My Song.mp3", b"ID3")
+    app, _drv = _files(ws)
+    app.open_place(files_app.DOWNLOADS)
+    app._act("DEL", "My Song.mp3")
+    assert app.status == "Moved to the Trash" and app.names_shown() == []
+    assert ("downloads", "My Song.mp3") in app.trash
+    _arrive(carts, "My Song.mp3", b"ID3 again")
+    app._refresh()
+    app._act("DEL", "My Song.mp3")
+    assert ("downloads", "My Song_2.mp3") in app.trash, "a collision before the extension"
+    app.open_place(files_app.TRASH)
+    app._act("RESTORE", "My Song_2.mp3")
+    assert moy_carts.list_files("downloads", carts) == ["My Song_2.mp3"]
+
+
+def test_no_folder_grant_reaches_downloads(tmp_path):
+    """The shell's files grant (no folder) lists Downloads; an app's grant for
+    a shared folder is refused it, and `files:downloads` grants nothing."""
+    from runtime import moy_app
+    carts = str(tmp_path / "carts")
+    ws = _ws(tmp_path)
+    _arrive(carts, "a.txt", "a")
+    shell = ws.app_context("local.shellish", ("files",), "local.shellish")
+    assert shell.files.list("downloads")[0] == ["a.txt"]
+    for kind in ("docs", "drawings", "music", "recordings"):
+        ctx = ws.app_context("local.app_" + kind, ("files",), "local.app_" + kind,
+                             run=True, kind=kind)
+        with pytest.raises(ValueError):
+            ctx.files.list("downloads")
+    assert moy_app.policy(["files:downloads"]) == ((), None)
+
+
 # -- the verbs ---------------------------------------------------------------------
 
 def test_gallery_lists_rename_copy_trash_restore(tmp_path):
@@ -542,8 +639,9 @@ def test_the_list_meets_the_verbs_and_peeks_half_a_row(tmp_path):
                                         ("contrast", "light"), ("contrast", "dark")])
 def test_the_desks_cut_row_shows_under_the_fade(tmp_path, theme, mode):
     """Files on the desk, on Projects, its window shorter than its rows (the
-    kit's scene): the half row above the view's foot holds the cut row's
-    ink, and the verbs' rule lies right under it."""
+    kit's scene, three rows shorter so the cut row is Pin Light, whose dark
+    cover and name have ink in every theme): the half row above the view's
+    foot holds the cut row's ink, and the verbs' rule lies right under it."""
     import test_shell_goldens as g
     import test_editor_look as el
     cfg = dict(g.CONFIGS["p4_1024x600_cs2_fs1_windowed"], variant=mode)
@@ -552,7 +650,7 @@ def test_the_desks_cut_row_shows_under_the_fade(tmp_path, theme, mode):
     ws.home.open_desk()
     ws.spine.open_app(ws.app("files"))
     el._frame(ws, 2)
-    win = el._place(ws, "files", (112, 54, 548, 380))
+    win = el._place(ws, "files", (112, 54, 548, 294))
     ws.app("files").open_place("projects", keep="Harpoon Pop")
     el._frame(ws, 6)
     cx, cy, _cw, _ch = win.content_rect()

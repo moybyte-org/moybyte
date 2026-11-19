@@ -92,6 +92,28 @@ static bool lease_perm(const char *v, const char *e) {
     return *v == '"' && moy_json_strlen(v, e) > 6 && memcmp(v + 1, "lease:", 6) == 0;
 }
 
+// Whether the entry's "extensions" list names `name`.
+static bool declares(const moy_cat_entry_t *e, const char *name) {
+    moy_json_iter_t it;
+    const char *k, *ke, *v, *ve;
+    if (e->extensions.v == NULL || *e->extensions.v != '[') {
+        return false;
+    }
+    moy_json_iter(&it, e->extensions.v, e->extensions.e);
+    while (moy_json_next(&it, &k, &ke, &v, &ve)) {
+        if (*v == '"' && moy_json_str_is(v, ve, name, strlen(name))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The extensions whose data the Python console hands a compiled run before
+// its load (device/moycore_glue.py's WasmRun), and the prefs, whose grant the
+// Player makes: a cart declaring one keeps the VM, its extension named as the
+// import.
+static const char *const VM_EXTS[] = { "moybyte.scenes", "moybyte.images", "moybyte.prefs" };
+
 typedef struct {
     char *imp;
     size_t cap;
@@ -159,6 +181,19 @@ static bool imports_free(const char *path, const moy_cat_entry_t *e, char *imp,
     return ok;
 }
 
+// Whether a manifest field is a list holding anything.
+static bool has_chips(moy_cat_json_t f) {
+    if (f.v == NULL || *f.v != '[') {
+        return false;
+    }
+    for (const char *c = f.v + 1; c < f.e; c++) {
+        if (*c != ' ' && *c != '\t' && *c != '\n' && *c != '\r') {
+            return *c != ']';
+        }
+    }
+    return false;
+}
+
 static uint8_t verdict(const char *path, const moy_cat_entry_t *e, char *imp, size_t cap) {
     if (e->broken != NULL) {
         return MOY_PLAY_WHY_BROKEN;
@@ -181,12 +216,15 @@ static uint8_t verdict(const char *path, const moy_cat_entry_t *e, char *imp, si
     } else {
         return MOY_PLAY_WHY_RUNTIME;
     }
-    if (rt->vm) {
+    if (rt->vm || has_chips(e->native)) {
+        // a compiled cart carrying a native module too: the Python console
+        // picks which module runs (runtime/shell/app_perms.py's tier_of)
         return MOY_PLAY_WHY_RUNTIME;
     }
-    // 2: a game, with the store's default; or a compiled app, where the image
-    // reads its imports.
-    bool app = path != NULL && str_is(e->runtime, "wasm") && str_is(e->type, "app")
+    // 2: a game, with the store's default; or a compiled app, or a compiled
+    // game declaring the app extension, where the image reads its imports.
+    bool wasm = str_is(e->runtime, "wasm");
+    bool app = path != NULL && wasm && (str_is(e->type, "app") || declares(e, APP_EXT))
                && moy_app_wasm_imports != NULL && moy_app_wasm_row_named != NULL
                && moy_app_table_c_row != NULL;
     if (!app && (e->type.v == NULL ? !e->spec : !str_is(e->type, "game"))) {
@@ -208,6 +246,14 @@ static uint8_t verdict(const char *path, const moy_cat_entry_t *e, char *imp, si
         }
         if (it.bad) {
             return MOY_PLAY_WHY_PERM;
+        }
+    }
+    for (size_t i = 0; wasm && i < sizeof(VM_EXTS) / sizeof(VM_EXTS[0]); i++) {
+        if (declares(e, VM_EXTS[i])) {
+            if (imp != NULL && cap) {
+                snprintf(imp, cap, "%s", VM_EXTS[i]);
+            }
+            return MOY_PLAY_WHY_IMPORT;
         }
     }
     if (app && !imports_free(path, e, imp, cap)) {

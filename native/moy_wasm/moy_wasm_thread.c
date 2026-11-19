@@ -4,6 +4,8 @@
 // (wasm_exec_env.h); the MicroPython component sees neither, and a usermod
 // cannot add a component to it.
 
+#include "moy_kmem.h"                    // MOY_KMEM_SRAM_CAPS
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <pthread.h>
@@ -25,7 +27,7 @@ int moy_wasm_spawn(pthread_t *tid, void *(*fn)(void *), void *arg,
     cfg.pin_to_core = core;
     cfg.thread_name = "moy_wasm";
     cfg.stack_alloc_caps = psram ? (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
-                                 : (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+                                 : MOY_KMEM_SRAM_CAPS;
     if (esp_pthread_set_cfg(&cfg) != ESP_OK) {
         return EINVAL;
     }
