@@ -4495,9 +4495,13 @@ def hello_read_its_greeting(board):
     """The hello cart's `read` crossed to the VM and back: its greeting's
     black band spans the text (8 pixels a character) only when the read
     returned the file's bytes; with nothing read it is 8 pixels wide and row 9
-    at x=24 is the blit's gradient. x=24 is left of the system notice an
-    interpreted run shows ("RUNNING SLOWLY"), which the kernel's front draws
-    centred over the top of the run's canvas."""
+    at x=24 is the blit's gradient. The system notice an interpreted run
+    shows ("RUNNING SLOWLY"), which the kernel's front draws centred over the
+    top of the run's canvas, spans the band, so it is said again for no time
+    and the band read from a frame drawn after it is down."""
+    if board.pyval("ws.notice_up is not None", strict=True):
+        board.pyval("ws.notices.notice(*ws.notice_up, ms=0)", strict=True)
+        board.drain(0.5)
     px = board.pyval("(lambda b, i: b[i] | b[i + 1] << 8)"
                      "(ws.run.canvas._buf, 2 * (9 * ws.run.canvas.w + 24))", strict=True)
     black = board.pyval("ws.run.canvas._wire[0]", strict=True)
