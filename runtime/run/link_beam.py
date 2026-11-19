@@ -139,14 +139,17 @@ def about(ms):
 
 def safe_name(name):
     """A received file's name as it may land: its last part only, no control
-    or reserved characters, no leading dot (nothing hidden, no `..`), at most
-    NAME_MAX characters with its extension kept."""
+    or reserved characters, no leading dot (nothing hidden, no `..`), no
+    suffix the store hides as its own (`.bak`, `.tmp`), at most NAME_MAX
+    characters with its extension kept."""
     n = str(name or "")
     n = n[max(n.rfind("/"), n.rfind("\\")) + 1:]
     out = ""
     for c in n:
         out += "_" if ord(c) < 32 or ord(c) == 127 or c in '<>:"|?*' else c
     out = out.strip().lstrip(".").strip()
+    if out.endswith(".bak") or out.endswith(".tmp"):
+        out += "_"
     if len(out) > NAME_MAX:
         dot = out.rfind(".")
         ext = out[dot:] if 0 < dot and len(out) - dot <= 10 else ""

@@ -588,6 +588,7 @@ def test_a_file_lands_in_downloads_under_a_safe_name_and_is_never_run(tmp_path):
     ("../../system/settings", "settings"), ("..", "file"), ("...", "file"),
     (".hidden", "hidden"), ("a\\b\\c.md", "c.md"), ("tab\there\x7f.txt", "tab_here_.txt"),
     ("", "file"), ("x" * 100 + ".png", "x" * 60 + ".png"),
+    ("notes.bak", "notes.bak_"), ("a.tmp", "a.tmp_"),
 ])
 def test_a_received_name_is_made_safe(name, safe):
     assert link_beam.safe_name(name) == safe
