@@ -462,6 +462,15 @@ def _yes(d, question):
     return line in ("y", "yes")
 
 
+def _typed(d, question):
+    """A line the user types after `question`, or None at its end."""
+    d.out(question + " ")
+    line = _door.In(d.io).readline()
+    if d.io is not None and not line.endswith("\n"):
+        d.out("\n")
+    return line.strip() or None
+
+
 def _then_release(p, verb):
     """`verb`'s code, the radio's release (r_pkg's `finally`) left to a
     step of its own."""
@@ -477,7 +486,8 @@ def r_pkg(d, a):
     yes = "-y" in a
     a = [w for w in a if w != "-y"]
     p = pkg.Pkg(ShellInstall(d.ws), d.out, lambda line: d.err("pkg", line),
-                ask=lambda q: _yes(d, q), stopped=lambda: stopped(d))
+                ask=lambda q: _yes(d, q), stopped=lambda: stopped(d),
+                password=lambda q: _typed(d, q))
     verb, rest = (a[0], a[1:]) if a else ("", [])
     try:
         if verb == "update" and not rest:

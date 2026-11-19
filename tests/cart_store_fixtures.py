@@ -71,6 +71,7 @@ class Repo:
         self.files = {}
         self.releases = {}        # full URL -> bytes, served by another host
         self.carts = []
+        self.revoked = {}
 
     def url(self, rel):
         return self.base + "/" + rel
@@ -169,9 +170,16 @@ class Repo:
         self.files["index.json"] = self.index()
         return entry
 
+    def revoke(self, cid, versions):
+        """The index withdraws `versions` of cart `cid` (its `revoked`)."""
+        self.revoked[cid] = list(versions)
+        self.files["index.json"] = self.index()
+
     def index(self):
-        return json.dumps({"version": 1, "name": self.name,
-                           "home": self.base, "carts": self.carts}).encode()
+        doc = {"version": 1, "name": self.name, "home": self.base, "carts": self.carts}
+        if self.revoked:
+            doc["revoked"] = self.revoked
+        return json.dumps(doc).encode()
 
     def routes(self):
         """{full URL: bytes} for an in-memory transport."""

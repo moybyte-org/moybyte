@@ -333,6 +333,7 @@ class BoardCarts:
     def __init__(self, link, root):
         self.link = link
         self.root = root
+        self.locked = False             # the board has a password: its last check said
 
     def check(self):
         return BoardAsk(self, "check", None)
@@ -478,10 +479,15 @@ class BoardAsk:
             self._post({"action": "cancel"})
         return True
 
-    def agree(self):
-        """The install prompt answered yes: the board lands the build."""
+    def agree(self, password=None):
+        """The install prompt answered yes: the board lands the build. With
+        `password`, the board's own, which it checks before an unreviewed
+        Python cart lands (web_addon.OfficialCarts' `agree`)."""
         self.asking = None
-        self._post({"action": "agree"})
+        doc = {"action": "agree"}
+        if password:
+            doc["password"] = password
+        self._post(doc)
 
     def _post(self, doc):
         self._drop_answer()
@@ -553,6 +559,8 @@ class BoardAsk:
         if state == "asking" and self.action == "install":
             return self._prompt(doc.get("manifest"))
         if state == "listed" and self.action in ("check", "licence"):
+            if self.action == "check":
+                self.board.locked = doc.get("locked") is True
             self.doc = doc
             return self._end(None)
         if state == "error":

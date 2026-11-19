@@ -15,4 +15,6 @@ CFLAGS_USERMOD += -I$(MOY_UI_DIR) -I$(MOY_UI_DIR)/../moy_gfx -I$(MOY_UI_DIR)/../
 # A generated face (gen_os, *_face.h) holds names only its includer uses, and
 # the qstr pass re-scans a source only when that source changed: a face that
 # changes alone re-scans every source, as a QSTR_GLOBAL_DEPENDENCIES entry.
-QSTR_GLOBAL_DEPENDENCIES += $(wildcard $(MOY_UI_DIR)/*_face.h)
+# The override dict's keys (modmoy_ui_over.h, a key's MP_QSTR_ only there) are
+# one of those.
+QSTR_GLOBAL_DEPENDENCIES += $(wildcard $(MOY_UI_DIR)/*_face.h) $(MOY_UI_DIR)/modmoy_ui_over.h

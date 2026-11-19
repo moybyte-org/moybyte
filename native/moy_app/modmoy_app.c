@@ -1796,6 +1796,8 @@ SERVED(install, INSTALL, wifi_open)
 SERVED(install, INSTALL, consent)
 SERVED(install, INSTALL, own)
 SERVED(install, INSTALL, board)
+SERVED(install, INSTALL, locked)
+SERVED(install, INSTALL, unlock)
 
 static const mp_rom_map_elem_t install_locals_table[] = {
     ROW(install, hold)
@@ -1820,6 +1822,8 @@ static const mp_rom_map_elem_t install_locals_table[] = {
     ROW(install, consent)
     ROW(install, own)
     ROW(install, board)
+    ROW(install, locked)
+    ROW(install, unlock)
 };
 SERVED_ROLE(install, Install)
 

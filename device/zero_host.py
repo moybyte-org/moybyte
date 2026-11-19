@@ -820,6 +820,17 @@ def _has_password():
         return False
 
 
+def _is_password(password):
+    """Whether `password` is this board's (the setup form's record)."""
+    try:
+        with open(SYSTEM_DIR + "/password") as f:
+            record = f.read()
+    except OSError:
+        return False
+    from zero_setup import is_password
+    return is_password(password, record)
+
+
 def host_class():
     """The store host: the boards' own `WebHost`, whose kernel answers /gpio
     over this board's pin table. Imported here, not at the top: importing this
@@ -931,7 +942,8 @@ def make_official(ota, addon=None):
         return None
     busy = None if addon is None else addon.busy
     return web_addon.OfficialCarts(_ZeroInstall(CartNet(_ZeroWifi())), ota.own_index,
-                                   busy=busy, reserve=SEED_RESERVE)
+                                   busy=busy, reserve=SEED_RESERVE,
+                                   locked=_has_password, unlock=_is_password)
 
 
 ADDON_SLICE_MS = 40                     # the add-on's install per loop iteration

@@ -523,12 +523,13 @@ def listing(c, state=None, had=None):
     holds)."""
     out = {}
     for key in ("id", "name", "version", "folder", "runtime", "description", "genre",
-                "tags", "memory", "depends", "index", "shelf", "external"):
+                "tags", "memory", "depends", "index", "shelf", "external", "revoked"):
         if key in c:
             out[key] = c[key]
     lic = c.get("licence") or {}
     out["licence"] = dict((k, lic[k]) for k in ("spdx", "name") if k in lic)
     out["official"] = _ci.is_official(c)
+    out["reviewed"] = _ci.is_reviewed(c)
     out["core"] = bool((c.get("moybyte") or {}).get("core"))
     out["assets"] = [{"size": a["size"],
                       "files": dict((fn, {"size": m["size"]}) for fn, m in a["files"].items())}
@@ -543,6 +544,7 @@ def listing(c, state=None, had=None):
 
 
 ASK_MS = 600000                 # an install prompt no page answers is cancelled after this
+WRONG_PASSWORD = "That isn't the console's password."
 
 
 class OfficialCarts:
@@ -560,7 +562,8 @@ class OfficialCarts:
                Get Carts reads it) and its entries that fit this image
                listed (`listing`) but the browser console add-on, which
                the board keeps itself (AddonStep), each with where it stands in this store,
-               with the store's room and the indexes not reached:
+               with the store's room, the indexes not reached and whether
+               this board has a password (`locked`):
                "listed", handed to the next GET once, then "idle"
       licence  the licence of the external file `path` of the entry
                `folder` (and `id`) of the index `index` fetched and checked:
@@ -571,7 +574,11 @@ class OfficialCarts:
                the store has room for it: the checked build's manifest is
                handed to the page ("asking", `manifest`) for the install
                prompt (pkg.manifest_check), and `agree` lands it: "done"
-      agree    the page's prompt answered yes
+      agree    the page's prompt answered yes; for a Python cart from an
+               index that is not reviewed (cart_index.is_reviewed), on a
+               board with a password (`locked()`), with that `password`,
+               which `unlock(password)` checks: a wrong one stops the
+               install (WRONG_PASSWORD)
       remove   an optional built-in's removal recorded (moy_seed.note_removed,
                as pkg.removed records it), or a cart the store's record
                holds, and its folder taken off: "done"; a core cart, or one
@@ -579,8 +586,8 @@ class OfficialCarts:
       cancel   an install stopped while it can be
 
     `index` names one of the indexes the board browses; none is its own
-    release's. A Python cart installs only from that one (cart_index.
-    runs_on), and an install whose cart and external files need more room
+    release's. A version an index revoked is refused (cart_index.REVOKED),
+    and an install whose cart and external files need more room
     than the store has free less `reserve` (zero_host.SEED_RESERVE) is
     refused before anything is fetched, with the sizes
     (cart_index.room_why).
@@ -591,8 +598,11 @@ class OfficialCarts:
     back: two installs never write one store. `sources(root, own)` answers
     the indexes (cart_index.load_indexes)."""
 
-    def __init__(self, inst, index, busy=None, reserve=0, sources=None):
+    def __init__(self, inst, index, busy=None, reserve=0, sources=None, locked=None,
+                 unlock=None):
         self.inst = inst
+        self.locked = locked          # () -> whether this board has a password
+        self.unlock = unlock          # (password) -> whether it is this board's
         self.index = index
         self.other = busy
         self.reserve = reserve
@@ -635,7 +645,7 @@ class OfficialCarts:
         if action == "cancel":
             return self._cancel()
         if action == "agree":
-            return self._agree()
+            return self._agree(doc.get("password"))
         if action not in ("check", "licence", "install", "remove"):
             return False, "action must be check, licence, install, agree, remove or cancel"
         if self.busy():
@@ -701,10 +711,21 @@ class OfficialCarts:
             self._end(None)             # nothing written yet: stopped now
         return True, "cancelled"
 
-    def _agree(self):
+    def _locked(self):
+        return self.locked is not None and bool(self.locked())
+
+    def _agree(self, password=None):
         job = self._job
         if self.state != "installing" or job is None or job.asking is None:
             return False, "nothing is asking"
+        cart = job.cart
+        if cart.get("runtime") == "python" and not _ci.is_reviewed(cart) \
+                and self._locked() and not (isinstance(password, str) and password
+                                            and self.unlock is not None
+                                            and self.unlock(password)):
+            job.cancel()
+            self._asked_at = None
+            return False, WRONG_PASSWORD
         job.agree()
         self._asked_at = None
         return True, "agreed"
@@ -838,8 +859,9 @@ class OfficialCarts:
             if found == [] and self._unreached:
                 return self._end(_ci.UNREACHABLE)
             parts = [f for f in found if f]
-            listed = '{"carts": [%s], "free": %s, "unreached": %d}' % (
-                ", ".join(parts), json.dumps(room), self._unreached)
+            listed = '{"carts": [%s], "free": %s, "unreached": %d, "locked": %s}' % (
+                ", ".join(parts), json.dumps(room), self._unreached,
+                "true" if self._locked() else "false")
             self._release()
             self._phase = None
             self._listed = listed
@@ -853,6 +875,8 @@ class OfficialCarts:
             return self._end(missing)
         if not _ci.runs_on(cart, _ci.RUNTIMES):
             return self._end("This console can't play this kind of cart.")
+        if _ci.is_revoked(cart):
+            return self._end(_ci.REVOKED)
         if self.action == "licence":
             ext = None
             for e in cart.get("external") or ():

@@ -607,11 +607,48 @@ def test_an_external_file_installs_only_with_its_licence_accepted(zero):
     assert os.path.getsize(zero.root + "/doom.moy/doom1.wad") == 16000
 
 
-def test_a_python_cart_installs_only_from_the_release(zero):
+def test_an_unreviewed_python_cart_lands_only_with_the_board_s_password(zero):
+    """A Python cart from an index nobody reviewed asks like any cart, and
+    on a board with a password the page's yes carries it: a wrong one, or
+    none, stops the install with nothing landed; the right one lands it."""
+    zero.official.locked = lambda: True
+    zero.official.unlock = lambda pw: pw == "hunter22"
     repo = _shelf(zero)
-    doc = _install(zero, repo, "snake_py")
-    assert doc["state"] == "error" and "can't play" in doc["error"]
-    assert not os.path.exists(zero.root + "/snake_py.moy")
+    doc = _post_run(zero, {"action": "check"})
+    assert doc["locked"] is True
+    by = dict((c["folder"], c) for c in doc["carts"])
+    assert by["snake_py.moy"]["reviewed"] is False
+    for wrong in ({}, {"password": "nope"}):
+        doc = _install(zero, repo, "snake_py")
+        assert doc["state"] == "asking"
+        code, doc = _call(zero, "POST", dict({"action": "agree"}, **wrong))
+        assert code == 409 and doc["message"] == web_addon.WRONG_PASSWORD
+        _run(zero)
+        assert not os.path.exists(zero.root + "/snake_py.moy")
+    _install(zero, repo, "snake_py")
+    doc = _post_run(zero, {"action": "agree", "password": "hunter22"})
+    assert doc["state"] == "done"
+    assert os.path.exists(zero.root + "/snake_py.moy/manifest.json")
+
+
+def test_a_lua_cart_on_a_locked_board_needs_no_password(zero):
+    zero.official.locked = lambda: True
+    zero.official.unlock = lambda pw: False
+    repo = _shelf(zero)
+    _install(zero, repo, "moymesh")
+    assert _post_run(zero, {"action": "agree"})["state"] == "done"
+
+
+def test_a_version_the_index_revoked_is_refused_by_the_board(zero):
+    repo = _shelf(zero)
+    repo.revoke("moymesh", [1])
+    zero.net.routes.update(repo.routes())
+    doc = _post_run(zero, {"action": "check"})
+    by = dict((c["folder"], c) for c in doc["carts"])
+    assert by["moymesh.moy"]["revoked"] == [1]
+    doc = _install(zero, repo, "moymesh")
+    assert doc["state"] == "error" and doc["error"] == ci.REVOKED
+    assert not os.path.exists(zero.root + "/moymesh.moy")
 
 
 def test_an_index_the_board_does_not_read_is_refused(zero):
@@ -656,7 +693,7 @@ def test_get_carts_on_a_zero_s_page_installs_from_moybyte_org(page, zero):
     app._tap_row(folders.index("moymesh.moy"))
     app._press("GET")
     _frames(ws, worker, lambda: app.phase in ("consent", "failed"))
-    assert app.phase == "consent" and app.question == ["Switch the console's pins"]
+    assert app.phase == "consent" and app.question == ["From Moybyte carts", "Switch the console's pins"]
     assert not os.path.exists(zero.root + "/moymesh.moy")
     app._answer(True)
     _frames(ws, worker, lambda: app.phase in ("done", "failed"))

@@ -258,7 +258,7 @@ def test_a_command_whose_name_is_taken_is_refused_at_install(tmp_path):
     cmd = {"format": "moy-1", "id": "kenny.hello", "title": "Hello",
            "moybyte": {"type": "command"}}
     inst = Inst(str(tmp_path), shelf=[{"id": "kenny.hello", "type": "command"}])
-    aid, perms, _lines = pkg.install_check(inst, _stage(tmp_path, cmd), "kenny.hello.moy",
+    aid, perms, _lines, _src = pkg.install_check(inst, _stage(tmp_path, cmd), "kenny.hello.moy",
                                            inst.carts())
     assert perms == [], "an update of the command that holds the name"
     inst.shelf = [{"id": "local.hello", "type": "command"}]

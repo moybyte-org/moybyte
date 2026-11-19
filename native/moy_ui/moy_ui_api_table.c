@@ -912,6 +912,8 @@ void mua_edits_drop(moy_ui_inst_t *I, const moy_ui_ctx_t *c, uint32_t id) {
     }
 }
 
+#define MOY_UI_SECRET_MAX 64           // the most `*`s a secret field draws
+
 int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,
                          uint8_t *buf, size_t cap, size_t len, const moy_ui_over_t *o) {
     o = mua_over(o);
@@ -1030,9 +1032,21 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
     if (!disabled) {
         mua_sig_mix(c, buf, len);
     }
+    // `secret`: a `*` a character in place of the text (at most a box's worth)
+    uint8_t dots[MOY_UI_SECRET_MAX];
+    moy_ui_span_t t = {buf, (uint16_t)len};
+    if (o->flags2 & MOY_UI_O2_SECRET) {
+        size_t n = 0;
+        for (size_t i = 0; i < len && n < sizeof dots; i++) {
+            if ((buf[i] & 0xC0) != 0x80) {
+                dots[n++] = '*';
+            }
+        }
+        t.p = dots;
+        t.n = (uint16_t)n;
+    }
     EACH_ROW(c, k, s, b, stacked, c->page) {
         mua_band(c, s, b, stacked);
-        moy_ui_span_t t = {buf, (uint16_t)len};
         moy_ui_box_t fb = b;
         moy_ui_span_t lb = label;
         if (caph) {

@@ -529,12 +529,14 @@ install prompt over the manifest of the build the board checked
 (`pkg.manifest_check`), and records the consent; the board installs through
 the same `cart_index.Install`, refusing before any download a cart and
 external files its store has no room for, with the sizes ("Not enough room:
-needs …, … free.", `cart_index.room_why`), and a Python cart from
-any index but its release's (`cart_index.runs_on`).
+needs …, … free.", `cart_index.room_why`), and a version its index revoked.
+A Python cart from an index that is not reviewed lands only on a yes that
+carries the board's password (`OfficialCarts`' `agree`).
 
 **The index** is moy-spec's (its `cartindex` module, version 1), read as it is, with
-two additions read here: an entry's `depends`, a list of cart ids, and the
-signature. **An index is signed as OTA manifests are** (the same keys,
+three additions read here: an entry's `depends`, a list of cart ids; the
+document's `revoked`, `{"<id>": [<version>, ...]}`, the versions it withdrew
+(a malformed one reads as none); and the signature. **An index is signed as OTA manifests are** (the same keys,
 RSA-2048 PKCS#1 v1.5 over SHA-256): `tools/ota_sign.py sign-index` appends
 `, "sig": "<hex>"}` in place of the document's closing brace, covering
 `moybyte-index-v1\n` and the document as it was, so neither side
@@ -544,6 +546,22 @@ read. A board verifies in the kernel (`moy_net.ota_verify`), the host through
 its twin; the browser has no verifier and needs none, its fetch checking the
 server's certificate.
 
+**Review and revocation** (owner, 2026-11-18, #261). A signature verifies
+against the image's keys or moybyte-org/carts' review keys
+(`cart_index.REVIEW_KEYS`, the public half of the key its CI signs
+`index.json` with), and an index signed by either is REVIEWED: its Python
+carts install as trusted apps. In the browser moybyte-org/carts' url is. A
+Python cart from any other index installs behind the unreviewed warning
+(`app_perms.UNREVIEWED`), whose yes takes the console's password where one is
+set (`pkg.gated`, the install role's `locked` and `unlock`) and is kept in the
+cart's consent record (`unreviewed`, the index it came from), so an update
+from that index asks again only when it adds a permission. A revoked version
+is refused at install (`cart_index.REVOKED`); reading an index marks the
+carts installed from it at a version it revoked (`pkg.revocations`, the
+consent record's `revoked`), which then refuse every launch until an update
+or a removal writes the record again. An index revokes only what was
+installed from it.
+
 **`system/sources`** names the repositories, one index URL a line (`#`
 comments); absent or empty, the console reads moybyte-org/carts. A legacy
 `indexes.json` reads as absent. A page served from a static host writes the
@@ -552,7 +570,7 @@ last (`carts-<board>.json` beside its update manifest): the browser console
 add-on and every seed cart of that build but a test fixture as an OFFICIAL
 cart (`"moybyte": {"fixture": true}`, `docs/app_api_v1.md` §2), those no
 store is seeded with (`"seed": false`) among them, the one place
-an entry in the built-ins' namespace or a Python cart installs from, with
+an entry in the built-ins' namespace installs from, with
 the signature verified (`.claude/rules/carts.md`).
 
 **The verbs** (the shell's `pkg`, `runtime/shell/sh_roles.py`):

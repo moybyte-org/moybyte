@@ -232,6 +232,9 @@ void moy_ui_over_put(moy_ui_over_t *o, int k, const int32_t *v) {
         case MOY_UI_OV_FOLLOW:
             o->flags2 = v[0] ? o->flags2 | MOY_UI_O2_FOLLOW : o->flags2 & ~MOY_UI_O2_FOLLOW;
             break;
+        case MOY_UI_OV_SECRET:
+            o->flags2 = v[0] ? o->flags2 | MOY_UI_O2_SECRET : o->flags2 & ~MOY_UI_O2_SECRET;
+            break;
         default: break;
     }
 }

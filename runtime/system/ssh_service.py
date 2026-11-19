@@ -29,6 +29,8 @@ PARK_MS. A start before then cancels the wake and keeps both.
                            characters
   system_dir(ws)           the store's system folder the server signs in from
   is_set(ws)               whether a password is set
+  is_password(ws, pw)      whether `pw` is it (Get Carts' gate on the
+                           unreviewed warning, runtime/shell/pkg.py)
   name(ws)                 the console's name: Settings' Name, or default_name()
   default_name()           `moybyte-XXXX`, the name of a console with none set
   hostname(ws)             the mDNS name the console answers to
@@ -95,6 +97,23 @@ def is_set(ws):
         with open(_path(ws, PASSWORD)) as f:
             return f.read().startswith(RECORD)
     except OSError:
+        return False
+
+
+def is_password(ws, password):
+    """Whether `password` is the console's: its record made again over the
+    record's own salt and compared whole."""
+    try:
+        with open(_path(ws, PASSWORD)) as f:
+            record = f.read().strip()
+    except OSError:
+        return False
+    parts = record.split("$")
+    if not password or not record.startswith(RECORD) or len(parts) != 6:
+        return False
+    try:
+        return hashed(password, parts[3]) == record
+    except ValueError:
         return False
 
 

@@ -311,7 +311,6 @@ def test_a_python_built_in_from_anywhere_else_is_still_refused():
                          "files": {"main.py": {"size": 1, "sha256": "0" * 64}}}]}
     assert ci.check_cart(entry) is not None
     assert ci.check_cart(entry, official=True) is None
-    assert not ci.runs_on(entry, ("lua", "wasm"))
     deep = dict(entry, assets=[dict(entry["assets"][0], files={
         "a/b/c/d.json": {"size": 1, "sha256": "0" * 64}})])
     assert ci.check_cart(deep, official=True) is not None

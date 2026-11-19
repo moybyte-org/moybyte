@@ -441,7 +441,7 @@ def test_install_asks_with_the_tables_lines_and_no_has_the_focus(tmp_path):
     ws, app = _store_ws(tmp_path, repo)
     _get(ws, app, "radio")
     assert app.phase == "consent"
-    assert app.question == ["Switch the console's pins", "Keep its own settings"]
+    assert app.question == ["From Test carts", "Switch the console's pins", "Keep its own settings"]
     assert app._ui.box("No") is not None and app._ui.box("Install") is not None
     _frames(ws, 2)
     assert app._focused == "No"
@@ -521,7 +521,7 @@ def test_an_update_that_adds_a_permission_asks_again(tmp_path):
     app.fetched_at = None
     _get(ws, app, "radio")
     assert app.phase == "consent"
-    assert app.question == ["Keep its own settings", "Switch the console's pins"]
+    assert app.question == ["From Test carts", "Keep its own settings", "Switch the console's pins"]
 
 
 def test_a_required_permission_the_console_lacks_is_not_installed(tmp_path):

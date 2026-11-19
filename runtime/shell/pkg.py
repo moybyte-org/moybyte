@@ -1,5 +1,6 @@
 # Map (grep -n a name to jump there):
-#   -- the checks Get Carts shares   fit_why, depends_why, blocker, install_check, manifest_check
+#   -- the checks Get Carts shares   fit_why, depends_why, blocker, install_check, manifest_check, origin_of, gated
+#   -- the store's trust             revocations, revoked_rows
 #   -- the steps it shares           through, removed, landed, land_now: a store op a frame
 #   Pkg                              the shell's `pkg`: the verbs over one installer
 #   Pkg.update                       fetch every source's index into the cache
@@ -45,7 +46,19 @@ memory for the running set can never be admitted), room in the store, and
 its `depends` (cart_index.needs). At the install prompt (`install_check`), a
 permission this console lacks refuses it, and so does a `"type": "command"`
 cart whose name -- its id's part after the first dot -- the shell already
-answers to or another installed command holds.
+answers to or another installed command holds. A version its index revoked
+is refused (cart_index.REVOKED).
+
+A Python cart from an index that is not reviewed (cart_index.is_reviewed)
+asks with the unreviewed warning (app_perms.UNREVIEWED), and where the
+console has a password (`passwd`, the one SSH and a paired browser sign in
+with) accepting it takes that password (`gated`): Get Carts asks for it in
+the prompt, `pkg install` on the terminal (`-y` never answers it), a Zero's
+page posts it with its yes. The acceptance is the consent record's
+`unreviewed`, so an update from the same index asks again only when it adds
+a permission. Reading an index marks the carts installed from it whose
+version it revoked (`revocations`): their launches are refused until an
+update or a removal.
 """
 
 import hashlib
@@ -61,6 +74,8 @@ import app_perms as _perms
 from player_fit import fit_notice as _fit_notice, board_share as _board_share
 
 InstallError = _ci.InstallError
+WRONG_PASSWORD = "That isn't the console's password."
+NO_PASSWORD = "This console has a password: install it from Get Carts, which asks for it."
 CACHE_DIR = "pkg"
 ARCHIVE_RAM_SHARE = 4         # an external archive kept in RAM below this share of the largest block
 
@@ -132,6 +147,8 @@ def blocker(inst, cart, plan, free, runs, fit=None):
         return "This console has nowhere to keep carts."
     if not runs:
         return "This console can't play this kind of cart."
+    if _ci.is_revoked(cart):
+        return _ci.REVOKED
     if fit:
         return fit
     if free is not None:
@@ -153,20 +170,32 @@ def _command_name(cid):
     return cid[i + 1:] if i > 0 else None
 
 
-def install_check(inst, stage, folder, shelf):
+def origin_of(entry):
+    """Where an install of index entry `entry` comes from, as the install
+    prompt reads it (app_perms.prompt's `origin`), or None."""
+    if not entry:
+        return None
+    return {"publisher": _ci.publisher(entry), "reviewed": _ci.is_reviewed(entry),
+            "index": entry.get("index") or ""}
+
+
+def install_check(inst, stage, folder, shelf, entry=None):
     """The install prompt's check for the build at `stage` (cart_index.
-    Install's `ask`), `shelf` the scanned carts: `(app id, permissions,
-    prompt lines or None; None for a built-in, which only the console's own
-    release index installs). An InstallError when a permission it requires is
-    one this console lacks, or when it is a command whose name is taken."""
+    Install's `ask`), `shelf` the scanned carts, `entry` the index entry it
+    installs: `(app id, permissions, prompt lines or None, unreviewed)`;
+    lines None for a built-in, which only the console's own release index
+    installs; `unreviewed` the index url whose unreviewed warning the lines
+    carry (or that the record accepted), else None -- what the consent
+    record keeps. An InstallError when a permission it requires is one this
+    console lacks, or when it is a command whose name is taken."""
     try:
         man = json.loads(_read(stage + "/manifest.json"))
     except (OSError, ValueError):
         man = {}
-    return manifest_check(inst, man, folder, shelf)
+    return manifest_check(inst, man, folder, shelf, entry)
 
 
-def manifest_check(inst, man, folder, shelf):
+def manifest_check(inst, man, folder, shelf, entry=None):
     """`install_check` over the checked build's parsed manifest `man`: what
     a page asks of a console with no screen, whose install is the board's
     and whose manifest the board hands it (web_addon.OfficialCarts)."""
@@ -194,8 +223,19 @@ def manifest_check(inst, man, folder, shelf):
     aid = _perms.app_id(cart)
     perms = _perms.perms_of(cart, consent.get(aid))
     if _store.removable(folder):
-        return aid, perms, None    # a built-in asks nothing, as its seed
-    return aid, perms, _perms.prompt(cart, consent.get(aid))
+        return aid, perms, None, None   # a built-in asks nothing, as its seed
+    origin = origin_of(entry)
+    unreviewed = None
+    if origin is not None and not origin["reviewed"] and "python" in _perms.tiers_of(cart):
+        unreviewed = origin["index"]
+    return aid, perms, _perms.prompt(cart, consent.get(aid), origin), unreviewed
+
+
+def gated(inst, lines):
+    """Whether saying yes to install prompt `lines` takes the console's
+    password: they carry the unreviewed warning and the console has one
+    (the install role's `locked`)."""
+    return _perms.warned(lines) and bool(inst.locked())
 
 
 def through(steps):
@@ -264,10 +304,59 @@ def landed(inst, path, consented):
 
 def consent_steps(inst, consented):
     """`yield from` it: the install prompt's answer (`(app id,
-    permissions)`, or None when it asked nothing) recorded."""
+    permissions, unreviewed)`, install_check's, or None when it asked
+    nothing) recorded."""
     if consented is not None:
         yield
-        yield from inst.consent().record_steps(consented[0], consented[1])
+        yield from inst.consent().record_steps(
+            consented[0], consented[1], consented[2] if len(consented) > 2 else None)
+
+
+# -- the store's trust ----------------------------------------------------------------
+
+
+def _mark(inst, folder, cid, on):
+    cart = inst.find(folder)
+    aid = _perms.app_id(cart if cart is not None else {"id": cid})
+    return inst.consent().revoke(aid, on)
+
+
+def revocations(inst, revoked):
+    """The carts this store installed from an index just read whose version
+    it revoked, marked in their consent records, and those it no longer
+    revokes unmarked: `revoked` is cart_index.parse_index's, {index url:
+    {id: [version, ...]}}. Only an index read now speaks, and only for the
+    carts installed from it. The folders marked revoked."""
+    root = inst.root()
+    if not revoked or root is None:
+        return []
+    rec = inst.op(lambda: _ci.load_record(root))
+    out = []
+    for folder, entry in rec.items():
+        gone = revoked.get(entry.get("index"))
+        if gone is None:
+            continue
+        on = entry.get("version") in (gone.get(entry.get("id")) or ())
+        _mark(inst, folder, entry.get("id"), on)
+        if on:
+            out.append(folder)
+    return out
+
+
+def revoked_rows(inst, rows):
+    """`revocations` from rows a console with no screen listed (Get Carts'
+    rows over web_addon.listing, each with the version its store holds,
+    `had`): the page's own consent records marked to match."""
+    out = []
+    for r in rows:
+        c, had = r["cart"], r.get("had")
+        if had is None:
+            continue
+        on = _ci.is_revoked(c, had)
+        _mark(inst, c["folder"], c["id"], on)
+        if on:
+            out.append(c["folder"])
+    return out
 
 
 def _official_here(root, ident):
@@ -298,11 +387,12 @@ class Pkg:
     is True once Ctrl-C came. The transport is the install role's
     (`inst.net()`: the http worker's where it verifies, cart_index.Worker)."""
 
-    def __init__(self, inst, out, err, ask=None, stopped=None):
+    def __init__(self, inst, out, err, ask=None, stopped=None, password=None):
         self.inst = inst
         self.out = out
         self.err = err
         self.ask = ask
+        self.password = password        # (question) -> the line typed, or None
         self.stopped = stopped or (lambda: False)
         self.held = False
 
@@ -401,7 +491,12 @@ class Pkg:
         yield from self._online()
         data = yield from self._wait(_ci.index_fetch(self._net(), url))
         yield
-        carts = _ci.fitting(_ci.parse_index(data, url, self.inst.own()))
+        revoked = {}
+        carts = _ci.fitting(_ci.parse_index(data, url, self.inst.own(), revoked))
+        yield
+        for folder in revocations(self.inst, revoked):
+            self.err("%s: its store took it back; it won't run until it is "
+                     "removed or updated" % folder)
         yield from self._keep(url, data)
         return carts
 
@@ -558,8 +653,8 @@ class Pkg:
         consented = []
 
         def ask(stage):
-            got = install_check(self.inst, stage, c["folder"], self.inst.carts())
-            consented[:] = [got[:2]]
+            got = install_check(self.inst, stage, c["folder"], self.inst.carts(), c)
+            consented[:] = [(got[0], got[1], got[3])]
             return got[2]
 
         job = _ci.Install(c, p, self.inst.net(), self.inst.root(), self.inst.op,
@@ -573,7 +668,11 @@ class Pkg:
                 if job.asking is not None:
                     self.release()
                     self.out("".join(ln + "\n" for ln in job.asking))
-                    if yes or (self.ask is not None and self.ask("Install?")):
+                    why = self._gate(job.asking)
+                    if why is not None:
+                        job.cancel()
+                        self.err("%s: %s" % (c["id"], why))
+                    elif yes or (self.ask is not None and self.ask("Install?")):
                         job.agree()
                     else:
                         job.cancel()
@@ -590,6 +689,17 @@ class Pkg:
         yield from through(landed(self.inst, job.path, consented[0] if consented else None))
         self.out("%s %d installed: %s\n" % (c["id"], c["version"], job.report()))
         return 0
+
+    def _gate(self, lines):
+        """None when the prompt `lines` may be answered; else why not: the
+        console's password, asked for an unreviewed Python cart (`gated`),
+        not typed right, or nobody here to type it."""
+        if not gated(self.inst, lines):
+            return None
+        if self.password is None:
+            return NO_PASSWORD
+        typed = self.password("The console's password:")
+        return None if typed and self.inst.unlock(typed) else WRONG_PASSWORD
 
     def remove(self, idents):
         inst = self.inst
