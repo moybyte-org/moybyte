@@ -98,7 +98,7 @@ manifest says `"animates": true` (`docs/app_api_v1.md` §3).
 
 A cart can be **Lua instead of Python**: set `"runtime": "lua"` and
 `"main": "main.lua"` in `manifest.json`. **Every call in this document is valid
-verbatim in both languages** — `spr(1, x, y)`, `btn("left")`, `cfg("speed", 2)`,
+verbatim in both languages** (but `list_files`, below) — `spr(1, x, y)`, `btn("left")`, `cfg("speed", 2)`,
 `pmem`, `quit()`, `textmode()` — because the Lua globals *are* the same console
 API (the device bridges them natively; hot sprites append to the same batch the
 Python path uses). Same lifecycle too: define `_init` / `_update(dt)` / `_draw`
@@ -920,6 +920,24 @@ same here as on any other console that implements the spec.
 | `W`, `H` | canvas size (320, 240) |
 | `wifi` | Python's older, wider door to the radio: **only present** if the cart's manifest `moybyte.permissions` include `"network"` (capability-gated, `#38`), and `None` while that is turned off in Settings. A normal cart has no `wifi` name at all. The way in from every tier is `moybyte.http` under `"http"` (below); a Lua or wasm cart that asks for `"network"` is refused at install and launch, and `moy app check` says so |
 | `net` / `on_net` | **only present** if the cart's manifest `moybyte.permissions` include `"multiplayer"` (capability-gated, `#65`), and `None` while that is turned off in Settings. See **Multiplayer** above |
+
+### Files (SPEC.md §9.1)
+
+A cart keeps files when it outgrows `pmem`: its manifest lists the paths it
+writes, a folder by its trailing `/` (`"writable": ["saves/", "options.txt"]`),
+and the four verbs reach the cart's own folder and what it wrote.
+
+| call | does |
+|---|---|
+| `read(name, offset=0, n=None)` | the bytes of the cart's file `name` from `offset`, at most `n`: the written copy of a writable path first, else the file the cart shipped. Python answers `bytes`, Lua a string; `b""`/`""` for anything absent |
+| `write(path, data)` | replace the whole file at a declared `path` (at most 64 bytes) with `data` (bytes or text, at most 1 MiB), kept when it returns: `0`, `-1` not declared, `-2` no room or too big, `-3` the storage failed |
+| `erase(path)` | remove the written copy, so `read` answers the shipped file again: `0`, or `-1` when there was none |
+| `list(prefix="")` | every path of the cart's files, shipped and written, that begins with `prefix`, in bytewise order. **In Python it is `list_files`**: `list` is Python's own, which carts call |
+
+The written files live in the cart's private folder (`apps/<id>/` beside the
+carts store, `runtime/carts/cart_files.py`), outside its own: an update keeps
+them and removing the cart removes them. A compiled cart holds the same verbs
+in SPEC.md §16.12's form, over the same store.
 
 ### Moybyte-side verbs
 

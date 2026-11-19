@@ -92,7 +92,8 @@ product), with the owner's later calls dated where they land.
 - **A compiled cart keeps files (owner, 2026-10-03):** SPEC.md §16.12's
   `writable` paths, kept beside the carts store in its app folder
   `apps/<id>/` (`runtime/carts/cart_files.py`) on every tier, untouched by an
-  install, an update or a push. A user's own files are a separate
+  install, an update or a push. A Lua and a Python cart keep theirs in the
+  same folder since 2026-11-18 (SPEC.md §9.1, #261). A user's own files are a separate
   capability (#231): the console's picker (`docs/os_2026-11/between_apps.md`
   §2), which a compiled app reaches by its `moybyte.app` imports
   (`moybyte_pick`, the item a handle its `moybyte_item_read` and

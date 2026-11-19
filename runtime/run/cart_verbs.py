@@ -56,6 +56,9 @@ CART_VERBS = (
     "sfx", "beep", "music", "music_stop", "sound_stop", "volume",
     # Misc / lifecycle
     "time", "pmem", "cfg", "rnd", "srand", "flr", "quit",
+    # The cart's files (SPEC.md 9.1); Python's listing is `list_files`, its
+    # own `list` kept
+    "read", "write", "erase", "list_files",
     # Capability-gated: network (#38), multiplayer (#65)
     "wifi", "net", "on_net",
     # Capability-gated: physical pins (#9), on a host that has them

@@ -551,6 +551,12 @@ the ui used. A Python process reads raw input records, timestamped, with
 settings namespaced under your app's `id`, saved as it is written; `None`
 (Lua `nil`) for a key never set. Your app and its service share them.
 
+**A cart's own files** need no permission either: any cart, app or game,
+reads its own folder and writes the paths its manifest declares `writable`
+(`read`, `write`, `erase`, `list`; moy-spec SPEC.md §9.1,
+`docs/moy_cart_api.md`, Files). They are the cart's private files, never the
+user's folders below.
+
 **Files** (`files` / `files:<folder>`): one of the user's shared folders,
 the ones the Files app shows: `files:documents` (the default),
 `files:pictures`, `files:music`, `files:recordings`; asking for two is a

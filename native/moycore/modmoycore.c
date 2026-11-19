@@ -53,6 +53,7 @@
 // deletion commit records what that cost).
 
 #include "modmoycore_int.h"
+#include "moycore_files.h"
 #include "moycore_svc.h"
 #include "py/mperrno.h"
 
@@ -869,6 +870,129 @@ static mp_obj_t mod_pmem_to(mp_obj_t path)
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_pmem_to_obj, mod_pmem_to);
 
+// lua_files(path, writable) -> whether the store opened: the current Lua
+// run's files (moycore_files.h), the cart's folder and its "writable"
+// entries NUL-joined (None for none). Its close unbinds them.
+static mp_obj_t mod_lua_files(mp_obj_t path, mp_obj_t writable)
+{
+    size_t n = 0;
+    const char *w = writable == mp_const_none ? NULL : mp_obj_str_get_data(writable, &n);
+    return mp_obj_new_bool(moycore_lua_files(mp_obj_str_get_str(path), w, n) == 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_lua_files_obj, mod_lua_files);
+
+// CartFiles(path, writable): a Python cart's files (moycore_files.h), the
+// cart's folder and its "writable" entries NUL-joined (None for none);
+// OSError when the store cannot be opened. read(name, offset, n) -> bytes
+// (n < 0: all of it), write(path, data) and erase(path) -> SPEC.md 9.1's
+// answers, list(prefix) -> the paths, close().
+typedef struct {
+    mp_obj_base_t base;
+    struct moycore_files *s;
+} cartfiles_obj_t;
+
+static mp_obj_t cartfiles_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw,
+                                   const mp_obj_t *args) {
+    mp_arg_check_num(n_args, n_kw, 2, 2, false);
+    size_t n = 0;
+    const char *w = args[1] == mp_const_none ? NULL : mp_obj_str_get_data(args[1], &n);
+    struct moycore_files *s = moycore_files_open(mp_obj_str_get_str(args[0]), w, n);
+    if (s == NULL) {
+        mp_raise_OSError(MP_EIO);
+    }
+    cartfiles_obj_t *o = mp_obj_malloc(cartfiles_obj_t, type);
+    o->s = s;
+    return MP_OBJ_FROM_PTR(o);
+}
+
+static mp_obj_t cartfiles_read(size_t n_args, const mp_obj_t *args) {
+    cartfiles_obj_t *o = MP_OBJ_TO_PTR(args[0]);
+    size_t nn;
+    const char *name = mp_obj_str_get_data(args[1], &nn);
+    mp_int_t off = mp_obj_get_int(args[2]);
+    mp_int_t want = mp_obj_get_int(args[3]);
+    if (off < 0 || want == 0) {
+        return mp_const_empty_bytes;
+    }
+    int32_t have = moycore_files_read(o->s, name, nn, (uint32_t)off, NULL, 0);
+    uint32_t len = have < 0 ? 0u : (uint32_t)have;
+    if (want > 0 && (mp_uint_t)want < len) {
+        len = (uint32_t)want;
+    }
+    if (len == 0u) {
+        return mp_const_empty_bytes;
+    }
+    vstr_t v;
+    vstr_init_len(&v, len);
+    int32_t got = moycore_files_read(o->s, name, nn, (uint32_t)off, (uint8_t *)v.buf, len);
+    v.len = got < 0 ? 0u : ((uint32_t)got < len ? (uint32_t)got : len);
+    return mp_obj_new_bytes_from_vstr(&v);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(cartfiles_read_obj, 4, 4, cartfiles_read);
+
+static mp_obj_t cartfiles_write(mp_obj_t self, mp_obj_t path, mp_obj_t data) {
+    cartfiles_obj_t *o = MP_OBJ_TO_PTR(self);
+    size_t pn;
+    const char *p = mp_obj_str_get_data(path, &pn);
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(data, &b, MP_BUFFER_READ);
+    if (b.len > MOY_FILE_WRITE_MAX) {
+        return MP_OBJ_NEW_SMALL_INT(moycore_files_write(o->s, p, pn, NULL, MOY_FILE_WRITE_MAX + 1u));
+    }
+    return MP_OBJ_NEW_SMALL_INT(moycore_files_write(o->s, p, pn, b.buf, (uint32_t)b.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(cartfiles_write_obj, cartfiles_write);
+
+static mp_obj_t cartfiles_erase(mp_obj_t self, mp_obj_t path) {
+    cartfiles_obj_t *o = MP_OBJ_TO_PTR(self);
+    size_t pn;
+    const char *p = mp_obj_str_get_data(path, &pn);
+    return MP_OBJ_NEW_SMALL_INT(moycore_files_erase(o->s, p, pn));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(cartfiles_erase_obj, cartfiles_erase);
+
+static mp_obj_t cartfiles_list(mp_obj_t self, mp_obj_t prefix) {
+    cartfiles_obj_t *o = MP_OBJ_TO_PTR(self);
+    size_t pn;
+    const char *p = mp_obj_str_get_data(prefix, &pn);
+    mp_obj_t out = mp_obj_new_list(0, NULL);
+    uint8_t name[MOY_FILE_NAME_MAX + 1];
+    for (uint32_t i = 0; i < (uint32_t)INT32_MAX; i++) {
+        int32_t r = moycore_files_list(o->s, p, pn, i, name, sizeof name);
+        if (r < 0) {
+            break;
+        }
+        if ((uint32_t)r <= sizeof name) {
+            mp_obj_list_append(out, mp_obj_new_str((const char *)name, (size_t)r));
+        }
+    }
+    return out;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(cartfiles_list_obj, cartfiles_list);
+
+static mp_obj_t cartfiles_close(mp_obj_t self) {
+    cartfiles_obj_t *o = MP_OBJ_TO_PTR(self);
+    moycore_files_close(o->s);
+    o->s = NULL;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(cartfiles_close_obj, cartfiles_close);
+
+static const mp_rom_map_elem_t cartfiles_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_read),  MP_ROM_PTR(&cartfiles_read_obj) },
+    { MP_ROM_QSTR(MP_QSTR_write), MP_ROM_PTR(&cartfiles_write_obj) },
+    { MP_ROM_QSTR(MP_QSTR_erase), MP_ROM_PTR(&cartfiles_erase_obj) },
+    { MP_ROM_QSTR(MP_QSTR_list),  MP_ROM_PTR(&cartfiles_list_obj) },
+    { MP_ROM_QSTR(MP_QSTR_close), MP_ROM_PTR(&cartfiles_close_obj) },
+};
+static MP_DEFINE_CONST_DICT(cartfiles_locals, cartfiles_locals_table);
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    cartfiles_type, MP_QSTR_CartFiles, MP_TYPE_FLAG_NONE,
+    make_new, cartfiles_make_new,
+    locals_dict, &cartfiles_locals
+    );
+
 // flag_xor(n, mask) -- an Editor flag edit reaching the running cart: tile
 // n's flag byte in the run's own table flips `mask`'s bits, so what the
 // cart's fset wrote to the other bits stays.
@@ -1359,6 +1483,8 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_perf_read),   MP_ROM_PTR(&moycore_perf_read_obj) },
     { MP_ROM_QSTR(MP_QSTR_pmem_image),  MP_ROM_PTR(&mod_pmem_image_obj) },
     { MP_ROM_QSTR(MP_QSTR_pmem_to),     MP_ROM_PTR(&mod_pmem_to_obj) },
+    { MP_ROM_QSTR(MP_QSTR_lua_files),   MP_ROM_PTR(&mod_lua_files_obj) },
+    { MP_ROM_QSTR(MP_QSTR_CartFiles),   MP_ROM_PTR(&cartfiles_type) },
     { MP_ROM_QSTR(MP_QSTR_retarget),    MP_ROM_PTR(&mod_retarget_obj) },
     { MP_ROM_QSTR(MP_QSTR_layer_bind),  MP_ROM_PTR(&mod_layer_bind_obj) },
     { MP_ROM_QSTR(MP_QSTR_image_put),   MP_ROM_PTR(&mod_image_put_obj) },

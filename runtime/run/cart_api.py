@@ -152,7 +152,7 @@ class _NoRun:
 
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
              pmem=None, wifi=None, images=None, scenes=None,
-             net=None, gpio=None, flags=None, owner="cart", run=None):
+             net=None, gpio=None, flags=None, owner="cart", run=None, files=None):
     """The cartridge global namespace: the frozen TIC-80-style kid API
     (cls/pix/rect/circ/spr/map/print/btn/touch/... -- docs/moy_cart_api.md)
     bound to a canvas + InputState + the injected audio/wifi backends.
@@ -457,6 +457,23 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
             return 0
         return pmem.cell(index, value)
 
+    # The cart's files (moy-spec SPEC.md 9.1): `files` is the run's
+    # moycore.CartFiles (native/moycore/moycore_files.h); with none, a host
+    # with no store's answers. The
+    # listing is `list_files` here: `list` is Python's own, which carts call
+    # (PY_RENAMED in tests/test_cart_api_unified.py).
+    def read(name, offset=0, n=None):
+        return files.read(name, offset, -1 if n is None else n) if files is not None else b""
+
+    def write(path, data):
+        return files.write(path, data) if files is not None else -3
+
+    def erase(path):
+        return files.erase(path) if files is not None else -1
+
+    def list_(prefix=""):
+        return files.list(prefix) if files is not None else []
+
     def make_layer(w, h):
         # make_layer(w, h) -> a scroll background (#54): a wider off-screen canvas the
         # cart pre-renders a level into ONCE (with the SAME verbs -- cls/map/spr/rect/
@@ -605,6 +622,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "pal": canvas.pal, "palt": canvas.palt,
         "btn": btn, "btnp": btnp, "players": players,
         "key": key, "keyp": keyp, "time": time, "pmem": pmem_fn,
+        "read": read, "write": write, "erase": erase, "list_files": list_,
         "textmode": textmode, "quit": _quit, "view": view,
         "cfg": cfg, "col": color,
         # The C tier needs the DICT, not this closure. moycore's `run_begin`

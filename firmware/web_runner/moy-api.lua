@@ -332,6 +332,34 @@ function cfg(k, default) end
 ---@return integer
 function pmem(i, v) end
 
+---The bytes of the cart's own file `name` (SPEC.md 9.1): a written copy of a
+---writable path first, else the file the cart shipped; "" when absent.
+---@param name string path in the cart's folder, e.g. "levels/1.txt"
+---@param offset? integer byte to start at, from 0
+---@param len? integer most bytes to return; default the rest
+---@return string
+function read(name, offset, len) end
+
+---Replace the whole file at `path`, one the manifest's "writable" declares,
+---kept when it returns. 0 written; -1 path not writable; -2 no room, or data
+---over 1 MiB; -3 the console's storage failed.
+---@param path string at most 64 bytes
+---@param data string
+---@return integer
+function write(path, data) end
+
+---Remove the written copy of `path`: read answers the shipped file again, or
+---"". 0, or -1 when there was none or path is not writable.
+---@param path string
+---@return integer
+function erase(path) end
+
+---Every path of the cart's files, shipped and written, that begins with
+---`prefix`, in bytewise order.
+---@param prefix? string default "", everything
+---@return string[]
+function list(prefix) end
+
 ---End this cart and return to whoever launched it. The ONLY exit for a
 ---textmode(true) cart.
 function quit() end

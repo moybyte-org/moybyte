@@ -220,7 +220,7 @@ def _entry(at, e):
          "runtime": _json(e.runtime, "lua" if e.spec else "python"),
          "main": _str(e.main, e.main_n),
          "memory": _int_of(e.memory, None) if e.compiled else None,
-         "writable": _json(e.writable, None) if e.compiled and e.writable_ok else None,
+         "writable": _json(e.writable, None) if e.writable_ok else None,
          "audio_ring": _int_of(e.audio_ring, None),
          "version": _int_of(e.version, 0),
          "format": _json(e.format, "moybyte-cart-v1"),

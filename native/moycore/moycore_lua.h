@@ -63,6 +63,7 @@ typedef struct moycore_run {
     void       *lay;             // the layers made here, `nlay` of `caplay`
     int         nlay, caplay;
     void       *scenes;          // the .moyscene texts (moycore_scenes_t)
+    struct moycore_files *files; // a Lua run's files (moycore_files.h), or NULL
     uint32_t    owner;           // its OWNER row (moycore_lua_owner), or 0
     uint32_t    proc;            // its process row's handle (the binding's), or 0
     moycore_mb_t mb;             // an app run's `moybyte` table (moycore_lua_own)

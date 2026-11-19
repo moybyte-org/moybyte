@@ -15,6 +15,7 @@
 #include "lualib.h"
 
 #include "moy.h"
+#include "moycore_files.h"
 #include "moycore_layers.h"
 #include "moycore_lua.h"
 #include "moycore_run.h"
@@ -1740,6 +1741,7 @@ void moycore_lua_close(void)
     RUN.mb_open = 0;
     if (RUN.L) lua_close(RUN.L);
     RUN.L = NULL;
+    moycore_files_bind(&RUN.c.con, &RUN.files, NULL, NULL, 0);
     media_release();                 // after the VM: its canvases point at the layers
 #if MOYCORE_POOL
     // AFTER lua_close, never before: until it returns, the chunks still hold

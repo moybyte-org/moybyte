@@ -68,7 +68,7 @@ the real picture" (2026-11-03):
 | folder | holds | who reaches it |
 |---|---|---|
 | `carts/` | installed carts and the kid's projects | the shell (`carts`, `install`), the Editor; an app only through `nav` |
-| `apps/<id>/` | **app-private storage**: a compiled cart's written files (`runtime/carts/cart_files.py`, `native/moy_store/moy_files.h`; `<id>` its folder less `.moy`), and an app's prefs to come (they are `system/settings` rows today) | its own app, no permission |
+| `apps/<id>/` | **app-private storage**: a cart's written files (`runtime/carts/cart_files.py`, `native/moy_store/moy_files.h`; `<id>` its folder less `.moy`), and an app's prefs to come (they are `system/settings` rows today) | its own app, no permission |
 | `files/` | the **shared user folders**, named on disk as the OS shows them: `Documents/` (notes; stories in `Documents/Stories/`), `Pictures/` (drawings; sprite sheets in `Pictures/Sprites/`), `Music/`, `Recordings/`, `Downloads/`, and the layer's own `.Trash/` and `.history/` | an app with `files:<folder>` (`files:documents`, `files:pictures`, `files:music`, `files:recordings`; one folder a grant), or one file at a time through the picker |
 | `system/` | the console's documents as plain-text files (`system.md` §5) | the shell |
 

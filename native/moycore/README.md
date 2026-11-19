@@ -99,6 +99,16 @@ inside the board's bus gate (`moy_vol_gate_enter`; on the T-Deck the panel's
 `sd_guard`). In the browser a write and an erase are logged for the page's
 keeper, which `files_kept` drains into the worker's OPFS commits.
 
+A Lua run's files (SPEC.md §9.1, the same four verbs and `read`) are the
+same store, `moycore_files.c`: the glue binds them into the run's console
+after `run_begin` (`lua_files(path, writable)`), the row holds them, and the
+run's close lets them go. Each op runs where the Lua run calls it, inside the
+bus gate, and is logged for the browser's keeper as a compiled run's are
+(`moycore_keep_refuses`, `moycore_keep_log`). A Python cart's are the same
+store opened on its own: `CartFiles(path, writable)` (`moycore_files_open`
+and its verbs, which hold each path to libmoy's rules as libmoy's Lua verbs
+do), on the host by ctypes (`runtime/host/moycore.py`).
+
 A cart's `par` items run on the engine's lanes: moycore hands the binding
 `moy_wasm_session_lanes()` of them and their `lane_go`/`lane_wait`, and the
 binding runs a sibling instance of the cart on each (the engine's README

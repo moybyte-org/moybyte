@@ -1,9 +1,10 @@
-"""Where a compiled cart's written files (moy-spec SPEC.md 16.12) are kept,
-and the name each path is kept under.
+"""Where a cart's written files (moy-spec SPEC.md 9.1, 16.12) are kept, and
+the name each path is kept under.
 
 The store of them is native/moy_store/moy_files.c on every tier: the boards'
 and the browser's moycore on the MicroPython task (native/moycore/
-moycore_wasm.c, through moy_wasm_on_vm), the host's run by ctypes
+moycore_wasm.c, through moy_wasm_on_vm, and moycore_files.c for a Lua run
+and a Python cart's CartFiles), the host's run by ctypes
 (runtime/host/moyhost_wasm.c; `moy_play.Files` is the suites' view of it).
 moy_files.h has its rules: a write whole or not at all, one writer, the
 listing.

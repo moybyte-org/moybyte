@@ -182,6 +182,20 @@ def _run_flags(project):
 
 
 
+def _lua_files(ws, project):
+    """The Lua run's files (moy-spec SPEC.md 9.1, native/moycore/
+    moycore_files.h): the cart's folder and its "writable" entries, the store
+    a compiled run's are kept in. A run with no folder (a harness's bare
+    project) holds none: its file verbs answer as a host with no store."""
+    to = getattr(_moycore, "lua_files", None)
+    cart = getattr(project, "cart", None) or getattr(ws, "cart", None) or {}
+    path = cart.get("path") if hasattr(cart, "get") else None
+    if to is None or not path:
+        return
+    writable = cart.get("writable") or ()
+    to(path, "\0".join(writable) if writable else None)
+
+
 def _pmem_to(pmem):
     """Whether the run saves its own pmem while it plays, from the frame it
     ends with (native/moycore/moycore_run.h): a cart whose pmem the console
@@ -287,6 +301,7 @@ class MoycoreRun:
             self.snap, self.aq, self.pmem_img, cfg, flags, True,
             ns.get("_moy_app") if hasattr(ns, "get") else None)
         self.pmem_saves = _pmem_to(pmem)
+        _lua_files(ws, project)
         # The superset, on top of libmoy's table and BEFORE the cart runs.
         # Anything callable in the namespace that libmoy did not already
         # install: registering a name libmoy owns would shadow the C verb with

@@ -39,6 +39,7 @@
 
 #include "moy.h"
 #include "moy_wasm.h"
+#include "moy_cartpath.h"
 
 /* NativeSymbol takes the function as a void *. ISO C does not define that
  * conversion and every compiler WAMR builds with does; __extension__ tells
@@ -719,60 +720,7 @@ static void w_blit565(env_t e, uint32_t frame)
     hand_over(w, src);
 }
 
-/* -- the cart's own files: read -------------------------------------------- */
-
-/* Relative, '/'-separated, no empty, "." or ".." segment, no '\\'. */
-static int inside_cart(const char *name)
-{
-    const char *seg = name, *p;
-    if (!*name) return 0;
-    for (;;) {
-        size_t len;
-        p = strchr(seg, '/');
-        len = p ? (size_t)(p - seg) : strlen(seg);
-        if (len == 0) return 0;
-        if (len == 1 && seg[0] == '.') return 0;
-        if (len == 2 && seg[0] == '.' && seg[1] == '.') return 0;
-        if (memchr(seg, '\\', len)) return 0;
-        if (!p) return 1;
-        seg = p + 1;
-    }
-}
-
-/* -- the cart's writable files: write, erase, list (SPEC.md 16.12) ---------- */
-
-/* Is `path` one the manifest's "writable" declares? An entry ending in '/'
- * is a folder, and declares every path below it; any other entry declares
- * itself. An entry that breaks the path rule declares nothing. */
-static int writable(const moy_wasm *w, const char *path)
-{
-    const char *e = w->writable;
-    if (!e) return 0;
-    for (; *e; e += strlen(e) + 1) {
-        size_t n = strlen(e);
-        char folder[MOY_WASM_PATH_MAX + 1];
-        if (n > MOY_WASM_PATH_MAX) continue;
-        if (e[n - 1] != '/') {
-            if (inside_cart(e) && !strcmp(e, path)) return 1;
-            continue;
-        }
-        memcpy(folder, e, n - 1);
-        folder[n - 1] = 0;
-        if (inside_cart(folder) && !strncmp(e, path, n) && path[n]) return 1;
-    }
-    return 0;
-}
-
-/* A path write or erase may name, as a C string in `buf`: NULL unless it is
- * well-formed, no longer than MOY_WASM_PATH_MAX, and writable. */
-static const char *written_path(const moy_wasm *w, const uint8_t *s, uint32_t len,
-                                char buf[MOY_WASM_PATH_MAX + 1])
-{
-    if (len > MOY_WASM_PATH_MAX || memchr(s, 0, len)) return NULL;
-    memcpy(buf, s, len);
-    buf[len] = 0;
-    return inside_cart(buf) && writable(w, buf) ? buf : NULL;
-}
+/* -- the cart's files: read, write, erase, list (SPEC.md 16.6, 16.12) ------ */
 
 /* write(path, data): the whole written copy, replaced. The host is never
  * handed a path the manifest does not declare, nor more than
@@ -785,7 +733,7 @@ static int32_t w_write(env_t e, const uint8_t *path, uint32_t plen,
     const char *p;
     int32_t r;
     if (!w) return MOY_WASM_FAILED;
-    p = written_path(w, path, plen, buf);
+    p = moy_path_written(w->writable, path, plen, buf);
     if (!p) return MOY_WASM_NOT_WRITABLE;
     if (len > MOY_WASM_WRITE_MAX) return MOY_WASM_NO_ROOM;
     if (!w->write) return MOY_WASM_FAILED;
@@ -799,7 +747,7 @@ static int32_t w_erase(env_t e, const uint8_t *path, uint32_t plen)
     char buf[MOY_WASM_PATH_MAX + 1];
     const char *p;
     if (!w) return -1;
-    p = written_path(w, path, plen, buf);
+    p = moy_path_written(w->writable, path, plen, buf);
     if (!p || !w->erase) return -1;
     return w->erase(w->files_user, p) == 0 ? 0 : -1;
 }
@@ -831,8 +779,8 @@ static int32_t w_read(env_t e, const uint8_t *name, uint32_t nlen, uint32_t offs
     uint32_t got;
     if (!w) return 0;
     nm = c_string(name, nlen, buf);
-    if (!nm || !inside_cart(nm)) return 0;
-    if (w->written && nlen <= MOY_WASM_PATH_MAX && writable(w, nm)) {
+    if (!nm || !moy_path_inside(nm)) return 0;
+    if (w->written && nlen <= MOY_WASM_PATH_MAX && moy_path_writable(w->writable, nm)) {
         int32_t r = w->written(w->files_user, nm, offset, dst, len);
         if (r >= 0) return (len && (uint32_t)r > len) ? (int32_t)len : r;
     }

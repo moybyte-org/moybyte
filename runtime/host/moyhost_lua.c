@@ -43,6 +43,7 @@
 
 #include "moy.h"
 #include "moycore_run.h"
+#include "moycore_files.h"
 #include "moycore_lua.h"
 #include "moycore_layers.h"
 #include "moy_gfx_kernels.h"     /* the layer restore draw_layer takes */
@@ -449,6 +450,11 @@ int hl_pmem_image(host_lua *r, int32_t *out, int n)
 
 void hl_pmem_load(host_lua *r, const int32_t *in, int n)
 { if (LIVE(r)) moycore_run_pmem_load(&RUN.c, in, n); }
+
+/* The cart's files (moycore_files.h): its folder and its "writable" entries,
+ * NUL-joined; 0, or -1 when the store would not open. */
+int hl_files(host_lua *r, const char *dir, const char *writable, int n)
+{ return LIVE(r) ? moycore_lua_files(dir, writable, n > 0 ? (size_t)n : 0) : -1; }
 
 /* A cart global as a double: 1, or 0 when absent or not a number. An integer
  * goes through lua_tointeger, which a double holds exactly. */

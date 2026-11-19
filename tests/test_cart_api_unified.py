@@ -25,6 +25,15 @@ PY_OWN = frozenset((
     "_moy_restore_bg", "_moy_cfg", "_moy_images",
 ))
 
+# The spec's names the Python tier answers under another: `list` is Python's
+# own builtin, which carts call (`list(pool)`), so SPEC.md 9.1's listing is
+# `list_files` in a Python cart.
+PY_RENAMED = {"list": "list_files"}
+
+
+def _py_names(names):
+    return {PY_RENAMED.get(n, n) for n in names}
+
 
 def test_one_make_api_object():
     assert host_api.make_api is cart_api.make_api
@@ -92,9 +101,10 @@ def test_the_base_namespace_is_the_spec_table_and_moybytes_own():
     change on all four tiers at once; a verb the spec gains fails here until
     the Python tier answers it."""
     keys = set(_base_namespace())
-    assert keys - spec_table.verbs() - spec_table.VALUES - PY_OWN == set(), \
+    spec = _py_names(spec_table.verbs())
+    assert keys - spec - spec_table.VALUES - PY_OWN == set(), \
         "names neither the spec's nor declared Moybyte's own"
-    assert spec_table.verbs() | spec_table.VALUES | PY_OWN <= keys, \
+    assert spec | spec_table.VALUES | PY_OWN <= keys, \
         "the Python tier lacks these"
 
 
@@ -109,7 +119,7 @@ def test_python_lua_and_wasm_name_the_spec_verb_table():
     table = spec_table.verbs()
     replaced = {"make_layer", "draw_layer"}
     assert replaced <= NOT_REGISTRABLE
-    assert table - set(_base_namespace()) == set(), "the Python tier lacks these"
+    assert _py_names(table) - set(_base_namespace()) == set(), "the Python tier lacks these"
     assert LIBMOY_VERBS | replaced == table, (
         "the Lua tier's libmoy names and the table differ: only the table's %s, "
         "only the Lua tier's %s" % (sorted(table - LIBMOY_VERBS - replaced),

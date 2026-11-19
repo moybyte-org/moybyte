@@ -135,6 +135,22 @@ def _wasm_ext_game(cart, spine):
             and cart.get("type") != "app" and not spine.is_system_app(cart))
 
 
+def _python_files(cart):
+    """A Python cart's files (moy-spec SPEC.md 9.1): its folder and the
+    "writable" entries its manifest declares, opened on the store a Lua and a
+    compiled run's are kept in (native/moycore/moycore_files.h, moycore's
+    CartFiles on every tier). None for a run with no folder, or where the
+    store cannot be opened: its verbs then answer as a host with none."""
+    path = cart.get("path") if cart is not None else None
+    if not path or cart.get("runtime", "python") != "python":
+        return None
+    try:
+        import moycore
+        return moycore.CartFiles(path, "\0".join(cart.get("writable") or ()) or None)
+    except (ImportError, OSError, AttributeError):
+        return None
+
+
 from ticks import _ticks_ms, _ticks_us, _ticks_diff
 from widgets import _err_text, _in
 
@@ -275,6 +291,7 @@ class Player(PlayerDiag):
         self.ui = None               # a Python app's frame of ui verbs: [context, input, canvas]
         self._run_handle = 0          # the kernel Player's handle on this run, or 0
         self.app_ctx = None          # a user app's or script's context: its run grant
+        self._files = None            # a Python run's files (_open_files)
                                       # when the run is not guarded
         self._restore_bg = None       # #63: the api's declared-background restore hook
         self._flag_put = None         # flag_edits' applier for the running cart
@@ -582,6 +599,20 @@ class Player(PlayerDiag):
         """A Python run's half of `ProjectStore.flag_edits`."""
         self.run.project.play_flags[n] ^= mask
 
+    def _open_files(self, cart):
+        """This run's Python files (`_python_files`), held to be let go."""
+        self._close_files()
+        self._files = _python_files(cart)
+        return self._files
+
+    def _close_files(self):
+        files, self._files = self._files, None
+        if files is not None:
+            try:
+                files.close()
+            except Exception:  # noqa: BLE001 -- a leaving step must never raise
+                pass
+
     def _close_lua(self):
         """Tear down the previous run's Lua state (#67), if any. Idempotent and
         exception-proof: a close() failure must never block the next start or
@@ -652,6 +683,7 @@ class Player(PlayerDiag):
         _os_log.end(self.pid)
         _moybyte.end(self.pid)
         self.pid = None
+        self._close_files()
         # The dead run's `view(w, h)` must not outlive it: every fullscreen
         # surface shares viewport(), and a lingering view would crop chrome.
         self.run.view = None
@@ -1262,7 +1294,8 @@ class Player(PlayerDiag):
                          gpio=gpio,         # #9: capability-gated physical pins
                          flags=project.play_flags,   # SPEC.md 3.5: the run's own flags
                          owner=self.owner,  # its layer loans end with it
-                         run=self.run)      # its view() and its clock
+                         run=self.run,      # its view() and its clock
+                         files=self._open_files(cart))   # SPEC.md 9.1
         # Paint is a regular cartridge with one narrow shell capability. Keep it out
         # of the kid API and inject it only into the shipped app identity that asks
         # for the artwork permission; copied/renamed carts do not inherit it.

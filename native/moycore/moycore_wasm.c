@@ -6,6 +6,7 @@
 
 #include "modmoycore_int.h"
 #include "moy_proc.h"
+#include "moycore_files.h"
 
 // -- the compiled cart (docs/history/wasm_tier_plan_2026-09.md, phase 3) -----------
 //
@@ -213,17 +214,19 @@ static struct {
     size_t n, cap;
 } g_keep;
 
-static void keep_log(char op, const char *path)
+// A write ('p') or an erase ('d') of `path` logged for the keeper, for the
+// cart whose files are kept in `keep_dir` (a Lua run's too, moycore_files.h).
+void moycore_keep_log(char op, const char *keep_dir, const char *path)
 {
     char key[3 * MOY_FILES_PATH + 1];
     const char *id;
     size_t pn = strlen(path), kn, idn, need;
     char *log;
-    if (!g_keep.on || !WR || !WR->files) return;
+    if (!g_keep.on || !keep_dir[0]) return;
     kn = moy_files_key((const uint8_t *)path, pn, key, sizeof(key));
     if (kn == 0) return;
-    id = strrchr(WR->keep_dir, '/');
-    id = id ? id + 1 : WR->keep_dir;
+    id = strrchr(keep_dir, '/');
+    id = id ? id + 1 : keep_dir;
     idn = strlen(id);
     need = g_keep.n + 1 + idn + 1 + kn + 1;
     if (need > g_keep.cap) {
@@ -238,6 +241,18 @@ static void keep_log(char op, const char *path)
     memcpy(log, id, idn + 1);
     memcpy(log + idn + 1, key, kn + 1);
     g_keep.n = need;
+}
+
+// Whether the browser's last word on its room refuses a write of `len`.
+int moycore_keep_refuses(uint32_t len)
+{
+    return g_keep.on && g_keep.known
+           && (g_keep.quota < g_keep.usage || g_keep.quota - g_keep.usage < len);
+}
+
+static void keep_log(char op, const char *path)
+{
+    if (WR && WR->files) moycore_keep_log(op, WR->keep_dir, path);
 }
 
 extern void moy_store_unwind(void);
@@ -260,8 +275,7 @@ static void files_now(void *arg)
                                               q->dst, q->len);
                 break;
             case FOP_WRITE:
-                if (g_keep.on && g_keep.known
-                    && (g_keep.quota < g_keep.usage || g_keep.quota - g_keep.usage < q->len)) {
+                if (moycore_keep_refuses(q->len)) {
                     q->r = MOY_WASM_NO_ROOM;
                     break;
                 }

@@ -808,7 +808,7 @@ static mp_obj_t entry_dict(const cat_ctx_t *c, const moy_cat_entry_t *e) {
                                     MP_OBJ_NEW_QSTR(e->spec ? MP_QSTR_lua : MP_QSTR_python)));
     put(d, MP_QSTR_main, new_str(e->main, e->main_n));
     put(d, MP_QSTR_memory, e->compiled ? int_or(&e->memory, mp_const_none) : mp_const_none);
-    put(d, MP_QSTR_writable, e->compiled && e->writable_ok ? json_or(e->writable, mp_const_none)
+    put(d, MP_QSTR_writable, e->writable_ok ? json_or(e->writable, mp_const_none)
                                                           : mp_const_none);
     put(d, MP_QSTR_audio_ring, int_or(&e->audio_ring, mp_const_none));
     put(d, MP_QSTR_version, int_or(&e->version, MP_OBJ_NEW_SMALL_INT(0)));

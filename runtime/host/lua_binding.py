@@ -82,8 +82,9 @@ def _lua_names():
 # Lua run, the kernel's Player and the public UI API's Lua and RUN faces
 # (native/moycore/moycore_ui.h, native/moy_ui/moy_ui_run.h).
 PART = native_build.Part("lua", list(_RASTER) + [
-    "moy_lua.c", "moy_p8.c", "moycore_run.h", "moycore_run.c", "moycore_lua.h",
-    "moycore_lua.c", "moycore_layers.h", "moycore_superset.h", "moycore_scene.h",
+    "moy_lua.c", "moy_cartpath.h", "moy_p8.c", "moycore_run.h", "moycore_run.c", "moycore_lua.h",
+    "moycore_lua.c", "moycore_files.h", "moycore_files.c", "moy_files.h", "moy_files.c",
+    "moycore_layers.h", "moycore_superset.h", "moycore_scene.h",
     "moy_gfx_kernels.h", "moy_gfx_kernels.c", "moy_gfx_base.h", "moy_gfx_base.c",
     "moy_text.h", "moy_text.c",
     "moy_shape.h", "moy_shape.c",
@@ -114,7 +115,7 @@ PART = native_build.Part("lua", list(_RASTER) + [
 # binding, the cart's `snd` stream (libmoy's synth at the boards' float) and
 # its written files, and a WASI command's table (native/moy_wasm/moy_wasi.c).
 WASM_PART = native_build.Part("wasm", (
-    "moy_wasm.c", "moy_wasm.h", "moy_wasm_footprint.h", "moy_audio.c", "moy_audio.h", "moycore_moybyte.h",
+    "moy_wasm.c", "moy_wasm.h", "moy_cartpath.h", "moy_wasm_footprint.h", "moy_audio.c", "moy_audio.h", "moycore_moybyte.h",
     "moy_files.h", "moy_files.c", "moyhost_wasm.c", "moycore_run.h", "moycore_lua.h",
     "moycore_wasm_ext.h",
     "moy_ui_run.h", "moy_ui_run_rows.h", "moy_ui_wasm.h", "moy_ui_wasm_rows.h", "moy.h", "moy_pixel.h",
@@ -171,6 +172,13 @@ _SIGS = (
     ("hl_tick", [_P, _F, _I, _P, _I], _I),
     ("hl_pmem_image", [_P, _P, _I], _I),
     ("hl_pmem_load", [_P, _P, _I], None),
+    ("hl_files", [_P, _C, _C, _I], _I),
+    ("moycore_files_open", [_C, _C, ctypes.c_size_t], _P),
+    ("moycore_files_close", [_P], None),
+    ("moycore_files_read", [_P, _C, ctypes.c_size_t, _U32, _P, _U32], ctypes.c_int32),
+    ("moycore_files_write", [_P, _C, ctypes.c_size_t, _C, _U32], ctypes.c_int32),
+    ("moycore_files_erase", [_P, _C, ctypes.c_size_t], ctypes.c_int32),
+    ("moycore_files_list", [_P, _C, ctypes.c_size_t, _U32, _P, _U32], ctypes.c_int32),
     ("hl_get_global_num", [_P, _C, ctypes.POINTER(ctypes.c_double)], _I),
     ("hl_get_global_str", [_P, _C, _P, _I], _I),
     ("hl_get_global_len", [_P, _C], _I),
@@ -551,6 +559,14 @@ class HostLuaRun:
     def pmem_load(self, cells):
         img = (ctypes.c_int32 * 256)(*[int(c) for c in list(cells)[:256]])
         self._d.hl_pmem_load(self._r, ctypes.cast(img, _P), 256)
+
+    def files(self, path, writable):
+        """The cart's files (moy-spec SPEC.md 9.1) bound into the run: its
+        folder `path` and its "writable" entries NUL-joined (None for none);
+        whether the store opened."""
+        joined = writable.encode() if writable else None
+        return self._d.hl_files(self._r, path.encode(), joined,
+                                len(joined) if joined else 0) == 0
 
     def pmem(self):
         img = (ctypes.c_int32 * 256)()

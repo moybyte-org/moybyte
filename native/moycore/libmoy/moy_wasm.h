@@ -92,17 +92,14 @@ extern "C" {
 #endif
 
 /* The longest file name `read` and `list` and key `cfg` accept, in bytes. A
- * longer one reads as absent. */
-#define MOY_WASM_NAME_MAX 255
-
-/* The cart's writable files (SPEC.md 16.12): the longest path `write` and
- * `erase` accept, in bytes, the most one `write` keeps, and write's answers
- * past 0, which a host's `write` returns as they are. */
-#define MOY_WASM_PATH_MAX  64
-#define MOY_WASM_WRITE_MAX 1048576
-#define MOY_WASM_NOT_WRITABLE (-1)
-#define MOY_WASM_NO_ROOM      (-2)
-#define MOY_WASM_FAILED       (-3)
+ * longer one reads as absent. The cart's files' limits and answers are the
+ * Lua binding's too (moy.h's MOY_FILE_PATH_MAX and the rest). */
+#define MOY_WASM_NAME_MAX     MOY_FILE_NAME_MAX
+#define MOY_WASM_PATH_MAX     MOY_FILE_PATH_MAX
+#define MOY_WASM_WRITE_MAX    MOY_FILE_WRITE_MAX
+#define MOY_WASM_NOT_WRITABLE MOY_FILE_NOT_WRITABLE
+#define MOY_WASM_NO_ROOM      MOY_FILE_NO_ROOM
+#define MOY_WASM_FAILED       MOY_FILE_FAILED
 
 /* The sample stream (SPEC.md 16.9's `snd`): signed 16-bit mono frames at this
  * rate, and the most a host holds that its output has not yet taken. */

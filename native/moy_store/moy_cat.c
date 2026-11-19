@@ -1008,16 +1008,18 @@ static int read_entry(rd_t *r, moy_cat_entry_t *e, moy_cart_t *c,
             e->memory.kind = moy_json_int(m.v, m.e, &e->memory.value);
             e->memory.json = m;
         }
-        e->writable = field(man, mend, "writable");
-        if (e->writable.v != NULL && *e->writable.v == '[') {
-            moy_json_iter_t it;
-            const char *x, *xe;
-            e->writable_ok = 1;
-            moy_json_iter(&it, e->writable.v, e->writable.e);
-            while (moy_json_next(&it, NULL, NULL, &x, &xe)) {
-                if (*x != '"') {
-                    e->writable_ok = 0;
-                }
+    }
+    // Every cart's (moy-spec SPEC.md 9.1): a Lua or Python cart keeps files
+    // as a compiled one does.
+    e->writable = field(man, mend, "writable");
+    if (e->writable.v != NULL && *e->writable.v == '[') {
+        moy_json_iter_t it;
+        const char *x, *xe;
+        e->writable_ok = 1;
+        moy_json_iter(&it, e->writable.v, e->writable.e);
+        while (moy_json_next(&it, NULL, NULL, &x, &xe)) {
+            if (*x != '"') {
+                e->writable_ok = 0;
             }
         }
     }

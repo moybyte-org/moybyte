@@ -86,6 +86,9 @@ VENDOR = {
         # moycore takes the file and gets an empty translation unit.
         "moy_wasm.c": "libmoy/src/moy_wasm.c",
         "moy_wasm.h": "libmoy/include/moy_wasm.h",
+        # The name rules both bindings hold a cart's file names to (SPEC.md
+        # 9.1, 16.6, 16.12), which moy_lua.c and moy_wasm.c include.
+        "moy_cartpath.h": "libmoy/src/moy_cartpath.h",
         "LICENSE": "LICENSE",
     },
     # The browser's wasm engine (native/moy_wasm_web): what libmoy's binding

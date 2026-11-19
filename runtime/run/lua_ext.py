@@ -343,6 +343,8 @@ LIBMOY_VERBS = frozenset((
     "touch", "key", "keyp", "textmode",
     # core since the layers promotion
     "view", "background",
+    # 9.1, the cart's files (native/moycore/moycore_files.h)
+    "read", "write", "erase", "list",
 ))
 
 # Names moybyte owns that still must NOT be registered, each for its own reason.
@@ -374,6 +376,7 @@ NOT_REGISTRABLE = frozenset((
     "open_editor",                         # an editor handle: prelude + handles
     "on_net",                              # takes a function: prelude + handles
     "_minimise", "_restore", "moy_action", "moy_open",   # the state's own (LUA_EVENTS)
+    "list_files",                          # Python's name for libmoy's `list`
 ))
 
 # The superset names a Lua run answers in C (native/moycore/moycore_superset.h),
