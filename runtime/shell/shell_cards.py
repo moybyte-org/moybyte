@@ -44,7 +44,7 @@ _CARD_ROW = {"change": ("CHANGE", "pencil", "Change"), "copy": ("DUPLICATE", "du
              "send": ("SEND", "export", "Send"), "delete": ("DELETE", "trash", "Delete")}
 # The system group's beam row (runtime/run/link_beam.py), by the beam under
 # way: none, a send, a receive.
-_BEAM_ROW = {None: ("RECEIVE CART", "wifi", "Receive a cart"),
+_BEAM_ROW = {None: ("RECEIVE NEARBY", "wifi", "Receive nearby"),
              1: ("STOP SENDING", "stop", "Stop sending"),
              2: ("STOP RECEIVING", "stop", "Stop receiving")}
 
@@ -920,10 +920,10 @@ class SystemMenuUI:
             rows.append(_row("item", sid, self.ws.home.toggle_search))
         if not ws.wm.top_is(ws.tasks_layer.id):
             rows.append(_row("item", "menu.tasks", ws.open_tasks))
-        # Beaming a cart where the console has a radio link: the receive
-        # state opened, or the beam under way stopped.
+        # Beaming where the console has a radio link that can come up: the
+        # receive state opened, or the beam under way stopped.
         link = getattr(ws, "link", None)
-        if link is not None and ws.netplay is None:
+        if link is not None and ws.netplay is None and link.usable():
             role = link.beam_role()
             label, icon, text = _BEAM_ROW.get(role, _BEAM_ROW[None])
             rows.append(("item", label, self._menu_beam, icon, text))

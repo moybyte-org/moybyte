@@ -96,6 +96,9 @@ native) is given the same folder by path, its only preopened root
 tier: a manifest naming two is refused, at launch and at a command's run.
 Downloads, `.Trash` and `.history` are no grant's: the user moves a download
 into a folder with Files, or hands one file over through the picker.
+Downloads is where a file beamed from a console nearby lands
+(`docs/netplay_v1.md` §7), under its own name made safe and never over
+another file.
 
 **The picker** is OS chrome: an app with no `files:*` permission calls
 `moybyte.pick(mime, mode)` and the console's one question
@@ -116,7 +119,10 @@ picker over it, where the pick reaches it.
 places are Projects, the shared folders by their names, Themes and the
 Trash, and a file's verbs include **Open with…**, which asks the "open
 with" menu of §1 always (`open_with(item, True)`), the app picked becoming
-the choice for the type.
+the choice for the type, and **Send** where the console's radio link can
+come up, which offers the file, or a project as its cart, to a console
+nearby (`Intents.send`, the shell's verb: a beam streams the file from the
+store, where `share` hands an app its bytes).
 
 **Sync, the web and USB see the same tree**: the sync RPC's files root
 takes and walks the shared folders alone (`moy_sync.file_folders`, the one

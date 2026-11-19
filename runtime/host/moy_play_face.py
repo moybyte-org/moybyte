@@ -291,6 +291,10 @@ class moy_match_t(_c.Structure):
         ("probe_at", _c.c_uint8),
         ("ports_budget", moy_match_budget_t),
         ("beam", _c.c_void_p),
+        ("kept_id", _c.c_uint32),
+        ("kept_at", _c.c_uint32),
+        ("kept_peer", _c.c_uint8 * 6),
+        ("kept", _c.c_uint8),
     ]
 
 
@@ -299,9 +303,14 @@ class moy_match_beam_info_t(_c.Structure):
         ("role", _c.c_uint8),
         ("state", _c.c_uint8),
         ("why", _c.c_uint8),
+        ("what", _c.c_uint8),
         ("size", _c.c_uint32),
-        ("chunks", _c.c_uint16),
-        ("done", _c.c_uint16),
+        ("done", _c.c_uint32),
+        ("sent", _c.c_uint32),
+        ("resent", _c.c_uint32),
+        ("refused", _c.c_uint32),
+        ("rate", _c.c_uint32),
+        ("ram", _c.c_uint32),
         ("title", _c.c_char * 121),
         ("peer", _c.c_char * 24),
     ]

@@ -216,12 +216,32 @@ class Intents:
         self.held = {}            # pid -> the grants its run holds
         self.asking = None        # (grant, candidates) while the menu is up
         self.picking = None       # (pid, mime, mode, items) while the picker is
+        self.beam = None          # fn(item) -> bool: send it to a console nearby
+        self.beam_ok = None       # fn() -> bool: whether this console can
 
     def bind(self, handlers, key, deliver, ask, read, write, prefs,
              listing=None, ask_pick=None, hand=None):
         self.handlers, self.key, self.deliver, self.ask = handlers, key, deliver, ask
         self.store_read, self.store_write, self.prefs = read, write, prefs
         self.listing, self.ask_pick, self.hand = listing, ask_pick, hand
+
+    def bind_beam(self, send, ok):
+        """The console's beam (runtime/run/link_beam.py), where it has a
+        radio link: `send(item)` offers a cart dict or a user file's item to
+        a console nearby, `ok()` says whether it can now."""
+        self.beam, self.beam_ok = send, ok
+
+    def can_send(self):
+        return self.beam_ok is not None and bool(self.beam_ok())
+
+    def send(self, pid, item):
+        """`item` (a cart dict, or a user file's item) offered to a console
+        nearby, as it is: the shell's verb (Files' Send), since the beam
+        streams the file from the store rather than handing its bytes to an
+        app the way `share` does. True where the offer went out."""
+        if pid != SHELL or not self.can_send():
+            return False
+        return bool(self.beam(item))
 
     def reset(self):
         for gs in self.held.values():

@@ -671,8 +671,7 @@ class _RadioIo:
         self._link = link
 
     def send(self, mac, payload):
-        self._link.radio.send(mac, payload, False)
-        return True
+        return self._link.radio.send(mac, payload, False) is not False
 
     def recv(self):
         mac, msg = self._link.radio.irecv(0)
@@ -703,7 +702,7 @@ class EspNowLink:
     `stop`, the Player's, around a run with the "multiplayer" permission),
     a process's open port (`open_port` and `close_port`, its `net`
     handle's: runtime/system/dev_handles.py) and a beam (`beam_send`,
-    `beam_receive`: runtime/run/link_beam.py). The radio stops when the last
+    `beam_send_file`, `beam_receive`: runtime/run/link_beam.py). The radio stops when the last
     of them lets go; a game's stop with a port open ends the match and
     leaves the radio up, its beacon at the launcher's. A game's start ends
     a beam.
@@ -935,7 +934,7 @@ class EspNowLink:
     def ports_open(self):
         return 0 if self._m is None else self._m.ports_open()
 
-    # -- beaming a cart (runtime/run/link_beam.py) --
+    # -- beaming a file (runtime/run/link_beam.py) --
     def beamer(self):
         b = self._beam
         if b is None:
@@ -943,9 +942,19 @@ class EspNowLink:
             b = self._beam = Beam(self)
         return b
 
+    def usable(self):
+        """Whether the radio can carry a beam: False once a bring-up failed
+        (a board with no ESP-NOW, the Guition P4's C6 without its shim:
+        docs/netplay_v1.md §5), which no wait would change."""
+        return self.error is None
+
     def beam_send(self, ws, cart):
         """Offer `cart` to a console nearby that is receiving."""
         return self.beamer().send(ws, cart)
+
+    def beam_send_file(self, ws, path):
+        """Offer the person's file at `path` to a console nearby."""
+        return self.beamer().send_file(ws, path)
 
     def beam_receive(self, ws):
         """Open the receive state."""
@@ -1117,6 +1126,7 @@ class EspNowLink:
                 if s.desync >= 0 else None,
             },
             "world_check": bool(m.world_check) if m is not None else None,
+            "beam": None if self._beam is None else self._beam.stats(),
         }
 
 

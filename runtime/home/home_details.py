@@ -48,7 +48,8 @@ class HomeDetails:
         if "change" in zone:
             out.append("change")
             out.append("copy")
-        if getattr(self.ws, "link", None) is not None:
+        link = getattr(self.ws, "link", None)
+        if link is not None and link.usable():
             it = self.grid.selected()
             if it and it.get("path") and it.get("type") not in PSEUDO_TILE_TYPES:
                 out.append("send")

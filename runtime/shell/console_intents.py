@@ -44,6 +44,23 @@ class Intents:
                       ws.system, self._intent_list, self._intent_ask_pick,
                       self._intent_hand)
         _FRONT.bind(self._front_pid, ws.notices._bring, True)
+        _INTENTS.bind_beam(self._beam_send, self._beam_ok)
+
+    def _beam_ok(self):
+        ws = self.ws
+        link = getattr(ws, "link", None)
+        return link is not None and ws.netplay is None and link.usable()
+
+    def _beam_send(self, item):
+        """A cart dict, or a user file's item (`Documents/todo.md`), offered
+        to a console nearby (runtime/run/link_beam.py)."""
+        ws = self.ws
+        if isinstance(item, dict):
+            return ws.link.beam_send(ws, item)
+        if not isinstance(item, str) or _intents.split(item) is None:
+            return False
+        from moy_store_base import files_root
+        return ws.link.beam_send_file(ws, files_root(ws.carts_root) + "/" + item)
 
     def _front_pid(self):
         """The pid of the run the user is in: the front run while its

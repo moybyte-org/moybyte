@@ -16,9 +16,11 @@
 //   candidate(cart, now), begin(index, seed, session, cfg), close(),
 //   pending(now), due(now), advance(held[, now]) -> 1|0|-1, resend(),
 //   packet(data[, now]) -> bool, tps(now), expand(f16),
-//   beam_send(title, size), beam_put(off, b), beam_offer(now), beam_listen(now),
-//   beam_accept(now) -> 0|code, beam_end(), beam_take(off, n) -> bytes,
-//   beam_info() -> (role, state, why, title, peer, size, done, chunks)|None
+//   beam_send(title, what, size, now), beam_listen(now), beam_accept(now),
+//   beam_refuse(why) -> 0|code, beam_room(), beam_fill(buf, n) -> taken,
+//   beam_held(), beam_take(buf, now) -> count, beam_end(),
+//   beam_info() -> (role, state, why, title, peer, size, done, what, sent,
+//   resent, refused, rate, ram)|None
 //   attributes: the link's and the session's fields (moy_match.h)
 //   seed_of(seed, frame)   the frame's seed (module level)
 
@@ -234,24 +236,28 @@ static mp_obj_t mt_dispatch(size_t n, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mt_dispatch_obj, 4, 4, mt_dispatch);
 
-static mp_obj_t mt_beam_send(mp_obj_t self, mp_obj_t title, mp_obj_t size) {
-    return MP_OBJ_NEW_SMALL_INT(moy_match_beam_send(M(self), mp_obj_str_get_str(title),
-                                                    (uint32_t)mp_obj_get_int(size)));
+static mp_obj_t mt_beam_send(size_t n, const mp_obj_t *a) {
+    return MP_OBJ_NEW_SMALL_INT(moy_match_beam_send(M(a[0]), mp_obj_str_get_str(a[1]),
+                                                    (uint8_t)mp_obj_get_int(a[2]),
+                                                    (uint32_t)mp_obj_get_int_truncated(a[3]),
+                                                    now_of(a[4])));
 }
-static MP_DEFINE_CONST_FUN_OBJ_3(mt_beam_send_obj, mt_beam_send);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mt_beam_send_obj, 5, 5, mt_beam_send);
 
-static mp_obj_t mt_beam_put(mp_obj_t self, mp_obj_t off, mp_obj_t data) {
+static mp_obj_t mt_beam_room(mp_obj_t self) {
+    return mp_obj_new_int_from_uint(moy_match_beam_room(M(self)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mt_beam_room_obj, mt_beam_room);
+
+// fill(buf, n): the first `n` bytes of `buf` offered; the count taken.
+static mp_obj_t mt_beam_fill(mp_obj_t self, mp_obj_t data, mp_obj_t n) {
     mp_buffer_info_t b;
     mp_get_buffer_raise(data, &b, MP_BUFFER_READ);
-    return MP_OBJ_NEW_SMALL_INT(moy_match_beam_put(M(self), (uint32_t)mp_obj_get_int(off),
-                                                   b.buf, b.len));
+    mp_int_t k = mp_obj_get_int(n);
+    size_t len = k < 0 ? 0u : (size_t)k > b.len ? b.len : (size_t)k;
+    return MP_OBJ_NEW_SMALL_INT(moy_match_beam_fill(M(self), b.buf, len));
 }
-static MP_DEFINE_CONST_FUN_OBJ_3(mt_beam_put_obj, mt_beam_put);
-
-static mp_obj_t mt_beam_offer(mp_obj_t self, mp_obj_t now) {
-    return MP_OBJ_NEW_SMALL_INT(moy_match_beam_offer(M(self), now_of(now)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(mt_beam_offer_obj, mt_beam_offer);
+static MP_DEFINE_CONST_FUN_OBJ_3(mt_beam_fill_obj, mt_beam_fill);
 
 static mp_obj_t mt_beam_listen(mp_obj_t self, mp_obj_t now) {
     return MP_OBJ_NEW_SMALL_INT(moy_match_beam_listen(M(self), now_of(now)));
@@ -263,34 +269,44 @@ static mp_obj_t mt_beam_accept(mp_obj_t self, mp_obj_t now) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mt_beam_accept_obj, mt_beam_accept);
 
+static mp_obj_t mt_beam_refuse(mp_obj_t self, mp_obj_t why) {
+    return MP_OBJ_NEW_SMALL_INT(moy_match_beam_refuse(M(self), (uint8_t)mp_obj_get_int(why)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mt_beam_refuse_obj, mt_beam_refuse);
+
+static mp_obj_t mt_beam_held(mp_obj_t self) {
+    return mp_obj_new_int_from_uint(moy_match_beam_held(M(self)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mt_beam_held_obj, mt_beam_held);
+
+// take(buf, now): the next bytes held, into `buf` (writable): the count.
+static mp_obj_t mt_beam_take(mp_obj_t self, mp_obj_t data, mp_obj_t now) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(data, &b, MP_BUFFER_WRITE);
+    return MP_OBJ_NEW_SMALL_INT(moy_match_beam_take(M(self), b.buf, b.len, now_of(now)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(mt_beam_take_obj, mt_beam_take);
+
 static mp_obj_t mt_beam_end(mp_obj_t self) {
     moy_match_beam_end(M(self));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mt_beam_end_obj, mt_beam_end);
 
-static mp_obj_t mt_beam_take(mp_obj_t self, mp_obj_t off, mp_obj_t n) {
-    mp_int_t want = mp_obj_get_int(n);
-    vstr_t v;
-    vstr_init_len(&v, want > 0 ? (size_t)want : 0u);
-    size_t got = moy_match_beam_take(M(self), (uint32_t)mp_obj_get_int(off),
-                                     (uint8_t *)v.buf, v.len);
-    v.len = got;
-    return mp_obj_new_bytes_from_vstr(&v);
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(mt_beam_take_obj, mt_beam_take);
-
 static mp_obj_t mt_beam_info(mp_obj_t self) {
     moy_match_beam_info_t i;
     if (!moy_match_beam_info(M(self), &i)) {
         return mp_const_none;
     }
-    mp_obj_t t[8] = {
+    mp_obj_t t[13] = {
         MP_OBJ_NEW_SMALL_INT(i.role), MP_OBJ_NEW_SMALL_INT(i.state), MP_OBJ_NEW_SMALL_INT(i.why),
         str_of(i.title), str_of(i.peer), mp_obj_new_int_from_uint(i.size),
-        MP_OBJ_NEW_SMALL_INT(i.done), MP_OBJ_NEW_SMALL_INT(i.chunks),
+        mp_obj_new_int_from_uint(i.done), MP_OBJ_NEW_SMALL_INT(i.what),
+        mp_obj_new_int_from_uint(i.sent), mp_obj_new_int_from_uint(i.resent),
+        mp_obj_new_int_from_uint(i.refused), mp_obj_new_int_from_uint(i.rate),
+        mp_obj_new_int_from_uint(i.ram),
     };
-    return mp_obj_new_tuple(8, t);
+    return mp_obj_new_tuple(13, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mt_beam_info_obj, mt_beam_info);
 
@@ -530,12 +546,14 @@ static const mp_rom_map_elem_t match_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_world), MP_ROM_PTR(&mt_world_obj) },
     { MP_ROM_QSTR(MP_QSTR_expand), MP_ROM_PTR(&mt_expand_obj) },
     { MP_ROM_QSTR(MP_QSTR_beam_send), MP_ROM_PTR(&mt_beam_send_obj) },
-    { MP_ROM_QSTR(MP_QSTR_beam_put), MP_ROM_PTR(&mt_beam_put_obj) },
-    { MP_ROM_QSTR(MP_QSTR_beam_offer), MP_ROM_PTR(&mt_beam_offer_obj) },
+    { MP_ROM_QSTR(MP_QSTR_beam_room), MP_ROM_PTR(&mt_beam_room_obj) },
+    { MP_ROM_QSTR(MP_QSTR_beam_fill), MP_ROM_PTR(&mt_beam_fill_obj) },
     { MP_ROM_QSTR(MP_QSTR_beam_listen), MP_ROM_PTR(&mt_beam_listen_obj) },
     { MP_ROM_QSTR(MP_QSTR_beam_accept), MP_ROM_PTR(&mt_beam_accept_obj) },
-    { MP_ROM_QSTR(MP_QSTR_beam_end), MP_ROM_PTR(&mt_beam_end_obj) },
+    { MP_ROM_QSTR(MP_QSTR_beam_refuse), MP_ROM_PTR(&mt_beam_refuse_obj) },
+    { MP_ROM_QSTR(MP_QSTR_beam_held), MP_ROM_PTR(&mt_beam_held_obj) },
     { MP_ROM_QSTR(MP_QSTR_beam_take), MP_ROM_PTR(&mt_beam_take_obj) },
+    { MP_ROM_QSTR(MP_QSTR_beam_end), MP_ROM_PTR(&mt_beam_end_obj) },
     { MP_ROM_QSTR(MP_QSTR_beam_info), MP_ROM_PTR(&mt_beam_info_obj) },
 };
 static MP_DEFINE_CONST_DICT(match_locals, match_locals_table);

@@ -368,66 +368,100 @@ can move. **Dividing the T-Deck's built-in keyboard between two kids shipped and
 was pulled inside a day** (owner, 2026-08-22): it worked, and that thumb
 keyboard is five centimetres wide.
 
-## 7. Beaming a cart (2026-11-18, #7)
+## 7. Beaming a file (2026-11-18, #7; streamed 2026-11-19)
 
-A person on one console sends a cart from its shelf to a console nearby
-that does not have it, and the two then meet on it as any two consoles do.
-The C carries it (`native/moy_play/moy_match.h`, BEAMING A CART, which has
-the frames and every number), the console packs, asks and installs
-(`runtime/run/link_beam.py`).
+A person on one console sends a cart from its shelf, or one of their files,
+to a console nearby, and a cart that crosses is one the two can then meet on
+as any two consoles do. The C carries it (`native/moy_play/moy_match.h`,
+BEAMING A FILE, which has the frames and every number), the console feeds
+and empties it, asks and lands it (`runtime/run/link_beam.py`). The owner's
+four terms (2026-11-19, #7): no size limit and RAM that does not grow with
+what is carried, any file and not only a cart, as fast as the link allows,
+and both consoles showing how far along it is and the time left, either side
+able to stop it at any moment.
 
-**What crosses is the cart's `.moy` archive**, as the browser exports it
-(`moy_carts.pack`), at most `MOY_MATCH_BEAM_MAX` bytes, in chunks that fill
-a frame. One frame type, `T_BEAM` (8), carries the beam's five kinds; like
-`T_PORT` it left `MOY_MATCH_PROTO` at 3, and a console without it drops the
-frames as an unknown type. Every frame is broadcast, and every one but the
-offer names its destination in the payload, as the handshake does (§2).
+**What crosses is one file**: a cart's `.moy` archive, packed into the
+store's install folder by the store's packer (`moy_carts.pack`, the
+browser's export), or a person's file as it is. One frame type, `T_BEAM` (8),
+carries the beam's six kinds; like `T_PORT` it left `MOY_MATCH_PROTO` at 3,
+since no release carried the first cut's layout, and a console without it
+drops the frames as an unknown type. Every frame is broadcast, and every one
+but the offer names its destination in the payload, as the handshake does
+(§2). A size and a chunk's index are 32 bits, so what bounds a beam is the
+receiver's free space, checked before it asks: an offer it has no room for
+is refused with a NO that carries why, and its sender says so.
+
+**The bytes go through a window, a block a frame.** Each side's link holds
+one ring of `MOY_MATCH_BEAM_WINDOW` chunks whatever the size; the sender's
+console reads the file into it a `link_beam.BLOCK` at a time as room opens
+and the receiver's writes what it holds in order into the arrival's
+temporary, each one store op at a block-aligned offset, so a beam's RAM is
+fixed and a frame pays one block's read or write at most.
 
 **The receiver drives completion, because the ack lies** (§4). The sender
 offers on the air until a console answers; the receiver's yes binds the two
 by address and beam id, and from then on it reports, every
 `MOY_MATCH_BEAM_NEED_MS`, the lowest chunk it lacks, the top of what it
-holds and which of the next `MOY_MATCH_BEAM_WINDOW` it lacks. The sender
-sends every chunk once, in order, then the ones a report names lost below
-its top, at `MOY_MATCH_BEAM_RATE` frames a second (the Waveshare P4's send
-queue, §5, is the bound). The whole is checked against the offer's FNV-1a
-hash before the receiver says DONE; a copy that fails is dropped whole and
-both consoles say it arrived damaged.
+holds, the end of its room and which of the window's chunks it lacks. The
+sender sends what its console filled up to that room, then again what a
+report names lost. **The pace is found**: it starts at
+`MOY_MATCH_BEAM_RATE` and each report moves it, down where a send was
+refused (the Waveshare P4's queue, §5) or the receiver's holes grew, up
+where the rate held the sender back. **The hash is streamed**: FNV-1a over
+the bytes as the sender's console fills them and as the receiver's takes
+them; the sender answers a report of everything in with its hash (SUM), the
+receiver says DONE, whole or damaged, and answers a SUM of that beam from
+its verdict for `MOY_MATCH_BEAM_KEEP_MS` after, so a sender whose DONEs were
+all lost still hears it. A copy that fails is dropped whole and both
+consoles say it arrived damaged.
 
 **A beam is taken only by a person who asked for one.** Frames are neither
 signed nor encrypted (§2), so an offer is heard only while a person on the
 receiving console has opened the receive state (the system menu's RECEIVE
-CART), and is asked about in the console's one dialog ("Receive <title>?",
-the console it comes from, No and Receive) before a byte is written. What
-arrives lands on the shelf as a dropped `.moy` does
+NEARBY), and is asked about in the console's one dialog ("Receive
+<title>?", the console it comes from and its size, No and Receive) before a
+byte is written. A cart lands on the shelf as a dropped `.moy` does
 (`moy_carts.import_archive`): a cart that arrived as files, whose first run
 asks with the install prompt's lines (`docs/os_2026-11/processes.md` §2), so
-a received cart never runs before its person says yes. The sender's SEND is
-a verb of the cart's card (its menu: a long press, a pad's X, the system
-menu's card group) wherever the console has a link.
+a received cart never runs before its person says yes. A file lands in the
+shared folder Downloads (`docs/os_2026-11/between_apps.md` §2) under its own
+name made safe (no folder, no reserved character, nothing hidden), beside
+any file of that name rather than over it, and nothing runs it. The sender's
+SEND is a verb of a cart's card (its menu: a long press, a pad's X, the
+system menu's card group) and of a project's or a file's row in Files
+(`intents.Intents.send`), wherever the console's link can come up: a link
+whose bring-up failed (the Guition P4's C6 without its shim, §5) offers
+neither, and a first attempt there refuses at once.
 
 **Nothing waits forever, and a match outranks a beam.** An offer nobody takes
 and a receive state nothing reaches end after `MOY_MATCH_BEAM_WAIT_MS`; a
 bound side that hears nothing from its peer for `MOY_MATCH_BEAM_SILENT_MS`
-ends; a no, a stop on either side and a damaged copy each end both, and
-every end is said on whatever screen is up. A no is said as often as a DONE
-(`MOY_MATCH_BEAM_DONES`), and the console keeps its radio up
-`link_beam.PART_MS` after a beam ends, because the Waveshare P4's sends are
-queued (§5) and a radio stopped in the same call never sends them. No beam
-starts while a match is live or a game holds the radio, a beam under way
-ends when a match goes live (in C) or a game takes the radio
-(`EspNowLink.start`), and a beam holds the channel while it is bound, as a
-peer on the cart does (§2's probes): a free station stays on the channel its
-beam's peer was last heard on (`MOY_MATCH_BEAM_HERE_MS`), which is where an
-offer taken on a probe tick came from. A game's stop takes its cart out of
-the beacon (`EspNowLink.stop`), so the radio a beam brings up at the home
-invites nobody to the last game.
+ends; a beam its console stops looking at for `MOY_MATCH_BEAM_TEND_MS` (a VM
+that went away) ends and tells its peer; a no, a refusal, a stop on either
+side and a damaged copy each end both, every end is said on whatever screen
+is up, and none leaves a temporary behind (each beam's start sweeps one a
+reset left). A no is said as often as a DONE (`MOY_MATCH_BEAM_DONES`), and
+the console keeps its radio up `link_beam.PART_MS` after a beam ends,
+because the Waveshare P4's sends are queued (§5) and a radio stopped in the
+same call never sends them, and `link_beam.KEEP_MS` after a receive it
+finished, for the sender's SUM. No beam starts while a match is live or a
+game holds the radio, a beam under way ends when a match goes live (in C) or
+a game takes the radio (`EspNowLink.start`), and a beam holds the channel
+while it is bound, as a peer on the cart does (§2's probes): a free station
+stays on the channel its beam's peer was last heard on
+(`MOY_MATCH_BEAM_HERE_MS`), which is where an offer taken on a probe tick
+came from. A game's stop takes its cart out of the beacon
+(`EspNowLink.stop`), so the radio a beam brings up at the home invites
+nobody to the last game.
 
 `tests/test_link_beam.py` is the net: two consoles over a lossy, reordering
-air, a damaged chunk, a console not receiving, a decline, a sender gone
-mid-transfer, the receive state's give-up, the game's precedence, and the
-shell's half (the system menu's row, the dialog's keys, the shelf, the
-first-run ask).
+air, a file of several megabytes against the beam's fixed RAM, a damaged
+chunk, a receiver with no room, a name already taken, a stop from either
+side, a stale temporary, a refusing send queue and the pace, the lost DONEs
+over forty seeds, a console not receiving, a decline, a sender gone
+mid-transfer, a beam nobody tends, the receive state's give-up, the game's
+precedence, an inert link, and the shell's half (the system menu's row, the
+dialog's keys, the shelf, the first-run ask, Files' Send).
 
 ## 8. Where the numbers live
 
