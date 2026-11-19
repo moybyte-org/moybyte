@@ -4,9 +4,9 @@
 // Compiled INTO the stock esp-hosted-mcu slave ("network_adapter") by this
 // directory's build.sh, which stages the slave project out of the SAME
 // managed-component checkout the P4 host builds against -- version match by
-// construction, not by discipline. The host half is native/moy_c6/
+// construction, not by discipline. The host half is native/p4/moy_c6/
 // modmoy_c6.c; the wire protocol is espnow_shim_proto.h, ONE body, copied
-// here at stage time. docs/espnow_p4_2026-08.md carries the plan.
+// here at stage time. docs/history/espnow_p4_2026-08.md carries the plan.
 //
 // Shape rules, mirrored from the host file:
 //   * one hosted msg id per direction, verb byte inside (the handler table
@@ -15,11 +15,18 @@
 //     ACK is how a stock slave tells the host "no shim here";
 //   * every other verb ACKs only on FAILURE (the host's peer mirror owns the
 //     happy path, and the radio's own send callback is the delivery report);
-//   * ADD_PEER is an UPSERT, so host mod_peer and add_peer converge here.
+//   * ADD_PEER is an UPSERT, so host mod_peer and add_peer converge here;
+//   * nothing here waits on hosted's RPC queue except the forwarder task
+//     (THE FORWARDER, below).
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/task.h"
 
 #include "esp_err.h"
 #include "esp_log.h"
@@ -33,11 +40,88 @@
 static const char *TAG = "moyc6_espnow";
 static bool s_now_inited;
 
+// -- THE FORWARDER -----------------------------------------------------------
+//
+// esp_hosted_send_custom_data() ends in xQueueSend(portMAX_DELAY) on the
+// slave's protocomm request queue (protocomm_pserial.c), whose one consumer,
+// pserial_task, also runs every host RPC. A host RPC such as
+// esp_wifi_sta_get_ap_info() or esp_wifi_get_channel() runs there and waits
+// for the WiFi task (ieee80211_ioctl). A radio callback that sends directly
+// parks the WiFi task on a full queue whose consumer is waiting for the WiFi
+// task: a deadlock with no timeout on either side, which an inbound ESP-NOW
+// flood plus one radio RPC reaches in seconds. An ACK sent directly from
+// moyc6_on_h2s, which runs ON pserial_task, blocks on its own queue.
+//
+// So every slave->host message is copied into this queue without waiting,
+// and one task, which neither the WiFi task nor pserial_task ever waits on,
+// hands them to hosted. A received frame that finds the queue at
+// MOYC6_FWD_RESERVE free slots or fewer is dropped and counted (the air
+// drops frames too; the link above already lives with loss); an ACK or a
+// send status may take the reserved slots, so a flood cannot starve a
+// handshake or modespnow's tx accounting.
+
+#define MOYC6_FWD_DEPTH     (24)
+#define MOYC6_FWD_RESERVE   (4)
+
+typedef struct {
+    uint16_t len;
+    uint8_t buf[sizeof(moyc6_recv_t) + ESP_NOW_MAX_DATA_LEN];
+} moyc6_fwd_t;
+
+static QueueHandle_t s_fwd_q;
+static volatile uint32_t s_rx_dropped, s_ctl_dropped;
+
+static void moyc6_fwd_task(void *arg) {
+    (void)arg;
+    static moyc6_fwd_t item;        // one consumer; off the task stack
+    uint32_t told_rx = 0, told_ctl = 0;
+    TickType_t told_at = 0;
+    for (;;) {
+        if (xQueueReceive(s_fwd_q, &item, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+        esp_hosted_send_custom_data(MOYC6_S2H, item.buf, item.len);
+        // At most one line a second: the UART log would slow this task.
+        if ((s_rx_dropped != told_rx || s_ctl_dropped != told_ctl)
+                && xTaskGetTickCount() - told_at >= pdMS_TO_TICKS(1000)) {
+            told_at = xTaskGetTickCount();
+            told_rx = s_rx_dropped;
+            told_ctl = s_ctl_dropped;
+            ESP_LOGW(TAG, "forward queue full: %" PRIu32 " frames, %" PRIu32
+                " control messages dropped", told_rx, told_ctl);
+        }
+    }
+}
+
+static void moyc6_forward(const void *hdr, size_t hdr_len,
+    const uint8_t *data, size_t data_len, bool control) {
+    moyc6_fwd_t item;
+    if (s_fwd_q == NULL || hdr_len + data_len > sizeof(item.buf)) {
+        return;
+    }
+    if (!control && uxQueueSpacesAvailable(s_fwd_q) <= MOYC6_FWD_RESERVE) {
+        s_rx_dropped++;
+        return;
+    }
+    memcpy(item.buf, hdr, hdr_len);
+    if (data_len > 0) {
+        memcpy(item.buf + hdr_len, data, data_len);
+    }
+    item.len = (uint16_t)(hdr_len + data_len);
+    if (xQueueSend(s_fwd_q, &item, 0) != pdTRUE) {
+        if (control) {
+            s_ctl_dropped++;
+        } else {
+            s_rx_dropped++;
+        }
+    }
+}
+
 static void moyc6_ack(uint8_t verb, esp_err_t err) {
     moyc6_ack_t msg = { .hdr = { MOYC6_PROTO_VERSION, MOYC6_V_ACK } };
     msg.verb = verb;
     msg.err = (int32_t)err;
-    esp_hosted_send_custom_data(MOYC6_S2H, (uint8_t *)&msg, sizeof(msg));
+    moyc6_forward(&msg, sizeof(msg), NULL, 0, true);
 }
 
 static void moyc6_ack_if_err(uint8_t verb, esp_err_t err) {
@@ -54,15 +138,12 @@ static void moyc6_now_recv_cb(const esp_now_recv_info_t *info,
     if (len < 0 || len > ESP_NOW_MAX_DATA_LEN) {
         return;
     }
-    uint8_t buf[sizeof(moyc6_recv_t) + ESP_NOW_MAX_DATA_LEN];
     moyc6_recv_t hdr = { .hdr = { MOYC6_PROTO_VERSION, MOYC6_V_RECV } };
     memcpy(hdr.src, info->src_addr, 6);
     memcpy(hdr.dst, info->des_addr, 6);
     hdr.rssi = (int8_t)info->rx_ctrl->rssi;
     hdr.len = (uint16_t)len;
-    memcpy(buf, &hdr, sizeof(hdr));
-    memcpy(buf + sizeof(hdr), data, len);
-    esp_hosted_send_custom_data(MOYC6_S2H, buf, sizeof(hdr) + len);
+    moyc6_forward(&hdr, sizeof(hdr), data, (size_t)len, false);
 }
 
 #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5, 5, 0)
@@ -77,7 +158,7 @@ static void moyc6_now_send_cb(const esp_now_send_info_t *tx_info, esp_now_send_s
         memcpy(msg.mac, mac, 6);
     }
     msg.status = (uint8_t)status;
-    esp_hosted_send_custom_data(MOYC6_S2H, (uint8_t *)&msg, sizeof(msg));
+    moyc6_forward(&msg, sizeof(msg), NULL, 0, true);
 }
 
 // -- host verbs --------------------------------------------------------------
@@ -196,6 +277,19 @@ static void moyc6_on_h2s(uint32_t id, const uint8_t *data, size_t len, void *ctx
 }
 
 esp_err_t moyc6_espnow_shim_init(void) {
+    // No forwarder, no shim: the host then reads a stock slave and its
+    // ESP-NOW fails inert.
+    s_fwd_q = xQueueCreate(MOYC6_FWD_DEPTH, sizeof(moyc6_fwd_t));
+    if (s_fwd_q == NULL || xTaskCreate(moyc6_fwd_task, "moyc6_fwd",
+            CONFIG_ESP_HOSTED_DEFAULT_TASK_STACK_SIZE, NULL,
+            CONFIG_ESP_HOSTED_DEFAULT_TASK_PRIORITY, NULL) != pdPASS) {
+        if (s_fwd_q != NULL) {
+            vQueueDelete(s_fwd_q);
+            s_fwd_q = NULL;
+        }
+        ESP_LOGE(TAG, "espnow shim: no forwarder, not armed");
+        return ESP_ERR_NO_MEM;
+    }
     esp_err_t err = esp_hosted_register_custom_callback(MOYC6_H2S, moyc6_on_h2s, NULL);
     ESP_LOGI(TAG, "espnow shim %s", err == ESP_OK ? "armed" : "FAILED to register");
     return err;

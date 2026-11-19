@@ -59,7 +59,7 @@
 // MUST stay below 0x100: the version travels in the ACK's err field, and
 // ESP-IDF's own error space starts at 0x100 (ESP_ERR_TIMEOUT is 0x107) --
 // the host filters on that boundary.
-#define MOYC6_SHIM_VERSION    2
+#define MOYC6_SHIM_VERSION    3
 
 // Every message begins with this envelope; every struct below embeds it.
 typedef struct __attribute__((packed)) {
