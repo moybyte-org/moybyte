@@ -1,3 +1,18 @@
+# Map (grep -n a name to jump there):
+#   is_cart                           a compiled cart whose C builds for both targets
+#   scene_rows                        a scene's actor records and flags texts, as moybyte.scenes answers
+#   game_data                         what a compiled cart's native module reads at its start
+#   elf_defines                       whether a module defines a dynamic symbol
+#   read_buttons                      the frame's held and pressed button masks
+#   key_ring                          the typed keys a run has not yet been sent
+#   post_paste                        the clipboard into a native app's queue
+#   fill_words                        an app's input words for this frame
+#   LinkedUi                          what the Player asks of a toolkit the app links
+#   stop_text                         a run's end code and fault as a sentence
+#   ElfRuntime                        ws.runtimes["elf"]: commands, services and games
+#   make_elf_runtime                  the native tier, or None when the image carries none
+#   ElfGame                           a native game or app run in steps, frame by frame
+#   ElfGame._release                  the process a run with no player began, ended
 """`ws.runtimes["elf"]`: the native tier (native/moy_elf/README.md) on every
 tier, over the engine that tier carries -- `moy_elf` on a board, the host's
 `elf_binding` (runtime/host/elf_binding.py) in the simulator. Both answer the
@@ -68,6 +83,7 @@ from lua_ext import MOY_BUTTONS, cfg_blob, put_scenes, run_face, run_room, wasm_
 from moy_input import pointer_state
 from ui_draw import KEY_PASTE, paste_text
 import moy_evq as _E
+import os_log as _os_log
 
 from array import array
 
@@ -641,7 +657,10 @@ class ElfGame(LinkedUi):
         if path is None:
             raise RuntimeError(NO_MODULE % rt.engine.CHIP)
         canvas = ws.run.canvas
-        self.pid = ws.run.player.pid
+        player = ws.run.player
+        # A run with no player (a wallpaper's) is a process of its own.
+        self._own = player is None
+        self.pid = _os_log.begin(cart.get("id") or "cart") if self._own else player.pid
         self._w, self._h = canvas.w, canvas.h
         self._app = cart.get("type") == "app"
         dual = is_cart(cart)
@@ -656,6 +675,7 @@ class ElfGame(LinkedUi):
                            self._w, self._h, run, 2 if self._app else 1, data)
         data = None
         if why is not None:
+            self._release()
             raise RuntimeError(why)
         self._px = self._e.screen(self.pid)
         self._masks = [0, 0]
@@ -707,8 +727,10 @@ class ElfGame(LinkedUi):
         self._live = False
         self._px = None
         code = self._e.game_stop(self.pid)
+        self._release()
         if code == 0:
-            self._ws.input.cart_quit = True
+            if not self._own:
+                self._ws.input.cart_quit = True
             return
         fault = None
         faults = getattr(self._e, "faults", None)
@@ -732,3 +754,9 @@ class ElfGame(LinkedUi):
             self._live = False
             self._px = None
             self._e.game_stop(self.pid)
+            self._release()
+
+    def _release(self):
+        if self._own:
+            self._own = False
+            _os_log.end(self.pid)

@@ -231,3 +231,23 @@ def test_settings_switch_runs_the_native_module_and_remembers(tmp_path):
         assert _frame(ws, "Dual C")[0] == "ElfGame"
     finally:
         ws.spine.exit()
+
+
+def test_sakura_c_is_a_wallpaper_on_both_targets(tmp_path):
+    ws = _ws(tmp_path, SAKURA, "moybyte.sakura_c.moy")
+    try:
+        drv = make_drv(ws)
+        for opted, kind in ((False, "WasmHostRun"), (True, "ElfGame")):
+            _opt(ws, "moybyte.sakura_c", "Sakura C", opted)
+            ws.look.select_wallpaper("moybyte.sakura_c", persist=False)
+            seen = set()
+            for _ in range(6):
+                drv.frame(_DT)
+                seen.add(bytes(ws.wallpaper._wp_run.run.canvas._buf))
+            assert type(ws.wallpaper._wp_run.h).__name__ == kind
+            assert len(seen) > 1                    # the petals fall
+            ws.look.select_wallpaper(None, persist=False)
+            assert ws.wallpaper._wp_run is None
+            assert ws.run.player.cart_error is None if ws.run.player else True
+    finally:
+        ws.spine.exit()
