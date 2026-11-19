@@ -120,8 +120,19 @@ SUPPORTED_EXTENSIONS = (
     "moybyte.wifi",       # #38: the injected wifi service (permission-gated)
     "moybyte.app",        # #224: a compiled app's role imports (native/moy_app/moy_app_wasm.h)
     "moybyte.ui",         # the public UI API, a Lua cart's `ui` (native/moycore/moycore_ui.h)
+    "moybyte.mouse",      # a compiled cart's mouse import (native/moycore/moycore_wasm_ext.h)
 )
 APP_EXT = "moybyte.app"
+
+
+def _wasm_ext_game(cart, spine):
+    """A compiled game that declares the app extension: its run holds a
+    grant of its own, as a user app's does, for its imports from it --
+    award, progress, notify and the device handles -- under its
+    permissions and their consent."""
+    return (cart is not None and cart.get("runtime") == "wasm"
+            and APP_EXT in (cart.get("extensions") or ())
+            and cart.get("type") != "app" and not spine.is_system_app(cart))
 
 
 from ticks import _ticks_ms, _ticks_us, _ticks_diff
@@ -137,7 +148,7 @@ from player_pace import Pace
 # USER APPS (#181, ui_refactor_2026-08 Phase 7): the permission-keyed filter over
 # AppContext, plus the responsive opt-in probe. A leaf like the rest of what this
 # file imports -- it holds no Workstation, only the context FACTORY it is handed.
-from system_api import draws_in_look, make_system_api, wants_layout
+from system_api import draws_in_look, make_run_grant, make_system_api, wants_layout
 import moy_app as _moy_app              # the grant policy (native/moy_app)
 import app_perms as _perms
 
@@ -410,7 +421,8 @@ class Player(PlayerDiag):
         self.ws.store.end_all()
 
     def _stop_grant(self, cart):
-        """A compiled app the VM stops for (its imports all C-served, the
+        """A compiled app, or a game declaring the app extension, the VM stops
+        for (its imports all C-served, the
         verdict's rule) runs with no Python to make its grant: the grant is
         made here, before the stop, as make_system_api makes a user app's
         (the C policy and key, the ungated theme and surface beside its
@@ -422,7 +434,7 @@ class Player(PlayerDiag):
         if (app is None or getattr(app, "stop_hold", None) is None
                 or cart.get("runtime") != "wasm"
                 or APP_EXT not in (cart.get("extensions") or ())
-                or not ws.spine.is_user_app(cart)):
+                or not (ws.spine.is_user_app(cart) or _wasm_ext_game(cart, ws.spine))):
             return
         roles, kind = _moy_app.policy(self.granted)
         needs = roles + tuple(r for r in ("surface", "theme") if r not in roles)
@@ -455,10 +467,11 @@ class Player(PlayerDiag):
         permissions name, for a compiled user app that declares the app
         extension, whose imports reach them, for a native app, whose rows
         reach them (runtime/run/elf_run.py), and for a Lua app or script,
-        whose state opens their names (moy_app_lua.h). The run's own: the
-        namespace hands it to the runtime's open, which copies it, so two
-        runs hold two grants. None otherwise, so a module's imports from the
-        extension are refused at load and a Lua game holds none."""
+        whose state opens their names (moy_app_lua.h). A compiled game that
+        declares the extension holds one too (`_wasm_ext_game`). The run's
+        own: the namespace hands it to the runtime's open, which copies it,
+        so two runs hold two grants. None otherwise, so a module's imports
+        from the extension are refused at load and a Lua game holds none."""
         app = getattr(self.ws, "app_abi", None)
         run = getattr(app, "run", None)
         if run is None:
@@ -1276,6 +1289,9 @@ class Player(PlayerDiag):
                                       owner=self.pid))
             if "ui" in ns:
                 self.face.bind(ns, cart)
+        elif _wasm_ext_game(cart, ws.spine):
+            make_run_grant(ws.app_context, cart, keep=self._keep_grant,
+                           perms=self.granted, owner=self.pid)
         if console is not None:
             ns.update(console.api())
         # A permission the manifest lists that Settings turned off reads None

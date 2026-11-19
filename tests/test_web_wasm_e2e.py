@@ -23,6 +23,10 @@ What it proves, in real Chrome against the built dist/:
   * a compiled app (App Roles Wasm) reaches its prefs and theme rows through
     imports from "moybyte.app" with no upcall of any class, and the same
     module one permission short is refused at load, the import named;
+  * a compiled game (Game Ext Wasm) awards its badges through the grant
+    its run holds, reads its scenes, places its paint image and reads the
+    mouse through Moybyte's own extensions, the page's adapters over the
+    same C (native/moycore/moycore_wasm_ext.h);
   * Get Carts offers a compiled cart from a local index and installs it --
     reading only the members this console keeps, by range, so not one byte
     of a chip's module crosses -- and the installed cart plays on the next
@@ -261,6 +265,38 @@ def test_a_compiled_app_reaches_its_roles_with_no_upcall(tmp_path):
     assert st["ups"][1:] == [0, 0, 0, 0, 0], "the run crossed into Python: %r" % (st,)
     st = got["app_short"]
     assert "moybyte.app.prefs_get" in (st["err"] or ""), st
+
+
+GAME_EXT = ROOT / "tests" / "fixtures" / "wasm" / "game_ext.moy"
+
+
+def test_a_compiled_game_reaches_its_badges_scenes_image_and_mouse(tmp_path):
+    """Game Ext Wasm (its src/main.c lists the pmem slots it reports in)
+    in the page: the same answers tests/test_wasm_game_ext.py pins on the
+    host, and a click on the canvas its mouse's press."""
+    web_e2e.require("store")
+    cart = _built(GAME_EXT, tmp_path / "carts" / "game_ext.moy")
+    state = ("__moyState().then(s => JSON.stringify({cart: s.cart, err: s.cart_error, "
+             "notice: s.notice, pmem: s.pmem}))")
+    out, js = _play(tmp_path, _site(tmp_path, [cart]), "game_ext",
+                    "?handheld=1&dev=1&cart=game_ext.moy", [
+        # the cart has ticked (its slot 23 counts its frames) before the click
+        {"waitFor": "__moyState().then(s => s.pmem && s.pmem[23] > 10)", "timeout": 20000},
+        {"click": [60, 70]},
+        {"wait": 500},
+        {"js": state},
+        {"shot": "game_ext"},
+    ])
+    assert len(js) == 1, "the scenario did not run to its end:\n%s" % out[-4000:]
+    st = json.loads(js[0])
+    assert st["cart"] == "Game Ext Wasm" and st["err"] is None and st["notice"] is None, st
+    p = st["pmem"]
+    assert p[0] >= 0 and p[1] >= 0, p[:2]                 # award, progress
+    assert p[2:13] == [2, 40, 50, 3, 1, 4, 1, 3, 3, -1, 1], p[2:13]
+    assert p[13] == len('{"speed": 2}') and p[14] == 0, p[13:15]
+    assert p[15:18] == [1, 4 << 16 | 2, 0], p[15:18]
+    assert p[19] >= 1 and p[20] == 1, p[19:23]             # down, one press
+    assert abs(p[21] - 60) <= 1 and abs(p[22] - 70) <= 1, p[21:23]
 
 
 APP_UI = ROOT / "tests" / "fixtures" / "wasm" / "app_ui.moy"

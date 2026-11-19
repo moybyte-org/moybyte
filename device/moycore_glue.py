@@ -64,7 +64,8 @@ from array import array
 
 from lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
                      LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES, ROLE_NAMES,
-                     install_handles, end_handles, put_scenes, layer_restore,
+                     install_handles, end_handles, put_scenes, put_wasm_media,
+                     wasm_exts, layer_restore,
                      layer_restore_end,
                      snap_slots, audio_ops, snap_shared, run_room, run_face, sync_view,
                      drain_audio, cfg_blob, wants_layout)
@@ -1164,13 +1165,17 @@ class WasmRun(MoycoreRun):
         app = ns.get("_moy_app")
 
         lay = ns.get("_moy_layout") if hasattr(ns, "get") else None
+        # Moybyte's extensions the cart declares (native/moycore/
+        # moycore_wasm_ext.h), and the scenes and paint images theirs read.
+        exts = wasm_exts(cart)
 
         def _open(target, target_sha, interp):
             return _moycore.wasm_open(target, head, int(pages), target_sha, path,
                                       swapped, unsigned_ok, interp, joined, ring,
-                                      app, lay)
+                                      app, lay, exts)
 
         try:
+            put_wasm_media(ns, exts, _moycore.image_put, _moycore.scene_put)
             if has_module:
                 err = _open(module, sha, False)
                 if (err and not err.startswith(_AOT_TAMPER_EVIDENCE)

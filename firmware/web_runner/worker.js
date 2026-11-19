@@ -359,7 +359,9 @@ function say(s) { self.postMessage({ t: "status", s: s }); }
 // with the same marshalling, blit, read and traps. This is moy-spec's web
 // player's adapter (runner/cart.js) on this worker's VM. A compiled app's
 // "moybyte.app" imports are the same adapters over the app ABI's rows
-// (moy_web_app_natives, native/moy_app/moy_app_wasm.h). The two modules have
+// (moy_web_app_natives, native/moy_app/moy_app_wasm.h), and so are a cart's
+// imports from Moybyte's own extensions (moy_web_ext_natives,
+// native/moycore/moycore_wasm_ext.h). The two modules have
 // separate memories, so a pointer the cart hands over is an offset into ITS
 // memory: where a row says '*~' -- a pointer and the length it covers -- the
 // range is bounds-checked against the cart's memory, copied into the VM's,
@@ -447,8 +449,10 @@ export function installCartEngine(M) {
             return 1;
         },
     };
-    // One import per row of a table (`natives`: the "moy" table's, or the app
-    // extension's "moybyte.app" rows), each an adapter over the row's C.
+    // One import per row of a table (`natives`: the "moy" table's, the app
+    // extension's "moybyte.app" rows, or one of Moybyte's own extensions'
+    // modules, native/moycore/moycore_wasm_ext.h), each an adapter over the
+    // row's C.
     function adapters(natives) {
         const cp = C.malloc(4);
         const base = natives(cp);
@@ -513,6 +517,8 @@ export function installCartEngine(M) {
                 if (!imports) {
                     imports = { moy: adapters(C.natives) };
                     if (C.appNatives) imports["moybyte.app"] = adapters(C.appNatives);
+                    for (let i = 0; C.extModule && C.extModule(i); i++)
+                        imports[cstr(C.extModule(i))] = adapters((cp) => C.extNatives(i, cp));
                 }
                 instance = new WebAssembly.Instance(module, imports);
             } catch (e) {

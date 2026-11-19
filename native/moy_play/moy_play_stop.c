@@ -313,6 +313,7 @@ typedef struct {
     char writable[512];
     size_t writable_len;
     uint32_t ring;
+    uint32_t exts;              // the Moybyte extensions it declares (moycore_run.h)
     uint8_t *head;
     size_t head_len;
     char title[48];
@@ -348,6 +349,7 @@ static int entry_read(void *ctx, const moy_cat_entry_t *e) {
     }
     S->ring = e->audio_ring.kind == 1 && e->audio_ring.value > 0
                   && e->audio_ring.value <= 0xFFFFFFF ? (uint32_t)e->audio_ring.value : 0u;
+    S->exts = moycore_exts_of(e->extensions.v, e->extensions.e);
     // "writable": its strings NUL-joined, as Python joined them.
     S->writable_len = 0;
     if (e->writable_ok) {
@@ -746,6 +748,7 @@ static int load(uint32_t run, const char *path, bool *notice) {
         .swapped = MOY_KERNEL_PANEL_SWAP, .allow_unsigned = (flags & MOY_PLAY_UNSIGNED) != 0,
         .interp = S->m.interp, .ring = S->ring,
         .app = moy_app_stopped != NULL ? moy_app_stopped() : NULL,
+        .exts = S->exts,
     };
     int rc = moycore_wasm_open_c(&o, S->err, sizeof(S->err));
     if (rc != 0 && !S->m.interp && !moycore_wasm_ran()

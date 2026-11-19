@@ -40,6 +40,8 @@ enum { WCALL_INIT = 0, WCALL_UPDATE, WCALL_DRAW, WCALL_LAYOUT };
 
 #if MOYCORE_WASM
 
+#include "moycore_wasm_ext.h"
+
 // A compiled cart's run state, its run's row's (`wr`): several compiled runs
 // are several rows, each with its engine session, and every call here reads
 // the CURRENT row's. Allocated per run, from PSRAM where there is any:
@@ -58,6 +60,7 @@ typedef struct moycore_wrun {
     char *writable;              // the manifest's "writable", libmoy's form
     int32_t layout[3];           // the (w, h, fs) WCALL_LAYOUT passes `_layout`
     int has_layout;              // the last WCALL_LAYOUT found the export
+    uint32_t exts;               // the Moybyte extensions it declares (moycore_wasm_ext.h)
 #if MOYCORE_APP
     moy_app_run_t app;           // the app's run its imports from the extension serve
 #endif
@@ -69,6 +72,8 @@ typedef struct moycore_wrun {
     // The app extension's rows, registered where they are: const, generated
     // in WAMR's lookup order (moy_wasm_register_rows).
     const NativeSymbol *app_natives;
+    // Moybyte's extension tables (moycore_wasm_ext.h), registered as they are.
+    int exts_registered;
 #endif
 } wrun_t;
 
@@ -109,8 +114,8 @@ const struct moy_app_run *moy_app_wasm_run_of(void *e)
 #endif
 
 // The extension's table for libmoy's check: only for a run that holds an app
-// grant (the Player makes one for a compiled user app that declares the
-// extension), so a cart that declares none imports only from "moy".
+// grant (the Player makes one for a compiled user app or game that declares
+// the extension), so a cart that declares none imports none of its rows.
 static uint32_t app_ext(moy_wasm_ext *x)
 {
     uint32_t n = 0;
@@ -372,6 +377,17 @@ static void hw_layer_free(void *user, moy_pixel *p)
 
 // -- the engine's callbacks, on its thread --
 
+const char *moycore_wasm_ext_module(uint32_t i)
+{
+    return i < MOYCORE_EXT_COUNT ? MOYCORE_EXTS[i].module : NULL;
+}
+
+const void *moycore_wasm_ext_rows(uint32_t i, uint32_t *count)
+{
+    *count = i < MOYCORE_EXT_COUNT ? MOYCORE_EXTS[i].count : 0u;
+    return i < MOYCORE_EXT_COUNT ? (const void *)MOYCORE_EXTS[i].rows : NULL;
+}
+
 static int wo_runtime_up(void *user, char *err, size_t errlen)
 {
     (void)user;
@@ -396,6 +412,14 @@ static int wo_runtime_up(void *user, char *err, size_t errlen)
         }
         WR->app_natives = rows;
     }
+    for (uint32_t i = 0; i < MOYCORE_EXT_COUNT; i++) {
+        if (!moy_wasm_register_rows(MOYCORE_EXTS[i].module, MOYCORE_EXTS[i].rows,
+                                    MOYCORE_EXTS[i].count)) {
+            snprintf(err, errlen, "the %s table did not register", MOYCORE_EXTS[i].module);
+            return 1;
+        }
+        WR->exts_registered = (int)i + 1;
+    }
 #else
     // The page's adapters read the table where it is (moy_web_natives).
     (void)err;
@@ -407,16 +431,21 @@ static int wo_runtime_up(void *user, char *err, size_t errlen)
 static int wo_loaded(void *user, moy_wasm_module module, char *err, size_t errlen)
 {
     (void)user;
-    moy_wasm_ext x = { NULL, NULL, 0 };
-    uint32_t nx = app_ext(&x);
+    // The app extension where the run holds a grant, then Moybyte's own the
+    // cart declares.
+    moy_wasm_ext x[1 + MOYCORE_EXT_COUNT];
+    uint32_t nx = app_ext(&x[0]);
+    uint32_t nall = nx + moycore_wasm_exts(WR->exts, x + nx);
 #if MOY_WASM
     const uint8_t *head = moycore_whead;
     size_t head_len = moycore_whead_len;
-    if (moy_wasm_check_ext(module, head, head_len, moycore_wpages, &x, nx, err, errlen)) return 1;
+    if (moy_wasm_check_ext(module, head, head_len, moycore_wpages, x, nall, err, errlen))
+        return 1;
 #else
     const uint8_t *head = module->bytes;
     size_t head_len = module->size;
-    if (moy_wasm_check_bytes_ext(module->bytes, module->size, moycore_wpages, &x, nx, err, errlen))
+    if (moy_wasm_check_bytes_ext(module->bytes, module->size, moycore_wpages, x, nall, err,
+                                 errlen))
         return 1;
 #endif
     // Each import from the extension against the run's grant, named when its
@@ -542,6 +571,9 @@ static void wo_unbound(void *user)
     // table's registration from this run's storage goes now.
     if (WR->natives) wasm_runtime_unregister_natives(MOY_WASM_MODULE, WR->natives);
     if (WR->app_natives) wasm_runtime_unregister_natives(APP_EXT, WR->app_natives);
+    for (int i = 0; i < WR->exts_registered; i++)
+        wasm_runtime_unregister_natives(MOYCORE_EXTS[i].module,
+                                        (NativeSymbol *)MOYCORE_EXTS[i].rows);
 #endif
     moy_wasm_close(&WR->w);
 }
@@ -605,7 +637,7 @@ int moycore_wasm_begin(const char *path, const char *sha, const char *dir,
                        const char *writable, size_t writable_len,
                        int swapped, int allow_unsigned, int interp, uint32_t ring,
                        const struct moy_app_run *app, const int32_t *layout,
-                       char *err, size_t errlen)
+                       uint32_t exts, char *err, size_t errlen)
 {
     if (WR) {
         wrun_free(WR);
@@ -618,6 +650,7 @@ int moycore_wasm_begin(const char *path, const char *sha, const char *dir,
     }
     WR->w.read = hw_read;
     WR->w.wire_swapped = swapped;
+    WR->exts = exts;
 #if MOYCORE_APP
     if (app) WR->app = *app;
 #endif
@@ -746,7 +779,7 @@ void moycore_wasm_end(void)
 
 // wasm_open(module_path, wasm_head, pages, wasm_sha, cart_dir, wire_swapped,
 //           allow_unsigned=False, interp=False, writable=None, ring=0, app=None,
-//           layout=None)
+//           layout=None, exts=0)
 //           -> None, or the refusal or trap as text
 //
 // After run_begin(..., vm=False): load the compiled module at `module_path`
@@ -767,7 +800,9 @@ void moycore_wasm_end(void)
 // app's run (moycore_app_run), which the run holds for its imports from the
 // app extension and its load's grant check, or None for none. `layout`, a
 // responsive app's (w, h, fs), is what its exported `_layout` hears before
-// _init. A refusal or a trap closes nothing -- close() does.
+// _init. `exts` is the Moybyte extensions the manifest declares, by
+// moycore_wasm_ext.h's bits (lua_ext.wasm_exts): their modules' imports are
+// the cart's to make. A refusal or a trap closes nothing -- close() does.
 static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
 {
     if (!RUN.open || RUN.L || RUN.wasm)
@@ -800,7 +835,9 @@ static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
                                 n_args > 7 && mp_obj_is_true(a[7]),
                                 ring > 0 ? (uint32_t)ring : 0u,
                                 moycore_app_run(n_args > 10 ? a[10] : mp_const_none),
-                                layout, err, sizeof(err));
+                                layout,
+                                n_args > 12 ? (uint32_t)mp_obj_get_int(a[12]) : 0u,
+                                err, sizeof(err));
     moycore_whead = NULL;
     moycore_whead_len = 0;
     if (rc) return mp_obj_new_str(err, strlen(err));
@@ -812,7 +849,7 @@ static mp_obj_t mod_wasm_open(size_t n_args, const mp_obj_t *a)
                  MP_ERROR_TEXT("moycore: this build has no wasm engine"));
 #endif
 }
-MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moycore_wasm_open_obj, 6, 12, mod_wasm_open);
+MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moycore_wasm_open_obj, 6, 13, mod_wasm_open);
 
 // files_keep(on): the page's keeper is listening, or not (the browser's,
 // firmware/web_runner/carts_link.py); turning it off drops the log.

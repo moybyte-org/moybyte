@@ -61,6 +61,7 @@
 // The kernel's Player, where the image has it (weak: moycore stands alone).
 #if __has_include("moy_play.h")
 #include "moy_play.h"
+#include "moy_json.h"
 #else
 bool moy_play_lock_seed(uint32_t *seed);
 #endif
@@ -300,12 +301,14 @@ static MP_DEFINE_CONST_FUN_OBJ_2(mod_register_obj, mod_register);
 // image_put(name, text) -- a paint image's .moyimg text for the run's
 // image(name), copied into C (moycore_lua.h); the cart's layers and images
 // are then the run's own, and __layer_new, __layer_spr_img and
-// __image_handle never cross into Python. Before the load.
+// __image_handle never cross into Python. Before the load: a Lua run's, or
+// a compiled run's (run_begin with vm=False) before wasm_open, for its
+// moybyte.images imports (moycore_wasm_ext.h).
 static mp_obj_t mod_image_put(mp_obj_t name_obj, mp_obj_t text_obj)
 {
     size_t n = 0;
     const char *text = mp_obj_str_get_data(text_obj, &n);
-    if (!RUN.L) mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("moycore: no run"));
+    if (!RUN.open) mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("moycore: no run"));
     if (moycore_lua_image_put(mp_obj_str_get_str(name_obj), text, n) != 0)
         mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("moycore: image_put"));
     return mp_const_none;
@@ -314,12 +317,13 @@ static MP_DEFINE_CONST_FUN_OBJ_2(mod_image_put_obj, mod_image_put);
 
 // scene_put(name, text) -- a scene's .moyscene text for the run's scene verbs
 // (moycore_scene.h): the scenes are parsed and drawn in C, so no scene row
-// crosses into Python. Before the load, in the cart's scene order.
+// crosses into Python. Before the load, in the cart's scene order: a Lua
+// run's, or a compiled run's before wasm_open, for its moybyte.scenes imports.
 static mp_obj_t mod_scene_put(mp_obj_t name_obj, mp_obj_t text_obj)
 {
     size_t n = 0;
     const char *text = mp_obj_str_get_data(text_obj, &n);
-    if (!RUN.L) mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("moycore: no run"));
+    if (!RUN.open) mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("moycore: no run"));
     if (moycore_lua_scene_put(mp_obj_str_get_str(name_obj), text, n) != 0)
         mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("moycore: scene_put"));
     return mp_const_none;
@@ -916,6 +920,22 @@ static mp_obj_t mod_close(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_close_obj, mod_close);
 
+uint32_t moycore_exts_of(const char *v, const char *v_end)
+{
+    static const char *const names[] = { MOYCORE_EXT_NAMES };
+    uint32_t mask = 0;
+    moy_json_iter_t it;
+    const char *k, *ke, *e, *ee;
+    if (v == NULL || moy_json_kind(v, v_end) != MOY_JSON_ARR) return 0;
+    moy_json_iter(&it, v, v_end);
+    while (moy_json_next(&it, &k, &ke, &e, &ee)) {
+        if (moy_json_kind(e, ee) != MOY_JSON_STR) continue;
+        for (uint32_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+            if (moy_json_str_is(e, ee, names[i], strlen(names[i]))) mask |= 1u << i;
+    }
+    return mask;
+}
+
 // A compiled cart's run opened from C, with no VM (docs/history/kernel_cartpath_2026-10.md
 // section 5.2, the load after the stop): run_begin's console over the
 // caller's buffers, then wasm_open's session -- the same two steps the binding
@@ -957,7 +977,7 @@ int moycore_wasm_open_c(const moycore_open_c_t *o, char *err, size_t n)
     moycore_wpages = o->pages;
     int rc = moycore_wasm_begin(o->module, o->sha, o->dir, o->writable, o->writable_len,
                                 o->swapped, o->allow_unsigned, o->interp, o->ring, o->app,
-                                o->layout, err, n);
+                                o->layout, o->exts, err, n);
     moycore_whead = NULL;
     moycore_whead_len = 0;
     return rc;

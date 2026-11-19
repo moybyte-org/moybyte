@@ -55,6 +55,7 @@
 #include "moy_sh.h"
 #include "moy_wasi.h"
 #include "moy_vmq.h"
+#include "moycore_wasm_ext.h"
 
 #ifndef MOY_PIXEL_RGB565
 #error "the host console is the RGB565 build -- compile with -DMOY_PIXEL_RGB565=1"
@@ -83,6 +84,7 @@ typedef struct {
     moy_files_t *files;      /* the cart's written files (moy_files.h) */
     char       *writable;    /* the manifest's "writable", libmoy's form */
     moy_app_run_t app;       /* the app's run its "moybyte.app" imports serve */
+    uint32_t    exts;        /* the Moybyte extensions it declares (moycore_wasm_ext.h) */
     uint32_t    rh;          /* its console's row (moycore_run_handle), 0 once released */
     int         take;        /* the layouts its blits leave in its memory (moycore_lua.h) */
     void       *next;        /* the runs made and not freed */
@@ -123,6 +125,7 @@ static void hw_release(host_wasm *r)
     moycore_run *row = moycore_run_of(r->rh);
     if (row) {
         moycore_run_use(row);
+        moycore_lua_close();             /* its scenes and paint images */
         moycore_run_close(&row->c);
         moycore_run_end(row);
     }
@@ -360,6 +363,14 @@ int hw_runtime(void)
             wasm_runtime_destroy();
             return 0;
         }
+        for (uint32_t i = 0; i < MOYCORE_EXT_COUNT; i++) {
+            if (!wasm_runtime_register_natives_sorted(MOYCORE_EXTS[i].module,
+                                                      (NativeSymbol *)MOYCORE_EXTS[i].rows,
+                                                      MOYCORE_EXTS[i].count)) {
+                wasm_runtime_destroy();
+                return 0;
+            }
+        }
         g_runtime = 1;
     }
     return 1;
@@ -473,6 +484,29 @@ int hw_set_app(host_wasm *r, const void *app, int len)
     return 0;
 }
 
+/* The Moybyte extensions the manifest declares, by moycore_wasm_ext.h's bits
+ * (lua_ext.wasm_exts): their modules' imports are the cart's to make. Before
+ * hw_load. */
+void hw_set_exts(host_wasm *r, uint32_t exts)
+{
+    r->exts = exts;
+}
+
+/* A paint image's .moyimg text and a scene's .moyscene text for the run's
+ * moybyte.images and moybyte.scenes (moycore_lua.h), as a Lua run's are
+ * handed over. 0, or 1 with no memory. */
+int hw_image_put(host_wasm *r, const char *name, const char *text, int n)
+{
+    hw_row(r);                          /* its row, the one the tables are put in */
+    return n < 0 || moycore_lua_image_put(name, text, (size_t)n) != 0;
+}
+
+int hw_scene_put(host_wasm *r, const char *name, const char *text, int n)
+{
+    hw_row(r);                          /* its row, the one the tables are put in */
+    return n < 0 || moycore_lua_scene_put(name, text, (size_t)n) != 0;
+}
+
 /* The engine's handle the run's imports are called with: its exec env, or
  * NULL before its load. */
 void *hw_env(host_wasm *r)
@@ -535,9 +569,10 @@ int hw_load(host_wasm *r, const char *dir, const char *main, int pages,
         put_err(err, errlen, "refused", "the manifest declares no \"memory\"");
         return 1;
     }
-    moy_wasm_ext x = { "moybyte.app", g_app_rows, g_app_n };
+    moy_wasm_ext x[1 + MOYCORE_EXT_COUNT] = { { "moybyte.app", g_app_rows, g_app_n } };
     uint32_t nx = r->app.g ? 1u : 0u;
-    if (moy_wasm_check_ext(r->module, copy, (size_t)n, (uint32_t)pages, &x, nx,
+    uint32_t nall = nx + moycore_wasm_exts(r->exts, x + nx);
+    if (moy_wasm_check_ext(r->module, copy, (size_t)n, (uint32_t)pages, x, nall,
                            msg, sizeof msg)
         || (nx && moy_app_wasm_admit(&r->app, copy, (size_t)n, msg, sizeof msg))) {
         free(copy);

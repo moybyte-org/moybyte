@@ -148,12 +148,25 @@ typedef struct {
     uint32_t ring;               // the manifest's "audio_ring": `snd`'s depth, 0 the default
     const struct moy_app_run *app;   // the app's run (native/moy_app/moy_app_run.h), or NULL
     const int32_t *layout;       // a responsive app's (w, h, fs) for `_layout`, or NULL
+    uint32_t exts;               // the Moybyte extensions it declares (moycore_wasm_ext.h)
 } moycore_open_c_t;
 
 int moycore_wasm_open_c(const moycore_open_c_t *o, char *err, size_t n);
+
+// Moybyte's extensions a compiled cart may import from, bit i the i-th
+// (moycore_wasm_ext.h has their tables, runtime/run/lua_ext.py's WASM_EXTS the
+// same names), and the bits of those a manifest's "extensions" JSON list names.
+#define MOYCORE_EXT_NAMES "moybyte.scenes", "moybyte.images", "moybyte.mouse"
+uint32_t moycore_exts_of(const char *v, const char *v_end);
 int moycore_wasm_ran(void);
 void moycore_close_c(void);
 // The VM is going: a run still open closes with it (modmoycore.c).
 void moycore_vm_stop(void);
+
+// Moybyte's extension tables by index (moycore_wasm_ext.h), for the browser's
+// page, whose adapters wrap each module's rows (native/moy_wasm_web): the
+// i-th module's name, NULL past the last, and its rows.
+const char *moycore_wasm_ext_module(uint32_t i);
+const void *moycore_wasm_ext_rows(uint32_t i, uint32_t *count);
 
 #endif // MOYCORE_RUN_H

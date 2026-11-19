@@ -180,7 +180,7 @@ int moycore_wasm_begin(const char *path, const char *sha, const char *dir,
                        const char *writable, size_t writable_len,
                        int swapped, int allow_unsigned, int interp, uint32_t ring,
                        const struct moy_app_run *app, const int32_t *layout,
-                       char *err, size_t errlen);
+                       uint32_t exts, char *err, size_t errlen);
 // A responsive app's `_layout(w, h, fs)` on the current compiled run: 1 where
 // its module exports one and it returned, 0 where it exports none, -1 with
 // `err` (a trap, which ends the run).

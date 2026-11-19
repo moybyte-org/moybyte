@@ -80,6 +80,9 @@ CHIPS = ("esp32s3", "esp32p4", "host")
 THEME = "theme"
 WASM_APP = "moybyte.app"
 WASM_OS = "moybyte.os"
+# Moybyte's own extensions a compiled cart imports from by their names
+# (native/moycore/moycore_wasm_ext.h, sdk/include/moybyte/cart.h).
+WASM_CART_EXTS = ("moybyte.scenes", "moybyte.images", "moybyte.mouse")
 # A WASI program's own files: WASI's path calls, which reach only the folder
 # its `files` permission names, beside its moybyte.os `files_*` rows; read
 # from its source, the C library's file calls.
@@ -102,6 +105,7 @@ STUB_FILES = {
                ("moybyte.pyi", os.path.join(STUBS, "moybyte.pyi"))),
     "lua": (("moybyte_os.lua", os.path.join(STUBS, "moybyte_os.lua")),),
     "wasm": (("include/moybyte/app.h", os.path.join(SDK_INCLUDE, "moybyte", "app.h")),
+             ("include/moybyte/cart.h", os.path.join(SDK_INCLUDE, "moybyte", "cart.h")),
              ("include/moybyte/os.h", os.path.join(SDK_INCLUDE, "moybyte", "os.h"))),
     "wasi": (("include/moybyte/os.h", os.path.join(SDK_INCLUDE, "moybyte", "os.h")),),
     "c": (("include/moybyte/os.h", os.path.join(SDK_INCLUDE, "moybyte", "os.h")),
@@ -344,6 +348,11 @@ def _wasm_program(prog, cart, stem, app, man):
         for module, name in wasm_imports(data):
             if module == WASI_PREVIEW1 and not app and name.startswith("path_"):
                 prog.used["%s.%s" % (module, name)] = ("files",)
+                continue
+            if module in WASM_CART_EXTS:
+                if module not in (man.get("extensions") or ()):
+                    prog.errors.append('imports %s "%s" and does not declare the extension '
+                                       '("extensions": ["%s"])' % (module, name, module))
                 continue
             if module == WASM_APP:
                 table = mods["app"]

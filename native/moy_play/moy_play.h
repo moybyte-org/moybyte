@@ -7,7 +7,8 @@
 //   1. the runtime is "lua" or "wasm" and this image has its row (moy_rt_get);
 //   2. the type is "game" (a manifest that names none is a game when it is a
 //      spec cart, an app otherwise: runtime/carts/moy_carts.py's rule), or "app"
-//      with the runtime "wasm" where the image carries native/moy_app;
+//      with the runtime "wasm" where the image carries native/moy_app (a
+//      compiled game declaring the app extension is read as such an app);
 //   3. every permission is in the native set: graphics, input, audio,
 //      multiplayer -- or, for a compiled app, a role's permission or a
 //      `lease:<row>`, which pass when every row the module imports from the
@@ -15,6 +16,9 @@
 //      table takes a compiled program's leases without MOY_LEASE_VM, and a
 //      lease a VM process holds keeps the VM at the stop's verdict instead
 //      (moy_play_stop.c). A permission the kernel does not know keeps the VM.
+//      A compiled cart declaring `moybyte.scenes` or `moybyte.images` keeps
+//      it too (WHY_IMPORT, the extension named): the Python console hands
+//      its scenes and paint images to the run.
 // A cart that fails it runs with the VM up, and `why` names the first clause
 // it failed. Everything outside the native set keeps the VM, by name:
 // `network`, `console`, `pins`, `files` and every `files:<folder>`, `prefs`, and

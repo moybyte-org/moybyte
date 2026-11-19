@@ -976,7 +976,10 @@ names from every app. Because the kernel stamps the sender, a game unlocks
 only its own manifest's badges; the process refuses any other id and logs
 the refusal. A Lua
 game, app and service hold `moybyte.award` and `moybyte.progress` too, a
-compiled app imports `moybyte_award` and `moybyte_progress`, a WASI program
+compiled app imports `moybyte_award` and `moybyte_progress`, and so does a
+compiled game that declares the `moybyte.app` extension (its run then holds
+a grant of its own, as an app's does, which its device handles answer under
+too: `docs/moy_cart_api.md`, "A compiled cart's Moybyte verbs"), a WASI program
 `moybyte.os`'s `award` and `progress`, and a C program calls `moy_award`
 and `moy_progress`.
 `system_carts/moybyte.harpoon_pop.moy` uses all three kinds;
@@ -1184,7 +1187,16 @@ C app as a reactor, its memory the manifest's `memory` pages,
 `tests/fixtures/wasm/app_talk.moy`), `--chip` adding a board's signed AOT
 module; `native/moy_wasm/README.md` is the tier.
 
-**Devices by handle.** A compiled program (a compiled app, a WASI program,
+**A compiled game** (any `type` but `app`) that declares `"extensions":
+["moybyte.app"]` imports from the same module: its run holds a grant of its
+own, made from its permissions and their consent as an app's is, so
+`moybyte_award`, `moybyte_progress`, `moybyte_notify` and the device
+handles below answer it as they answer an app, and an import its
+permissions do not grant is refused at load. A game that declares none
+holds no grant. Its scenes, paint images and mouse are Moybyte's other
+extensions (`docs/moy_cart_api.md`, "A compiled cart's Moybyte verbs").
+
+**Devices by handle.** A compiled program (a compiled app or game, a WASI program,
 a native module) and a Lua program (an app or a service) hold a lease or a
 device API by a handle where a Python program holds an object (`native/moy_kernel/moy_dev.h` is the authority
 on the leases' names, keys and answers, `runtime/system/dev_handles.py` on

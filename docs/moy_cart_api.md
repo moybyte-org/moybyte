@@ -377,6 +377,8 @@ entry is the default active scene. Pure data: `scene()` never draws anything, an
 cart with no scenes just gets an empty list. Author them WYSIWYG in the Editor's
 **Scene** tab: pick a sprite, tap the world to place an actor, tap one to select it,
 drag to move, and set its tag in the props row — PLAY spawns what you placed.
+A compiled cart reads them through `moybyte.scenes`
+([A compiled cart's Moybyte verbs](#a-compiled-carts-moybyte-verbs)).
 
 | call | does |
 |---|---|
@@ -574,7 +576,7 @@ The console's key still works there.
 | `key(code=None)` | with a code (`key(ord("a"))`): is that ASCII key down this frame. No arg: the last key code (`0` if none). *One key at a time* (T-Deck reports 1 byte/frame) |
 | `keyp(code=None)` | same, but only the press edge this frame |
 | `touch()` | `(x, y, tapped, held)` in canvas space, or `None` if no pointer. `tapped` = press edge (one hit per tap); `held` = the finger/button is still down this frame, position following the drag (drawing, sliders). **A touch panel's pointer behaves like a mouse:** hold and drag, and on release it stays where you left it for ~1.5s before `touch()` reads `None` — a pointer that vanished on the release frame is not a mouse, and a cart's cursor or drag handle is written against one. A hovering source (desktop, browser) never expires |
-| `mouse()` | TIC-80 7-tuple `(x, y, left, middle, right, scrollx, scrolly)`; a tap = left. middle/right/scroll are always 0 on hardware |
+| `mouse()` | TIC-80 7-tuple `(x, y, left, middle, right, scrollx, scrolly)`; a tap = left. middle/right/scroll are always 0 on hardware. A compiled cart imports it from `moybyte.mouse` ([A compiled cart's Moybyte verbs](#a-compiled-carts-moybyte-verbs)) |
 | `textmode(on=True)` | opt a running cart into clean text-keyboard input (for typing a name/password) so `key()/keyp()` return typeable ASCII; `textmode(False)` restores game mode (held WASD/arrows drive `btn()`). Auto-resets to game mode on exit |
 | `view(w, h)` | declare the cart's LOGICAL viewport: the console composites the centered `w`x`h` region of the 320x240 canvas at the biggest integer scale that fits the screen (a 128x128 PICO-8 port fills the P4 glass at 4x instead of the full canvas's 2x); touch coords stay in full canvas space. `view()` restores the full canvas; auto-resets each run |
 
@@ -926,6 +928,27 @@ moybyte` in Python; a Lua run holds the same `moybyte` table):
 notifications, alarms, opening with another app, picking a
 file, messages between processes and achievements. They are not moy-spec's,
 and `docs/app_api_v1.md` is their guide (§5 to §9).
+
+## A compiled cart's Moybyte verbs
+
+A `"runtime": "wasm"` cart imports moy-spec's verbs from module `"moy"`
+(SPEC.md §16). What this page adds to them it imports from a module named for
+a Moybyte extension, which its manifest declares (SPEC.md §16.2's
+vendor-extension rule): a module importing from an extension it does not
+declare is refused at load, the import named. `sdk/include/moybyte/cart.h`
+declares the rows for C; `native/moycore/moycore_wasm_ext.h` is the one body
+the boards, the host and the browser run.
+
+| extension | imports | as |
+|---|---|---|
+| `moybyte.scenes` | `scene(name, name_n, out, cap)`, `load_scene(name, name_n)`, `scene_name(i, dst, cap)`, `scene_flags(name, name_n, i, dst, cap)` | `scene()`, `scene(name)` and `load_scene(name)` above: the actors as 32-byte records (tile, x, y, flip as `int32`, then the tag cut at 15 bytes), the count answered, -1 for no such scene; an empty name is the active scene, the first at each run. A scene's names and an actor's `flags` object (as JSON text) have their own rows. The live actor world is the cart's own arrays |
+| `moybyte.images` | `image(name, name_n)`, `image_size(h)`, `image_spr(h, x, y)` | `image(name)`: a handle, 0 for none; its size as `w << 16 \| h`; placed on the draw target (the screen, or the layer `target` chose) under its camera, clip, `pal` and `palt` |
+| `moybyte.mouse` | `mouse(out, cap)` | `mouse()`: the seven numbers as `int32` at `out`, 1 while a pointer is down |
+| `moybyte.app` | `moybyte_award`, `moybyte_progress`, `moybyte_dev_open`, ... | a game's achievements and device handles (`docs/app_api_v1.md` §9, §10): a compiled game that declares it holds a grant of its own, as an app does, under its permissions and their consent |
+
+A cart declaring `moybyte.scenes` or `moybyte.images` keeps the VM up
+(`native/moy_play/moy_play.h`'s rule): the console hands the run its scenes and
+paint images. `tests/fixtures/wasm/game_ext.moy` uses every row.
 
 ---
 

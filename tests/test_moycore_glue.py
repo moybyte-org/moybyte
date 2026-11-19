@@ -1930,7 +1930,7 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
         assert world.core.verbs()[:2] == ["run_begin", "wasm_open"]
         assert world.core.rb("vm") is False
         (_v, module, head, pages, sha, cdir, swapped,
-         allow_unsigned, interp, writable, ring, app, layout) = world.core.calls[1]
+         allow_unsigned, interp, writable, ring, app, layout, exts) = world.core.calls[1]
         assert module == cart["path"] + "/main.esp32s3.f%s.aot" % format_version()
         blob = open(main, "rb").read()
         assert blob.startswith(head) and len(head) < len(blob)
@@ -1938,6 +1938,7 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
         # a cart that does not ask for "full_access" loads signed modules only
         assert allow_unsigned is False
         assert interp is False         # a module by this console's own name -- AOT
+        assert exts == 0               # it declares none of Moybyte's extensions
         # the cart declares no writable paths; its files are moycore's C
         assert writable is None
         # nor an audio ring: `snd` keeps moy-spec's queue
@@ -1955,6 +1956,36 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
         world.close()
 
 
+def test_a_compiled_cart_declaring_scenes_and_images_is_handed_their_texts(tmp_path):
+    """Moybyte's extensions a compiled cart declares (lua_ext.WASM_EXTS)
+    reach wasm_open as their bits, and the scenes' and paint images' texts
+    their imports read go to the run before it (native/moycore/
+    moycore_wasm_ext.h); a cart declaring neither is handed none."""
+    from runtime.widgets import Scenes
+    for i, (exts, want) in enumerate(((["moybyte.scenes", "moybyte.images", "moybyte.mouse"], 7),
+                                      (["moybyte.mouse"], 4))):
+        (tmp_path / str(i)).mkdir()
+        cart, _main = _compiled(tmp_path / str(i))
+        cart["extensions"] = exts
+        world = _wasm_world()
+        try:
+            ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
+            ns = make_ns(_moy_images={"bg": "text-of-bg"},
+                         _moy_scenes=Scenes({"one": "[]"}, ["one"]))
+            world.mod.WasmRun(ws, ns, None)
+            verbs = world.core.verbs()
+            opened = verbs.index("wasm_open")
+            call = world.core.calls[opened]
+            assert call[13] == want
+            puts = [c for c in world.core.calls[:opened] if c[0] in ("image_put", "scene_put")]
+            if want & 3:
+                assert puts == [("image_put", "bg", "text-of-bg"), ("scene_put", "one", "[]")]
+            else:
+                assert puts == []
+        finally:
+            world.close()
+
+
 def test_the_cart_s_writable_paths_reach_the_binding_joined(tmp_path):
     """The manifest's "writable" entries go to wasm_open as one string, NUL
     between them, which moycore hands libmoy's binding as its list (moy-spec
@@ -1967,7 +1998,7 @@ def test_the_cart_s_writable_paths_reach_the_binding_joined(tmp_path):
         world.mod.WasmRun(ws, make_ns(), None)
         call = world.core.calls[1]
         assert call[0] == "wasm_open"
-        assert len(call) == 13 and call[9] == "saves/\0options.cfg"
+        assert len(call) == 14 and call[9] == "saves/\0options.cfg" and call[13] == 0
         assert call[11] is None
     finally:
         world.close()
@@ -2092,7 +2123,7 @@ def test_an_engine_with_no_compiled_tier_runs_main_wasm_at_its_full_speed(tmp_pa
         opens = [c for c in world.core.calls if c[0] == "wasm_open"]
         assert len(opens) == 1
         (_v, module, head, pages, sha, _cdir, _sw, _unknown, interp,
-         _writable, _ring, _app, _layout) = opens[0]
+         _writable, _ring, _app, _layout, _exts) = opens[0]
         assert module == main and sha is None and interp is True
         assert open(main, "rb").read().startswith(head) and pages == 3
     finally:

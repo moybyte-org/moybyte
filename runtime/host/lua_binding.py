@@ -116,6 +116,7 @@ PART = native_build.Part("lua", list(_RASTER) + [
 WASM_PART = native_build.Part("wasm", (
     "moy_wasm.c", "moy_wasm.h", "moy_wasm_footprint.h", "moy_audio.c", "moy_audio.h", "moycore_moybyte.h",
     "moy_files.h", "moy_files.c", "moyhost_wasm.c", "moycore_run.h", "moycore_lua.h",
+    "moycore_wasm_ext.h",
     "moy_ui_run.h", "moy_ui_run_rows.h", "moy_ui_wasm.h", "moy_ui_wasm_rows.h", "moy.h", "moy_pixel.h",
     "moy_app_run.h", "moy_proc.h",
     "moy_wasi.c", "moy_wasi.h", "moy_wasi_os_rows.h", "moy_evq.h", "moy_screen_slot.h", "moy_vmq.h", "moy_super.h", "moy_sh.h", "moy_sh_board.h", "moy_sh_prog.h", "moy_log.h", "moy_proc_exit.h"),

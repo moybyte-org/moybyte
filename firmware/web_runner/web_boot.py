@@ -1172,7 +1172,7 @@ def state_json():
     audio pull mixed, frames it found none, the room, whether it is open, its
     depth), the page's pull (`pcm`: its rate, the samples it sent the
     page's sink and the sink's count of those it played), and
-    the running cart's first eight pmem slots, the earned badges' ids, the
+    the running cart's first 32 pmem slots, the earned badges' ids, the
     Settings rows as the console holds them, whether the FPS chip shows and
     the store's sync (`sync`: the batches its far end has taken, and whether
     one is on its way), the Terminal's grid as lines (`term`, None before
@@ -1215,7 +1215,7 @@ def state_json():
     if flush is not None:
         flush()
     img = getattr(run, "pmem_img", None)
-    st["pmem"] = list(img)[:8] if img is not None else None
+    st["pmem"] = list(img)[:32] if img is not None else None
     return json.dumps(st)
 
 

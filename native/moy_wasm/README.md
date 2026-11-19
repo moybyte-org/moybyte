@@ -96,7 +96,20 @@ product), with the owner's later calls dated where they land.
   capability (#231): the console's picker (`docs/os_2026-11/between_apps.md`
   §2), which a compiled app reaches by its `moybyte.app` imports
   (`moybyte_pick`, the item a handle its `moybyte_item_read` and
-  `item_write` take; `docs/app_api_v1.md` §10) and a game holds none of.
+  `item_write` take; `docs/app_api_v1.md` §10), and a compiled game only
+  where it declares that extension (the next decision).
+- **A compiled game holds what a Python or Lua game holds (owner,
+  2026-11-18, #261).** A game that declares `moybyte.app` holds a run grant
+  of its own, as an app does (`runtime/run/player.py`'s `_wasm_ext_game`, a
+  VM stop's too), so its achievements and device handles answer under its
+  permissions and their consent. Its scenes, paint images and mouse are
+  three more Moybyte extensions, `moybyte.scenes`, `moybyte.images` and
+  `moybyte.mouse`, whose rows are one C body every engine registers
+  (`native/moycore/moycore_wasm_ext.h`: WAMR's sorted registration on the
+  boards and the host, the page's adapters in the browser) over the run's
+  own scene and image tables (`moycore_lua.h`) and its snapshot. The rows
+  are Moybyte's, never moy-spec's (SPEC.md §16.2), and a cart imports from
+  one only when it declares it.
 - **WASI preview1 is an adapter of ours, not WAMR's libc-wasi
   (2026-11-08).** A command's imports are a table of natives registered
   under WASI's module name (`moy_wasi.h`), each over the C a shell built-in

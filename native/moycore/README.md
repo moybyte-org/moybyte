@@ -457,6 +457,14 @@ hosts (`moycore_scene.h`): the cart's `.moyscene` texts go to the run before
 the load (`scene_put`), are parsed there into Lua row tables, and
 `draw_scene` draws the live rows, so no scene verb crosses.
 
+A compiled cart reaches the same tables, and `mouse`'s snapshot, through
+three import modules named for the extensions its manifest declares
+(`moycore_wasm_ext.h`: `moybyte.scenes`, `moybyte.images`,
+`moybyte.mouse`), one body `moycore_wasm.c` and the host's
+`runtime/host/moyhost_wasm.c` both include; the glue hands a declaring run
+its texts with `image_put` and `scene_put` before `wasm_open`
+(`lua_ext.put_wasm_media`), and the run's close frees them as a Lua run's.
+
 What a frame calls is C (native/moy_play/moy_play.h), so a frame makes
 no crossing: `col` and `mouse` (`moycore_superset.h`, which the registration
 loops skip by `lua_ext.NATIVE_NAMES`), and `draw_layer`, the prelude's wrapper

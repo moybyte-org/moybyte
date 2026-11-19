@@ -830,6 +830,37 @@ PRELUDE_HANDLES = (PRELUDE_HANDLES.replace(
 _LUA_PRELUDE = PRELUDE_HANDLES + PRELUDE_FASTMATH
 
 
+# Moybyte's extensions a compiled cart imports from (native/moycore/
+# moycore_wasm_ext.h), bit i the i-th; moycore_run.h's MOYCORE_EXT_NAMES.
+WASM_EXTS = ("moybyte.scenes", "moybyte.images", "moybyte.mouse")
+
+
+def wasm_exts(cart):
+    """The bits of WASM_EXTS a compiled cart's manifest declares: its imports
+    from those modules are the cart's to make, and the scenes and paint images
+    are handed to a run that declares theirs (`put_wasm_media`)."""
+    declared = (cart or {}).get("extensions") or ()
+    mask = 0
+    for i, name in enumerate(WASM_EXTS):
+        if name in declared:
+            mask |= 1 << i
+    return mask
+
+
+def put_wasm_media(ns, exts, image_put, scene_put):
+    """Hand a compiled run the paint images' and scenes' texts its
+    moybyte.images and moybyte.scenes imports read, where its manifest
+    declares them (`exts`, wasm_exts's bits), as a Lua run is handed them."""
+    if exts & 2:
+        imgs = ns.get("_moy_images") if hasattr(ns, "get") else None
+        for name in (imgs or ()):
+            blob = imgs[name]
+            if isinstance(blob, (str, bytes)):
+                image_put(name, blob)
+    if exts & 1:
+        put_scenes(ns, scene_put)
+
+
 def put_scenes(ns, put):
     """Hand the cart's scene texts to a run that parses them in C
     (native/moycore/moycore_scene.h), in the order the namespace's Scenes keeps,

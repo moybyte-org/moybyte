@@ -38,7 +38,7 @@ import subprocess
 import sys
 
 from . import native_build
-from .lua_ext import cfg_blob
+from .lua_ext import cfg_blob, put_scenes
 from .moy_wasm_face import NativeSymbol as _NativeSymbol
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -238,6 +238,12 @@ def _lib():
             d.hw_set_ring.restype = _I
             d.hw_set_app.argtypes = [_P, _C, _I]
             d.hw_set_app.restype = _I
+            d.hw_set_exts.argtypes = [_P, ctypes.c_uint32]
+            d.hw_set_exts.restype = None
+            d.hw_image_put.argtypes = [_P, _C, _C, _I]
+            d.hw_image_put.restype = _I
+            d.hw_scene_put.argtypes = [_P, _C, _C, _I]
+            d.hw_scene_put.restype = _I
             d.hw_env.argtypes = [_P]
             d.hw_env.restype = _P
             d.hw_load.argtypes = [_P, _C, _C, _I, _P, _I]
@@ -507,7 +513,8 @@ class HostWasmRun:
 
     def __init__(self, buf, w, h, cart_dir, main, pages, sheet=None,
                  tilemap=None, wire=None, wire_swapped=False, flags=None,
-                 cfg=None, files=None, writable=None, ring=None, app=None):
+                 cfg=None, files=None, writable=None, ring=None, app=None,
+                 exts=0, images=None, scenes=None):
         d = _lib()
         if d is None:
             raise RuntimeError("no host wasm binding (%s)" % (why_unavailable() or "?"))
@@ -567,12 +574,28 @@ class HostWasmRun:
         if app is not None and d.hw_set_app(self._r, bytes(app), len(app)):
             self.close()
             raise ValueError("host wasm: not an app run")
+        # The Moybyte extensions the manifest declares (lua_ext.wasm_exts),
+        # and the paint images' and scenes' texts their imports read: a
+        # {name: text} and a Scenes, as a Lua run is handed them.
+        d.hw_set_exts(self._r, int(exts))
+        for name, text in (images or {}).items():
+            self._put(d.hw_image_put, name, text)
+        if scenes is not None:
+            put_scenes({"_moy_scenes": scenes}, lambda n, t: self._put(d.hw_scene_put, n, t))
         err = ctypes.create_string_buffer(256)
         if d.hw_load(self._r, os.fsencode(cart_dir), os.fsencode(main),
                      int(pages or 0), ctypes.cast(err, _P), 256):
             msg = err.value.decode("utf-8", "replace")
             self.close()
             raise RuntimeError(msg)
+
+    def _put(self, put, name, text):
+        if not isinstance(text, (str, bytes)):
+            return
+        raw = text.encode("utf-8") if isinstance(text, str) else bytes(text)
+        if put(self._r, str(name).encode("utf-8"), raw, len(raw)):
+            self.close()
+            raise MemoryError("host wasm: no memory for %s" % name)
 
     def env(self):
         """The engine's handle this run's imports are called with (its exec

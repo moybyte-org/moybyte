@@ -45,7 +45,7 @@ moy app coredump <board> [--gdb] [--port PORT] [--elf ELF] [--symbols DIR]
   signed as those tools sign them; `--unsigned` leaves it off. A Python or
   Lua cart runs from its source and has nothing to build.
 - `stubs` copies what the cart's tier compiles or edits against into it:
-  `include/moybyte/os.h` and `app.h` with a `compile_flags.txt` for C (a
+  `include/moybyte/os.h`, `app.h` and `cart.h` with a `compile_flags.txt` for C (a
   native cart's with `game.h` and libmoy's `moy.h`),
   `moybyte_os.lua` for the Lua language server, `__builtins__.pyi` and
   `moybyte.pyi` for a Python editor.
@@ -88,7 +88,12 @@ standing only where it lists the reason.
   `native/os_calls.json`. The POSIX rows are declared by the toolchain's own
   headers (`unistd.h`, `fcntl.h`, `pthread.h`, ...).
 - `include/moybyte/app.h` (generated): a C app compiled to wasm's
-  `moybyte.app` imports, each under its import name.
+  `moybyte.app` imports, each under its import name, which a compiled game
+  that declares the extension imports too.
+- `include/moybyte/cart.h`: a compiled cart's imports from Moybyte's own
+  extensions, `moybyte.scenes`, `moybyte.images` and `moybyte.mouse`
+  (`native/moycore/moycore_wasm_ext.h`); `check` refuses an import from one
+  the manifest does not declare.
 - `include/moybyte/frame.h`: the frame loop (`native/moy_elf/moy_os.h`, A
   GAME): `moy_game_frame` waits for the console's next frame message and
   reads its buttons and an app's input words.

@@ -67,8 +67,11 @@ def test_the_compiled_carts_run_with_no_vm(tmp_path):
     for i, path in enumerate(mans):
         with open(path) as fh:
             man = json.load(fh)
-        if (man.get("moybyte") or {}).get("type") == "app":
-            continue        # a compiled app's verdict reads its module: test_wasm_app.py
+        if ((man.get("moybyte") or {}).get("type") == "app"
+                or "moybyte.app" in (man.get("extensions") or ())):
+            # a compiled app's verdict, and a game's declaring the app
+            # extension, reads its module: test_wasm_app.py, test_wasm_game_ext.py
+            continue
         d = _cart(tmp_path, "c%d.moy" % i, man, main=man.get("main", "main.wasm"))
         if (man.get("moybyte") or {}).get("type") in ("command", "service"):
             # a command runs in the shell and a service on a task of its own,
