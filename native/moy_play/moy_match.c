@@ -1198,12 +1198,20 @@ static const uint8_t PROBE[] = {6, 11, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13};
 // beacon was missed), else home, else -- with no peer on its cart and no beam
 // bound, every PROBE_EVERY-th tick -- one tick on the next probe channel. A
 // listening beam's console is tuned every BEAM_PROBE_MS instead, and probes
-// on every look but each BEAM_PROBE_HOME-th.
+// on every look but each BEAM_PROBE_HOME-th. A bound beam whose peer is heard
+// where it rests asks the radio nothing: on the Waveshare P4 the question is
+// two round trips to the C6, on the link the chunks arrive by.
 static void tune(moy_match_t *m, uint32_t now) {
     m->tuned_at = now;
     m->away = false;
     if (m->io == NULL || m->io->channel == NULL || m->s.live) {
         return;
+    }
+    if (m->ch != 0 && beam_hears(m, now)) {
+        int rests = beam_rests(m, now);
+        if (rests == 0 || rests == m->ch) {
+            return;
+        }
     }
     int c = m->io->channel(m->io->ctx, 0);
     m->pinned = c < 0;

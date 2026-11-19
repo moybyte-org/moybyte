@@ -76,7 +76,9 @@ belongs here is only what a coder must not undo:
   before the arrival is moved into place, an offer is heard only in the
   receive state a person opened, a cart lands as one that arrived as files,
   asked on its first run, and a file lands in Downloads under a safe name and
-  never runs. Do not let a beam start beside a match.
+  never runs. Do not let a beam start beside a match, and do not give a
+  bound beam's tick a question for the radio: on the Waveshare P4 each is a
+  round trip to the C6 on the link the chunks arrive by (§7).
 - **Nothing waits forever.** An unanswered invite and a match that falls too far
   behind both give up and re-run the cart solo; a frozen screen with no
   explanation is the one outcome designed out.

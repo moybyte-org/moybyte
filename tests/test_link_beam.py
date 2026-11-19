@@ -577,6 +577,33 @@ def test_a_console_with_no_beam_probes_at_the_matchs_pace(tmp_path):
     assert 0.25 < away / len(seen) < 0.42
 
 
+def test_a_bound_beam_whose_peer_is_heard_asks_the_radio_nothing(tmp_path):
+    """Each look at the channel is two round trips to a Waveshare P4's C6,
+    on the link its chunks arrive by: while the chunks cross and their
+    sender is heard where it rests, neither console asks."""
+    air, clock, a, b, wsa, wsb = _setup(tmp_path)
+    b.beam_receive(wsb)
+    a.beam_send_file(wsa, _file(wsa, size=3000000))
+    _offered(a, b, wsa, wsb, clock)
+    wsb.confirm.yes()
+    _run(a, b, wsa, wsb, clock, 1000)
+    asked = []
+    for lk in (a, b):
+        was = lk.wlan.config
+
+        def config(*args, _was=was, _lk=lk, **kw):
+            asked.append((_lk.name, args, tuple(kw)))
+            return _was(*args, **kw)
+        lk.wlan.config = config
+    _run(a, b, wsa, wsb, clock, 4000)
+    assert a.beam_role() is not None and b.beam_role() is not None
+    assert asked == []
+    assert _run(a, b, wsa, wsb, clock, 120000, until=_both_done(a, b))
+    assert wsb.notices.said[-1][0] == "Got notes.txt"
+    _run(a, b, wsa, wsb, clock, 3000)
+    assert asked                        # the home's tick asks again
+
+
 def test_a_stopped_game_leaves_no_cart_in_the_beacon_a_beam_brings_up(tmp_path):
     """Two consoles that each last ran the same two-player cart meet for a
     beam at their homes: no match forms and the beam goes through."""

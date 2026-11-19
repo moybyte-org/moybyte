@@ -471,7 +471,11 @@ a game takes the radio (`EspNowLink.start`), and a beam holds the channel
 while it is bound, as a peer on the cart does (§2's probes): a free station
 stays on the channel its beam's peer was last heard on
 (`MOY_MATCH_BEAM_HERE_MS`), which is where an offer taken on a probe tick
-came from. A game's stop takes its cart out of the beacon
+came from. While a bound beam's peer is heard where it rests the link
+asks the radio nothing (`tune`, 2026-11-19): on the Waveshare P4 the
+channel's read is two round trips to the C6 over the link the chunks arrive
+by, and with them a beam into that console stopped the C6 answering a few
+seconds in, until the console's watchdog restarted it. A game's stop takes its cart out of the beacon
 (`EspNowLink.stop`), so the radio a beam brings up at the home invites
 nobody to the last game.
 
