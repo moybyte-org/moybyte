@@ -890,12 +890,12 @@ def _app_open(app, page=None, window=False):
 
 # The targets' shelf (rounds/round13.py's STORE): name, the seed cart whose
 # cover it shows (None: none), its genre, where it stands, its size in KB.
-_STORE = (("Tap Game", "tap_game", "toy", "installed", 40),
+_STORE = (("Tap Only Red", "tap_only_red", "toy", "installed", 40),
           ("Brick Siege", "brick_siege", "shooter", "update", 18),
           ("Bullet Storm", "bullet_storm", "shooter", "get", 96),
           ("Doom", None, "shooter", "too_big", 4100),
           ("Letter Blitz", "letter_blitz", "puzzle", "get", 22),
-          ("Tap Only Red", "tap_only_red", "toy", "noplay", 14),
+          ("Sakura Lua", "sakura_lua", "toy", "noplay", 14),
           ("Star Catcher", "star_catcher", "arcade", "installed", 12),
           ("Harpoon Pop", "harpoon_pop", "arcade", "get", 31))
 
@@ -2180,7 +2180,7 @@ def _desk_files(g, ws):
     ws.home.open_desk()
     ws.spine.open_app(ws.app("files"))
     _settle(g, ws, 2)
-    _place(ws, "files", 112, 54, 548, 380)
+    _place(ws, "files", 112, 54, 548, 376)
     _app(ws, "files").open_place("projects", keep="Harpoon Pop")
 
 

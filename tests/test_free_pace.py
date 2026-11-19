@@ -93,7 +93,7 @@ def test_the_roster_carries_free_through_to_the_boards():
 # paced, every phase cheaper than the tick read 30.3 / p50 33 on every board
 # for twelve days after #217 (owner call 2026-09-22, numbers in #66).
 FREE_SEEDS = {"Star Catcher", "Brick Siege", "Brick Siege Lua", "Letter Blitz",
-              "Harpoon Pop", "Tap Only Red", "Bullet Storm", "Bench", "Bench Lua"}
+              "Harpoon Pop", "Bullet Storm", "Bench", "Bench Lua"}
 
 
 def test_only_audited_seed_games_declare_free():

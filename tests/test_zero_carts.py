@@ -31,7 +31,7 @@ from runtime import cart_index as ci, moy_carts, web_addon    # noqa: E402
 from test_official_carts import OWN, SEEDS, ZeroInst, _release  # noqa: E402
 from test_ota_signing import TEST_KEYS                         # noqa: E402
 
-SOME = ("moybyte.files", "moybyte.harpoon_pop", "moybyte.tap_game", "moybyte.calc")
+SOME = ("moybyte.files", "moybyte.harpoon_pop", "moybyte.tap_only_red", "moybyte.calc")
 HARPOON = "moybyte.harpoon_pop.moy"
 
 
@@ -401,7 +401,7 @@ def test_get_carts_on_a_zero_s_page_lists_the_board_s_release(page, monkeypatch)
     _frames(ws, worker, lambda: app.phase == "list")
     rows = dict((r["cart"]["folder"], r["state"]) for r in app.rows)
     assert rows == {"moybyte.files.moy": "installed", "moybyte.calc.moy": "installed",
-                    HARPOON: "get", "moybyte.tap_game.moy": "get"}
+                    HARPOON: "get", "moybyte.tap_only_red.moy": "get"}
     assert worker.asked[0] == ("POST", '{"action": "check"}')
     assert app.free is not None and app.free[0] > 0, "the board's room, not the page's"
     assert "carts" not in ws.leases.holders(), "the page's radio is not the board's"

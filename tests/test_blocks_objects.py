@@ -349,6 +349,28 @@ def test_on_tap_compiles_to_a_per_sprite_tap_guard():
     assert "if _taphit(_self):" in src and "def _taphit(" in src
 
 
+def test_a_tap_hits_the_box_a_sprite_is_drawn_in():
+    """draw_scene paints an actor 8px times its whole size multiple, and a
+    tap anywhere in that box is a tap on it."""
+    prog = {"scripts": [], "objects": [{"tag": "coin", "scripts": [
+        mb("on_tap", children=[mb("remove_actor")])]}]}
+    ns = {"touch": lambda: tap[0]}
+    exec(compile(B.compile_blocks(prog), "<t>", "exec"), ns)
+
+    class A:
+        x, y, flags = 100, 100, {}
+    a = A()
+    tap = [(120, 120, True)]
+    assert not ns["_taphit"](a), "a sprite at its own size is 8px"
+    a.flags = {"size": 400}
+    assert ns["_taphit"](a)
+    tap[0] = (132, 120, True)
+    assert not ns["_taphit"](a)
+    a.flags = {"size": 50}
+    tap[0] = (104, 104, True)
+    assert ns["_taphit"](a), "a sprite smaller than its own size is drawn at it"
+
+
 def test_insert_lands_in_the_target_objects_scripts():
     be = BlockEditor(B)
     be.set_target("enemy")

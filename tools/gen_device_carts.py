@@ -340,7 +340,7 @@ def build_carts(system_carts_dir, fixtures=False):
                     cart["scene_order"] = keep
         blocks = os.path.join(base, "blocks.json")      # block source (#29), optional
         if os.path.exists(blocks):
-            # carry the block program so a block-authored seed (tap_game) opens in
+            # carry the block program so a block-authored seed (Tap Only Red) opens in
             # the on-device block editor, not just as compiled code.
             cart["blocks"] = json.loads(_read(blocks))
         if "canvas" in man:

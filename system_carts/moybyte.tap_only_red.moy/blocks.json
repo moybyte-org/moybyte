@@ -1,0 +1,335 @@
+{
+ "vars": [
+  "score",
+  "misses"
+ ],
+ "scripts": [
+  {
+   "t": "on_start",
+   "p": {},
+   "c": [
+    {
+     "t": "set_var",
+     "p": {
+      "var": "score",
+      "value": 0
+     }
+    },
+    {
+     "t": "set_var",
+     "p": {
+      "var": "misses",
+      "value": 0
+     }
+    }
+   ]
+  },
+  {
+   "t": "on_update",
+   "p": {},
+   "c": [
+    {
+     "t": "if",
+     "p": {
+      "cond": {
+       "t": "op_gt",
+       "p": {
+        "a": {
+         "t": "var",
+         "p": {
+          "var": "misses"
+         }
+        },
+        "b": 4
+       }
+      }
+     },
+     "c": [
+      {
+       "t": "set_var",
+       "p": {
+        "var": "score",
+        "value": 0
+       }
+      },
+      {
+       "t": "set_var",
+       "p": {
+        "var": "misses",
+        "value": 0
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "t": "on_draw",
+   "p": {},
+   "c": [
+    {
+     "t": "cls",
+     "p": {
+      "color": "black"
+     }
+    },
+    {
+     "t": "draw_scene",
+     "p": {}
+    },
+    {
+     "t": "print",
+     "p": {
+      "text": "SCORE",
+      "x": 8,
+      "y": 8,
+      "color": "white"
+     }
+    },
+    {
+     "t": "print",
+     "p": {
+      "text": {
+       "t": "var",
+       "p": {
+        "var": "score"
+       }
+      },
+      "x": 56,
+      "y": 8,
+      "color": "yellow"
+     }
+    },
+    {
+     "t": "print",
+     "p": {
+      "text": "MISSES",
+      "x": 224,
+      "y": 8,
+      "color": "white"
+     }
+    },
+    {
+     "t": "print",
+     "p": {
+      "text": {
+       "t": "var",
+       "p": {
+        "var": "misses"
+       }
+      },
+      "x": 280,
+      "y": 8,
+      "color": "red"
+     }
+    },
+    {
+     "t": "print",
+     "p": {
+      "text": "TAP ONLY THE RED",
+      "x": 96,
+      "y": 224,
+      "color": "light_grey"
+     }
+    }
+   ]
+  }
+ ],
+ "objects": [
+  {
+   "tag": "red",
+   "scripts": [
+    {
+     "t": "on_start",
+     "p": {},
+     "c": [
+      {
+       "t": "set_size",
+       "p": {
+        "n": 400
+       }
+      }
+     ]
+    },
+    {
+     "t": "on_update",
+     "p": {},
+     "c": [
+      {
+       "t": "change_my_y",
+       "p": {
+        "dy": -2
+       }
+      },
+      {
+       "t": "if",
+       "p": {
+        "cond": {
+         "t": "op_lt",
+         "p": {
+          "a": {
+           "t": "my_y",
+           "p": {}
+          },
+          "b": -32
+         }
+        }
+       },
+       "c": [
+        {
+         "t": "change_var",
+         "p": {
+          "var": "misses",
+          "value": 1
+         }
+        },
+        {
+         "t": "move_actor_to",
+         "p": {
+          "x": {
+           "t": "op_rnd",
+           "p": {
+            "n": 288
+           }
+          },
+          "y": 240
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "t": "on_draw",
+     "p": {},
+     "c": []
+    },
+    {
+     "t": "on_tap",
+     "p": {},
+     "c": [
+      {
+       "t": "change_var",
+       "p": {
+        "var": "score",
+        "value": 1
+       }
+      },
+      {
+       "t": "beep",
+       "p": {
+        "freq": 880
+       }
+      },
+      {
+       "t": "move_actor_to",
+       "p": {
+        "x": {
+         "t": "op_rnd",
+         "p": {
+          "n": 288
+         }
+        },
+        "y": 240
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "tag": "lure",
+   "scripts": [
+    {
+     "t": "on_start",
+     "p": {},
+     "c": [
+      {
+       "t": "set_size",
+       "p": {
+        "n": 400
+       }
+      }
+     ]
+    },
+    {
+     "t": "on_update",
+     "p": {},
+     "c": [
+      {
+       "t": "change_my_y",
+       "p": {
+        "dy": -2
+       }
+      },
+      {
+       "t": "if",
+       "p": {
+        "cond": {
+         "t": "op_lt",
+         "p": {
+          "a": {
+           "t": "my_y",
+           "p": {}
+          },
+          "b": -32
+         }
+        }
+       },
+       "c": [
+        {
+         "t": "move_actor_to",
+         "p": {
+          "x": {
+           "t": "op_rnd",
+           "p": {
+            "n": 288
+           }
+          },
+          "y": 240
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "t": "on_draw",
+     "p": {},
+     "c": []
+    },
+    {
+     "t": "on_tap",
+     "p": {},
+     "c": [
+      {
+       "t": "change_var",
+       "p": {
+        "var": "misses",
+        "value": 1
+       }
+      },
+      {
+       "t": "beep",
+       "p": {
+        "freq": 220
+       }
+      },
+      {
+       "t": "move_actor_to",
+       "p": {
+        "x": {
+         "t": "op_rnd",
+         "p": {
+          "n": 288
+         }
+        },
+        "y": 240
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

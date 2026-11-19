@@ -44,7 +44,7 @@ def _manifests():
 # The test fixtures (owner, 2026-11-18): seeded on the host for the tests,
 # pushed to a board for a run, never in an image nor listed as an official cart.
 FIXTURES = {"moybyte.bench", "moybyte.bench_lua", "moybyte.brick_siege_lua",
-            "moybyte.sakura", "moybyte.tap_only_red"}
+            "moybyte.sakura"}
 
 
 def _official():
@@ -186,6 +186,19 @@ def test_a_store_from_before_the_cut_sweeps_the_cut_carts_and_keeps_the_fixtures
     assert moy_seed.sweep_store(root, export=None, board="b") == len(CUT)
     assert sorted(n for n in os.listdir(root) if n.endswith(".moy")) == kept
     assert not set(SEEDS.iterdir()) & {SEEDS / ("moybyte.%s.moy" % c) for c in CUT}
+
+
+def test_a_store_from_before_tap_only_red_sweeps_tap_game(tmp_path):
+    """Tap Only Red, rebuilt in blocks, replaced Tap Game (owner, 2026-11-18):
+    a store swept before that sweeps Tap Game's folder once."""
+    root = str(tmp_path / "carts")
+    kept = ["moybyte.tap_only_red.moy"]
+    for name in ["moybyte.tap_game.moy"] + kept:
+        os.makedirs(os.path.join(root, name))
+    moy_seed._save_store_version(root, moy_seed.STORE_FORMAT, 9)
+    assert moy_seed.sweep_store(root, export=None, board="b") == 1
+    assert sorted(n for n in os.listdir(root) if n.endswith(".moy")) == kept
+    assert not (SEEDS / "moybyte.tap_game.moy").exists()
 
 
 def test_the_test_fixtures_are_the_ones_the_owner_named():
@@ -482,7 +495,7 @@ def test_after_an_update_a_zero_brings_the_official_carts_it_holds_to_the_releas
     os.makedirs(root)
     seeds = tmp_path / "seeds"
     import shutil
-    for cid in ("moybyte.files", "moybyte.coin_quest", "moybyte.tap_game"):
+    for cid in ("moybyte.files", "moybyte.coin_quest", "moybyte.tap_only_red"):
         shutil.copytree(str(SEEDS / (cid + ".moy")), str(seeds / (cid + ".moy")))
     digest, routes = _release(tmp_path, seeds=seeds)
     monkeypatch.setattr(ci, "page_want", lambda: digest)
@@ -510,7 +523,8 @@ def test_after_an_update_a_zero_brings_the_official_carts_it_holds_to_the_releas
     assert json.loads(open(quest + "/manifest.json").read())["version"] == man["version"] + 1
     assert open(quest + "/pmem.bin").read() == "[1, 2]"
     assert open(quest + "/config.json").read() == '{"speed": 120}'
-    assert not os.path.exists(root + "/moybyte.tap_game.moy"), "a cart it holds, never a new one"
+    assert not os.path.exists(root + "/moybyte.tap_only_red.moy"), \
+        "a cart it holds, never a new one"
     assert web_addon.official_stamp(root) == digest
     assert not step.wanted(), "a store at its release asks nothing"
 
@@ -528,12 +542,12 @@ def test_a_console_board_s_step_is_the_add_on_s_alone(tmp_path, monkeypatch):
 
 def test_a_cable_flash_installs_a_new_store_s_set_and_updates_what_a_store_holds():
     offered = {"moybyte.files.moy": 6, "moybyte.coin_quest.moy": 17,
-               "moybyte.tap_game.moy": 11, "moybyte.letter_blitz.moy": 14}
+               "moybyte.tap_only_red.moy": 11, "moybyte.letter_blitz.moy": 14}
     image = ("moybyte.files",)
-    install = ("moybyte.coin_quest", "moybyte.tap_game")
+    install = ("moybyte.coin_quest", "moybyte.tap_only_red")
     new = {"moybyte.files.moy": 6, "web_console_0123456789ab.moy": 0}
     assert board_flash.carts_plan(new, offered, install, image) == [
-        "moybyte.coin_quest.moy", "moybyte.tap_game.moy"]
+        "moybyte.coin_quest.moy", "moybyte.tap_only_red.moy"]
     used = {"moybyte.files.moy": 5, "moybyte.coin_quest.moy": 16, "kids.moy": 1}
     assert board_flash.carts_plan(used, offered, install, image) == ["moybyte.coin_quest.moy"], \
         "a store in use gets the newer versions of what it holds and nothing it lacks"

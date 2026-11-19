@@ -433,14 +433,15 @@ RETIRED = ("Ray Test", "Ray Lua", "Layer Test", "Battle City", "Bubble Trouble",
 # 2026-11-18. The test fixtures left every image that day too, and they stay:
 # a store keeps the copy it was seeded, edited or not (tests/fixtures/
 # store_trial's Bench), as it keeps any cart, and a tool that runs one pushes
-# it over that copy.
+# it over that copy. Generation 10 takes Tap Game, which Tap Only Red, rebuilt
+# in blocks, replaced on 2026-11-18.
 RETIRED_FOLDERS = tuple("moybyte.%s.moy" % s for s in (
     "ocean", "pet", "platformer", "scroll_demo", "tap_red", "theme_picker",
     "wallpaper_space", "wifi", "mesh",
     "hop_quest", "pixel_pet", "sky_run", "tiny_runner", "ocean_desktop",
-    "open_machine", "moy_night"))
+    "open_machine", "moy_night", "tap_game"))
 RETIRED_SIBLINGS = ("written", "retired.ver")
-RETIRED_GEN = 9
+RETIRED_GEN = 10
 # -- the store's format and its one door (docs/refactor_2026-11.md, phase 13) --
 #
 # A store carries a FORMAT STAMP: the sidecar `store.ver` beside the carts

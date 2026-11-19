@@ -160,10 +160,10 @@ interpreter rather than refusing it, and ESP 88 is a compiled cart besides
 Doom and Jet Teapot.
 
 - [`docs/moy_cart_api.md`](docs/moy_cart_api.md) — the verb table.
-- `system_carts/` — the 22 built-in carts, from a 70-line tap game to Brick Siege,
-  and five test fixtures.
-- [`docs/blocks_tap_game.md`](docs/blocks_tap_game.md) — building
-  `system_carts/moybyte.tap_game.moy` in the block editor, step by step.
+- `system_carts/` — the 22 built-in carts, from a blocks game to Brick Siege,
+  and four test fixtures.
+- [`docs/blocks_tap_only_red.md`](docs/blocks_tap_only_red.md) — building
+  `system_carts/moybyte.tap_only_red.moy` in the block editor, step by step.
 
 ## The spec
 

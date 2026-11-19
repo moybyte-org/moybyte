@@ -269,8 +269,8 @@ boot verdict and the rollback confirm the frame loop drives."""
 [roster]
 # The seed carts the image carries beside the core (moy_seed.CORE: Get Carts,
 # Files, Appearance, Achievements and the Wallpaper slot), compressed: every
-# app, the five games the store kept since 2026-11-07 (Brick Siege, Letter
-# Blitz, Tap Game, Harpoon Pop, Star Catcher), and Pin Light, the cart that
+# app, five games (Brick Siege, Letter Blitz, Tap Only Red, Harpoon Pop, Star
+# Catcher), and Pin Light, the cart that
 # drives this board's pins from a browser (2026-11-18). zero_host.seed_carts seeds them as a console seeds its own (owner,
 # 2026-11-17): present unless the kid removed one, a newer one in a new image
 # replacing the store's. Every other system cart but a test fixture is an
@@ -281,7 +281,7 @@ boot verdict and the rollback confirm the frame loop drives."""
 image = [
   "moybyte.calc", "moybyte.music", "moybyte.my_art", "moybyte.notes",
   "moybyte.paint", "moybyte.storybook", "moybyte.terminal",
-  "moybyte.brick_siege", "moybyte.letter_blitz", "moybyte.tap_game",
+  "moybyte.brick_siege", "moybyte.letter_blitz", "moybyte.tap_only_red",
   "moybyte.harpoon_pop", "moybyte.star_catcher", "moybyte.pin_light",
 ]
 

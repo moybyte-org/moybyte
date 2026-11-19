@@ -164,10 +164,12 @@ def _keyed(ws, frame):
     script, a prompt typed into and cancelled, a menu backed out of; then
     Cart info, A on its door, typed into and cancelled."""
     drv = frame.drv
-    ws.open_in_editor(_cart(ws, "Tap Game"))
+    ws.open_in_editor(_cart(ws, "Tap Only Red"))
     ws.text.set_menu_view("blocks")
     frame(4)
     bu = ws.block_ui
+    bu._select_sprite("red")            # the red bubble's scripts: a size, a beep
+    frame(3)
     prompts = menus = 0
     opens = None                        # a row whose first slot A prompts for
     for _ in range(14):

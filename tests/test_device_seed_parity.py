@@ -217,7 +217,7 @@ def test_embedded_edit_and_cfg_match_manifest():
 
 
 def test_embedded_blocks_match_blocks_json_or_both_absent():
-    # A block-authored cart (#29: tap_game) carries its blocks.json into the bundle
+    # A block-authored cart (#29: Tap Only Red) carries its blocks.json into the bundle
     # (parsed) so the on-device block editor opens it as blocks; a code-only cart has
     # no "blocks" key. Drift fails here.
     carts = _carts_by_title()

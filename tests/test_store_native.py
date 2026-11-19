@@ -453,7 +453,7 @@ def test_moy_json_recurses_only_in_its_bounded_scanner(cflags):
     recursive function is moy_json_value, which counts its depth and refuses
     past MOY_JSON_DEPTH; canon walks with a fixed array. A recursive canon,
     608 bytes a level on the P4 for its number buffer, overflowed the 16 KB VM
-    stack seeding tap_game's blocks.json, 22 containers deep. The same with
+    stack seeding a blocks cart's blocks.json, 22 containers deep. The same with
     char unsigned, as RISC-V has it."""
     graph = _call_graph(os.path.join(ROOT, "native", "moy_spine", "moy_json.c"), cflags)
     if graph is None:

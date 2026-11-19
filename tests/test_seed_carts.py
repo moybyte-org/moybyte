@@ -1,5 +1,6 @@
 """Tests for the seed game cartridges (#5, #19): Star Catcher, Harpoon Pop and
-Tap Only Red (touch mini-game). Each loads through the SHARED
+Tap Only Red (the touch mini-game made with blocks, whose play
+tests/test_blocks.py drives). Each loads through the SHARED
 console via host_app (the same code path the device runs) and is driven headless
 for several frames -- exercising attract-mode auto-play and, where relevant, the
 input contract (buttons + the touch() api). Kept in its own file so it doesn't
@@ -31,7 +32,7 @@ def _run(ws, frames, dt=1 / 30):
 def test_seed_cart_folders_present_and_valid():
     import json
 
-    for folder in ("moybyte.star_catcher", "moybyte.tap_only_red", "moybyte.harpoon_pop"):
+    for folder in ("moybyte.star_catcher", "moybyte.harpoon_pop"):
         d = SYSTEM_CARTS / (folder + ".moy")
         assert (d / "manifest.json").is_file(), folder
         assert (d / "main.py").is_file(), folder
@@ -85,36 +86,6 @@ def test_carts_are_lively_in_attract_mode(tmp_path):
         ws.home.go_home()
 
 
-# -- per-cart gameplay sanity ------------------------------------------------
-
-
-def test_tap_red_scores_red_and_penalizes_other(tmp_path):
-    from runtime import host_app
-
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _open_cart(ws, "Tap Only Red")
-    col = ws.ns["col"]
-    cx, cy = ws.run.canvas.w // 2, ws.run.canvas.h // 2
-
-    # tap a RED bubble -> +1 score (touch() reads the pointer via the api)
-    ws.ns["bubbles"][:] = [[float(cx), float(cy), 16, col("red"), True]]
-    s0 = ws.ns["score"]
-    ws.pointer.place(cx, cy)
-    ws.pointer.click = True
-    ws.input.begin_frame()
-    ws.frame(1 / 30)
-    assert ws.ns["score"] == s0 + 1
-
-    # tap a non-red bubble -> a miss
-    ws.ns["bubbles"][:] = [[float(cx), float(cy), 16, col("blue"), False]]
-    m0 = ws.ns["misses"]
-    ws.pointer.place(cx, cy)
-    ws.pointer.click = True
-    ws.input.begin_frame()
-    ws.frame(1 / 30)
-    assert ws.ns["misses"] == m0 + 1
-
-
 # -- character art lives in EDITABLE sprite-sheet tiles (#15 follow-up) ------
 #
 # The carts whose characters used to be inline ASCII Images in main.py now keep
@@ -130,6 +101,7 @@ CONVERTED_SHEETS = {
     "moybyte.star_catcher": (0, 1, 2, 3, 6),   # catchers, star, basket span, life heart
     "moybyte.harpoon_pop": (0, 2, 5, 8, 12, 64),   # both hunters, then one tile per bubble size
     "moybyte.letter_blitz": (1, 2, 3, 16, 18),     # brick, turret, star, the two tank spans
+    "moybyte.tap_only_red": (1, 2, 3, 4, 5),       # the red bubble, then the four lures
     # The bench twins' folded ray scene: one wall texture per maze tile id, and
     # +16 is that wall's dim side-on face (they were ray_test/ray_lua's tiles).
     "moybyte.bench": (64, 65, 66, 67, 80, 81, 82, 83),
@@ -140,12 +112,6 @@ CONVERTED_SHEETS = {
 # reads which pixels are ink and no verb reads the sheet back (there is no sget),
 # so a sheet copy would be a second source of truth, not an editable one.
 GLYPH_DATA_CARTS = {"moybyte.letter_blitz": "GLYPH_ROWS"}
-
-# Tap Only Red stays PRIMITIVE on purpose: its bubbles are variable-radius
-# circles whose color IS the gameplay (red vs lure), set per-bubble at spawn --
-# a fixed 8x8 tile can't express that, so it has no sprites.moygfx.
-PRIMITIVE_CARTS = ("moybyte.tap_only_red",)
-
 
 def test_converted_carts_have_nonempty_sprite_sheets():
     from runtime.editors_sheet import SpriteSheet
@@ -159,12 +125,6 @@ def test_converted_carts_have_nonempty_sprite_sheets():
         for n in tiles:                              # each expected character tile is painted
             pix = [sheet.tget(n, lx, ly) for ly in range(8) for lx in range(8)]
             assert any(pix), "%s tile %d is blank" % (folder, n)
-
-
-def test_primitive_cart_has_no_sprite_sheet():
-    # The genuinely-primitive cart is intentionally left without a sheet.
-    for folder in PRIMITIVE_CARTS:
-        assert not (SYSTEM_CARTS / (folder + ".moy") / "sprites.moygfx").exists(), folder
 
 
 def test_glyph_data_carts_keep_their_table_in_source():
@@ -188,7 +148,7 @@ def test_converted_carts_load_their_sheet_and_run_headless(tmp_path):
 
     title_for = {"moybyte.star_catcher": "Star Catcher", "moybyte.harpoon_pop": "Harpoon Pop",
                  "moybyte.letter_blitz": "Letter Blitz", "moybyte.bench": "Bench",
-                 "moybyte.bench_lua": "Bench Lua"}
+                 "moybyte.bench_lua": "Bench Lua", "moybyte.tap_only_red": "Tap Only Red"}
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     for folder, tiles in CONVERTED_SHEETS.items():
         _open_cart(ws, title_for[folder])
