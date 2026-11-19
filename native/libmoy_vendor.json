@@ -17,6 +17,7 @@
     "native/moycore/libmoy/moy_p8.c": "d3dac60efd94c44dbc215bcd5cf350dc41220f9cc384c38add292143ac97a678",
     "native/moycore/libmoy/moy_wasm.c": "4cfda7c85ca079174abbe3fca7e23006892d8259d566d76bb1884d0dde74381e",
     "native/moycore/libmoy/moy_wasm.h": "be04f85f2ea0048392753617f2bc9511ea87e1d28727971770d05f533b881aca",
+    "sdk/include/moy_cart.h": "91b02c279ebd2fccd815a7f4626d7b40d47f66f9c8532cba2a5d9d3aab4835cc",
     "tools/wat.py": "cc7332d29d4642fede58d2521f343c836c3e4457f4b309b9f1f8553d24817796"
   },
   "upstream": {

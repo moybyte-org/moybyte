@@ -105,7 +105,8 @@ enum {
 enum {
     MOY_PLAY_FREE = 0,          // no reason: the run needs no VM
     MOY_PLAY_WHY_BROKEN = 1,    // the manifest would not read
-    MOY_PLAY_WHY_RUNTIME = 2,   // the runtime is Python, or one no row runs VM-free
+    MOY_PLAY_WHY_RUNTIME = 2,   // the runtime is Python, or one no row runs VM-free, or
+                                // a native module beside the wasm one (the console picks)
     MOY_PLAY_WHY_NORT = 3,      // the runtime's row is not in this image
     MOY_PLAY_WHY_TYPE = 4,      // not a game
     MOY_PLAY_WHY_PERM = 5,      // a permission outside the native set

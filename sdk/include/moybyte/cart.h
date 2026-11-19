@@ -1,23 +1,135 @@
-// A compiled cart's Moybyte verbs (docs/moy_cart_api.md, "A compiled cart's
-// Moybyte verbs"): the scenes, paint images and mouse a Python and a Lua cart
-// hold by name, imported from the module of each extension's name, which the
-// cart's manifest declares ("extensions": ["moybyte.scenes"], ...). The rows
-// are native/moycore/moycore_wasm_ext.h's. A name or a buffer is a pointer
-// and its length, never NUL-terminated; an answer longer than its buffer is
-// cut, and its whole length still answered.
+// A compiled cart in C: one source, built to a wasm module and to a native
+// module per chip (sdk/README.md, "A compiled cart"; tools/wasm_cart.py and
+// tools/elf_cart.py). A cart includes this one header on both targets and
+// calls moy-spec's verbs by the names libmoy's moy_cart.h gives them
+// (`moy_cls`, `moy_spr`, ...), with Moybyte's extension rows below:
+//
+//     #include "moybyte/cart.h"
+//     void init(void) { }
+//     void update(float dt) { }
+//     void draw(void) { moy_cls(1); }
+//
+// Its hooks are `init`, `update(dt)` and `draw`, and `par_item(i, arg)` where
+// it calls moy_par. Built for wasm (`__wasm__`) the verbs are moy-spec's "moy"
+// imports and the extension rows the imports of the module of their name,
+// which the manifest declares ("extensions": ["moybyte.scenes"], ...; the
+// rows are native/moycore/moycore_wasm_ext.h's). Built for a chip they are
+// the SDK's adapter, sdk/src/moycart.c, linked into the module: libmoy's
+// raster over the game's screen (native/moy_elf/moy_os.h, A GAME), its frame
+// loop calling the hooks, and the sprites, map, flags, config, scenes and
+// paint images the console hands the game at its start (moy_game_data). A
+// name or a buffer is a pointer and its length, never NUL-terminated; an
+// answer longer than its buffer is cut, and its whole length still answered.
+//
+// What a native module does not do as the wasm module does: no sound (the
+// audio verbs are silent, moy_snd answers no room), pmem writes last the run,
+// the cart's files read as absent and none is written (moy_read, moy_write,
+// moy_erase, moy_list), moy_blit's palette and moy_blit565 are not shown, and
+// moy_par runs its items one after another.
 
 #ifndef MOYBYTE_CART_H
 #define MOYBYTE_CART_H
 
 #include <stdint.h>
 
+#ifndef __wasm__
+// The native module's names for the verbs: libmoy's raster, which the module
+// links too, holds the moy_ names itself (its moy_cls takes a canvas).
+#define moy_cls moy_cart_cls
+#define moy_background moy_cart_background
+#define moy_view moy_cart_view
+#define moy_pix moy_cart_pix
+#define moy_line moy_cart_line
+#define moy_rect moy_cart_rect
+#define moy_rectb moy_cart_rectb
+#define moy_circ moy_cart_circ
+#define moy_circb moy_cart_circb
+#define moy_oval moy_cart_oval
+#define moy_ovalb moy_cart_ovalb
+#define moy_print moy_cart_print
+#define moy_camera moy_cart_camera
+#define moy_clip moy_cart_clip
+#define moy_pal moy_cart_pal
+#define moy_palt moy_cart_palt
+#define moy_fillp moy_cart_fillp
+#define moy_make_layer moy_cart_make_layer
+#define moy_draw_layer moy_cart_draw_layer
+#define moy_tri moy_cart_tri
+#define moy_trib moy_cart_trib
+#define moy_tline moy_cart_tline
+#define moy_spr moy_cart_spr
+#define moy_sspr moy_cart_sspr
+#define moy_sget moy_cart_sget
+#define moy_sset moy_cart_sset
+#define moy_fget moy_cart_fget
+#define moy_fset moy_cart_fset
+#define moy_map moy_cart_map
+#define moy_mget moy_cart_mget
+#define moy_mset moy_cart_mset
+#define moy_btn moy_cart_btn
+#define moy_btnp moy_cart_btnp
+#define moy_players moy_cart_players
+#define moy_touch moy_cart_touch
+#define moy_key moy_cart_key
+#define moy_keyp moy_cart_keyp
+#define moy_textmode moy_cart_textmode
+#define moy_sfx moy_cart_sfx
+#define moy_music moy_cart_music
+#define moy_music_stop moy_cart_music_stop
+#define moy_sound_stop moy_cart_sound_stop
+#define moy_volume moy_cart_volume
+#define moy_beep moy_cart_beep
+#define moy_time moy_cart_time
+#define moy_pmem moy_cart_pmem
+#define moy_cfg moy_cart_cfg
+#define moy_rnd moy_cart_rnd
+#define moy_srand moy_cart_srand
+#define moy_flr moy_cart_flr
+#define moy_quit moy_cart_quit
+#define moy_target moy_cart_target
+#define moy_blit moy_cart_blit
+#define moy_blit565 moy_cart_blit565
+#define moy_read moy_cart_read
+#define moy_snd moy_cart_snd
+#define moy_par moy_cart_par
+#define moy_write moy_cart_write
+#define moy_erase moy_cart_erase
+#define moy_list moy_cart_list
+#endif
+
+#if defined(__GNUC__) && !defined(__wasm__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wattributes"
+#ifdef __clang__
+#pragma GCC diagnostic ignored "-Wunknown-attributes"
+#endif
+#endif
+#include "moy_cart.h"
+#if defined(__GNUC__) && !defined(__wasm__)
+#pragma GCC diagnostic pop
+#endif
+
+#ifdef __wasm__
+#define MOYBYTE_SCENES(name) __attribute__((import_module("moybyte.scenes"), import_name(#name)))
+#define MOYBYTE_IMAGES(name) __attribute__((import_module("moybyte.images"), import_name(#name)))
+#define MOYBYTE_MOUSE(name) __attribute__((import_module("moybyte.mouse"), import_name(#name)))
+#else
+#undef MOY_EXPORT
+#define MOY_EXPORT(name)
+#define MOYBYTE_SCENES(name)
+#define MOYBYTE_IMAGES(name)
+#define MOYBYTE_MOUSE(name)
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define MOYBYTE_SCENES(name) __attribute__((import_module("moybyte.scenes"), import_name(#name)))
-#define MOYBYTE_IMAGES(name) __attribute__((import_module("moybyte.images"), import_name(#name)))
-#define MOYBYTE_MOUSE(name) __attribute__((import_module("moybyte.mouse"), import_name(#name)))
+// The hooks, each the export of moy-spec's name for it.
+MOY_EXPORT("_init") void init(void);
+MOY_EXPORT("_update") void update(float dt);
+MOY_EXPORT("_draw") void draw(void);
+MOY_EXPORT("_par") void par_item(int32_t i, int32_t arg);
 
 // One placed actor, as scene() writes it: Python's row fields, its tag cut at
 // 15 bytes and NUL-padded.

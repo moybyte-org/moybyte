@@ -41,7 +41,8 @@ moy app coredump <board> [--gdb] [--port PORT] [--elf ELF] [--symbols DIR]
   a wasm main or service by `tools/wasm_cart.py` (the portable `.wasm`, and
   with a board's `--chip` that chip's AOT module), a native main or service
   by `tools/elf_cart.py` (a module per `--chip`, which a native cart must
-  name; `host` is the host's, for its tests and terminal). Modules are
+  name; `host` is the host's, for its tests and terminal), and a compiled
+  cart's both (below, "A compiled cart"). Modules are
   signed as those tools sign them; `--unsigned` leaves it off. A Python or
   Lua cart runs from its source and has nothing to build.
 - `stubs` copies what the cart's tier compiles or edits against into it:
@@ -90,10 +91,8 @@ standing only where it lists the reason.
 - `include/moybyte/app.h` (generated): a C app compiled to wasm's
   `moybyte.app` imports, each under its import name, which a compiled game
   that declares the extension imports too.
-- `include/moybyte/cart.h`: a compiled cart's imports from Moybyte's own
-  extensions, `moybyte.scenes`, `moybyte.images` and `moybyte.mouse`
-  (`native/moycore/moycore_wasm_ext.h`); `check` refuses an import from one
-  the manifest does not declare.
+- `include/moybyte/cart.h`: a compiled cart's one header (below, "A
+  compiled cart").
 - `include/moybyte/frame.h`: the frame loop (`native/moy_elf/moy_os.h`, A
   GAME): `moy_game_frame` waits for the console's next frame message and
   reads its buttons and an app's input words.
@@ -154,6 +153,50 @@ under `__wasm__` it declares the rows a WASI program imports (`moy_send`,
 The chips: `esp32s3` (Xtensa, `-mlongcalls`), `esp32p4` (RISC-V,
 `rv32imafc`, `ilp32f`), and `host`, the simulator's, which links the host's C
 library dynamically behind the SDK's own.
+
+## A compiled cart
+
+**Decision (owner, 2026-11-18, #261): one source, two targets.** A compiled
+cart in C (`"runtime": "wasm"`, a game or a wallpaper) includes one header,
+`include/moybyte/cart.h`, and `moy app build` builds it to `main.wasm` and to
+`main.<chip>.elf` for each `--chip`, in one `.moy`:
+
+```json
+{"format": "moy-1", "runtime": "wasm", "main": "main.wasm", "memory": 2,
+ "extensions": ["moybyte.scenes"],
+ "moybyte": {"type": "game", "native": ["esp32s3", "esp32p4"], "permissions": []}}
+```
+
+`native` is the field a native cart names its chips in; beside a wasm main
+(an empty list before the first build) it makes the cart build both, and
+`check` reads it as a wasm cart, asking no `full_access`.
+
+- **The verbs are moy-spec's**, by the names libmoy's `moy_cart.h` gives them
+  for C (`moy_cls`, `moy_spr`, ...; vendored as `include/moy_cart.h` by
+  `make vendor-libmoy`), with Moybyte's extension rows (`scene`, `image`,
+  `mouse`, ...) and the hooks `init`, `update(dt)`, `draw` and `par_item`.
+  Built for wasm they are the `"moy"` imports and the extensions' (SPEC.md
+  §16, `native/moycore/moycore_wasm_ext.h`).
+- **Built for a chip they are the SDK's adapter**, `src/moycart.c`, which
+  `tools/elf_cart.py` links into a compiled cart's module: a game's `main`
+  (`native/moy_elf/moy_os.h`, A GAME) running the hooks once a frame over
+  libmoy's raster, the verbs' bodies as `moy_wasm.c`'s, and the sprites,
+  flags, map, config, pmem, scenes and paint images the console hands the
+  game at its start through the `moy_game_data` row
+  (`runtime/run/elf_run.py`'s `game_data`). libmoy's raster holds the
+  `moy_` names itself, so the header names a cart's verbs `moy_cart_<name>`
+  in a module. The header says what a module does not do as the wasm one
+  does (sound, persistent pmem, the cart's files).
+- **Which runs** is the console's (`runtime/shell/app_perms.py`'s
+  `tier_of`, the Player's and the wallpaper's routing): the native module
+  on a P4, which confines it, unless Settings turned its `full_access` off;
+  the wasm one on an S3 unless the user turned on Settings' "Run as native
+  code" for the cart (`full_access`, remembered in its consent record); the
+  wasm one in the browser; the other where the wanted one is missing. The
+  install prompt asks `full_access` only where the native module runs.
+- An official compiled cart carries its source alone: the release builds it
+  (`tools/web_pack.py`'s `built_seed`, the same source and pinned toolchains
+  building the same bytes). `system_carts/moybyte.sakura_c.moy` is one.
 
 ## The C library
 

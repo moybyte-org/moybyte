@@ -168,8 +168,11 @@ _UNREAD = {"wasm": ("scene",), "elf": ("paint", "map", "scene", "music", "mine")
 
 def _tier(cart):
     """The tier `cart` runs on, as `_UNREAD` keys it: `elf` for a native
-    cart, else its runtime."""
-    return "elf" if cart.get("native") else (cart.get("runtime") or "python")
+    cart, else its runtime (a compiled cart's native module is handed what
+    its wasm one reads, runtime/run/elf_run.py's game_data)."""
+    if cart.get("native") and cart.get("runtime") != "wasm":
+        return "elf"
+    return cart.get("runtime") or "python"
 
 
 # The theme mode's tabs (runtime/editors/theme_editor.py's TAB_CONFIG, TAB_SPRITES).

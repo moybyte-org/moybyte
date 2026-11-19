@@ -180,6 +180,19 @@ static bool imports_free(const char *path, const moy_cat_entry_t *e, char *imp,
     return ok;
 }
 
+// Whether a manifest field is a list holding anything.
+static bool has_chips(moy_cat_json_t f) {
+    if (f.v == NULL || *f.v != '[') {
+        return false;
+    }
+    for (const char *c = f.v + 1; c < f.e; c++) {
+        if (*c != ' ' && *c != '\t' && *c != '\n' && *c != '\r') {
+            return *c != ']';
+        }
+    }
+    return false;
+}
+
 static uint8_t verdict(const char *path, const moy_cat_entry_t *e, char *imp, size_t cap) {
     if (e->broken != NULL) {
         return MOY_PLAY_WHY_BROKEN;
@@ -202,7 +215,9 @@ static uint8_t verdict(const char *path, const moy_cat_entry_t *e, char *imp, si
     } else {
         return MOY_PLAY_WHY_RUNTIME;
     }
-    if (rt->vm) {
+    if (rt->vm || has_chips(e->native)) {
+        // a compiled cart carrying a native module too: the Python console
+        // picks which module runs (runtime/shell/app_perms.py's tier_of)
         return MOY_PLAY_WHY_RUNTIME;
     }
     // 2: a game, with the store's default; or a compiled app, or a compiled

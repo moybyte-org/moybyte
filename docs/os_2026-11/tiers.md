@@ -167,6 +167,16 @@ costs are #227's.
   an unsigned module by **content hash**, since an id is the author's to
   change (`processes.md` §10).
 
+**One source, two targets (owner, 2026-11-18, #261).** A compiled cart's C
+builds to a wasm module and to a native module per chip from one header
+(`sdk/README.md`, "A compiled cart"): the P4s run the native one, the S3s the
+wasm one unless the user chose the native one for the cart ("risk it": its
+full access is the user's choice, in plain words, remembered), the browser the
+wasm one, and a console lacking the wanted one runs the other. The routing is
+`runtime/shell/app_perms.py`'s `tier_of`, which the Player, the wallpaper and
+the consent share; `full_access` is asked for only where the native module
+runs.
+
 The deferred Rust rung (owner, 2026-11-02) uses this loader and table.
 
 **A C app on an S3** is feasible within these limits: a foreground C app

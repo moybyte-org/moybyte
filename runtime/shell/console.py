@@ -3846,6 +3846,8 @@ def wire_workstation_core(ws, store, carts_root, make_api, wifi,
         ws.audio_out = audio_out
     if runtimes:
         ws.runtimes = dict(runtimes)
+    import app_perms
+    app_perms.wire_tiers(getattr(ws, "runtimes", None))
     ws.carts_store = store
     ws.carts_root = carts_root
     ws.can_manage = (carts_root is not None) if can_manage is None else can_manage

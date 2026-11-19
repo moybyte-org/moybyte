@@ -157,10 +157,10 @@ class _Strip:
     h = 0
 
 
-def _runtime_of(cart):
-    """The runtime a cart runs on, as the Player routes it: "elf" for a
-    native cart, else its `runtime` field ("python" when it names none)."""
-    return "elf" if cart.get("native") else cart.get("runtime", "python")
+def _runtime_of(cart, ws=None):
+    """The runtime a cart runs on, as the Player routes it (app_perms.run_tier)."""
+    import app_perms
+    return app_perms.run_tier(ws, cart)
 
 
 class _Project:
@@ -583,7 +583,7 @@ class Wallpaper:
         try:
             # (a per-glass wallpaper is a Python cart's: its QUIET and SUBJECT
             # are names in its namespace)
-            glass = bool(cart.get("glass")) and _runtime_of(cart) == "python"
+            glass = bool(cart.get("glass")) and _runtime_of(cart, self.ws) == "python"
             ns, hosted = self._load(cart, ws.sys_canvas if glass else ws.run.canvas,
                                     # #63: layer loans reclaimed on clear()
                                     "wallpaper", "<wallpaper>",
@@ -621,7 +621,7 @@ class Wallpaper:
         the Player starts it through, and `hosted` its `_Hosted`. `quiet`:
         a per-glass cart's QUIET, set before its `_init`."""
         ws = self.ws
-        rt = _runtime_of(cart)
+        rt = _runtime_of(cart, self.ws)
         sheet = ws.build_sheet(cart)
         tilemap = ws.build_tilemap(cart)
         flags = ws.build_flags(cart)        # SPEC.md 3.5 tile flags
@@ -1235,7 +1235,7 @@ class Wallpaper:
                 self._pv_run = None
                 pv_run.close()
             try:
-                glass = cart.get("glass") and _runtime_of(cart) == "python"
+                glass = cart.get("glass") and _runtime_of(cart, self.ws) == "python"
                 ns, hosted = self._load(cart, pv, "wallpaper_pv", "<wallpaper-preview>",
                                         self._preview_quiet() if glass else None)
             finally:

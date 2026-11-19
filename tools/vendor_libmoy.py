@@ -97,6 +97,13 @@ VENDOR = {
         "embed.c": "libmoy/port/wasm/embed.c",
         "LICENSE": "LICENSE",
     },
+    # The wasm binding's imports as C (SPEC.md 16): the verbs a compiled C
+    # cart calls, which the SDK's moybyte/cart.h declares from this file on
+    # every target -- the "moy" imports under wasm, the adapter's functions in
+    # a native module (sdk/src/moycart.c).
+    os.path.join(ROOT, "sdk", "include"): {
+        "moy_cart.h": "libmoy/include/moy_cart.h",
+    },
     # The WebAssembly text assembler moy-spec's own wasm fixtures are built
     # with. The one file here that is not C: moybyte's wasm carts under test
     # are WAT source too (never a committed binary), and this turns them into

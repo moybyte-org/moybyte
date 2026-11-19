@@ -815,9 +815,10 @@ class Player(PlayerDiag):
         err = self._gate_spec(ws, cart)
         if err is not None:
             return self._refuse(err)
-        # A native cart (runtime/run/elf_run.py) has no main the console's
-        # tiers read: its tier is "elf" whatever its runtime field says.
-        _rt = "elf" if project.cart.get("native") else project.cart.get("runtime", "python")
+        # The tier the cart runs on here (app_perms.tier_of): a native cart's
+        # is "elf" whatever its runtime field says, and a compiled cart that
+        # carries both modules runs the one this console and its consent pick.
+        _rt = _perms.run_tier(ws, project.cart)
         self._wasm = _rt == "wasm"
         run = 0
         self._run_handle = 0
@@ -1163,7 +1164,7 @@ class Player(PlayerDiag):
         `wants_layout(cart)` -- a Lua cart's scripts (lua_ext), a compiled or
         WASI app's module exports, a native app's dynamic symbols (elf_run).
         A runtime with no such answer, or one that fails, is fixed."""
-        rt = "elf" if cart.get("native") else cart.get("runtime", "python")
+        rt = _perms.run_tier(ws, cart)
         if rt == "python":
             return wants_layout(cart.get("src"))
         probe = getattr((getattr(ws, "runtimes", None) or {}).get(rt), "wants_layout", None)

@@ -273,7 +273,7 @@ class Notices:
         if not _perms.asks_first(cart, consent.get(aid)):
             return False
         title = str(cart.get("title") or "this cart")[:18]
-        perms = list(cart.get("permissions") or ())
+        perms = _perms.perms_of(cart)
 
         def allow():
             consent.record(aid, perms)

@@ -38,6 +38,10 @@ is let go when no native process holds it.
 A native cart carries one module a chip, `main.<chip>.elf` beside its
 manifest (tools/elf_cart.py), and its manifest's `"moybyte": {"native":
 [chips]}` names them; a cart with none for this console does not run here.
+A compiled cart (`"runtime": "wasm"`) naming chips carries both modules
+(sdk/README.md, "A compiled cart"), and where the console runs its native
+one (app_perms.tier_of) its game is handed `game_data` at its start and
+hears the pointer and the key typed in its frame words.
 An app's service entry `<stem>.elf` (scheduler.as_service) is a module
 `<stem>.<chip>.elf` a chip, the chips those the folder carries.
 A module that carries a signature must verify; one with none runs only when
@@ -60,7 +64,7 @@ SIGNALS = {4: "SIGILL", 5: "SIGTRAP", 7: "SIGBUS", 9: "SIGKILL", 11: "SIGSEGV",
 WHAT = {4: "an illegal instruction", 5: "a breakpoint", 7: "a misaligned access",
         9: "killed", 11: "a memory fault", 31: "a call the console lacks"}
 
-from lua_ext import MOY_BUTTONS, run_face, run_room
+from lua_ext import MOY_BUTTONS, cfg_blob, put_scenes, run_face, run_room, wasm_exts
 from moy_input import pointer_state
 from ui_draw import KEY_PASTE, paste_text
 import moy_evq as _E
@@ -77,6 +81,119 @@ IN_WORDS = 16
 # toolkit an app links told after its last frame: moy_ui_tell).
 ASK_CANCEL, ASK_BACK = 1, 2
 TOLD_TYPING, TOLD_CANCEL, TOLD_BACK = 1, 2, 4
+
+
+# The data a compiled cart's native module reads at its start (moy_game_data;
+# its layout is sdk/src/moycart.c's): an entry's kind.
+D_SHEET, D_FLAGS, D_MAP, D_CFG, D_PMEM, D_SCENE, D_IMAGE = range(1, 8)
+ACTOR_TAG = 16          # moycore_lua.h's MOYCORE_ACTOR_TAG
+
+
+def is_cart(cart):
+    """Whether `cart` is a compiled cart's native module (a `"runtime": "wasm"`
+    cart with a module a chip, sdk/include/moybyte/cart.h): its game reads
+    `game_data` and hears the pointer and keys in its frame words."""
+    return bool(cart) and bool(cart.get("native")) and cart.get("runtime") == "wasm"
+
+
+def _i32(v):
+    """A scene field as moycore_lua.c's row_record reads it: a number made an
+    int (truncated), anything else 0."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return 0
+    try:
+        return max(-0x80000000, min(0x7FFFFFFF, int(v)))
+    except (OverflowError, ValueError):
+        return 0
+
+
+def _tag(v):
+    """An actor's tag as row_record spells it, cut at ACTOR_TAG - 1 bytes."""
+    if v is True:
+        t = "True"
+    elif v is False:
+        t = "False"
+    elif v is None:
+        t = "None"
+    else:
+        t = v if isinstance(v, str) else str(v)
+    b = t.encode()[:ACTOR_TAG - 1]
+    return b + bytes(ACTOR_TAG - len(b))
+
+
+def scene_rows(text):
+    """A scene's JSON text as moybyte.scenes answers it (moycore_wasm_ext.h):
+    its actors' records and their "flags" objects as JSON texts."""
+    import json
+    import struct
+    try:
+        rows = json.loads(text)
+    except ValueError:
+        rows = None
+    recs, flags = bytearray(), []
+    for r in rows if isinstance(rows, list) else ():
+        if not isinstance(r, dict):
+            continue
+        recs += struct.pack("<iiii", _i32(r.get("tile")), _i32(r.get("x")), _i32(r.get("y")),
+                            _i32(r.get("flip")))
+        recs += _tag(r.get("tag", ""))
+        f = r.get("flags")
+        flags.append(json.dumps(f).encode() if isinstance(f, dict) else b"")
+    out = bytearray(struct.pack("<I", len(flags))) + recs
+    for f in flags:
+        out += struct.pack("<I", len(f)) + f
+    return out
+
+
+def game_data(ws, cart, ns):
+    """What a compiled cart's native module reads at its start (moy_game_data,
+    sdk/src/moycart.c): the run's sprites, flags, map, config and pmem, and
+    the scenes and paint images of the extensions its manifest declares, as
+    the console hands a wasm run of the same cart (runtime/host/wasm_host.py,
+    device/moycore_glue.py's WasmRun)."""
+    import struct
+    project = getattr(getattr(ws, "run", None), "project", None)
+    parts = []
+
+    def put(kind, name, data):
+        nb = name.encode()[:255]
+        parts.append(struct.pack("<BB", kind, len(nb)) + nb + struct.pack("<I", len(data)))
+        parts.append(data)
+
+    sheet = getattr(project, "sheet", None)
+    pix = getattr(sheet, "pix", sheet)
+    if pix is not None:
+        put(D_SHEET, "", pix)
+    flags = getattr(project, "flags", None)
+    if flags is not None:
+        put(D_FLAGS, "", bytes(flags))
+    tm = getattr(project, "play_map", None) or getattr(project, "tilemap", None)
+    cells = getattr(tm, "cells", None)
+    if cells is not None:
+        put(D_MAP, "", struct.pack("<HH", int(tm.w), int(tm.h)) + bytes(cells))
+    cfg = cfg_blob(ns.get("_moy_cfg"))
+    if cfg:
+        put(D_CFG, "", cfg)
+    pm = getattr(getattr(project, "pmem", None), "cells", None)
+    if pm is not None:
+        vals = [int(c) for c in list(pm)[:256]]
+        put(D_PMEM, "", struct.pack("<%di" % len(vals), *vals))
+    exts = wasm_exts(cart)
+    if exts & 1:
+        put_scenes(ns, lambda name, text: put(D_SCENE, name, scene_rows(text)))
+    if exts & 2:
+        from moyimg import decode_moyimg
+        imgs = ns.get("_moy_images") or {}
+        for name in imgs:
+            blob = imgs[name]
+            got = decode_moyimg(blob) if isinstance(blob, (str, bytes)) else None
+            if got is not None:
+                put(D_IMAGE, name, struct.pack("<HH", got[0], got[1]) + bytes(got[2]))
+    total = 12 + sum(len(p) for p in parts)
+    out = bytearray(b"MOYG" + struct.pack("<II", total, len(parts) // 2))
+    for p in parts:
+        out += p
+    return out
 
 
 def elf_defines(path, name):
@@ -370,7 +487,7 @@ class ElfRuntime:
         cart = ws.cart or {}
         if cart.get("type") in ("command", "service"):
             raise RuntimeError("a native %s runs in the Terminal" % cart["type"])
-        return ElfGame(self, ws, cart, ns.get("_moy_app"), ns.get("_moy_layout"))
+        return ElfGame(self, ws, cart, ns.get("_moy_app"), ns.get("_moy_layout"), ns)
 
     def wants_layout(self, cart):
         """Whether the cart's module for this console exports `_layout`
@@ -517,7 +634,7 @@ class ElfGame(LinkedUi):
 
     own_ui = True                       # an app's toolkit is its own: a paste is its message
 
-    def __init__(self, rt, ws, cart, run, lay=None):
+    def __init__(self, rt, ws, cart, run, lay=None, ns=None):
         self._e = rt.engine
         self._ws = ws
         path = rt.module(cart)
@@ -527,14 +644,17 @@ class ElfGame(LinkedUi):
         self.pid = ws.run.player.pid
         self._w, self._h = canvas.w, canvas.h
         self._app = cart.get("type") == "app"
-        self._words = array("i", bytes(4 * IN_WORDS)) if self._app else None
+        dual = is_cart(cart)
+        self._words = array("i", bytes(4 * IN_WORDS)) if self._app or dual else None
         # A responsive app's surface rides its frame words: the toolkit it
         # links calls its `_layout` when they change (sdk/src/moyui_link.c).
         self._lay = list(lay) if lay is not None and self._app else None
         self._ptr = [0, 0, 0, 0]
         self._keys = key_ring()
+        data = game_data(ws, cart, ns if ns is not None else {}) if dual else None
         why = self._e.game(path, self.pid, cart.get("id") or "", rt._flags(cart, False),
-                           self._w, self._h, run, 2 if self._app else 1)
+                           self._w, self._h, run, 2 if self._app else 1, data)
+        data = None
         if why is not None:
             raise RuntimeError(why)
         self._px = self._e.screen(self.pid)

@@ -110,6 +110,10 @@ product), with the owner's later calls dated where they land.
   own scene and image tables (`moycore_lua.h`) and its snapshot. The rows
   are Moybyte's, never moy-spec's (SPEC.md §16.2), and a cart imports from
   one only when it declares it.
+- **One source, two targets (owner, 2026-11-18, #261).** A cart's C builds
+  to its `main.wasm` and to a native module per chip, and the console picks
+  which runs: `docs/os_2026-11/tiers.md` §1, `sdk/README.md` ("A compiled
+  cart").
 - **WASI preview1 is an adapter of ours, not WAMR's libc-wasi
   (2026-11-08).** A command's imports are a table of natives registered
   under WASI's module name (`moy_wasi.h`), each over the C a shell built-in

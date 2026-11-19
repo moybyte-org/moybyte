@@ -192,9 +192,10 @@ def manifest_check(inst, man, folder, shelf):
             raise _ci.InstallError("Its command name is taken: " + why,
                                    "%s: %s" % (folder, why))
     aid = _perms.app_id(cart)
+    perms = _perms.perms_of(cart, consent.get(aid))
     if _store.removable(folder):
-        return aid, list(cart["permissions"]), None    # a built-in asks nothing, as its seed
-    return aid, list(cart["permissions"]), _perms.prompt(cart, consent.get(aid))
+        return aid, perms, None    # a built-in asks nothing, as its seed
+    return aid, perms, _perms.prompt(cart, consent.get(aid))
 
 
 def through(steps):

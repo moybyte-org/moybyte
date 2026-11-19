@@ -936,7 +936,8 @@ A `"runtime": "wasm"` cart imports moy-spec's verbs from module `"moy"`
 a Moybyte extension, which its manifest declares (SPEC.md §16.2's
 vendor-extension rule): a module importing from an extension it does not
 declare is refused at load, the import named. `sdk/include/moybyte/cart.h`
-declares the rows for C; `native/moycore/moycore_wasm_ext.h` is the one body
+declares the rows for C, with moy-spec's verbs, and the same C builds to a
+native module per chip too (`sdk/README.md`, "A compiled cart"); `native/moycore/moycore_wasm_ext.h` is the one body
 the boards, the host and the browser run.
 
 | extension | imports | as |

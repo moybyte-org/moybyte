@@ -1,3 +1,21 @@
+# Map (grep -n a name to jump there):
+#   row                               a permission's row of the table
+#   line                              a permission's line on the install prompt
+#   asked                             the permissions a prompt asks for, on a tier
+#   wire_tiers                        which tiers this console runs
+#   tier_of                           the one router: the tier a cart runs on here
+#   native_choice                     whether Settings offers 'Run as native code'
+#   run_tier                          tier_of with the cart's consent record
+#   perms_of                          the permissions a cart needs where it runs
+#   tiers_of                          the tiers a cart's permissions are read on
+#   check                             (granted, absent, refusal) for running or installing a cart
+#   lacking                           the first required permission the console has nothing for
+#   manifest_cart                     a manifest read as the table reads a cart
+#   app_id                            the id a consent record is kept under
+#   prompt                            the install prompt's lines
+#   regrant                           a live run's grants redone after its app's permissions changed
+#   Consent                           the consent records over the system store, and this console's checks
+#   Consent.opt                       turn one permission on or off, as Settings does
 """The permission table (`native/os_calls.json`'s "permissions") and the
 consent the install prompt records against it (docs/os_2026-11/processes.md
 §2). One table: the install prompt's lines, the install check and the launch
@@ -50,7 +68,12 @@ The consent record lives in system/settings under `KEY`, one entry per app id
 (`moy_app.id_for`, the grant's key): `{"perms": [...], "off": [...]}`, the
 manifest permissions consented at install or first run (None for a cart
 made here, and for a Settings switch on a cart with no record) and the ones
-turned off since. A malformed entry reads as no entry."""
+turned off since. A malformed entry reads as no entry.
+
+A compiled cart carrying a native module beside its wasm one (`is_dual`)
+asks for `full_access` too where its native module runs (`perms_of`,
+`tier_of`); where that is the user's choice (`native_choice`), the record's
+`full_access`, consented and on, is the choice (`native_opted`)."""
 
 import moy_app as _moy_app
 from moy_store_base import builtin_name, id_in_folder, vendor
@@ -201,19 +224,108 @@ def asked(perms, tier=None):
     return out
 
 
-def tier_of(cart):
-    """The cart's tier: `elf` for a native cart (its manifest's
-    `"moybyte": {"native": [chips]}`), else its runtime, Python by default."""
-    if cart and cart.get("native"):
+# The compiled tiers this console runs, as its runtimes are wired
+# (`wire_tiers`, console.wire_workstation_core): the chip its native modules
+# are built for (None: no native tier) and whether it runs wasm.
+_HERE = {"chip": None, "wasm": False}
+
+# The chips whose consoles confine a native module (U-mode, PMP; docs/os_2026-11/
+# tiers.md section 1): a compiled cart's native module is what they run.
+CONFINING = ("esp32p4",)
+
+# Settings' switch for a compiled cart's native module on a console that does
+# not confine it (perms_ui): the user's choice, remembered as consent to
+# `full_access` (`Consent.opt`).
+NATIVE_LINE = "Run as native code: faster, with full access to the console"
+
+
+def wire_tiers(runtimes):
+    """This console's compiled tiers from its runtimes (`ws.runtimes`): the
+    native one's chip, and whether a wasm one is there."""
+    elf = (runtimes or {}).get("elf")
+    _HERE["chip"] = getattr(getattr(elf, "engine", None), "CHIP", None)
+    _HERE["wasm"] = (runtimes or {}).get("wasm") is not None
+
+
+def is_dual(cart):
+    """Whether `cart` is a compiled cart that carries a native module beside
+    its wasm one (`"runtime": "wasm"` and `"moybyte": {"native": [chips]}`,
+    sdk/include/moybyte/cart.h)."""
+    return bool(cart) and bool(cart.get("native")) and cart.get("runtime") == "wasm"
+
+
+def native_opted(rec):
+    """Whether consent record `rec` holds `full_access` on: the user's choice
+    of a compiled cart's native module (`NATIVE_LINE`)."""
+    return (isinstance(rec, dict) and isinstance(rec.get("perms"), list)
+            and "full_access" in rec["perms"] and "full_access" not in rec["off"])
+
+
+def _wants_native(rec, chip):
+    """A compiled cart's native module is wanted on a console that confines
+    it, unless Settings turned its `full_access` off, and elsewhere only by
+    the user's choice (`native_opted`)."""
+    if chip in CONFINING:
+        return not (isinstance(rec, dict) and "full_access" in rec["off"])
+    return native_opted(rec)
+
+
+def tier_of(cart, rec=None):
+    """The tier `cart` runs on here, under its consent record `rec`: `elf`
+    for a native cart (its manifest's `"moybyte": {"native": [chips]}`),
+    else its runtime, Python by default. A compiled cart that carries both
+    modules (`is_dual`) runs its native one where it is wanted
+    (`_wants_native`) and this console has it, else its wasm one, else its
+    native one; with neither here, the one the console would want, whose
+    absence the Player says. The Player, the wallpaper and the consent all
+    route by this."""
+    if not cart:
+        return "python"
+    if not cart.get("native"):
+        return cart.get("runtime") or "python"
+    if cart.get("runtime") != "wasm":
         return "elf"
-    return (cart.get("runtime") if cart else None) or "python"
+    chip = _HERE["chip"]
+    elf = chip is not None and chip in cart["native"]
+    if elf and _wants_native(rec, chip):
+        return "elf"
+    if _HERE["wasm"] or not elf:
+        return "wasm"
+    return "elf"
 
 
-def tiers_of(cart):
+def native_choice(cart):
+    """Whether running `cart`'s native module is the user's choice here: a
+    compiled cart carrying a module for this console's chip, on a console
+    that does not confine it (`NATIVE_LINE`, Settings' switch)."""
+    chip = _HERE["chip"]
+    return (is_dual(cart) and chip is not None and chip not in CONFINING
+            and chip in cart["native"])
+
+
+def run_tier(ws, cart):
+    """`tier_of` for a launch of `cart` on console `ws`, under the record it
+    runs under (`Consent.for_run`)."""
+    consent = getattr(ws, "consent", None) if ws is not None else None
+    rec = consent.for_run(cart) if consent is not None and is_dual(cart) else None
+    return tier_of(cart, rec)
+
+
+def perms_of(cart, rec=None):
+    """The permissions `cart` asks for here: its manifest's, and
+    `full_access` where it is a compiled cart running its native module
+    (`tier_of`), the consent that module runs under."""
+    perms = list((cart.get("permissions") if cart else None) or ())
+    if is_dual(cart) and "full_access" not in perms and tier_of(cart, rec) == "elf":
+        perms.append("full_access")
+    return perms
+
+
+def tiers_of(cart, rec=None):
     """The tiers `cart`'s programs run on: its own (`tier_of`), and its own
     service's where it declares one (scheduler.entry_of), whose permissions
     its one consent grants too."""
-    own = tier_of(cart)
+    own = tier_of(cart, rec)
     if not cart or cart.get("type") == "service":
         return (own,)
     import scheduler
@@ -315,11 +427,11 @@ def check(cart, rec, have):
     the message naming the first `required` permission that is absent, or
     the first that no tier of the cart's serves (`_served`: a Lua or wasm
     cart's `network`, whose door is `http`), else None."""
-    perms = (cart.get("permissions") if cart else None) or ()
+    perms = perms_of(cart, rec if rec is not UNASKED else None)
     if rec is UNASKED:
         return [], list(perms), UNASKED_REFUSAL
     req = (cart.get("required") if cart else None) or ()
-    tier = tier_of(cart)
+    tier = tier_of(cart, rec)
     granted, absent = [], []
     refusal = None
     for p in perms:
@@ -329,7 +441,7 @@ def check(cart, rec, have):
             continue
         absent.append(p)
         if refusal is None and (p in req or why == "folder" or (
-                why == "tier" and not _served(p, cart))):
+                why == "tier" and not _served(p, cart, rec))):
             refusal = _refusal(p, why, tier)
     if refusal is None:
         for p in req:
@@ -342,13 +454,13 @@ def check(cart, rec, have):
     return granted, absent, refusal
 
 
-def _served(perm, cart):
+def _served(perm, cart, rec=None):
     """Whether one of the tiers `cart`'s programs run on (`tiers_of`: its
     own and its service's) serves `perm`. One none of them serves is the
     cart's mistake, refused at install and at launch with what to ask for
     instead, never a name that is silently absent."""
     r = row(perm)
-    return r is not None and any(t in r[TIERS] for t in tiers_of(cart))
+    return r is not None and any(t in r[TIERS] for t in tiers_of(cart, rec))
 
 
 def lacking(cart, have):
@@ -417,8 +529,8 @@ def prompt(cart, rec=None):
     service's lines, and an app's that declares its own service, end with
     BACKGROUND: what it is granted, it uses with no
     window open."""
-    perms = (cart.get("permissions") if cart else None) or ()
-    tiers = tiers_of(cart)
+    perms = perms_of(cart, rec)
+    tiers = tiers_of(cart, rec)
     want = asked(perms, tiers)
     held = rec["perms"] if rec is not None and rec["perms"] is not None else None
     new = want if held is None else [p for p in want if p not in held]
@@ -593,10 +705,14 @@ class Consent:
             pass
 
     def record_steps(self, aid, perms):
-        """`record`, its write stepped (`yield from` it)."""
+        """`record`, its write stepped (`yield from` it). The user's choice of
+        a compiled cart's native module (`native_opted`) outlives a reinstall."""
         old = self.get(aid)
+        perms = list(perms)
+        if native_opted(old) and "full_access" not in perms:
+            perms.append("full_access")
         off = [p for p in (old["off"] if old else ()) if p in perms]
-        self._all()[aid] = {"perms": list(perms), "off": off}
+        self._all()[aid] = {"perms": perms, "off": off}
         yield from self._put_steps()
 
     def made(self, *aids):
@@ -628,6 +744,24 @@ class Consent:
         if off == rec["off"] and aid in self._all():
             return
         self._all()[aid] = {"perms": rec["perms"], "off": off}
+        self._put()
+        if self._changed is not None:
+            self._changed(aid)
+
+    def opt(self, aid, perm, on, asked=()):
+        """Settings' switch for a permission app `aid` holds by the user's
+        choice rather than its manifest (`NATIVE_LINE`'s `full_access`): on
+        consents to it, off turns it off. A record that consents to nothing
+        in particular (a cart made here) consents to `asked`, its manifest's,
+        beside it."""
+        rec = self.get(aid) or {"perms": None, "off": []}
+        perms = list(rec["perms"] if rec["perms"] is not None else asked)
+        off = [p for p in rec["off"] if p != perm]
+        if on and perm not in perms:
+            perms.append(perm)
+        if not on:
+            off.append(perm)
+        self._all()[aid] = {"perms": perms, "off": off}
         self._put()
         if self._changed is not None:
             self._changed(aid)

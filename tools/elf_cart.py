@@ -28,6 +28,11 @@ into `<stem>.<chip>.elf`, signed alike. A cart with no `src/*.c` of its own
 (a Python or Lua app) gets the service's modules alone, and no `native`
 field: that names the chips of the cart's own main.
 
+A compiled cart (`"runtime": "wasm"`, a game) builds here too, from the C it
+builds its main.wasm from (sdk/include/moybyte/cart.h, tools/wasm_cart.py):
+its module links the SDK's adapter (sdk/src/moycart.c, `moycart`), and its
+`native` names the chips beside its `main`.
+
 A board module is compiled with -g and stripped; its unstripped twin is kept
 under .build/sdk/symbols/ by the sha256 of the stripped module, the name a
 board's core dump gives it (tools/coredump.py).
@@ -55,6 +60,7 @@ if ROOT not in sys.path:
 SDK = os.path.join(ROOT, "sdk")
 SDK_INCLUDE = os.path.join(SDK, "include")
 SDK_SRC = os.path.join(SDK, "src")
+CART_SRC = os.path.join(SDK_SRC, "moycart.c")
 SDK_LIBC = os.path.join(SDK, "libc")
 SDK_SYSROOT = os.path.join(SDK, "sysroot", "include")
 SDK_LIBM = os.path.join(SDK_LIBC, "m")
@@ -256,6 +262,34 @@ def libmoyos(chip):
     return lib
 
 
+def moycart(chip):
+    """The adapter a compiled cart's module links for `chip` (sdk/src/moycart.c:
+    its main, its verbs over libmoy's raster, the console's hand-over), one
+    object built once per content into .build/sdk/."""
+    cc, _ar, _strip = toolchain(chip)
+    h = hashlib.sha256()
+    for p in [CART_SRC, os.path.join(SDK_INCLUDE, "moy_cart.h")] + sorted(
+            glob.glob(os.path.join(SDK_INCLUDE, "moybyte", "*.h"))) + [
+            os.path.join(LIBMOY, "moy.h")]:
+        h.update(os.path.relpath(p, ROOT).encode())
+        with open(p, "rb") as f:
+            h.update(f.read())
+    flags = CFLAGS + CHIPS[chip]["flags"]
+    h.update(repr((cc, flags)).encode())
+    out_dir = os.path.join(CACHE, chip, "cart-" + h.hexdigest()[:16])
+    obj = os.path.join(out_dir, "moycart.o")
+    if os.path.exists(obj):
+        return obj
+    tmp = out_dir + ".%d.tmp" % os.getpid()
+    os.makedirs(tmp, exist_ok=True)
+    _run([cc] + flags + includes(chip) + ["-c", CART_SRC, "-o", os.path.join(tmp, "moycart.o")])
+    if os.path.isdir(out_dir):
+        shutil.rmtree(tmp, ignore_errors=True)
+    else:
+        os.replace(tmp, out_dir)
+    return obj
+
+
 def libmoyui(chip):
     """The toolkit an app links for `chip` (UI_SOURCES), built once per
     content into .build/sdk/."""
@@ -390,19 +424,31 @@ def libs(chip, ui=False):
         libmoyos(chip), pure_libc(chip), "-lm", libgcc(chip), "-Wl,--end-group"]
 
 
+def is_cart(man):
+    """Whether a manifest is a compiled cart's (`"runtime": "wasm"`, a game:
+    no command, service or app), whose C builds to the wasm module and, through
+    the SDK's adapter (sdk/include/moybyte/cart.h), to a native module."""
+    ven = man.get("moybyte") or {}
+    return (man.get("runtime") == "wasm" and ven.get("type") not in ("command", "service", "app")
+            and ven.get("wasi") is not True)
+
+
 def is_app(man):
     """Whether a manifest is an app's, whose main module links the toolkit
     (sdk/include/moybyte/ui.h) and whose screen is RGB565."""
     return (man.get("moybyte") or {}).get("type") == "app"
 
 
-def build_module(sources, chip, out, cflags=(), signed=True, sign_with=None, ui=False):
+def build_module(sources, chip, out, cflags=(), signed=True, sign_with=None, ui=False,
+                 cart=False):
     """Compile `sources` (C files) for `chip` into the module file `out`,
-    an app's linking the toolkit (`ui`), signed unless `signed` is False
-    (the host's never is). Returns `out`."""
+    an app's linking the toolkit (`ui`), a compiled cart's the adapter
+    (`cart`, moycart()), signed unless `signed` is False (the host's never
+    is). Returns `out`."""
     cc, _ar, _strip = toolchain(chip)
     cmd = ([cc] + CFLAGS + CHIPS[chip]["flags"] + list(cflags) + includes(chip)
-           + list(sources) + LINK + CHIPS[chip]["link"] + libs(chip, ui))
+           + list(sources) + ([moycart(chip)] if cart else []) + LINK + CHIPS[chip]["link"]
+           + libs(chip, ui))
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     _run(cmd + ["-o", out])
     return finish(out, chip, signed=signed, sign_with=sign_with)
@@ -460,6 +506,7 @@ def build(src, dst, chips, signed=True, sign_with=None):
         man = json.load(f)
     stem = service_entry(man)
     ui = is_app(man)
+    cart = is_cart(man)
     sources = sorted(glob.glob(os.path.join(src, "src", "*.c")))
     svc = sorted(glob.glob(os.path.join(src, "src", stem, "*.c"))) if stem else []
     if stem and not svc:
@@ -474,7 +521,7 @@ def build(src, dst, chips, signed=True, sign_with=None):
     for chip in chips:
         if sources:
             out[chip] = build_module(sources, chip, os.path.join(dst, module_name(chip)),
-                                     signed=signed, sign_with=sign_with, ui=ui)
+                                     signed=signed, sign_with=sign_with, ui=ui, cart=cart)
         if svc:
             out["service." + chip] = build_module(
                 svc, chip, os.path.join(dst, "%s.%s.elf" % (stem, chip)),

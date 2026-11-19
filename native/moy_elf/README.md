@@ -288,3 +288,13 @@ whose card names the signal and, on a P4, the fault record
 (`elf_run.stop_text`), with Restart and Home and no See why, as a compiled
 cart's. The Player checks its footprint (the module, the screen twice, its
 stack) against free PSRAM first and gives the fit notice.
+
+A compiled cart's C builds to a module a chip too (`sdk/README.md`, "A
+compiled cart"): its manifest keeps `"runtime": "wasm"` and its `main.wasm`
+and names its chips in `native`, and its module links the SDK's adapter
+(`sdk/src/moycart.c`), a game whose data the console hands over at its start
+(`moy_os_game`'s `data`, read by the `moy_game_data` row: the sprites, map,
+flags, config, pmem, scenes and paint images, `elf_run.game_data`) and whose
+frames carry the pointer and the key typed. Which module runs is
+`runtime/shell/app_perms.py`'s `tier_of`; a module runs with `full_access`
+consented, asked for only where it runs.
