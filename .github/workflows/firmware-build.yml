@@ -400,6 +400,17 @@ jobs:
           # lies about the image, so say it loudly rather than shipping it.
           test -f out/ota_build.json || echo "::warning::no ota_build.json for ${{ matrix.board }} -- the manifest will fall back to the committed version"
 
+      # The official compiled carts' native modules for this board's chip
+      # (tools/web_pack.py's board_modules), built here because this job has
+      # the chip's toolchain, unsigned because it has no key: the publish job
+      # collects them, signs them and puts them in the published cart. A
+      # failure leaves the module out and the images go on: the cart then
+      # runs as wasm on this chip.
+      - name: The official compiled carts' native modules
+        if: steps.gate.outputs.run == 'true'
+        continue-on-error: true
+        run: .venv/bin/python tools/web_pack.py modules ${{ matrix.dir }} out
+
       # 90 days rather than the old 14. Artifacts are no longer where the
       # website gets its images (that is the release below, which never
       # expires), but they are still the fallback and the by-hand download, and
@@ -426,9 +437,12 @@ jobs:
   # their own (`make ota-publish-unstable` stays the LAN/offline path).
   #
   # Per board and additive: only the boards THIS run built are replaced, so a
-  # single-board dispatch leaves the other board's published image alone. The
-  # Pages workflow watches this workflow and republishes the site afterwards --
-  # for master only, since dev never changes what the site serves.
+  # single-board dispatch leaves the other board's published image alone.
+  # The official compiled carts are built here from their source, their
+  # native modules taken from the board jobs' artifacts: no job needs two
+  # chips' toolchains. The Pages workflow watches this workflow and
+  # republishes the site afterwards -- for master only, since dev never
+  # changes what the site serves.
   publish:
     name: publish to ${{ github.ref == 'refs/heads/master' && 'firmware-latest' || 'firmware-beta' }}
     needs: build

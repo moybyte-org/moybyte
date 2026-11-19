@@ -203,6 +203,13 @@ cart in C (`"runtime": "wasm"`, a game or a wallpaper) includes one header,
 - An official compiled cart carries its source alone: the release builds it
   (`tools/web_pack.py`'s `built_seed`, the same source and pinned toolchains
   building the same bytes). `system_carts/moybyte.sakura_c.moy` is one.
+  **Decision (owner, 2026-11-19): each board's firmware build, which has its
+  chip's toolchain, builds the native modules for its chip**
+  (`web_pack.py modules`, `board_modules`), unsigned; the publish job builds
+  main.wasm, collects the modules from the run's artifacts, signs them and
+  puts them in the one published cart, so no job needs two chips'
+  toolchains. A chip whose boards built no module this run has none in the
+  cart, and its consoles run the wasm one.
 
 ## The C library
 

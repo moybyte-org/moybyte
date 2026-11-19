@@ -379,6 +379,132 @@ def test_the_build_job_carries_the_pack_to_the_publisher():
     assert "dist/*/%s out/" % web_pack.PACK_FILE in collect
 
 
+# -- the official compiled carts' native modules ------------------------------
+
+SAKURA = "moybyte.sakura_c"
+FAKE_MODULE = {"esp32s3": b"\x7fELF s3 module " * 40, "esp32p4": b"\x7fELF p4 module " * 50}
+
+
+def _module(artifacts, board, chip):
+    """A board build's native module of Sakura C, as board_modules names it."""
+    folder = artifacts / ("moybyte-firmware-%s" % board)
+    name = web_pack.NATIVE_ASSET % (SAKURA, "main.%s.elf" % chip)
+    (folder / name).write_bytes(FAKE_MODULE[chip])
+
+
+def _sakura(out, board):
+    """(index entry, {file: bytes} of the zip) of Sakura C in the board's
+    index in the release folder `out`."""
+    doc = json.loads((out / (web_pack.INDEX_NAME % board)).read_text())
+    entry, = [c for c in doc["carts"] if c["id"] == SAKURA]
+    asset, = entry["assets"]
+    data = (out / asset["url"]).read_bytes()
+    assert (asset["size"], asset["sha256"]) == (len(data), hashlib.sha256(data).hexdigest())
+    top = SAKURA + ".moy/"
+    with zipfile.ZipFile(str(out / asset["url"])) as z:
+        files = {n[len(top):]: z.read(n) for n in z.namelist()}
+    for name, meta in asset["files"].items():
+        assert (meta["size"], meta["sha256"]) == (
+            len(files[name]), hashlib.sha256(files[name]).hexdigest())
+    assert sorted(asset["files"]) == sorted(files)
+    return entry, files
+
+
+@pytest.fixture
+def _no_aot(tmp_path, monkeypatch):
+    from tools import wasm_module
+    monkeypatch.setattr(wasm_module, "DIST", str(tmp_path / "no-wamrc"))
+    return wasm_module
+
+
+def test_a_release_carries_the_module_each_chip_s_board_built(tmp_path, monkeypatch, _no_aot):
+    """Two S3 boards and a P4 built; the publish puts each chip's module,
+    signed, into the one Sakura C every board's index lists, and its
+    `native` names both chips."""
+    from test_ota_signing import TEST_KEYS
+    from test_wasm_signing import sign_with_test_key
+    from tools import elf_cart
+    monkeypatch.setattr(_no_aot, "signing_key", lambda source=None: sign_with_test_key)
+    artifacts = tmp_path / "artifacts"
+    boards = ("tdeck", "guition_s3", "p4")
+    for board in boards:
+        _artifacts(artifacts, board)
+    for board, chip in (("tdeck", "esp32s3"), ("guition_s3", "esp32s3"), ("p4", "esp32p4")):
+        _module(artifacts, board, chip)
+    out = tmp_path / "release"
+    out.mkdir()
+    assert set(publish.stage_ota_all("firmware-beta", "unstable", str(artifacts),
+                                     str(out), repo=REPO)) == set(boards)
+    urls = set()
+    for board in boards:
+        entry, files = _sakura(out, board)
+        urls.add(entry["assets"][0]["url"])
+        assert json.loads(files["manifest.json"])["moybyte"]["native"] == ["esp32s3", "esp32p4"]
+        assert "main.wasm" in files
+        for chip, body in FAKE_MODULE.items():
+            data = files[elf_cart.module_name(chip)]
+            module, sig = _no_aot.split(data)
+            assert module == body and sig
+            assert _no_aot.verify(data, chip, TEST_KEYS, scheme=elf_cart.sig_scheme()) is None
+    assert len(urls) == 1                   # one cart, one asset, on every board's index
+    assert not [n for n in os.listdir(str(out)) if n.endswith(".elf")]
+
+
+def test_a_chip_whose_board_built_no_module_has_none(tmp_path, monkeypatch, _no_aot, capsys):
+    """The P4's build left no module: the cart has the S3's alone, as it was
+    built (no key here), and a P4 runs its wasm one."""
+    monkeypatch.setattr(_no_aot, "signing_key", lambda source=None: None)
+    artifacts = tmp_path / "artifacts"
+    for board in ("tdeck", "p4"):
+        _artifacts(artifacts, board)
+    _module(artifacts, "tdeck", "esp32s3")
+    out = tmp_path / "release"
+    out.mkdir()
+    publish.stage_ota_all("firmware-beta", "unstable", str(artifacts), str(out), repo=REPO)
+    assert "native %s: main.esp32s3.elf" % SAKURA in capsys.readouterr().out
+    for board in ("tdeck", "p4"):
+        _entry, files = _sakura(out, board)
+        assert json.loads(files["manifest.json"])["moybyte"]["native"] == ["esp32s3"]
+        assert files["main.esp32s3.elf"] == FAKE_MODULE["esp32s3"]
+        assert "main.esp32p4.elf" not in files and "main.wasm" in files
+
+
+def test_a_run_with_no_modules_publishes_the_wasm_cart_alone(tmp_path, _no_aot):
+    artifacts = tmp_path / "artifacts"
+    _artifacts(artifacts, "tdeck")
+    out = tmp_path / "release"
+    out.mkdir()
+    publish.stage_ota_all("firmware-beta", "unstable", str(artifacts), str(out), repo=REPO)
+    _entry, files = _sakura(out, "tdeck")
+    assert json.loads(files["manifest.json"])["moybyte"]["native"] == []
+    assert not [n for n in files if n.endswith(".elf")]
+
+
+def test_a_board_build_makes_its_chip_s_modules_unsigned(tmp_path):
+    from tools import elf_cart, wasm_module
+    assert web_pack.main(["modules", str(ROOT / "firmware" / "esp32c3_zero"),
+                          str(tmp_path / "c3")]) == 0
+    assert not (tmp_path / "c3").exists()   # no native tier on the C3
+    chip = next((c for c in web_pack.BOARD_CHIPS if elf_cart.available(c)), None)
+    if chip is None:
+        pytest.skip("no ESP toolchain here")
+    got = web_pack.board_modules(chip, str(tmp_path / "out"))
+    assert got == [web_pack.NATIVE_ASSET % (SAKURA, "main.%s.elf" % chip)]
+    data = (tmp_path / "out" / got[0]).read_bytes()
+    assert data[:4] == b"\x7fELF" and wasm_module.split(data)[1] is None
+    assert web_pack.collected_modules([str(tmp_path / "out")]) == {
+        SAKURA: {"main.%s.elf" % chip: str(tmp_path / "out" / got[0])}}
+
+
+def test_the_build_job_builds_the_modules_and_carries_them():
+    wf = (ROOT / ".github" / "workflows" / "firmware-build.yml").read_text()
+    step = wf.split("- name: The official compiled carts' native modules", 1)[1]
+    upload = step.split("- name: Upload firmware artifacts", 1)
+    assert len(upload) == 2                 # before the upload, which carries out/*
+    assert "tools/web_pack.py modules ${{ matrix.dir }} out" in upload[0]
+    assert "continue-on-error: true" in upload[0]
+
+
 # -- the LAN mirror ------------------------------------------------------------
 
 
