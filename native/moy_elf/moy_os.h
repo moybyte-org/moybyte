@@ -106,11 +106,14 @@ typedef struct {
 // A process's caps: every thread of it is a task at `prio` on `core` (-1:
 // either) with a stack of `stack` bytes, but a game's threads besides its
 // first, which run on `lane_core` at `lane_prio` (MOY_OS_LANE_SAME: `core`
-// and `prio`): on a P4 the core its first thread is not on, at the VM's
-// priority, as a wasm run's par lanes take the core its session is not on
-// (native/moy_wasm/modmoy_wasm.c), so a compiled cart's par items run on both
-// cores in either tier (sdk/src/moycart.c's moy_par). An S3 keeps every
-// native thread on core 1 (docs/os_2026-11/tiers.md).
+// and `prio`). A game's par lane (sdk/src/moycart.c's moy_par) on a P4 or an
+// S3 has no core (-1, tskNO_AFFINITY), so FreeRTOS SMP runs it on whichever
+// core is free, at the VM task's priority (owner, 2026-11-19): the
+// compositor and present tasks, far above it, always win a contended core,
+// and the VM waits out its par call while the lane runs. One below the VM
+// would be the idle task's priority on these boards, sharing each tick with
+// idle (configIDLE_SHOULD_YIELD 0), so half a free core. IDF pins a task to the core it first
+// uses the FPU on, so a lane that computes in float keeps that core.
 #define MOY_OS_LANE_SAME (-2)
 typedef struct {
     int prio;

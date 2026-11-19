@@ -537,11 +537,13 @@ moy_os_proc_t *moy_os_game(const moy_os_module_t *m, const moy_os_caps_t *caps, 
             c.stack *= 2;
         }
     }
-#if defined(MOY_ON_BOARD) && !defined(CONFIG_IDF_TARGET_ESP32S3)
-    // A game's lanes (moy_os_caps_t): the other core, at the VM's priority.
-    if (caps == NULL && portNUM_PROCESSORS > 1 && c.core >= 0) {
-        c.lane_core = c.core == 0 ? 1 : 0;
-        c.lane_prio = (int)uxTaskPriorityGet(NULL);
+#ifdef MOY_ON_BOARD
+    // A game's lanes (moy_os_caps_t): no core, the VM's priority (this is
+    // the VM's task).
+    if (caps == NULL && portNUM_PROCESSORS > 1) {
+        int vm = (int)uxTaskPriorityGet(NULL);
+        c.lane_core = -1;
+        c.lane_prio = vm;
     }
 #endif
     uint8_t *copy = NULL;

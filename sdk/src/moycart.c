@@ -707,8 +707,8 @@ extern void par_item(int32_t i, int32_t arg) HOOK;
 
 // moy_wasm.c's w_par: the calling thread and a lane take the items in turn,
 // the next untaken one each, and par returns when every one has. The lane is
-// a thread of the game's, on the other core where the console gives it one
-// (moy_os.h's moy_os_caps_t), as a wasm run's lane is; each item runs on its
+// a thread of the game's, on whichever core is free where the console gives
+// it one (moy_os.h's moy_os_caps_t); each item runs on its
 // thread's own C stack, so `stacks` is the wasm module's alone.
 static pthread_mutex_t g_par_lock = PTHREAD_MUTEX_INITIALIZER;
 static int32_t g_par_next, g_par_n, g_par_arg;

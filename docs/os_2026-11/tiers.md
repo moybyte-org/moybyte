@@ -45,7 +45,7 @@ costs are #227's.
   SERVICE): no hook is dispatched to it, and a timer is a deadline it
   passes. It has **no raw RTOS**: the table exports no task, timer or ISR
   primitive, and the OS creates the module's task with a priority and core
-  cap (core 1 only on the S3s). Every registration is a handle under the
+  cap (core 1 only on the S3s, but a game's par lane, which has none). Every registration is a handle under the
   process's OWNER, so "leases end with the process" stays true.
   `pthread_create` is the one thread verb (below): it makes an OS-owned task
   under the OWNER with the module's caps, swept on stop, never a raw
@@ -183,7 +183,8 @@ The deferred Rust rung (owner, 2026-11-02) uses this loader and table.
 uses the **cart's** PSRAM share (its text counting in its PROCS need); a
 background C service's text is the ELF row of THE SHARES
 (`native/moy_play/moy_play.h`), 256 KiB on each S3; its code lives in PSRAM, so no ISR, no
-internal SRAM, and core 1 only.
+internal SRAM, and core 1 only (a game's par lane runs on either core:
+`native/moy_elf/moy_os.h`'s `moy_os_caps_t`).
 
 **The function table (sketch).**
 
