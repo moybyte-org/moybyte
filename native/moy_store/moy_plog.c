@@ -19,7 +19,9 @@ typedef struct {
     uint16_t alive;     // of them, records not marked dead
 } sect_t;
 
-static struct {
+// The log's RAM state: kept from the store's blocks (PSRAM where a board has
+// it) while a medium is attached, since nothing reads it with the cache off.
+typedef struct {
     moy_plog_medium_t m;
     const void *owner;
     uint32_t n;         // sectors used
@@ -28,7 +30,8 @@ static struct {
     uint32_t alive;
     sect_t s[MOY_PLOG_SECTORS];
     moy_plog_stats_t st;
-} L;
+} plog_t;
+static plog_t *L;
 static int s_on;
 
 static uint32_t get32(const uint8_t *p) {
@@ -50,7 +53,7 @@ static uint32_t sum(const uint8_t *p, uint32_t len) {
 }
 
 static const uint8_t *at(uint32_t off) {
-    return L.m.map + off;
+    return L->m.map + off;
 }
 
 // The length of the valid record at `off`, whose sector ends at `end`; 0
@@ -97,10 +100,10 @@ typedef int (*each_fn)(uint32_t off, void *ctx);
 
 static int each_in(uint32_t s, each_fn fn, void *ctx) {
     uint32_t base = s * MOY_PLOG_SECTOR, off = 0;
-    while (off + HEAD <= L.s[s].fill) {
+    while (off + HEAD <= L->s[s].fill) {
         const uint8_t *p = at(base + off);
         uint32_t len = (uint32_t)p[12] | (uint32_t)p[13] << 8;
-        if (len < HEAD || off + len > L.s[s].fill) {
+        if (len < HEAD || off + len > L->s[s].fill) {
             break;
         }
         if (fn(base + off, ctx)) {
@@ -112,7 +115,7 @@ static int each_in(uint32_t s, each_fn fn, void *ctx) {
 }
 
 static int each(each_fn fn, void *ctx) {
-    for (uint32_t s = 0; s < L.n; s++) {
+    for (uint32_t s = 0; s < L->n; s++) {
         if (each_in(s, fn, ctx)) {
             return 1;
         }
@@ -123,12 +126,12 @@ static int each(each_fn fn, void *ctx) {
 // -- the scan ---------------------------------------------------------------------
 
 static void scan(void) {
-    L.seq = 0;
-    L.head = 0;
-    L.alive = 0;
-    for (uint32_t s = 0; s < L.n; s++) {
+    L->seq = 0;
+    L->head = 0;
+    L->alive = 0;
+    for (uint32_t s = 0; s < L->n; s++) {
         uint32_t base = s * MOY_PLOG_SECTOR, off = 0;
-        sect_t *t = &L.s[s];
+        sect_t *t = &L->s[s];
         memset(t, 0, sizeof *t);
         while (off < MOY_PLOG_SECTOR) {
             if (get32(at(base + off)) == ERASED) {
@@ -140,13 +143,13 @@ static void scan(void) {
                 break;
             }
             uint32_t seq = get32(at(base + off + 4));
-            if (seq >= L.seq) {
-                L.seq = seq;
-                L.head = s;
+            if (seq >= L->seq) {
+                L->seq = seq;
+                L->head = s;
             }
             if (is_alive(base + off)) {
                 t->alive++;
-                L.alive++;
+                L->alive++;
             }
             off += len;
         }
@@ -156,26 +159,31 @@ static void scan(void) {
 
 void moy_plog_attach(const moy_plog_medium_t *m, const void *owner) {
     s_on = 0;
-    memset(&L, 0, sizeof L);
     if (m == NULL || m->size < MOY_PLOG_SECTOR) {
+        moy_store_free(L, sizeof *L);
+        L = NULL;
         return;
     }
-    L.m = *m;
-    L.owner = owner;
-    L.n = m->size / MOY_PLOG_SECTOR;
-    if (L.n > MOY_PLOG_SECTORS) {
-        L.n = MOY_PLOG_SECTORS;
+    if (L == NULL && (L = moy_store_keep(sizeof *L)) == NULL) {
+        return;
+    }
+    memset(L, 0, sizeof *L);
+    L->m = *m;
+    L->owner = owner;
+    L->n = m->size / MOY_PLOG_SECTOR;
+    if (L->n > MOY_PLOG_SECTORS) {
+        L->n = MOY_PLOG_SECTORS;
     }
     scan();
     s_on = 1;
 }
 
 int moy_plog_owns(const moy_vol_t *v) {
-    return s_on && v->kind == MOY_VOL_KIND_LFS2 && v->fs == L.owner;
+    return s_on && v->kind == MOY_VOL_KIND_LFS2 && v->fs == L->owner;
 }
 
 const void *moy_plog_owner(void) {
-    return s_on ? L.owner : NULL;
+    return s_on ? L->owner : NULL;
 }
 
 // -- the newest alive record of a key -----------------------------------------------
@@ -204,7 +212,7 @@ static int find_one(uint32_t off, void *ctx) {
 
 static int newest(const char *key, size_t klen, uint32_t above, uint32_t *off) {
     find_t f = { .key = key, .klen = klen, .above = above };
-    if (L.alive == 0) {
+    if (L->alive == 0) {
         return 0;
     }
     each(find_one, &f);
@@ -253,7 +261,7 @@ static int holds_one(uint32_t off, void *ctx) {
 
 static int holds_newest(uint32_t s) {
     holds_t h = { 0 };
-    if (L.s[s].alive == 0) {
+    if (L->s[s].alive == 0) {
         return 0;
     }
     each_in(s, holds_one, &h);
@@ -261,10 +269,10 @@ static int holds_newest(uint32_t s) {
 }
 
 static int erase(uint32_t s) {
-    int rc = L.m.erase(L.m.ctx, s * MOY_PLOG_SECTOR);
-    L.alive -= L.s[s].alive;
-    memset(&L.s[s], 0, sizeof L.s[s]);
-    L.s[s].closed = rc != 0;
+    int rc = L->m.erase(L->m.ctx, s * MOY_PLOG_SECTOR);
+    L->alive -= L->s[s].alive;
+    memset(&L->s[s], 0, sizeof L->s[s]);
+    L->s[s].closed = rc != 0;
     return rc;
 }
 
@@ -280,7 +288,7 @@ static int blank(uint32_t off, uint32_t n) {
 // Whether `len` bytes fit sector `s` past its records, in flash that reads
 // erased. Flash that does not (a cut write or erase) closes the sector.
 static int fits(uint32_t s, uint32_t len) {
-    sect_t *t = &L.s[s];
+    sect_t *t = &L->s[s];
     if (t->closed || t->fill + len > MOY_PLOG_SECTOR) {
         return 0;
     }
@@ -294,16 +302,16 @@ static int fits(uint32_t s, uint32_t len) {
 // The sector the next `len` bytes go to: the head, else the first after it
 // with erased room; with none, one erased now that holds no newest record.
 static int room(uint32_t len) {
-    for (uint32_t i = 0; i < L.n; i++) {
-        uint32_t s = (L.head + i) % L.n;
+    for (uint32_t i = 0; i < L->n; i++) {
+        uint32_t s = (L->head + i) % L->n;
         if (fits(s, len)) {
             return (int)s;
         }
     }
-    for (uint32_t i = 1; i <= L.n; i++) {
-        uint32_t s = (L.head + i) % L.n;
+    for (uint32_t i = 1; i <= L->n; i++) {
+        uint32_t s = (L->head + i) % L->n;
         if (!holds_newest(s) && erase(s) == 0 && fits(s, len)) {
-            L.st.erases_now++;
+            L->st.erases_now++;
             return (int)s;
         }
     }
@@ -322,7 +330,7 @@ int moy_plog_append(const char *key, const int32_t cells[MOY_PMEM_CELLS]) {
     uint32_t body = HEAD + PAD4((uint32_t)klen), len = body + 4u * ncells;
     int s = room(len);
     if (s < 0) {
-        L.st.refused++;
+        L->st.refused++;
         return MOY_ENOSPC;
     }
     uint8_t *rec = moy_store_alloc(REC_MAX);
@@ -331,7 +339,7 @@ int moy_plog_append(const char *key, const int32_t cells[MOY_PMEM_CELLS]) {
     }
     memset(rec, 0, len);
     put32(rec, MAGIC);
-    put32(rec + 4, L.seq + 1u);
+    put32(rec + 4, L->seq + 1u);
     rec[12] = (uint8_t)len;
     rec[13] = (uint8_t)(len >> 8);
     rec[14] = (uint8_t)klen;
@@ -341,20 +349,20 @@ int moy_plog_append(const char *key, const int32_t cells[MOY_PMEM_CELLS]) {
         put32(rec + body + 4u * i, (uint32_t)cells[i]);
     }
     put32(rec + 8, sum(rec, len));
-    sect_t *t = &L.s[s];
+    sect_t *t = &L->s[s];
     uint32_t off = (uint32_t)s * MOY_PLOG_SECTOR + t->fill;
-    int rc = L.m.prog(L.m.ctx, off, rec, len);
+    int rc = L->m.prog(L->m.ctx, off, rec, len);
     moy_store_free(rec, REC_MAX);
     if (rc != 0 || rec_len(off, (uint32_t)s * MOY_PLOG_SECTOR + MOY_PLOG_SECTOR) != len) {
         t->closed = 1;              // the fill stays below what did not land
         return MOY_EIO;
     }
     t->fill = (uint16_t)(t->fill + len);
-    L.seq++;
-    L.head = (uint32_t)s;
+    L->seq++;
+    L->head = (uint32_t)s;
     t->alive++;
-    L.alive++;
-    L.st.appends++;
+    L->alive++;
+    L->st.appends++;
     return 0;
 }
 
@@ -384,27 +392,29 @@ static int oldest_one(uint32_t off, void *ctx) {
 int moy_plog_kill(const char *key) {
     static const uint8_t dead = 0;
     size_t klen = strlen(key);
-    while (s_on && L.alive > 0) {
+    while (s_on && L->alive > 0) {
         oldest_t o = { .key = key, .klen = klen };
         each(oldest_one, &o);
         if (!o.found) {
             return 0;
         }
         uint32_t s = o.off / MOY_PLOG_SECTOR;
-        if (L.m.prog(L.m.ctx, o.off + 15u, &dead, 1) != 0 || is_alive(o.off)) {
+        if (L->m.prog(L->m.ctx, o.off + 15u, &dead, 1) != 0 || is_alive(o.off)) {
             // A record that will not die keeps its key's pmem in the log: the
             // sector holding it is closed and nothing newer is written over.
-            L.s[s].closed = 1;
+            L->s[s].closed = 1;
             return MOY_EIO;
         }
-        L.s[s].alive--;
-        L.alive--;
+        L->s[s].alive--;
+        L->alive--;
     }
     return 0;
 }
 
 void moy_plog_settled(void) {
-    L.st.settles++;
+    if (L != NULL) {
+        L->st.settles++;
+    }
 }
 
 typedef struct {
@@ -428,7 +438,7 @@ static int next_one(uint32_t off, void *ctx) {
 
 int moy_plog_next(const char *prefix, char key[MOY_PLOG_KEY + 1]) {
     next_t x = { .prefix = prefix, .pn = strlen(prefix), .key = key };
-    if (!s_on || L.alive == 0) {
+    if (!s_on || L->alive == 0) {
         return 0;
     }
     each(next_one, &x);
@@ -441,36 +451,40 @@ int moy_plog_erase_one(void) {
     if (!s_on) {
         return 0;
     }
-    for (uint32_t i = 1; i <= L.n; i++) {
-        uint32_t s = (L.head + i) % L.n;
-        sect_t *t = &L.s[s];
+    for (uint32_t i = 1; i <= L->n; i++) {
+        uint32_t s = (L->head + i) % L->n;
+        sect_t *t = &L->s[s];
         if (t->fill == 0 && !t->closed) {
             continue;
         }
-        if (s == L.head && !t->closed && t->fill + REC_MAX <= MOY_PLOG_SECTOR) {
+        if (s == L->head && !t->closed && t->fill + REC_MAX <= MOY_PLOG_SECTOR) {
             continue;
         }
         if (holds_newest(s)) {
             continue;
         }
         erase(s);
-        L.st.erases++;
+        L->st.erases++;
         return 1;
     }
     return 0;
 }
 
 void moy_plog_stats(moy_plog_stats_t *out, int reset) {
-    L.st.sectors = s_on ? L.n : 0;
-    L.st.alive = L.alive;
-    uint32_t b = 0;
-    for (uint32_t s = 0; s_on && s < L.n; s++) {
-        b += L.s[s].fill == 0 && !L.s[s].closed;
+    if (L == NULL) {
+        memset(out, 0, sizeof *out);
+        return;
     }
-    L.st.blank = b;
-    *out = L.st;
+    L->st.sectors = s_on ? L->n : 0;
+    L->st.alive = L->alive;
+    uint32_t b = 0;
+    for (uint32_t s = 0; s_on && s < L->n; s++) {
+        b += L->s[s].fill == 0 && !L->s[s].closed;
+    }
+    L->st.blank = b;
+    *out = L->st;
     if (reset) {
-        memset(&L.st, 0, sizeof L.st);
+        memset(&L->st, 0, sizeof L->st);
     }
 }
 
