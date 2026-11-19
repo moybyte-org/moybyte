@@ -5,7 +5,9 @@
 // native/moy_wasm/moy_wasi.c, runtime/run/wasi_run.py).
 //
 // THE SLOT is w x h pixels of `depth` bytes (1 palette indices, 2 RGB565),
-// in the kernel's memory, opened by the program's runner on the VM's task as
+// or a MIXED slot (MOY_SCREEN_SLOT_MIXED, a game built from a compiled
+// cart's source: sdk/src/moycart.c) of two bytes a pixel whose every frame
+// is either, by its size, in the kernel's memory, opened by the program's runner on the VM's task as
 // the program starts and closed at its end. Its frame has one writer at a
 // time: FREE, the program's present copies its screen in (WRITING) and makes
 // it READY; the console's frame call takes a READY one (TAKEN) and lets it
@@ -30,6 +32,7 @@
 #include <stdint.h>
 
 #define MOY_SCREEN_SLOTS 4u             // programs with a screen at once
+#define MOY_SCREEN_SLOT_MIXED 3         // a depth: indices or RGB565, frame by frame
 #define MOY_SCREEN_SLOT_IN 16           // input words a frame message carries at most
 
 // The VM's task. Open: 0, or an errno negated (ENOSPC every slot another's,
@@ -38,12 +41,14 @@
 int moy_screen_slot_open(uint32_t pid, int w, int h, int depth);
 void moy_screen_slot_close(uint32_t pid);
 
-// Any task: the slot's size and depth: 0, or -ENODEV for none.
+// Any task: the slot's size and depth (a MIXED slot's MIXED): 0, or -ENODEV
+// for none.
 int moy_screen_slot_size(uint32_t pid, int *w, int *h, int *depth);
 
-// The program's thread: its screen, `n` bytes (w * h * depth), copied into
-// the slot, waiting while the last is not let go. 0, or an errno negated
-// (ENODEV no slot, EINVAL a size not the slot's, EINTR the slot closed).
+// The program's thread: its screen, `n` bytes (w * h * depth; a MIXED
+// slot's w * h indices or 2 * w * h RGB565), copied into the slot, waiting
+// while the last is not let go. 0, or an errno negated (ENODEV no slot,
+// EINVAL a size not the slot's, EINTR the slot closed).
 int moy_screen_slot_present(uint32_t pid, const void *px, size_t n);
 
 // The VM's task, once a frame: the frame the last call took let go, the
@@ -52,16 +57,19 @@ int moy_screen_slot_present(uint32_t pid, const void *px, size_t n);
 // program's hops served meanwhile (0 where no task can block: stepped). A
 // mask: MOY_SCREEN_SLOT_SENT where the message was posted,
 // MOY_SCREEN_SLOT_SHOWN where a frame was presented, taken until the next
-// call; -ENODEV for no slot.
+// call, and MOY_SCREEN_SLOT_DIRECT with SHOWN where a MIXED slot's frame is
+// RGB565; -ENODEV for no slot.
 #define MOY_SCREEN_SLOT_SENT 1
 #define MOY_SCREEN_SLOT_SHOWN 2
+#define MOY_SCREEN_SLOT_DIRECT 4
 int moy_screen_slot_frame(uint32_t pid, uint32_t held, uint32_t pressed, uint32_t ms,
                           const int32_t *in, int n_in, uint32_t max_ms);
 // Any task: a hop of process `pid` queued (moy_vmq_hop): the frame call
 // waiting on its slot, if one has a slot, woken to serve it.
 void moy_screen_slot_kick(uint32_t pid);
 // The slot's pixels, for its life (what a SHOWN frame call took holds them
-// until the next call); NULL for none.
+// until the next call), `depth` the bytes a pixel it holds (a MIXED slot's
+// 2); NULL for none.
 const uint8_t *moy_screen_slot_pixels(uint32_t pid, int *w, int *h, int *depth);
 
 // THE TOOLKIT'S ANSWERS. An app drawing with the toolkit it links tells,

@@ -5,7 +5,12 @@ to a native module a chip, both in one .moy, and the console picks which runs
 
   * the two draw the same frame from the same cart: tests/fixtures/wasm/
     dual.moy uses every kind of verb, the sheet, the map, a layer, a paint
-    image, a scene, the config, on the host's WAMR and as the host's module;
+    image, a scene, the config, par's items and a file's round trip, on the
+    host's WAMR and as the host's module;
+  * the native module keeps what the wasm one keeps and plays what it plays
+    (native/moy_elf/moy_os.h, A GAME'S CHANNELS): pmem, a pref and a written
+    file across runs, a blit through a palette, blit565 and a blit of
+    indices, and the audio verbs and the stream on the run's session;
   * the routing: the native module where the console confines it (the P4s)
     unless Settings turned its full access off, the wasm one elsewhere unless
     the user chose the native one, the other where one is missing, and the
@@ -87,6 +92,126 @@ def test_one_source_draws_the_same_frame_on_both_targets(tmp_path):
         assert len(set(wasm)) > 8               # it drew something
     finally:
         ws.spine.exit()
+
+
+def _twins(tmp_path, **cfg):
+    """A workstation holding two copies of the built dual cart under their own
+    ids, its config `cfg` added: "Dual W", run on the wasm module, and "Dual
+    N", run on the native one, so each keeps its own pmem, prefs and files."""
+    root = str(tmp_path / "carts")
+    host_app.moy_carts.ensure_dirs(root)
+    built = _built(DUAL, os.path.join(root, "dual.moy"))
+    for tag in ("w", "n"):
+        dst = os.path.join(root, "dual_%s.moy" % tag)
+        shutil.copytree(built, dst)
+        mp = os.path.join(dst, "manifest.json")
+        with open(mp) as f:
+            man = json.load(f)
+        man["id"], man["title"] = "local.dual_" + tag, "Dual " + tag.upper()
+        man["moybyte"]["config"].update(cfg)
+        with open(mp, "w") as f:
+            json.dump(man, f)
+    ws = no_unlock_banner(host_app.build_workstation(root))
+    _opt(ws, "local.dual_n", "Dual N")
+    return ws
+
+
+def _pair(ws, frames=4):
+    """Dual W's frame and Dual N's, each from its own tier."""
+    kind, wasm = _frame(ws, "Dual W", frames)
+    assert kind == "WasmHostRun"
+    kind, native = _frame(ws, "Dual N", frames)
+    assert kind == "ElfGame"
+    return wasm, native
+
+
+def test_pmem_a_pref_and_a_file_last_across_runs_on_both_targets(tmp_path):
+    ws = _twins(tmp_path, mode=1)
+    try:
+        first = _pair(ws)
+        assert first[0] == first[1]
+        second = _pair(ws)
+        assert second[0] == second[1]
+        assert second[0] != first[0]            # each counted the second run
+        third = _pair(ws)
+        assert third[0] == third[1] and third[0] not in (first[0], second[0])
+    finally:
+        ws.spine.exit()
+
+
+@pytest.mark.parametrize("mode", [2, 3, 4])
+def test_a_blit_shows_the_same_frame_on_both_targets(tmp_path, mode):
+    """2: a palette blit once, drawn over each frame after (the kept frame);
+    3: blit565 and 4: a blit of indices, each frame, drawn over."""
+    ws = _twins(tmp_path, mode=mode)
+    try:
+        wasm, native = _pair(ws)
+        assert wasm == native
+        assert len(set(wasm)) > 16
+    finally:
+        ws.spine.exit()
+
+
+def _audio_run(ws, title, frames=6):
+    from runtime import audio_binding
+    a = audio_binding.get()
+    if a is None:
+        pytest.skip("no host audio library")
+    a.trace(True)
+    quiesce(ws)
+    open_cart(ws, title)
+    p = ws.run.player
+    assert p.cart_error is None, p.cart_error
+    drv = make_drv(ws)
+    for _ in range(frames):
+        drv.frame(_DT)
+    assert p.cart_error is None, p.cart_error
+    kind = type(p.lua).__name__
+    # (queued, mixed out, output frames mixed with it empty, room): a wasm run's
+    # own stream on the host, the speaker's render-ahead ring for the native one
+    counts = p.lua.snd_counts() if kind == "WasmHostRun" else a.snd_counts()
+    verbs = [tuple(r[1:]) for r in a.trace()
+             if r[1] in (4, 5, 6, 7, 8, 9)]         # moy_aud.h's T_SFX .. T_LEVEL
+    a.trace(False)
+    ws.input.cart_quit = True
+    for _ in range(2):
+        drv.frame(_DT)
+    return kind, verbs, counts[:3]
+
+
+def test_the_audio_verbs_and_the_stream_reach_the_session_on_both_targets(tmp_path):
+    ws = _twins(tmp_path, mode=5)
+    try:
+        kind, wasm, w_snd = _audio_run(ws, "Dual W")
+        assert kind == "WasmHostRun"
+        kind, native, n_snd = _audio_run(ws, "Dual N")
+        assert kind == "ElfGame"
+        assert len(wasm) == 8, wasm
+        assert native == wasm
+        # the cart keeps its stream full, and neither runs dry
+        assert w_snd[0] > 2048 and w_snd[0] % 256 == 0 and w_snd[2] == 0, w_snd
+        assert n_snd[0] % 256 == 0 and abs(n_snd[0] - w_snd[0]) <= 1024, n_snd
+        assert n_snd[1] > 0 and n_snd[2] == 0, n_snd
+    finally:
+        ws.spine.exit()
+
+
+def test_the_sound_ops_are_the_audio_queue_s():
+    """moy_os.h's MOY_OS_SOUND_*, moycart.c's SOUND_* and elf_run's SOUND_OPS
+    are moycore_run.h's AQ_* in its order."""
+    import elf_run
+    with open(os.path.join(ROOT, "native", "moycore", "moycore_run.h")) as f:
+        aq = re.search(r"enum \{ (AQ_SFX = 0, [^}]*)\}", f.read()).group(1)
+    assert [n.split("=")[0].strip() for n in aq.split(",")] == [
+        "AQ_SFX", "AQ_MUSIC", "AQ_BEEP", "AQ_MUSIC_STOP", "AQ_SOUND_STOP", "AQ_VOLUME"]
+    with open(os.path.join(ROOT, "native", "moy_elf", "moy_os.h")) as f:
+        os_h = dict(re.findall(r"#define MOY_OS_SOUND_(\w+) (\d+)", f.read()))
+    assert [int(os_h[k]) for k in ("SFX", "MUSIC", "BEEP", "MUSIC_STOP", "STOP", "VOLUME")] \
+        == list(elf_run.SOUND_OPS)
+    assert int(os_h["MAX"]) == elf_run.SOUND_MAX == 32
+    with open(os.path.join(ROOT, "sdk", "src", "moycart.c")) as f:
+        assert ("enum { SOUND_SFX, SOUND_MUSIC, SOUND_BEEP, SOUND_MUSIC_STOP, SOUND_STOP, "
+                "SOUND_VOLUME };") in f.read()
 
 
 def test_sakura_c_runs_on_both_targets(tmp_path):

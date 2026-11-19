@@ -67,7 +67,12 @@ flag), the one rule the compiled tier's AOT modules follow too.
 REFUSED = -3
 RUNNING = -100          # moy_os.h's MOY_OS_RUNNING
 ENDED = -4              # moy_os.h's MOY_OS_ENDED
-FRAME_SENT, FRAME_SHOWN = 1, 2
+FRAME_SENT, FRAME_SHOWN, FRAME_DIRECT = 1, 2, 4
+MIXED = 3               # moy_screen_slot.h's MOY_SCREEN_SLOT_MIXED: a compiled cart's screen
+# moy_os.h's MOY_OS_SOUND_*, in moycore_run.h's AQ_* order (lua_ext.drain_audio's
+# ops), and MOY_OS_SOUND_MAX.
+SOUND_OPS = (0, 1, 2, 3, 4, 5)
+SOUND_MAX = 32
 NET_TAG = "native"
 STACK = 16 * 1024       # moy_os_default_caps' stack: a game's one thread
 # The longest a tick waits for a present, so a game that falls behind costs
@@ -79,7 +84,7 @@ SIGNALS = {4: "SIGILL", 5: "SIGTRAP", 7: "SIGBUS", 9: "SIGKILL", 11: "SIGSEGV",
 WHAT = {4: "an illegal instruction", 5: "a breakpoint", 7: "a misaligned access",
         9: "killed", 11: "a memory fault", 31: "a call the console lacks"}
 
-from lua_ext import MOY_BUTTONS, cfg_blob, put_scenes, run_face, run_room, wasm_exts
+from lua_ext import MOY_BUTTONS, cfg_blob, drain_audio, put_scenes, run_face, run_room, wasm_exts
 from moy_input import pointer_state
 from ui_draw import KEY_PASTE, paste_text
 import moy_evq as _E
@@ -101,7 +106,7 @@ TOLD_TYPING, TOLD_CANCEL, TOLD_BACK = 1, 2, 4
 
 # The data a compiled cart's native module reads at its start (moy_game_data;
 # its layout is sdk/src/moycart.c's): an entry's kind.
-D_SHEET, D_FLAGS, D_MAP, D_CFG, D_PMEM, D_SCENE, D_IMAGE = range(1, 8)
+D_SHEET, D_FLAGS, D_MAP, D_CFG, D_PMEM, D_SCENE, D_IMAGE, D_WIRE = range(1, 9)
 ACTOR_TAG = 16          # moycore_lua.h's MOYCORE_ACTOR_TAG
 
 
@@ -163,10 +168,11 @@ def scene_rows(text):
 
 def game_data(ws, cart, ns):
     """What a compiled cart's native module reads at its start (moy_game_data,
-    sdk/src/moycart.c): the run's sprites, flags, map, config and pmem, and
-    the scenes and paint images of the extensions its manifest declares, as
-    the console hands a wasm run of the same cart (runtime/host/wasm_host.py,
-    device/moycore_glue.py's WasmRun)."""
+    sdk/src/moycart.c): the run's sprites, flags, map, config and pmem, the
+    scenes and paint images of the extensions its manifest declares, as the
+    console hands a wasm run of the same cart (runtime/host/wasm_host.py,
+    device/moycore_glue.py's WasmRun), and the canvas's words for the
+    palette, which a direct-colour frame's drawn pixels become."""
     import struct
     project = getattr(getattr(ws, "run", None), "project", None)
     parts = []
@@ -205,6 +211,9 @@ def game_data(ws, cart, ns):
             got = decode_moyimg(blob) if isinstance(blob, (str, bytes)) else None
             if got is not None:
                 put(D_IMAGE, name, struct.pack("<HH", got[0], got[1]) + bytes(got[2]))
+    wire = getattr(getattr(getattr(ws, "run", None), "canvas", None), "_wire", None)
+    if wire is not None and len(wire) >= 64:
+        put(D_WIRE, "", struct.pack("<64H", *[int(wire[i]) for i in range(64)]))
     total = 12 + sum(len(p) for p in parts)
     out = bytearray(b"MOYG" + struct.pack("<II", total, len(parts) // 2))
     for p in parts:
@@ -649,6 +658,8 @@ class ElfGame(LinkedUi):
     """A native game's run in the Player (A GAME in this module's head)."""
 
     own_ui = True                       # an app's toolkit is its own: a paste is its message
+    _dual = _snd = _direct = False      # a compiled cart's module: its channels
+    _sound = _pmem = None
 
     def __init__(self, rt, ws, cart, run, lay=None, ns=None):
         self._e = rt.engine
@@ -671,12 +682,24 @@ class ElfGame(LinkedUi):
         self._ptr = [0, 0, 0, 0]
         self._keys = key_ring()
         data = game_data(ws, cart, ns if ns is not None else {}) if dual else None
-        why = self._e.game(path, self.pid, cart.get("id") or "", rt._flags(cart, False),
-                           self._w, self._h, run, 2 if self._app else 1, data)
+        if dual:
+            # Its files are the store a wasm run's are (moycore_files.h).
+            writable = cart.get("writable") or ()
+            why = self._e.game(path, self.pid, cart.get("id") or "", rt._flags(cart, False),
+                               self._w, self._h, run, MIXED, data, cart.get("path"),
+                               "\0".join(writable).encode() if writable else None)
+        else:
+            why = self._e.game(path, self.pid, cart.get("id") or "", rt._flags(cart, False),
+                               self._w, self._h, run, 2 if self._app else 1, data)
         data = None
         if why is not None:
             self._release()
             raise RuntimeError(why)
+        self._dual = dual
+        self._direct = False
+        self._sound = array("i", bytes(12 * SOUND_MAX)) if dual else None
+        self._pmem = array("i", bytes(4 * 256)) if dual else None
+        self._snd = dual and self._snd_open(cart)
         self._px = self._e.screen(self.pid)
         self._masks = [0, 0]
         self._mask_of = getattr(ws.input, "button_masks", None)
@@ -721,9 +744,65 @@ class ElfGame(LinkedUi):
                 sent(words)
         if got & FRAME_SHOWN:
             self._shown = True
+            self._direct = bool(got & FRAME_DIRECT)
             self.presented += 1
+        if self._sound is not None:
+            self._drain_sound()
+
+    def _drain_sound(self):
+        """The audio verbs the game queued, onto the run's session as a Lua or
+        wasm run's queue goes (lua_ext.drain_audio)."""
+        q = self._sound
+        n = self._e.game_sound(self.pid, q)
+        if n > 0:
+            drain_audio(self._ws.run.audio, SOUND_OPS,
+                        ((q[3 * i], q[3 * i + 1], q[3 * i + 2]) for i in range(n)))
+
+    def _snd_open(self, cart):
+        """The speaker's render-ahead stream for the game's snd, as deep as
+        the manifest's "audio_ring" asks, where nothing else holds it
+        (runtime/system/moybyte.py's snd_open): the audio module when it is
+        the game's, else False."""
+        try:
+            import moy_audio
+        except ImportError:  # an image without audio, a host without a compiler
+            return False
+        try:
+            c = moy_audio.snd_counts()
+            if c is not None and c[4]:
+                return False            # a compiled cart or a process holds it
+            if moy_audio.snd_open(int(cart.get("audio_ring") or 0)) <= 0:
+                return False
+        except (AttributeError, OSError, TypeError, ValueError):
+            return False
+        if self._e.game_snd(self.pid, True) != 0:
+            moy_audio.snd_close()
+            return False
+        return moy_audio
+
+    def _snd_close(self):
+        audio = self._snd
+        if audio:
+            self._snd = False
+            self._e.game_snd(self.pid, False)
+            audio.snd_close()
+
+    def flush_pmem(self):
+        """The game's pmem image into the console's Pmem, if it moved, as a
+        wasm run's (runtime/host/wasm_host.py's flush_pmem)."""
+        img = self._pmem
+        if img is None or not self._live:
+            return False
+        pmem = getattr(self._ws.run.project, "pmem", None)
+        cell = getattr(pmem, "cell", None) if pmem is not None else None
+        if cell is None or self._e.game_pmem(self.pid, img) != 1:
+            return False
+        for i in range(256):
+            cell(i, int(img[i]))
+        return True
 
     def _end(self):
+        self._closing()
         self._live = False
         self._px = None
         code = self._e.game_stop(self.pid)
@@ -743,7 +822,7 @@ class ElfGame(LinkedUi):
 
     def _draw(self):
         if self._shown:
-            if self._app:
+            if self._app or self._direct:
                 self._ws.run.canvas.blit565(self._px, self._w, self._h, 0, 0)
             else:
                 self._ws.run.canvas.blit_indices(self._px, self._w, self._h, 0, 0)
@@ -751,10 +830,19 @@ class ElfGame(LinkedUi):
 
     def close(self):
         if self._live:
+            self._closing()
             self._live = False
             self._px = None
             self._e.game_stop(self.pid)
             self._release()
+
+    def _closing(self):
+        """What the game handed over last, while its record holds it: its
+        audio verbs and its pmem; its stream let go."""
+        if self._dual:
+            self._drain_sound()
+            self.flush_pmem()
+            self._snd_close()
 
     def _release(self):
         if self._own:

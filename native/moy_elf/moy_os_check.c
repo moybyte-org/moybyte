@@ -624,6 +624,45 @@ static int u_check_127(const moy_u_space_t *u, size_t off, void *dst, size_t n) 
     return U_BUF(dst, u_n((size_t)n, 1), MOY_U_W);
 }
 
+// 129 moy_game_snd
+_Static_assert(U_REGS(const int16_t *) + U_REGS(size_t) <= 7, "moy_game_snd's registers");
+static int u_check_129(const moy_u_space_t *u, const int16_t *pcm, size_t n) {
+    return U_BUF0(pcm, u_n((size_t)n, sizeof *pcm), MOY_U_R);
+}
+
+// 130 moy_game_pmem
+_Static_assert(U_REGS(const int32_t *) + U_REGS(size_t) <= 7, "moy_game_pmem's registers");
+static int u_check_130(const moy_u_space_t *u, const int32_t *cells, size_t n) {
+    return U_BUF(cells, u_n((size_t)n, sizeof *cells), MOY_U_R);
+}
+
+// 131 moy_game_read
+_Static_assert(U_REGS(const char *) + U_REGS(size_t) + U_REGS(uint32_t) + U_REGS(void *) + U_REGS(size_t) <= 7, "moy_game_read's registers");
+static int u_check_131(const moy_u_space_t *u, const char *name, size_t n, uint32_t off, void *dst, size_t len) {
+    return U_BUF(name, u_n((size_t)n, sizeof *name), MOY_U_R)
+        && U_BUF0(dst, u_n((size_t)len, 1), MOY_U_W);
+}
+
+// 132 moy_game_write
+_Static_assert(U_REGS(const char *) + U_REGS(size_t) + U_REGS(const void *) + U_REGS(size_t) <= 7, "moy_game_write's registers");
+static int u_check_132(const moy_u_space_t *u, const char *path, size_t n, const void *data, size_t len) {
+    return U_BUF(path, u_n((size_t)n, sizeof *path), MOY_U_R)
+        && U_BUF0(data, u_n((size_t)len, 1), MOY_U_R);
+}
+
+// 133 moy_game_erase
+_Static_assert(U_REGS(const char *) + U_REGS(size_t) <= 7, "moy_game_erase's registers");
+static int u_check_133(const moy_u_space_t *u, const char *path, size_t n) {
+    return U_BUF(path, u_n((size_t)n, sizeof *path), MOY_U_R);
+}
+
+// 134 moy_game_list
+_Static_assert(U_REGS(const char *) + U_REGS(size_t) + U_REGS(uint32_t) + U_REGS(void *) + U_REGS(size_t) <= 7, "moy_game_list's registers");
+static int u_check_134(const moy_u_space_t *u, const char *prefix, size_t n, uint32_t index, void *dst, size_t cap) {
+    return U_BUF0(prefix, u_n((size_t)n, sizeof *prefix), MOY_U_R)
+        && U_BUF0(dst, u_n((size_t)cap, 1), MOY_U_W);
+}
+
 int moy_os_check(const moy_u_space_t *u, uint32_t row, const uint32_t *a) {
     u_check_fn *fn;
     switch (row) {
@@ -716,6 +755,12 @@ int moy_os_check(const moy_u_space_t *u, uint32_t row, const uint32_t *a) {
     case 123: fn = (u_check_fn *)(void *)u_check_123; break;
     case 124: fn = (u_check_fn *)(void *)u_check_124; break;
     case 127: fn = (u_check_fn *)(void *)u_check_127; break;
+    case 129: fn = (u_check_fn *)(void *)u_check_129; break;
+    case 130: fn = (u_check_fn *)(void *)u_check_130; break;
+    case 131: fn = (u_check_fn *)(void *)u_check_131; break;
+    case 132: fn = (u_check_fn *)(void *)u_check_132; break;
+    case 133: fn = (u_check_fn *)(void *)u_check_133; break;
+    case 134: fn = (u_check_fn *)(void *)u_check_134; break;
     default: return 1;
     }
     return fn(u, a[0], a[1], a[2], a[3], a[4], a[5], a[6]);

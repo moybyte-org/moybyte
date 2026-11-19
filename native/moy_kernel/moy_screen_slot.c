@@ -25,6 +25,7 @@ typedef struct {
     uint32_t pid;               // 0: free
     int w, h, depth;
     uint8_t *px;
+    volatile uint8_t direct;    // a MIXED slot's frame is RGB565
     volatile uint8_t state;
     volatile uint8_t closed;
     volatile uint32_t room;     // moved where the frame is let go or the slot closed
@@ -51,7 +52,7 @@ static slot_t *slot_of(uint32_t pid) {
 }
 
 int moy_screen_slot_open(uint32_t pid, int w, int h, int depth) {
-    if (pid == 0u || w <= 0 || h <= 0 || depth < 1 || depth > 2) {
+    if (pid == 0u || w <= 0 || h <= 0 || depth < 1 || depth > MOY_SCREEN_SLOT_MIXED) {
         return -EINVAL;
     }
     if (MOY_SYNC_TABLE(s_slots) == NULL) {
@@ -68,7 +69,7 @@ int moy_screen_slot_open(uint32_t pid, int w, int h, int depth) {
             return -ENOSPC;
         }
     }
-    uint8_t *px = SLOT_ALLOC((size_t)w * (size_t)h * (size_t)depth);
+    uint8_t *px = SLOT_ALLOC((size_t)w * (size_t)h * (size_t)(depth == 1 ? 1 : 2));
     if (px == NULL) {
         return -ENOMEM;
     }
@@ -120,7 +121,9 @@ int moy_screen_slot_present(uint32_t pid, const void *px, size_t n) {
     if (s == NULL) {
         return -ENODEV;
     }
-    if (px == NULL || n != (size_t)s->w * (size_t)s->h * (size_t)s->depth) {
+    size_t one = (size_t)s->w * (size_t)s->h;
+    bool mixed = s->depth == MOY_SCREEN_SLOT_MIXED;
+    if (px == NULL || (mixed ? n != one && n != 2u * one : n != one * (size_t)s->depth)) {
         return -EINVAL;
     }
     s->presenter = moy_sync_me();
@@ -143,6 +146,7 @@ int moy_screen_slot_present(uint32_t pid, const void *px, size_t n) {
     }
     memcpy(s->px, px, n);
     MOY_SYNC_LOCK(&s_lock);
+    s->direct = mixed && n != one;
     s->state = READY;
     MOY_SYNC_UNLOCK(&s_lock);
     moy_sync_wake(&s->shown, s->console);
@@ -189,7 +193,7 @@ int moy_screen_slot_frame(uint32_t pid, uint32_t held, uint32_t pressed, uint32_
         uint32_t hops = s->hops;
         MOY_SYNC_UNLOCK(&s_lock);
         if (ready) {
-            return out | MOY_SCREEN_SLOT_SHOWN;
+            return out | MOY_SCREEN_SLOT_SHOWN | (s->direct ? MOY_SCREEN_SLOT_DIRECT : 0);
         }
         if (hops != s->served) {
             s->served = hops;
@@ -225,7 +229,7 @@ const uint8_t *moy_screen_slot_pixels(uint32_t pid, int *w, int *h, int *depth) 
     }
     *w = s->w;
     *h = s->h;
-    *depth = s->depth;
+    *depth = s->depth == 1 ? 1 : 2;
     return s->px;
 }
 

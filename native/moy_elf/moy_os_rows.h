@@ -207,5 +207,12 @@ int32_t moy_os_moy_name(void *name, size_t name_cap);
 int32_t moy_os_moy_clock(int32_t local);
 int moy_os_moy_ui_tell(uint32_t answers);
 int moy_os_moy_game_data(size_t off, void *dst, size_t n);
+int moy_os_moy_game_sound(int op, int a, int b);
+int moy_os_moy_game_snd(const int16_t *pcm, size_t n);
+int moy_os_moy_game_pmem(const int32_t *cells, size_t n);
+int moy_os_moy_game_read(const char *name, size_t n, uint32_t off, void *dst, size_t len);
+int moy_os_moy_game_write(const char *path, size_t n, const void *data, size_t len);
+int moy_os_moy_game_erase(const char *path, size_t n);
+int moy_os_moy_game_list(const char *prefix, size_t n, uint32_t index, void *dst, size_t cap);
 
 #endif // MOY_OS_ROWS_H

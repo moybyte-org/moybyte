@@ -19,7 +19,7 @@ extern "C" {
 
 // The OS table this header was made from: a module built against it runs
 // on a console whose table has every row the module calls.
-#define MOY_OS_VERSION 128
+#define MOY_OS_VERSION 135
 
 // THE EVENT DESCRIPTOR (docs/os_2026-11/processes.md section 1, the service
 // model): the process's event queue, readable while a message is queued.
@@ -812,6 +812,13 @@ uint32_t moy_ui_pull(uint32_t have, void *buf, size_t cap);
 uint32_t moy_ui_font_pull(uint32_t gen, uint32_t font, void *buf, size_t cap);
 int moy_ui_tell(uint32_t answers);
 int moy_game_data(size_t off, void *dst, size_t n);
+int moy_game_sound(int op, int a, int b);
+int moy_game_snd(const int16_t *pcm, size_t n);
+int moy_game_pmem(const int32_t *cells, size_t n);
+int moy_game_read(const char *name, size_t n, uint32_t off, void *dst, size_t len);
+int moy_game_write(const char *path, size_t n, const void *data, size_t len);
+int moy_game_erase(const char *path, size_t n);
+int moy_game_list(const char *prefix, size_t n, uint32_t index, void *dst, size_t cap);
 
 // The app's calls (docs/app_api_v1.md, the call table): each the console's
 // row of the same name, under the process's permissions. A text is

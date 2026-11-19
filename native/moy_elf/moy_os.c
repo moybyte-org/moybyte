@@ -434,7 +434,8 @@ static int u_thread(thr_t *t) {
 // Memory a U-mode process held, freed now when no other thread of it can be
 // inside a row or running on another core, else at the process's end.
 static void u_free(moy_os_proc_t *p, void *mem) {
-    bool busy = p->caps.core < 0;
+    bool busy = p->caps.core < 0
+                || (p->caps.lane_core != MOY_OS_LANE_SAME && p->caps.lane_core != p->caps.core);
     thr_t *me = self_thr();
     for (uint32_t k = 0; k < MOY_OS_THREADS; k++) {
         busy |= &p->thr[k] != me && p->thr[k].state == T_LIVE && p->thr[k].in_row > 0;
@@ -481,9 +482,12 @@ int moy_os_thr_spawn(thr_t *t) {
     t->state = T_LIVE;
 #ifdef MOY_ON_BOARD
     TaskHandle_t h = NULL;
-    BaseType_t core = p->caps.core < 0 ? tskNO_AFFINITY : (BaseType_t)p->caps.core;
+    bool lane = t != &p->thr[0] && p->caps.lane_core != MOY_OS_LANE_SAME;
+    int want = lane ? p->caps.lane_core : p->caps.core;
+    int prio = lane ? p->caps.lane_prio : p->caps.prio;
+    BaseType_t core = want < 0 ? tskNO_AFFINITY : (BaseType_t)want;
     // The record is LIVE before the task can run, so its first row finds it.
-    if (!moy_task_spawn_as(MOY_TASK_ELF, NULL, p->caps.stack, (int)p->caps.prio, (int)core,
+    if (!moy_task_spawn_as(MOY_TASK_ELF, NULL, p->caps.stack, prio, (int)core,
                            thr_main, t, &h)) {
         t->state = T_FREE;
         moy_os_sem_fini(&t->done);
@@ -1283,6 +1287,155 @@ int moy_os_moy_game_data(size_t off, void *dst, size_t n) {
     return r;
 }
 
+// -- the rows: a game's channels (moy_os.h, A GAME'S CHANNELS) ------------------------
+
+static game_ch_t *ch_of(thr_t *t) {
+    return t != NULL && t->p->game ? t->p->ch : NULL;
+}
+
+int moy_os_moy_game_sound(int op, int a, int b) {
+    thr_t *t = moy_os_enter();
+    game_ch_t *ch = ch_of(t);
+    int r = -1;
+    if (ch == NULL) {
+        moy_os_errno_set(ENODEV);
+    } else if (op < MOY_OS_SOUND_SFX || op > MOY_OS_SOUND_VOLUME) {
+        moy_os_errno_set(EINVAL);
+    } else {
+        moy_os_lock();
+        if (ch->sounds < MOY_OS_SOUND_MAX) {
+            int32_t *q = ch->sound + 3u * ch->sounds++;
+            q[0] = op;
+            q[1] = a;
+            q[2] = b;
+        }
+        moy_os_unlock();
+        r = 0;
+    }
+    moy_os_leave(t);
+    return r;
+}
+
+int moy_os_moy_game_snd(const int16_t *pcm, size_t n) {
+    thr_t *t = moy_os_enter();
+    game_ch_t *ch = ch_of(t);
+    moy_os_snd_fn sink = NULL;
+    if (ch != NULL) {
+        moy_os_lock();
+        sink = ch->snd;
+        moy_os_unlock();
+    }
+    int r = -1;
+    if (sink == NULL) {
+        moy_os_errno_set(ENODEV);
+    } else {
+        uint32_t k = n > 0x7FFFFFFFu ? 0x7FFFFFFFu : (uint32_t)n;
+        uint32_t got = sink(k ? (const uint8_t *)pcm : NULL, k);
+        r = (int)(k && got > k ? k : got);
+    }
+    moy_os_leave(t);
+    return r;
+}
+
+int moy_os_moy_game_pmem(const int32_t *cells, size_t n) {
+    thr_t *t = moy_os_enter();
+    game_ch_t *ch = ch_of(t);
+    int r = -1;
+    if (ch == NULL) {
+        moy_os_errno_set(ENODEV);
+    } else {
+        int32_t img[256];
+        size_t k = n < 256u ? n : 256u;
+        memcpy(img, cells, k * sizeof(int32_t));    // read once: its memory is its own
+        moy_os_lock();
+        memcpy(ch->pmem, img, k * sizeof(int32_t));
+        ch->pmem_moved = 1;
+        moy_os_unlock();
+        r = 0;
+    }
+    moy_os_leave(t);
+    return r;
+}
+
+enum { GF_READ, GF_WRITE, GF_ERASE, GF_LIST };
+
+typedef struct {
+    game_ch_t *ch;
+    int op;
+    const char *name;               // the kernel's copy, NUL-ended
+    size_t n;
+    uint32_t arg;                   // read's offset, list's index
+    void *buf;
+    size_t len;
+    int32_t r;
+} gfile_t;
+
+// On the VM's task (the hop): the cart's file verb, moycore_files' answer.
+static void gfile_body(void *arg) {
+    gfile_t *c = arg;
+    uint32_t len = c->len > 0x7FFFFFFFu ? 0x7FFFFFFFu : (uint32_t)c->len;
+    switch (c->op) {
+    case GF_READ:
+        c->r = moycore_files_read(c->ch->files, c->name, c->n, c->arg, c->buf, len);
+        break;
+    case GF_WRITE:
+        c->r = moycore_files_write(c->ch->files, c->name, c->n, c->buf, len);
+        break;
+    case GF_ERASE:
+        c->r = moycore_files_erase(c->ch->files, c->name, c->n);
+        break;
+    default:
+        c->r = moycore_files_list(c->ch->files, c->name, c->n, c->arg, c->buf, len);
+        break;
+    }
+}
+
+// A file verb's row: its name copied, the verb hopped to the VM's task.
+static int game_file(int op, const char *name, size_t n, uint32_t arg, void *buf, size_t len) {
+    static const int32_t none[] = { 0, -3, -1, -1 };    // a host with no files
+    thr_t *t = moy_os_enter();
+    game_ch_t *ch = ch_of(t);
+    int32_t r = none[op];
+    char stack[128];
+    char *copy = stack;
+    if (ch != NULL && ch->files != NULL && moycore_files_read != NULL) {
+        if (n >= sizeof stack) {
+            copy = moy_os_alloc(n + 1u);
+        }
+        if (copy != NULL) {
+            if (n > 0) {
+                memcpy(copy, name, n);
+            }
+            copy[n] = 0;
+            gfile_t c = { ch, op, copy, n, arg, buf, len, r };
+            if (vm_hop(t->p, gfile_body, &c)) {
+                r = c.r;
+            }
+            if (copy != stack) {
+                moy_os_free(copy);
+            }
+        }
+    }
+    moy_os_leave(t);
+    return (int)r;
+}
+
+int moy_os_moy_game_read(const char *name, size_t n, uint32_t off, void *dst, size_t len) {
+    return game_file(GF_READ, name, n, off, dst, len);
+}
+
+int moy_os_moy_game_write(const char *path, size_t n, const void *data, size_t len) {
+    return game_file(GF_WRITE, path, n, 0u, (void *)data, len);
+}
+
+int moy_os_moy_game_erase(const char *path, size_t n) {
+    return game_file(GF_ERASE, path, n, 0u, NULL, 0u);
+}
+
+int moy_os_moy_game_list(const char *prefix, size_t n, uint32_t index, void *dst, size_t cap) {
+    return game_file(GF_LIST, prefix, n, index, dst, cap);
+}
+
 // The toolkit's answers after a frame (moy_screen_slot.h, THE TOOLKIT'S
 // ANSWERS), into the game's slot for the console's input owner to read.
 int moy_os_moy_ui_tell(uint32_t answers) {
@@ -1553,6 +1706,48 @@ int moy_os_game_frame(uint32_t pid, uint32_t held, uint32_t pressed, uint32_t ms
         return r;
     }
     return p->main_done ? MOY_OS_ENDED : r;
+}
+
+int moy_os_game_sound(uint32_t pid, int32_t *out, int max) {
+    moy_os_proc_t *p = game_of(pid);
+    if (p == NULL || p->ch == NULL) {
+        return p == NULL ? -1 : 0;
+    }
+    moy_os_lock();
+    uint32_t k = p->ch->sounds;
+    if (max < 0 || out == NULL) {
+        k = 0;
+    } else if (k > (uint32_t)max) {
+        k = (uint32_t)max;
+    }
+    memcpy(out, p->ch->sound, 3u * k * sizeof(int32_t));
+    p->ch->sounds = 0;
+    moy_os_unlock();
+    return (int)k;
+}
+
+int moy_os_game_snd(uint32_t pid, moy_os_snd_fn sink) {
+    moy_os_proc_t *p = game_of(pid);
+    if (p == NULL || p->ch == NULL) {
+        return -1;
+    }
+    moy_os_lock();
+    p->ch->snd = sink;
+    moy_os_unlock();
+    return 0;
+}
+
+int moy_os_game_pmem(uint32_t pid, int32_t out[256]) {
+    moy_os_proc_t *p = game_of(pid);
+    if (p == NULL || p->ch == NULL) {
+        return -1;
+    }
+    moy_os_lock();
+    int moved = p->ch->pmem_moved;
+    memcpy(out, p->ch->pmem, sizeof p->ch->pmem);
+    p->ch->pmem_moved = 0;
+    moy_os_unlock();
+    return moved;
 }
 
 const uint8_t *moy_os_game_screen(uint32_t pid, int *w, int *h, int *depth) {

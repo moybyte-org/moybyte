@@ -105,7 +105,10 @@ toolkit's `ui` rows are deferred for this tier (`"elf": "deferred"`).
 
 - The OS makes every thread: a task at the process's caps (`moy_os_caps_t`),
   its stack in PSRAM. The defaults (`moy_os_default_caps`) are core 1 at the
-  VM's priority on an S3 and core 0 on a P4, where core 1 is the frame's.
+  VM's priority on an S3 and core 0 on a P4, where core 1 is the frame's;
+  on a P4 a game's threads besides its first (its par lane) run on core 1 at
+  the VM's priority, as a wasm run's par lanes take the core its session is
+  not on (`moy_os_caps_t`'s lane).
   `pthread_create` is the one thread verb; the table has no task, timer or
   ISR primitive.
 - A service is `main` on its own task, a loop blocked in `poll` on its
@@ -295,6 +298,12 @@ and names its chips in `native`, and its module links the SDK's adapter
 (`sdk/src/moycart.c`), a game whose data the console hands over at its start
 (`moy_os_game`'s `data`, read by the `moy_game_data` row: the sprites, map,
 flags, config, pmem, scenes and paint images, `elf_run.game_data`) and whose
-frames carry the pointer and the key typed. Which module runs is
+frames carry the pointer and the key typed. What its wasm twin's binding hands
+the console it hands over the rows `moy_game_sound` to `moy_game_list`, 128 to
+134 (`moy_os.h`, A GAME'S CHANNELS): the audio verbs and the stream, the pmem
+image, the cart's files (a hop to the VM's task, over
+`native/moycore/moycore_files.h`), and a frame that is palette indices or
+RGB565 on its MIXED screen (`moy_screen_slot.h`); its par items take a second
+thread, on the other core on a P4 (`moy_os_caps_t`'s lane). Which module runs is
 `runtime/shell/app_perms.py`'s `tier_of`; a module runs with `full_access`
 consented, asked for only where it runs.

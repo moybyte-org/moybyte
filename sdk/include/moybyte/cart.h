@@ -21,12 +21,16 @@
 // name or a buffer is a pointer and its length, never NUL-terminated; an
 // answer longer than its buffer is cut, and its whole length still answered.
 //
-// What a native module does not do as the wasm module does: no sound (the
-// audio verbs are silent, moy_snd answers no room), pmem writes last the run,
-// the cart's files read as absent and none is written (moy_read, moy_write,
-// moy_erase, moy_list), no pref is set or kept (game_prefs_get,
-// game_prefs_set and game_prefs_clear answer -8), moy_blit's palette and
-// moy_blit565 are not shown, and moy_par runs its items one after another.
+// The native module does what the wasm module does, over the game's
+// channels to the console (native/moy_elf/moy_os.h, A GAME'S CHANNELS): its
+// audio verbs and its stream reach the run's session and the speaker, its
+// pmem, prefs and written files last as the wasm module's do, its blits show
+// through a palette and as RGB565, and moy_par's items run on two cores
+// where the console gives a game a second one (a P4), as a wasm run's do.
+// Where it differs: an import called from one of par's items traps in wasm
+// and runs in the native module, which shares the cart's state with the
+// other core, and a wasm module's traps (a blit outside _draw, a second blit
+// in one) are no fault natively.
 
 #ifndef MOYBYTE_CART_H
 #define MOYBYTE_CART_H

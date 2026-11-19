@@ -4,10 +4,11 @@
   "id": "local.dual",
   "runtime": "wasm",
   "main": "main.wasm",
-  "memory": 2,
+  "memory": 6,
   "canvas": "320x240",
   "input": ["buttons", "touch"],
-  "extensions": ["moybyte.scenes", "moybyte.images", "moybyte.mouse"],
+  "extensions": ["moybyte.scenes", "moybyte.images", "moybyte.mouse", "moybyte.prefs"],
+  "writable": ["notes/"],
   "moybyte": {
     "type": "game",
     "native": [],

@@ -104,11 +104,20 @@ typedef struct {
 } moy_os_module_t;
 
 // A process's caps: every thread of it is a task at `prio` on `core` (-1:
-// either) with a stack of `stack` bytes.
+// either) with a stack of `stack` bytes, but a game's threads besides its
+// first, which run on `lane_core` at `lane_prio` (MOY_OS_LANE_SAME: `core`
+// and `prio`): on a P4 the core its first thread is not on, at the VM's
+// priority, as a wasm run's par lanes take the core its session is not on
+// (native/moy_wasm/modmoy_wasm.c), so a compiled cart's par items run on both
+// cores in either tier (sdk/src/moycart.c's moy_par). An S3 keeps every
+// native thread on core 1 (docs/os_2026-11/tiers.md).
+#define MOY_OS_LANE_SAME (-2)
 typedef struct {
     int prio;
     int core;
     uint32_t stack;
+    int lane_core;
+    int lane_prio;
 } moy_os_caps_t;
 
 #define MOY_OS_PROCS 4u             // processes at once
@@ -203,9 +212,52 @@ moy_os_proc_t *moy_os_service(const moy_os_module_t *m, const moy_os_caps_t *cap
 // console's hand-over to a game built from a compiled cart's source
 // (sdk/include/moybyte/cart.h, sdk/src/moycart.c: its sprites, map, flags,
 // config, scenes and paint images, runtime/run/elf_run.py's game_data).
+// `dir` (NULL: none) is that cart's folder and `writable` (`wn` bytes,
+// NUL-joined) its manifest's "writable" entries: its files (A GAME'S
+// CHANNELS), opened here, on the console's task. A depth of
+// MOY_SCREEN_SLOT_MIXED is such a game's: each frame it presents is palette
+// indices or RGB565 (moy_screen_slot.h), and the frame call says which.
 moy_os_proc_t *moy_os_game(const moy_os_module_t *m, const moy_os_caps_t *caps, uint32_t pid,
                            const char *id, int w, int h, int depth, const moy_app_run_t *run,
-                           const void *data, size_t n, char *err, size_t errlen);
+                           const void *data, size_t n, const char *dir, const char *writable,
+                           size_t wn, char *err, size_t errlen);
+
+// A GAME'S CHANNELS: what a game built from a compiled cart's source hands the
+// console where its wasm twin's binding would (sdk/src/moycart.c), each row
+// copying what it hands across, so the module is never given a kernel
+// pointer to write through.
+//
+// - THE SOUND. moy_game_sound(op, a, b) queues one of the cart's audio verbs,
+//   MOY_OS_SOUND_* (moycore_run.h's AQ_*, in that order, with its a and b),
+//   MOY_OS_SOUND_MAX at most unread, a verb past them dropped as a Lua or
+//   wasm run's queue drops it; on the console's task moy_os_game_sound
+//   drains them into `out` (3 int32 a verb): how many. moy_game_snd(pcm, n)
+//   queues n frames of the cart's stream (SPEC.md 16.9's snd) into the sink
+//   moy_os_game_snd gave the game (the speaker's render-ahead stream,
+//   moy_audio_snd.h): how many fitted, with n 0 the room; -1 (ENODEV) with
+//   no sink, where the module drains its stream by the clock as libmoy's
+//   binding does.
+// - THE PMEM. moy_game_pmem(cells, n) leaves the module's pmem image (n cells,
+//   256 at most) in the record, marked moved; moy_os_game_pmem copies the
+//   record's 256 cells into `out`: 1 where they moved since the last ask, 0
+//   where not, -1 for no such game.
+// - THE FILES. moy_game_read, moy_game_write, moy_game_erase and
+//   moy_game_list are SPEC.md 9.1's verbs over the cart's files
+//   (native/moycore/moycore_files.h: its folder and the written copies the
+//   "writable" entries keep), with moycore_files' answers; each is a hop on
+//   the VM's queue (moy_vmq.h), which the game's frame call serves. With no
+//   files, a read is 0, a write -3 and an erase and a list -1.
+#define MOY_OS_SOUND_SFX 0
+#define MOY_OS_SOUND_MUSIC 1
+#define MOY_OS_SOUND_BEEP 2             // a hertz, b milliseconds
+#define MOY_OS_SOUND_MUSIC_STOP 3
+#define MOY_OS_SOUND_STOP 4
+#define MOY_OS_SOUND_VOLUME 5
+#define MOY_OS_SOUND_MAX 32             // moycore_run.h's AQ_MAX
+int moy_os_game_sound(uint32_t pid, int32_t *out, int max);
+typedef uint32_t (*moy_os_snd_fn)(const uint8_t *pcm, uint32_t n);
+int moy_os_game_snd(uint32_t pid, moy_os_snd_fn sink);
+int moy_os_game_pmem(uint32_t pid, int32_t out[256]);
 // On the console's task, once a frame: its screen slot's frame call
 // (native/moy_kernel/moy_screen_slot.h): the frame the last call took let
 // go, the frame message posted unless one waits unread (its arguments
@@ -216,6 +268,7 @@ moy_os_proc_t *moy_os_game(const moy_os_module_t *m, const moy_os_caps_t *caps, 
 // for no such game.
 #define MOY_OS_FRAME_SENT 1
 #define MOY_OS_FRAME_SHOWN 2
+#define MOY_OS_FRAME_DIRECT 4           // the frame shown is RGB565 (a MIXED screen's)
 #define MOY_OS_ENDED (-4)
 // An app's input words: the pointer's x and y on the screen, its state
 // (lua_ext.snap_shared's flags, 0 none), the key typed this frame (0 none),

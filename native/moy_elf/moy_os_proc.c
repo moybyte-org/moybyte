@@ -18,6 +18,20 @@ void moy_os_default_caps(moy_os_caps_t *caps) {
     caps->prio = 0;
 #endif
     caps->stack = 16 * 1024;
+    caps->lane_core = MOY_OS_LANE_SAME;
+    caps->lane_prio = caps->prio;
+}
+
+// A game's channels let go: its files closed (on the console's task, where
+// every game's record is freed).
+static void ch_free(game_ch_t *ch) {
+    if (ch == NULL) {
+        return;
+    }
+    if (ch->files != NULL && moycore_files_close != NULL) {
+        moycore_files_close(ch->files);
+    }
+    moy_os_free(ch);
 }
 
 // A record proc_new made and nothing else holds.
@@ -249,6 +263,7 @@ static bool proc_end(moy_os_proc_t *p) {
     moy_os_free(p->argv);
     moy_os_free(p->env);
     moy_os_free(p->data);
+    ch_free(p->ch);
 #ifdef MOY_OS_UMODE
     while (p->retired != NULL) {
         retired_t *r = p->retired;
@@ -421,10 +436,11 @@ int moy_os_command(moy_sh_t *s, const moy_os_module_t *m, const moy_os_caps_t *c
 static moy_os_proc_t *loop_start(const moy_os_module_t *m, const moy_os_caps_t *caps,
                                  uint32_t pid, const char *id, int w, int h, int depth,
                                  const moy_app_run_t *run, uint8_t *data, size_t data_n,
-                                 char *err, size_t errlen) {
+                                 game_ch_t *ch, char *err, size_t errlen) {
     moy_os_proc_t *p = proc_new(m, caps, pid, true, err, errlen);
     if (p == NULL) {
         moy_os_free(data);
+        ch_free(ch);
         if (m->unload != NULL) {
             m->unload(m->loaded);
         }
@@ -432,6 +448,7 @@ static moy_os_proc_t *loop_start(const moy_os_module_t *m, const moy_os_caps_t *
     }
     p->data = data;                            // freed with the record (proc_end)
     p->data_n = data_n;
+    p->ch = ch;                                // and so are these
     p->prog.bg_pid = pid;
     if (run != NULL) {
         p->run = *run;
@@ -495,13 +512,14 @@ static moy_os_proc_t *loop_start(const moy_os_module_t *m, const moy_os_caps_t *
 moy_os_proc_t *moy_os_service(const moy_os_module_t *m, const moy_os_caps_t *caps,
                               uint32_t pid, const char *id, const moy_app_run_t *run,
                               char *err, size_t errlen) {
-    return loop_start(m, caps, pid, id, 0, 0, 0, run, NULL, 0, err, errlen);
+    return loop_start(m, caps, pid, id, 0, 0, 0, run, NULL, 0, NULL, err, errlen);
 }
 
 moy_os_proc_t *moy_os_game(const moy_os_module_t *m, const moy_os_caps_t *caps, uint32_t pid,
                            const char *id, int w, int h, int depth, const moy_app_run_t *run,
-                           const void *data, size_t n, char *err, size_t errlen) {
-    if (w <= 0 || h <= 0 || depth < 1 || depth > 2) {
+                           const void *data, size_t n, const char *dir, const char *writable,
+                           size_t wn, char *err, size_t errlen) {
+    if (w <= 0 || h <= 0 || depth < 1 || depth > MOY_SCREEN_SLOT_MIXED) {
         snprintf(err, errlen, "no screen for it");
         if (m->unload != NULL) {
             m->unload(m->loaded);
@@ -510,12 +528,22 @@ moy_os_proc_t *moy_os_game(const moy_os_module_t *m, const moy_os_caps_t *caps, 
     }
     // An app's thread runs the toolkit it links (sdk/include/moybyte/ui.h),
     // whose calls nest deeper than a game's: twice the default stack.
-    moy_os_caps_t app;
-    if (caps == NULL && depth == 2) {
-        moy_os_default_caps(&app);
-        app.stack *= 2;
-        caps = &app;
+    moy_os_caps_t c;
+    if (caps != NULL) {
+        c = *caps;
+    } else {
+        moy_os_default_caps(&c);
+        if (depth == 2) {
+            c.stack *= 2;
+        }
     }
+#if defined(MOY_ON_BOARD) && !defined(CONFIG_IDF_TARGET_ESP32S3)
+    // A game's lanes (moy_os_caps_t): the other core, at the VM's priority.
+    if (caps == NULL && portNUM_PROCESSORS > 1 && c.core >= 0) {
+        c.lane_core = c.core == 0 ? 1 : 0;
+        c.lane_prio = (int)uxTaskPriorityGet(NULL);
+    }
+#endif
     uint8_t *copy = NULL;
     if (data != NULL && n > 0) {
         copy = moy_os_alloc(n);
@@ -528,7 +556,20 @@ moy_os_proc_t *moy_os_game(const moy_os_module_t *m, const moy_os_caps_t *caps, 
         }
         memcpy(copy, data, n);
     }
-    return loop_start(m, caps, pid, id, w, h, depth, run, copy, copy != NULL ? n : 0, err,
+    game_ch_t *ch = moy_os_alloc(sizeof *ch);
+    if (ch == NULL) {
+        moy_os_free(copy);
+        snprintf(err, errlen, "out of memory");
+        if (m->unload != NULL) {
+            m->unload(m->loaded);
+        }
+        return NULL;
+    }
+    memset(ch, 0, sizeof *ch);
+    if (dir != NULL && *dir && moycore_files_open != NULL) {
+        ch->files = moycore_files_open(dir, writable, writable != NULL ? wn : 0u);
+    }
+    return loop_start(m, &c, pid, id, w, h, depth, run, copy, copy != NULL ? n : 0, ch, err,
                       errlen);
 }
 

@@ -185,8 +185,11 @@ cart in C (`"runtime": "wasm"`, a game or a wallpaper) includes one header,
   game at its start through the `moy_game_data` row
   (`runtime/run/elf_run.py`'s `game_data`). libmoy's raster holds the
   `moy_` names itself, so the header names a cart's verbs `moy_cart_<name>`
-  in a module. The header says what a module does not do as the wasm one
-  does (sound, persistent pmem, the cart's files).
+  in a module. What the wasm binding hands its console the module hands
+  across the game's channels (`native/moy_elf/moy_os.h`, A GAME'S
+  CHANNELS): its audio verbs and stream, its pmem, its files and a
+  direct-colour frame; its prefs are the app rows. The header says where
+  the two still differ (par's items and the wasm module's traps).
 - **Which runs** is the console's (`runtime/shell/app_perms.py`'s
   `tier_of`, the Player's and the wallpaper's routing): the native module
   on a P4, which confines it, unless Settings turned its `full_access` off;
