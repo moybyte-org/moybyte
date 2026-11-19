@@ -578,10 +578,13 @@ def test_a_page_that_says_no_leaves_the_store_as_it_was(zero):
     assert not os.listdir(ci.stage_root(zero.root))
 
 
-def test_a_cart_the_store_has_no_room_for_is_refused_with_the_sizes(zero):
+def test_a_cart_the_store_has_no_room_for_is_refused_with_the_sizes(zero, monkeypatch):
+    # The store's free space is stood in for: the real disk's moves under
+    # other writers between the read and the install.
+    monkeypatch.setattr(web_addon, "_room",
+                        lambda root, reserve: (max(0, 8192 - reserve), 4096))
     repo = _shelf(zero)
-    free = web_addon._room(zero.root, 0)
-    zero.official.reserve = free[0] - free[1]
+    zero.official.reserve = 4096
     doc = _install(zero, repo, "doom", accepted=["doom1.wad"])
     assert doc["state"] == "error"
     assert doc["error"].startswith("Not enough room: needs ") and doc["error"].endswith(" free.")
