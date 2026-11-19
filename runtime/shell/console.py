@@ -3114,7 +3114,10 @@ class Workstation:
         now = _ticks_ms()
         if self.toast_until and _ticks_diff(self.toast_until, now) > 0:
             return True
-        if self.notices.notice_active():
+        # A notice is still: its show, its change and its withdrawal mark the
+        # frame dirty (`Notices.notice`), so the gate opens for the one frame
+        # that takes it down once its time is up.
+        if self.notice_up is not None and not self.notices.notice_active(now):
             return True
         return _NOTES.banner is not None and _NOTES.up(now) is not None
 

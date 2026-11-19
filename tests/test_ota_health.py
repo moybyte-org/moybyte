@@ -452,15 +452,21 @@ def test_the_banner_expires_on_its_own(tmp_path):
     assert ws.notice_up is None
 
 
-def test_the_banner_joins_the_overlay_stack_and_keeps_the_screen_alive(tmp_path):
+def test_the_banner_joins_the_overlay_stack_and_is_taken_down_at_its_time(tmp_path):
     # Two gates, and both matter: the layer has to be IN the stack to draw at
-    # all, and _animating has to hold the redraw gate open or the banner would
-    # be painted once and then sit there frozen past its own expiry.
+    # all, and its show marks the frame dirty. A still notice repaints
+    # nothing while it is up (a notice up every frame of a beam was a whole
+    # desk's repaint a frame), but the frame its time runs out on is drawn,
+    # or it would sit there frozen past its own expiry.
     ws = _ws_with(tmp_path, ("ok", "v2 -> v3"))
+    ws.frame_state.dirty = False
     ws.notices.announce_update()
+    assert ws.frame_state.dirty is True
     assert ws.notice_layer in ws._overlay_stack()
+    assert ws.animating(1.0 / 30) is False
+    ws._notice_until = ws._notice_until - 10 ** 6
     assert ws.animating(1.0 / 30) is True
-    ws.notice_up = None
+    assert ws.notice_up is None and ws.animating(1.0 / 30) is False
     assert ws.notice_layer not in ws._overlay_stack()
 
 
