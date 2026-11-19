@@ -745,6 +745,9 @@ class EditorDesk(Layer):
         `c`'s header shows: an edit's undo step, the sounds, the blocks'
         object, the Map's tools, the Code pane's file and find tool."""
         ws = self.ws
+        if c == "cards":
+            h = getattr(ws.run.project, "config_hist", None)
+            return None if h is None else (id(h), h.gen)
         if c in ("code", "theme_config"):
             return (ws.text.code_file_name(), bool(ws.layer_of(c)._find_open))
         if c == "blocks":
@@ -869,6 +872,15 @@ class EditorDesk(Layer):
                 cv.clip()
         else:
             self._tab_pane(tab, body, dt, True)
+            if c == "cards" and self._own_data(c) != data:
+                # a card's value is set by the page's draw, an undo step the
+                # Editor's strip shows: the strip drawn over this frame too
+                ws.bar_layer.draw_status_strip("menu")
+                for bx, by, bw, bh in ws.bar_layer.bar_rects("menu"):
+                    x0, y0 = min(x0, bx), min(y0, by)
+                    x1, y1 = max(x1, bx + bw), max(y1, by + bh)
+                self._changed = [x0, y0, x1, y1]
+                return True
             w = self._within
             if self._host.within(w):
                 # it drew inside that rect of the pane alone (a modal's band
