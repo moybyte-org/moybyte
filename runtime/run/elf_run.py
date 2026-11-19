@@ -34,7 +34,9 @@ and answers an ElfGame, the shape every runtime's run has
 (`init`/`update`/`draw`/`close`). Each tick posts the frame message with the
 buttons and waits up to the tick's time for a present; the draw puts the
 presented screen into the run's canvas through the one canvas class's
-`blit_indices`. An APP (its manifest's type "app") draws with the toolkit
+`blit_indices`, or, for a run set `from_slot`, leaves it in the screen's slot,
+where `kept` hands the last frame taken until the next tick (a wallpaper's,
+which the desk scales from there: wallpaper._Hosted). An APP (its manifest's type "app") draws with the toolkit
 it links (sdk/include/moybyte/ui.h): its screen is RGB565, drawn with
 `blit565`, and its frame message carries the input words the toolkit reads
 (moy_os.h's MOY_OS_FRAME_IN_*: the pointer, the key typed, the ui face and
@@ -701,12 +703,16 @@ class ElfGame(LinkedUi):
         self._pmem = array("i", bytes(4 * 256)) if dual else None
         self._snd = dual and self._snd_open(cart)
         self._px = self._e.screen(self.pid)
+        self._kept = (self._px, self._w, self._h, 1)
+        self._kept565 = (self._px, self._w, self._h, 2)
         self._masks = [0, 0]
         self._mask_of = getattr(ws.input, "button_masks", None)
         self._pressed = 0
         self._ms = 0                    # the time since the last frame message
         self._shown = False
         self.presented = 0              # the frames it has presented
+        self.from_slot = False          # its frames are shown from `kept`
+        self.owe = False                # the next draw puts `kept` in the canvas
         self._live = True
         self.draw_next = True
         self.init = None
@@ -804,7 +810,7 @@ class ElfGame(LinkedUi):
     def _end(self):
         self._closing()
         self._live = False
-        self._px = None
+        self._px = self._kept = self._kept565 = None
         code = self._e.game_stop(self.pid)
         self._release()
         if code == 0:
@@ -820,8 +826,18 @@ class ElfGame(LinkedUi):
                     break
         raise RuntimeError(stop_text(code, fault))
 
+    def kept(self):
+        """(screen, w, h, depth) of the last frame the run presented, which
+        its slot holds until the next tick's update (moy_screen_slot.h), or
+        None before the first."""
+        if not self.presented or self._px is None:
+            return None
+        return self._kept565 if self._app or self._direct else self._kept
+
     def _draw(self):
-        if self._shown:
+        if (self._shown or self.owe) and not self.from_slot and self._px is not None \
+                and self.presented:
+            self.owe = False
             if self._app or self._direct:
                 self._ws.run.canvas.blit565(self._px, self._w, self._h, 0, 0)
             else:
@@ -832,7 +848,7 @@ class ElfGame(LinkedUi):
         if self._live:
             self._closing()
             self._live = False
-            self._px = None
+            self._px = self._kept = self._kept565 = None
             self._e.game_stop(self.pid)
             self._release()
 

@@ -399,3 +399,47 @@ def test_sakura_c_is_a_wallpaper_on_both_targets(tmp_path, monkeypatch):
             assert ws.run.player.cart_error is None if ws.run.player else True
     finally:
         ws.spine.exit()
+
+
+def test_a_native_wallpaper_is_scaled_from_its_own_memory(tmp_path, monkeypatch):
+    """On a desk whose system canvas is not the game canvas (the P4s), a
+    native wallpaper's frame is never copied into the game canvas: the cover
+    scale reads it from the run's screen slot, through the game canvas's
+    palette, and lays the pixels the copy and the canvas's cover made
+    (tests/test_screen_slot.py holds the slot keeping it between ticks)."""
+    import device_canvas
+    from runtime import host_canvas
+    copies = []
+    blit = device_canvas.DeviceCanvas.blit_indices
+    monkeypatch.setattr(device_canvas.DeviceCanvas, "blit_indices",
+                        lambda cv, *a: (copies.append(cv), blit(cv, *a))[1])
+    root = str(tmp_path / "carts")
+    host_app.moy_carts.ensure_dirs(root)
+    _built(SAKURA, os.path.join(root, "moybyte.sakura_c.moy"))
+    ws = no_unlock_banner(host_app.build_workstation(root, sys_size=(1024, 600)))
+    try:
+        drv = make_drv(ws)
+        _opt(ws, "moybyte.sakura_c", "Sakura C")
+        ws.look.select_wallpaper("moybyte.sakura_c", persist=False)
+        hosted = ws.wallpaper._wp_run
+        gc = hosted.run.canvas
+        assert type(hosted.h).__name__ == "ElfGame" and gc is not ws.sys_canvas
+        frames = set()
+        for _ in range(6):
+            drv.frame(_DT)
+            frames.add(bytes(hosted.kept()[0]))
+        assert hosted.h.from_slot and hosted.h.presented >= 2 and len(frames) > 1
+        assert gc not in copies                 # no frame went into the game canvas
+
+        frame = hosted.kept()
+        new = host_canvas.make_system_canvas(1024, 600)
+        new.blit_cover(gc, frame)
+        old_gc = host_canvas.make_canvas(320, 240)
+        old_gc._wire = gc._wire
+        old_gc.blit_indices(frame[0], 320, 240, 0, 0)
+        old = host_canvas.make_system_canvas(1024, 600)
+        old.blit_cover(old_gc)
+        assert bytes(new._buf) == bytes(old._buf)
+        assert len(set(memoryview(new._buf).cast("H"))) > 16
+    finally:
+        ws.spine.exit()

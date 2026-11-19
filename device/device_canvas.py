@@ -2951,11 +2951,15 @@ class SystemCanvas(DeviceCanvas):
         # scaled desktop.
         return type(self)(comp, font_scale=self.font_scale)
 
-    def blit_cover(self, gc):
+    def blit_cover(self, gc, frame=None):
         """wallpaper._backdrop_blit's raster path: the smallest integer upscale
         of the wallpaper's game-canvas frame that COVERS the whole surface,
         centered + cropped (ox/oy <= 0) -- full-bleed, not a letterboxed
-        rectangle floating in black.
+        rectangle floating in black. `frame` is a compiled run's kept frame
+        in place of the game canvas's pixels, (screen, w, h, depth) as
+        elf_run.ElfGame.kept hands it: its indices are resolved through
+        `gc`'s palette in the same pass that scales them, so the frame is
+        never copied into `gc`.
 
         Not optional on a 565 system canvas, and its absence is SILENT:
         `_backdrop_blit` probes for this method and otherwise falls back to
@@ -2964,7 +2968,7 @@ class SystemCanvas(DeviceCanvas):
         first build shipped exactly that). The crop overflows the picture,
         which the P4's PPA cannot do (it has no clip), so every tier keeps
         this on the CPU kernel."""
-        gw, gh = gc.w, gc.h
+        gw, gh = (frame[1], frame[2]) if frame is not None else (gc.w, gc.h)
         if gw <= 0 or gh <= 0:
             return
         sw, sh = self.w, self.h
@@ -2975,8 +2979,17 @@ class SystemCanvas(DeviceCanvas):
             gc.flush_batch()
         if self._batch_arr[0] > 4:
             self.flush_batch()
-        self._gfx.blit565_scale(self._buf, sw, sh, int(ox), int(oy),
-                                gc._buf, gw, gh, int(scale))
+        if frame is None:
+            self._gfx.blit565_scale(self._buf, sw, sh, int(ox), int(oy),
+                                    gc._buf, gw, gh, int(scale))
+        elif frame[3] == 1:
+            self._gfx.blit_indices_scale(self._buf, sw, sh, frame[0], gw, gh,
+                                         0, 0, gw, gh, int(ox), int(oy),
+                                         int(scale), gc._wire, None, -1,
+                                         0, 0, sw, sh)
+        else:
+            self._gfx.blit565_scale(self._buf, sw, sh, int(ox), int(oy),
+                                    frame[0], gw, gh, int(scale))
 
 
 # What a released canvas draws into: nothing at all.

@@ -10,10 +10,14 @@
 // is either, by its size, in the kernel's memory, opened by the program's runner on the VM's task as
 // the program starts and closed at its end. Its frame has one writer at a
 // time: FREE, the program's present copies its screen in (WRITING) and makes
-// it READY; the console's frame call takes a READY one (TAKEN) and lets it
-// go (FREE) at its next call, once it has drawn it. A present while the
-// frame is not FREE waits for it, in slices, and answers EINTR once the slot
-// is closed.
+// it READY; the console's frame call takes a READY one (TAKEN) and keeps it
+// until a present waits with a newer one: a frame call lets it go (FREE)
+// then and waits for that one, past its `max_ms`, so between frame calls the
+// slot holds the last frame taken, which the console may show again from
+// its memory (runtime/run/elf_run.py's `kept`). A stepped build lets it go
+// at the call's start, since its program presents after the call returns.
+// A present while the frame is not FREE waits for it, in slices, and
+// answers EINTR once the slot is closed.
 //
 // THE FRAME MESSAGE: each frame call posts the system's "frame" message,
 // [held, pressed, ms, words...], to the process unless its queue holds one
@@ -51,14 +55,14 @@ int moy_screen_slot_size(uint32_t pid, int *w, int *h, int *depth);
 // EINVAL a size not the slot's, EINTR the slot closed).
 int moy_screen_slot_present(uint32_t pid, const void *px, size_t n);
 
-// The VM's task, once a frame: the frame the last call took let go, the
-// frame message posted unless one waits unread (its arguments followed by
-// the `n_in` words at `in`), then up to `max_ms` waiting for a present, the
+// The VM's task, once a frame: the frame message posted unless one waits
+// unread (its arguments followed by the `n_in` words at `in`), then up to
+// `max_ms` waiting for a present (the frame taken let go to it), the
 // program's hops served meanwhile (0 where no task can block: stepped). A
 // mask: MOY_SCREEN_SLOT_SENT where the message was posted,
-// MOY_SCREEN_SLOT_SHOWN where a frame was presented, taken until the next
-// call, and MOY_SCREEN_SLOT_DIRECT with SHOWN where a MIXED slot's frame is
-// RGB565; -ENODEV for no slot.
+// MOY_SCREEN_SLOT_SHOWN where a newer frame was presented and taken, and
+// MOY_SCREEN_SLOT_DIRECT with SHOWN where a MIXED slot's frame is RGB565;
+// -ENODEV for no slot.
 #define MOY_SCREEN_SLOT_SENT 1
 #define MOY_SCREEN_SLOT_SHOWN 2
 #define MOY_SCREEN_SLOT_DIRECT 4
@@ -67,9 +71,9 @@ int moy_screen_slot_frame(uint32_t pid, uint32_t held, uint32_t pressed, uint32_
 // Any task: a hop of process `pid` queued (moy_vmq_hop): the frame call
 // waiting on its slot, if one has a slot, woken to serve it.
 void moy_screen_slot_kick(uint32_t pid);
-// The slot's pixels, for its life (what a SHOWN frame call took holds them
-// until the next call), `depth` the bytes a pixel it holds (a MIXED slot's
-// 2); NULL for none.
+// The slot's pixels, for its life (between frame calls, the last frame a
+// call took), `depth` the bytes a pixel it holds (a MIXED slot's 2); NULL
+// for none.
 const uint8_t *moy_screen_slot_pixels(uint32_t pid, int *w, int *h, int *depth);
 
 // THE TOOLKIT'S ANSWERS. An app drawing with the toolkit it links tells,

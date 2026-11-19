@@ -382,6 +382,10 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   a game full screen on the desk once the glass around it is still) runs in
   the kernel's front with the VM up, and the same scale and snapshot are C
   (`moy_glass.front`'s frame op, `moy_play.h`): no console Python a frame.
+  A native wallpaper's frame skips the game canvas too, palette or not:
+  the desk's cover scale (`blit_cover`'s `frame`) reads it from the
+  program's screen slot, which holds the last frame taken between frame
+  calls (`moy_screen_slot.h`, `wallpaper._Hosted.kept`).
 - **An async PPA op must be the frame's LAST write**, and `moy_ppa` must
   C2M-writeback a CPU-painted destination before submit, because the IDF
   driver invalidates the out window at submit. Both are ROW-SCOPED

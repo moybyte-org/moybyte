@@ -28,6 +28,8 @@ typedef struct {
     volatile uint8_t direct;    // a MIXED slot's frame is RGB565
     volatile uint8_t state;
     volatile uint8_t closed;
+    volatile uint8_t waiting;   // a present waits for the frame to be let go
+    uint8_t owed;               // the console let its frame go for one not yet taken
     volatile uint32_t room;     // moved where the frame is let go or the slot closed
     volatile uint32_t shown;    // moved where a present made it READY, or a hop was queued
     volatile uint32_t hops;     // the program's hops queued (moy_screen_slot_kick)
@@ -135,12 +137,17 @@ int moy_screen_slot_present(uint32_t pid, const void *px, size_t n) {
         if (free_) {
             s->state = WRITING;
         }
+        bool told = !free_ && !closed && !s->waiting;
+        s->waiting = !free_ && !closed;
         MOY_SYNC_UNLOCK(&s_lock);
         if (closed) {
             return -EINTR;
         }
         if (free_) {
             break;
+        }
+        if (told) {
+            moy_sync_wake(&s->shown, s->console);   // a frame call waiting lets it go
         }
         moy_sync_wait(&s->room, seen, SLICE_MS);
     }
@@ -160,6 +167,9 @@ int moy_screen_slot_frame(uint32_t pid, uint32_t held, uint32_t pressed, uint32_
         return -ENODEV;
     }
     s->console = moy_sync_me();
+    #if !defined(MOY_ON_BOARD) && !defined(MOY_THREADS)
+    // Stepped: the program presents after this call returns, so the frame
+    // is let go here.
     MOY_SYNC_LOCK(&s_lock);
     bool let_go = s->state == TAKEN;
     if (let_go) {
@@ -169,6 +179,7 @@ int moy_screen_slot_frame(uint32_t pid, uint32_t held, uint32_t pressed, uint32_
     if (let_go) {
         moy_sync_wake(&s->room, s->presenter);
     }
+    #endif
     int out = 0;
     if (moy_evq_queued(pid) == 0u) {
         char args[40 + 12 * MOY_SCREEN_SLOT_IN];
@@ -190,8 +201,24 @@ int moy_screen_slot_frame(uint32_t pid, uint32_t held, uint32_t pressed, uint32_
         if (ready) {
             s->state = TAKEN;
         }
+        // The frame taken is let go once a newer one waits to be written,
+        // and from then the call waits for that one past `max_ms`: the
+        // present writing it runs no program code.
+        bool let_go = !ready && s->state == TAKEN && s->waiting;
+        if (let_go) {
+            s->state = FREE;
+            s->waiting = 0;
+            s->owed = 1;
+        }
+        if (ready) {
+            s->owed = 0;
+        }
+        bool owed = s->owed && s->closed == 0;
         uint32_t hops = s->hops;
         MOY_SYNC_UNLOCK(&s_lock);
+        if (let_go) {
+            moy_sync_wake(&s->room, s->presenter);
+        }
         if (ready) {
             return out | MOY_SCREEN_SLOT_SHOWN | (s->direct ? MOY_SCREEN_SLOT_DIRECT : 0);
         }
@@ -203,10 +230,10 @@ int moy_screen_slot_frame(uint32_t pid, uint32_t held, uint32_t pressed, uint32_
         #if !defined(MOY_ON_BOARD) && !defined(MOY_THREADS)
         left = 0;                       // nothing to wait on: the caller is stepped
         #endif
-        if (left <= 0) {
+        if (left <= 0 && !owed) {
             return out;
         }
-        uint32_t ms = (uint32_t)((left + 999) / 1000);
+        uint32_t ms = left > 0 ? (uint32_t)((left + 999) / 1000) : SLICE_MS;
         moy_sync_wait(&s->shown, seen, ms < SLICE_MS ? ms : SLICE_MS);
     }
 }

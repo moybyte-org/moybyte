@@ -188,13 +188,17 @@ class _Hosted:
     it, so a paint the wallpaper is `held` for runs `draw()` alone, a tick
     of 0 that draws the same frame again; a second `update` with no draw
     between (the preview's warm-up) runs the first logic-only. A quit() it
-    calls quits nothing."""
+    calls quits nothing. A run that keeps its frame in its own memory
+    (`kept`, a native one's screen slot) is set `from_slot` where the desk's
+    cover scale can read it from there, and its frames then skip the
+    canvas."""
 
     def __init__(self, ws, run, h):
         self.ws = ws
         self.run = run
         self.h = h
         self._dt = -1.0             # the step `update` kept, -1: none
+        self._kept = getattr(h, "kept", None)
 
     @staticmethod
     def start(ws, rt, ns, cart, canvas, project):
@@ -237,6 +241,24 @@ class _Hosted:
         if self._dt >= 0:
             self._tick(self._dt, False)
         self._dt = dt
+
+    def from_slot(self, on):
+        """Whether `kept` is where its frames are shown from, rather than
+        the canvas; False for a run that keeps none."""
+        h = self.h
+        if self._kept is None:
+            return False
+        if h.from_slot != on:
+            h.from_slot = on
+            if not on:
+                h.owe = True        # the frame kept goes into the canvas
+        return on
+
+    def kept(self):
+        """The run's last frame in its own memory (elf_run.ElfGame.kept),
+        or None."""
+        k = self._kept
+        return k() if k is not None else None
 
     def draw(self):
         dt = self._dt
@@ -980,6 +1002,10 @@ class Wallpaper:
                     self._glass_paint(dt, home)
                     self._painted(self._wp_live and self._wp_update is not None)
                     return
+                sc = ws.sys_canvas
+                hosted = self._wp_run
+                slot = hosted is not None and hosted.from_slot(
+                    sc is not ws.run.canvas and hasattr(sc, "blit_cover"))
                 if self._advances(dt):
                     self._wp_update(dt)
                 # The safe area is the layout's content rect: the wallpaper
@@ -1026,9 +1052,9 @@ class Wallpaper:
                 # a black bezel) -- without this the big desktop showed whatever was
                 # left on the system canvas (the windowed WM exposed it as stale
                 # pixels). One object on the 320x240 tiers -> this never runs there.
-                sc = ws.sys_canvas
                 if sc is not ws.run.canvas:
-                    self._backdrop_blit(sc, ws.run.canvas)
+                    self._backdrop_blit(sc, ws.run.canvas,
+                                        hosted.kept() if slot else None)
                 self._painted(self._wp_live and self._wp_update is not None)
                 return
             except Exception as exc:  # noqa: BLE001 -- drop a broken wallpaper to the fill
@@ -1521,7 +1547,7 @@ class Wallpaper:
         view(ox, oy, scale, gw, gh)
         return True
 
-    def _backdrop_blit(self, sc, gc):
+    def _backdrop_blit(self, sc, gc, frame=None):
         """Composite the 320x240 wallpaper frame into the big system canvas as the
         desktop backdrop, COVER-style (the Picotron model): the smallest integer
         upscale that covers the whole desktop, centered and cropped -- a real
@@ -1529,7 +1555,9 @@ class Wallpaper:
         (Always full-desktop -- never routed through the WM, whose viewport may be
         a player WINDOW in windowed mode.) A system canvas with no readable
         framebuffer has nothing to copy into: draw the frame as ONE scaled spr
-        instead, and let the canvas clip the crop."""
+        instead, and let the canvas clip the crop. `frame` is a run's
+        kept frame (`_Hosted.kept`), which `blit_cover` scales in place of
+        `gc`'s pixels."""
         # (asked with hasattr and called by name: a getattr of a method makes
         # a bound method, every frame of a live wallpaper)
         if hasattr(gc, "flush_batch"):
@@ -1538,7 +1566,7 @@ class Wallpaper:
             # A device system canvas (the P4, #58): native cover-crop blit in one
             # moy_gfx call -- an RGB565 canvas has no index buffer for the loops
             # below, and a per-frame Python expansion of ~600k px is unusable.
-            sc.blit_cover(gc)
+            sc.blit_cover(gc, frame)
             return
         gbuf = getattr(gc, "buf", None)
         sbuf = getattr(sc, "buf", None)
