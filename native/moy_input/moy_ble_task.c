@@ -51,6 +51,8 @@
 #include "services/gap/ble_svc_gap.h"
 #if defined(MOY_INPUT_BLE_HOSTED)
 #include "esp_hosted.h"
+// hosted's transport state (drivers/transport/transport_drv.h, not exported)
+uint8_t is_transport_tx_ready(void);
 #endif
 
 void ble_store_config_init(void);
@@ -650,8 +652,14 @@ bool moy_ble_start(void) {
     // before NimBLE's first HCI command (esp-hosted-mcu#212). A companion that
     // does not answer these RPCs -- the Guition P4's factory C6 slave -- runs
     // its controller already, so their results are not a verdict: NimBLE's own
-    // start is.
+    // start is. A companion whose transport never comes up is: NimBLE's start
+    // runs hosted's ble_transport_ll_init, whose ESP_ERROR_CHECK aborts on it,
+    // so a C6 that does not boot would restart the console at every boot.
     esp_hosted_connect_to_slave();
+    if (!is_transport_tx_ready()) {
+        moy_hid_started(s_h, false, "the radio did not answer");
+        return false;
+    }
     esp_hosted_bt_controller_init();
     esp_hosted_bt_controller_enable();
     #endif
