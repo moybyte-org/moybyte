@@ -542,9 +542,9 @@ def test_the_list_meets_the_verbs_and_peeks_half_a_row(tmp_path):
                                         ("contrast", "light"), ("contrast", "dark")])
 def test_the_desks_cut_row_shows_under_the_fade(tmp_path, theme, mode):
     """Files on the desk, on Projects, its window shorter than its rows (the
-    kit's scene, two rows shorter so the cut row is Sakura Lua, whose cover
-    has ink in every theme): the half row above the view's foot holds the cut row's
-    ink, and the verbs' rule lies right under it."""
+    kit's scene, three rows shorter so the cut row is Pin Light, whose dark
+    cover and name have ink in every theme): the half row above the view's
+    foot holds the cut row's ink, and the verbs' rule lies right under it."""
     import test_shell_goldens as g
     import test_editor_look as el
     cfg = dict(g.CONFIGS["p4_1024x600_cs2_fs1_windowed"], variant=mode)
@@ -553,7 +553,7 @@ def test_the_desks_cut_row_shows_under_the_fade(tmp_path, theme, mode):
     ws.home.open_desk()
     ws.spine.open_app(ws.app("files"))
     el._frame(ws, 2)
-    win = el._place(ws, "files", (112, 54, 548, 324))
+    win = el._place(ws, "files", (112, 54, 548, 294))
     ws.app("files").open_place("projects", keep="Harpoon Pop")
     el._frame(ws, 6)
     cx, cy, _cw, _ch = win.content_rect()

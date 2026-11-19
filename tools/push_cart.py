@@ -842,14 +842,15 @@ def push_folder(b, board_dir, local, folder):
 
 
 def push_fixtures(b, board_dir, titles):
-    """The test fixtures among the seed carts `titles`
-    (gen_device_carts.is_fixture), which no image carries, pushed from
-    system_carts/ under their seed folders (`push_folder`). Returns the
-    folders this pushed, which the caller removes after (`drop_folders`)."""
+    """The seed carts among `titles` that no image carries
+    (gen_device_carts.in_image: the test fixtures and the official carts no
+    store is seeded with), pushed from system_carts/ under their seed folders
+    (`push_folder`). Returns the folders this pushed, which the caller
+    removes after (`drop_folders`)."""
     import gen_device_carts as gen
     src = os.path.join(ROOT, "system_carts")
     folders = gen.title_to_folder(src)
-    fixtures = {f for f, m in gen.read_manifests(src) if gen.is_fixture(m)}
+    fixtures = {f for f, m in gen.read_manifests(src) if not gen.in_image(m)}
     pushed = []
     for title in titles:
         folder = folders.get(title)

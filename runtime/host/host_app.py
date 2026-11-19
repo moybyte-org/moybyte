@@ -172,9 +172,9 @@ def make_host_cart_net():
     return HostCartNet()
 
 
-def _manifest_title(cart_dir):
+def _manifest(cart_dir):
     with open(os.path.join(cart_dir, "manifest.json"), encoding="utf-8") as f:
-        return json.load(f)["title"]
+        return json.load(f)
 
 
 def _seed_system_carts(carts_dir):
@@ -182,12 +182,15 @@ def _seed_system_carts(carts_dir):
     them (and the child duplicates/edits copies), by the rules a board seeds its
     built-ins by (#47, moy_seed.seed_folders over the store as a cache): a built-in
     whose shipped manifest "version" is newer than the seeded copy is RE-SEEDED, its
-    tuning and saves (config.json, pmem.bin) kept."""
+    tuning and saves (config.json, pmem.bin) kept. An official cart no store is
+    seeded with (`"seed": false`) is left to Get Carts, as on a board."""
     os.makedirs(carts_dir, exist_ok=True)
     names = ([n for n in sorted(os.listdir(SYSTEM_CARTS)) if n.endswith(".moy")]
              if os.path.isdir(SYSTEM_CARTS) else [])
-    moy_carts.sweep_store(carts_dir, [{"title": _manifest_title(
-        os.path.join(SYSTEM_CARTS, n))} for n in names])
+    mans = [(n, _manifest(os.path.join(SYSTEM_CARTS, n))) for n in names]
+    names = [n for n, m in mans if not _store_base.unseeded(m)]
+    moy_carts.sweep_store(carts_dir, [{"title": m["title"]} for n, m in mans
+                                      if n in names])
     _store_base.seeded(carts_dir, names)
     if names:
         moy_carts.seed_folders(SYSTEM_CARTS, carts_dir, record=False)

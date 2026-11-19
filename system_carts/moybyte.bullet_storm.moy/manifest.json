@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 12,
+  "version": 13,
   "title": "Bullet Storm",
   "id": "moybyte.bullet_storm",
   "runtime": "lua",
@@ -12,6 +12,7 @@
   "moybyte": {
     "type": "game",
     "system": true,
+    "seed": false,
     "order": 170,
     "targets": [
       "host",

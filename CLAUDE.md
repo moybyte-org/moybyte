@@ -67,7 +67,8 @@ a browser. **`.moy` is the only cart format** (the `.moyproj` SDK was deleted
 - `system_carts/*.moy` — the seed carts (manifest + main + config), which each
   release also publishes as its official carts, but for the test fixtures
   (`"moybyte": {"fixture": true}`), which only the host seeds and a board
-  tool pushes for its run; all but `moy_seed.CORE` are
+  tool pushes for its run. An official cart marked `"seed": false` is
+  published but seeded nowhere; all but `moy_seed.CORE` are
   removable (`.claude/rules/carts.md`).
 
 **Where a piece belongs (owner, 2026-09-26).** What a cart author needs to make

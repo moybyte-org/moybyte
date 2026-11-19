@@ -242,7 +242,7 @@ VENDOR_KEY = "moybyte"
 VENDOR_FIELDS = ("type", "system", "order", "permissions", "required", "handles", "receives",
                  "achievements", "config", "edit", "targets", "app", "assets",
                  "graduated", "glass", "pictures", "animates", "native", "audio_ring",
-                 "entries", "wasi", "fixture")
+                 "entries", "wasi", "fixture", "seed")
 
 
 def vendor(man):
@@ -250,6 +250,13 @@ def vendor(man):
     an object)."""
     v = man.get(VENDOR_KEY) if isinstance(man, dict) else None
     return v if isinstance(v, dict) else {}
+
+
+def unseeded(man):
+    """Whether the system cart whose manifest is `man` is one no store is
+    seeded with (`"moybyte": {"seed": false}`): an official cart a console
+    gets from its release's index alone (tools/gen_device_carts.is_unseeded)."""
+    return vendor(man).get("seed") is False
 
 
 def _id_part(s):

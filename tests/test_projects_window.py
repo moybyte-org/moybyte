@@ -282,7 +282,7 @@ def test_the_card_the_shelfs_margin_cuts_shows_its_part_past_it(tmp_path, where)
 
     g = at(grid._geom)
     left, pitch, side = g[1][0] + g[9][4] - g[5], g[3], g[2]
-    k = 2
+    k = 1
 
     def put(s):
         at(lambda: setattr(grid, "scroll", s))

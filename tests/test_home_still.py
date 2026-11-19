@@ -182,9 +182,10 @@ def test_a_change_settles_every_buffer_then_rests(tmp_path, monkeypatch, bufs):
     for t in ("apps", "games"):           # the tab's covers in the cache
         ws.home.set_home_tab(t)
         quiet = 0
-        for _ in range(200):              # until the covers stop popping in
-            quiet = quiet + 1 if frame() is None else 0
-            if quiet >= 5:
+        for _ in range(200):              # until the covers stop popping in,
+            gen = ws.covers.gen           # the idle prebuild's included
+            quiet = quiet + 1 if frame() is None and ws.covers.gen == gen else 0
+            if quiet >= 20:
                 break
     ws.home.set_home_tab("apps")
     shots = [s for s in (frame() for _ in range(10)) if s is not None]

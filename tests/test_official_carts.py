@@ -8,6 +8,7 @@ update's step (runtime/carts/web_addon.py)."""
 import json
 import os
 import re
+import shutil
 import sys
 import zipfile
 from pathlib import Path
@@ -45,6 +46,9 @@ def _manifests():
 # pushed to a board for a run, never in an image nor listed as an official cart.
 FIXTURES = {"moybyte.bench", "moybyte.bench_lua", "moybyte.brick_siege_lua",
             "moybyte.sakura"}
+# The official carts no store is seeded with (owner, 2026-11-18): the release
+# lists them, and a console gets them from there alone.
+UNSEEDED = {"moybyte.bullet_storm"}
 
 
 def _official():
@@ -188,11 +192,12 @@ def test_a_store_from_before_the_cut_sweeps_the_cut_carts_and_keeps_the_fixtures
     assert not set(SEEDS.iterdir()) & {SEEDS / ("moybyte.%s.moy" % c) for c in CUT}
 
 
-def test_a_store_from_before_tap_only_red_sweeps_tap_game(tmp_path):
+def test_a_store_from_before_tap_only_red_sweeps_tap_game_and_keeps_bullet_storm(tmp_path):
     """Tap Only Red, rebuilt in blocks, replaced Tap Game (owner, 2026-11-18):
-    a store swept before that sweeps Tap Game's folder once."""
+    a store swept before that sweeps Tap Game's folder once, and keeps Bullet
+    Storm, which left the seed set to be an official cart only."""
     root = str(tmp_path / "carts")
-    kept = ["moybyte.tap_only_red.moy"]
+    kept = ["moybyte.%s.moy" % f for f in ("bullet_storm", "tap_only_red")]
     for name in ["moybyte.tap_game.moy"] + kept:
         os.makedirs(os.path.join(root, name))
     moy_seed._save_store_version(root, moy_seed.STORE_FORMAT, 9)
@@ -208,6 +213,47 @@ def test_the_test_fixtures_are_the_ones_the_owner_named():
         assert not FIXTURES & set(board_config.roster_install(str(ROOT / "firmware" / d)))
 
 
+def test_the_unseeded_carts_are_the_ones_the_owner_named():
+    mans = _manifests()
+    assert {cid for cid, m in mans.items() if gen.is_unseeded(m)} == UNSEEDED
+    assert not UNSEEDED & FIXTURES and not UNSEEDED & set(moy_seed.CORE)
+    for cid in UNSEEDED:
+        assert not gen.in_image(mans[cid]) and not gen.is_fixture(mans[cid])
+
+
+def test_an_unseeded_cart_is_seeded_nowhere(tmp_path):
+    """No image, browser bundle, cable flash's new store or host store is
+    seeded with an unseeded cart, and naming one for an image is an error."""
+    mans = _manifests()
+    titles = {mans[cid]["title"] for cid in UNSEEDED}
+    for target in ("host", "device", "web"):
+        assert not UNSEEDED & set(gen.roster(target))
+    assert not titles & {t for t, _v, _b in gen.build_packed(str(SEEDS))}
+    assert not titles & {c["title"] for c in gen.build_carts(str(SEEDS), fixtures=True)}
+    with pytest.raises(ValueError, match="unseeded"):
+        gen.build_packed(str(SEEDS), (sorted(UNSEEDED)[0],))
+    for d in (ROOT / "firmware").iterdir():
+        if (d / "board.toml").is_file():
+            assert not UNSEEDED & set(board_config.roster_only(str(d)))
+            assert not UNSEEDED & set(board_config.roster_install(str(d)))
+    # the host's store and a store the seed served (the browser's) take none
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "host"))
+    assert not titles & {c["title"] for c in ws.launcher.items}
+    for cid in UNSEEDED:
+        assert not os.path.exists(str(tmp_path / "host" / (cid + ".moy")))
+    os.makedirs(str(tmp_path / "served"))
+    got = moy_seed.seed_folders(str(SEEDS), str(tmp_path / "served"))
+    assert not {cid + ".moy" for cid in UNSEEDED} & set(got["served"])
+    # a store that holds one keeps it: the seed and its sweep take nothing
+    root = str(tmp_path / "held")
+    shutil.copytree(str(SEEDS / "moybyte.bullet_storm.moy"), root + "/moybyte.bullet_storm.moy")
+    moy_seed._save_store_version(root, moy_seed.STORE_FORMAT, 0)
+    moy_seed.sweep_store(root, gen.build_packed(str(SEEDS)), export=None, board="b")
+    moy_catalogue.seed(gen.build_packed(str(SEEDS)), root, moy_catalogue.catalogue(root))
+    assert os.path.exists(root + "/moybyte.bullet_storm.moy/manifest.json")
+
+
 def test_every_seed_cart_but_a_fixture_is_an_official_entry_of_its_release(tmp_path, keys,
                                                                           monkeypatch):
     digest, routes = _release(tmp_path)
@@ -216,6 +262,7 @@ def test_every_seed_cart_but_a_fixture_is_an_official_entry_of_its_release(tmp_p
     official = {c["id"]: c for c in got if ci.is_official(c)}
     mans = _official()
     assert set(official) == set(mans) and not FIXTURES & {c["id"] for c in got}
+    assert UNSEEDED <= set(official), "an unseeded cart is official all the same"
     assert not any(n[len(BASE):].startswith(tuple(f + "-" for f in FIXTURES)) for n in routes), \
         "a fixture's zip or cover was published"
     assert set(board_flash.offered_carts()) == {cid + ".moy" for cid in mans}
@@ -590,3 +637,26 @@ def test_a_perf_pass_puts_back_its_fixtures_and_says_so():
     assert B.asked == ["ws.carts.put_back(['Brick Siege', 'Coin Quest'])"]
     assert said and "Brick Siege" in said[0] and "removal" in said[0]
     assert stage.conditions["put_back"] == ["Brick Siege"]
+
+
+def test_an_unseeded_cart_installs_from_its_release_on_the_host(tmp_path, keys, monkeypatch):
+    from runtime import host_app
+    root = str(tmp_path / "carts")
+    host_app.build_workstation(root)
+    digest, routes = _release(tmp_path)
+    monkeypatch.setattr(ci, "page_want", lambda: digest)
+    carts = ci.fitting(ci.parse_index(routes[OWN], OWN, OWN))
+    rows = _rows(root, carts)
+    for cid in UNSEEDED:
+        assert rows[cid + ".moy"] == "get"
+    inst = OwnInst(root, MemNet(routes))
+    out, err = [], []
+    p = pkg.Pkg(inst, out.append, err.append, ask=lambda q: True)
+    assert _done(p.install(sorted(UNSEEDED))) == 0, err
+    rows = _rows(root, carts)
+    for cid in UNSEEDED:
+        assert rows[cid + ".moy"] == "installed"
+        assert os.path.exists(root + "/" + cid + ".moy/main.lua")
+    # the host's next seed keeps it, and seeds it no more
+    host_app.build_workstation(root)
+    assert all(os.path.exists(root + "/" + cid + ".moy/main.lua") for cid in UNSEEDED)

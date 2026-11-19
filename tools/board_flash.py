@@ -481,7 +481,9 @@ KEPT = ("pmem.bin", "config.json")        # moy_seed._RESEED_PRESERVE
 def offered_carts(seeds=SEED_DIR):
     """{folder: manifest version} of every official cart in `seeds`, in
     order: the seed carts but the test fixtures, which no release publishes
-    (gen_device_carts.is_fixture)."""
+    (gen_device_carts.is_fixture). One no store is seeded with
+    (gen_device_carts.is_unseeded) is among them: a store that holds it is
+    brought to the tree's, and no board's `[roster] install` names it."""
     import json
     from tools.gen_device_carts import is_fixture
     out = {}

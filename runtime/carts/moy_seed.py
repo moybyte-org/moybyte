@@ -26,7 +26,8 @@ import json
 from moy_fs import (_exists, _mkdir, _read, _read_bytes, _read_recover,
                     _remove, _write, _write_atomic, _write_bytes)
 from moy_store_base import (CARTS_DIR, _has, _listing, _rmtree, _sibling_path, cart_path,
-                            cart_folder, store_path, BUILTIN_NS, CART_EXT, VENDOR_KEY)
+                            cart_folder, store_path, BUILTIN_NS, CART_EXT, VENDOR_KEY,
+                            unseeded)
 from moy_fs import _native as _store
 
 
@@ -192,7 +193,8 @@ def seed_folders(src, root=CARTS_DIR, record=True):
     each cart's manifest last, "removed": those a re-seed removed, "served":
     every cart folder `src` holds, taken or not}. A store of `record` takes
     every cart only on its first visit; one that is a cache of the built-ins
-    (the host's, as a board's) takes every cart every time."""
+    (the host's, as a board's) takes every cart every time. An unseeded
+    cart (`"moybyte": {"seed": false}`) is none `src` serves."""
     have = _listing(root) or {}
     first = not any(have[n] and n.endswith(CART_EXT) for n in have)
     wrote, removed, served = [], [], []
@@ -204,8 +206,8 @@ def seed_folders(src, root=CARTS_DIR, record=True):
             man = json.loads(_read(src + "/" + name + "/manifest.json"))
         except (OSError, ValueError):
             continue                  # not a manifest anything reads: not a cart
-        if not isinstance(man, dict):
-            continue
+        if not isinstance(man, dict) or unseeded(man):
+            continue                  # an official cart only its index offers
         served.append(name)
         d = cart_path(root, name)
         there = _exists(d)
@@ -434,7 +436,9 @@ RETIRED = ("Ray Test", "Ray Lua", "Layer Test", "Battle City", "Bubble Trouble",
 # a store keeps the copy it was seeded, edited or not (tests/fixtures/
 # store_trial's Bench), as it keeps any cart, and a tool that runs one pushes
 # it over that copy. Generation 10 takes Tap Game, which Tap Only Red, rebuilt
-# in blocks, replaced on 2026-11-18.
+# in blocks, replaced on 2026-11-18. An official cart no store is seeded with
+# (`"seed": false`, Bullet Storm) is no retired one: a store that holds it
+# keeps it.
 RETIRED_FOLDERS = tuple("moybyte.%s.moy" % s for s in (
     "ocean", "pet", "platformer", "scroll_demo", "tap_red", "theme_picker",
     "wallpaper_space", "wifi", "mesh",

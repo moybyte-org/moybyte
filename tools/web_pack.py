@@ -54,7 +54,10 @@ ones its image seeds. `moybyte.core` marks the ones a console never removes
 (moy_seed.CORE). A test fixture (`"moybyte": {"fixture": true}`,
 gen_device_carts.is_fixture: Bench and the others the perf ledger, the
 on-glass suites and the tests run) is seeded on the host alone and is no
-official cart, so no image or bundle carries it and no index lists it. A console trusts the built-ins' namespace only from its own
+official cart, so no image or bundle carries it and no index lists it. An
+official cart no store is seeded with (`"moybyte": {"seed": false}`,
+gen_device_carts.is_unseeded) is listed like any other: the index is the one
+place a console gets it. A console trusts the built-ins' namespace only from its own
 release's index with the signature verified (cart_index.parse_index).
 """
 

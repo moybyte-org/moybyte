@@ -161,7 +161,8 @@ Doom and Jet Teapot.
 
 - [`docs/moy_cart_api.md`](docs/moy_cart_api.md) — the verb table.
 - `system_carts/` — the 22 built-in carts, from a blocks game to Brick Siege,
-  and four test fixtures.
+  and four test fixtures. Every console is seeded with 21 of them; Bullet
+  Storm is official but waits in Get Carts.
 - [`docs/blocks_tap_only_red.md`](docs/blocks_tap_only_red.md) — building
   `system_carts/moybyte.tap_only_red.moy` in the block editor, step by step.
 

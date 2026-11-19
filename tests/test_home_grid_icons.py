@@ -15,7 +15,7 @@ import pytest
 from runtime import host_app, launcher_layer, ui_draw
 from runtime import home_grid
 from runtime.cover_cache import BASE, HALF
-from ws_helpers import build_ws_with_shelf
+from ws_helpers import build_ws_with_shelf, shelf
 
 
 @pytest.fixture(autouse=True)
@@ -32,6 +32,8 @@ def _home(tmp_path, arrangement, n=30, **kw):
         ws = host_app.build_workstation(str(tmp_path / "carts"), **kw)
         ws.home.go_home()
         ws.home.open_library()
+        ws.launcher.items = [c for c in shelf(str(tmp_path / "carts"))
+                             if c.get("type") == "game"]     # the top-up's games too
     else:
         ws = build_ws_with_shelf(tmp_path, n)
     drv = host_app.ConsoleDriver(ws)

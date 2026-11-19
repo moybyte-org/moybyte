@@ -550,7 +550,8 @@ comments); absent or empty, the console reads moybyte-org/carts. A legacy
 host's `indexes.json` there at boot. A board reads its own release's index
 last (`carts-<board>.json` beside its update manifest): the browser console
 add-on and every seed cart of that build but a test fixture as an OFFICIAL
-cart (`"moybyte": {"fixture": true}`, `docs/app_api_v1.md` §2), the one place
+cart (`"moybyte": {"fixture": true}`, `docs/app_api_v1.md` §2), those no
+store is seeded with (`"seed": false`) among them, the one place
 an entry in the built-ins' namespace or a Python cart installs from, with
 the signature verified (`.claude/rules/carts.md`).
 
