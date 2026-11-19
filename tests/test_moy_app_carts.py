@@ -57,6 +57,9 @@ LISTED = {
     # tests/test_wasi_commands.py sets this service's permissions per test and
     # pins the calls they refuse.
     "tests/fixtures/wasm/wasi_svc.moy": (r"^main uses moybyte\.os\.",),
+    # An official compiled cart carries its source: the release builds its
+    # modules (tools/web_pack.py's built_seed).
+    "system_carts/moybyte.sakura_c.moy": (r"not built: `moy app build",),
     # tests/test_services_vm_stop.py grants its "pin" round lease:gpio per test.
     "tests/fixtures/elf/elf_svc.moy": (r"^main uses moy_dev_",),
 }

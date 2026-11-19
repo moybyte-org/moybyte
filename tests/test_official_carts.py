@@ -48,7 +48,7 @@ FIXTURES = {"moybyte.bench", "moybyte.bench_lua", "moybyte.brick_siege_lua",
             "moybyte.sakura"}
 # The official carts no store is seeded with (owner, 2026-11-18): the release
 # lists them, and a console gets them from there alone.
-UNSEEDED = {"moybyte.bullet_storm"}
+UNSEEDED = {"moybyte.bullet_storm", "moybyte.sakura_c"}
 
 
 def _official():
@@ -277,7 +277,7 @@ def test_every_seed_cart_but_a_fixture_is_an_official_entry_of_its_release(tmp_p
         assert names == sorted(asset["files"])
         assert not any(n.startswith("thumbs/") for n in names)
         assert c.get("cover") is None or (tmp_path / "release" / c["cover"]["url"]).exists()
-        assert ci.runs_on(c, ("lua",))
+        assert ci.runs_on(c, ("lua", "wasm"))
     assert "scenes/" in "".join(official["moybyte.coin_quest"]["assets"][0]["files"]), \
         "a cart's subfolders travel"
     # one cart is one asset: the same bytes the same name on every board
@@ -340,7 +340,7 @@ class OwnInst(Inst):
         return self._own
 
     def runtimes(self):
-        return ("lua",)
+        return ("lua", "wasm")
 
 
 def _drain(gen_):
@@ -656,7 +656,14 @@ def test_an_unseeded_cart_installs_from_its_release_on_the_host(tmp_path, keys, 
     rows = _rows(root, carts)
     for cid in UNSEEDED:
         assert rows[cid + ".moy"] == "installed"
-        assert os.path.exists(root + "/" + cid + ".moy/main.lua")
+        assert os.path.exists(_main(root, cid))
     # the host's next seed keeps it, and seeds it no more
     host_app.build_workstation(root)
-    assert all(os.path.exists(root + "/" + cid + ".moy/main.lua") for cid in UNSEEDED)
+    assert all(os.path.exists(_main(root, cid)) for cid in UNSEEDED)
+
+
+def _main(root, cid):
+    """The main file of the installed cart `cid` (a compiled one's built by
+    its release: tools/web_pack.py's built_seed)."""
+    with open(os.path.join(root, cid + ".moy", "manifest.json")) as f:
+        return os.path.join(root, cid + ".moy", json.load(f).get("main", "main.py"))

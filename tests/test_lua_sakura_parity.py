@@ -48,13 +48,16 @@ def test_both_twins_ship_the_same_scene_and_no_pasted_table():
     what #214 set out to delete, and a byte difference between the two scenes
     is a canopy the twins shed from differently."""
     blobs = []
-    for slug in ("moybyte.sakura", "moybyte.sakura_lua"):
+    for slug in ("moybyte.sakura", "moybyte.sakura_lua", "moybyte.sakura_c"):
         d = os.path.join(CARTS, slug + ".moy")
         with open(os.path.join(d, "scenes", "blossoms.moyscene")) as fh:
             blobs.append(fh.read())
         man = json.load(open(os.path.join(d, "manifest.json")))
         assert man["moybyte"]["assets"]["scenes"] == ["blossoms"], slug
-    assert blobs[0] == blobs[1], "the twins' scenes drifted"
+    assert blobs[0] == blobs[1] == blobs[2], "the twins' scenes drifted"
+    bgs = {open(os.path.join(CARTS, slug + ".moy", "images", "bg.moyimg"), "rb").read()
+           for slug in ("moybyte.sakura", "moybyte.sakura_lua", "moybyte.sakura_c")}
+    assert len(bgs) == 1, "the twins' backdrops drifted"
     rows = json.loads(blobs[0])
     assert len(rows) > 100 and all(r["tag"] == "blossom" for r in rows)
 

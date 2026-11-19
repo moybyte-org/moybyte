@@ -347,6 +347,9 @@ def test_a_signed_release_signs_the_index(tmp_path, monkeypatch):
     monkeypatch.setattr(publish.ota_sign, "read_key", lambda: b"test key")
     monkeypatch.setattr(publish.ota_sign, "sign", lambda m, k: "00")
     monkeypatch.setattr(publish.ota_sign, "sign_index", lambda d, k: _sign(d))
+    # the compiled seed carts' modules go unsigned: the stand-in key is no PEM
+    from tools import wasm_module
+    monkeypatch.setattr(wasm_module, "signing_key", lambda source=None: None)
     monkeypatch.setitem(sys.modules, "moy_net", net_binding)
     monkeypatch.setattr(ci, "INDEX_KEYS", TEST_KEYS)
     artifacts = tmp_path / "artifacts"

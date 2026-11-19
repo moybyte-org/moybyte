@@ -7,6 +7,7 @@
 #   publish_cart     the add-on cart for a page, packed beside it
 #   index_entry      its entry in the board's index
 #   official_carts   the seed carts a release publishes: all but the test fixtures
+#   built_seed       a compiled seed cart built from its source, for its entry
 #   official_entries every official cart as an entry of the release
 #   index_doc        the board's index: the official entries, this add-on, then every earlier add-on
 #   publish_addon    the carts, their licence and the board's index, in one folder
@@ -204,6 +205,42 @@ def seed_files(src):
     return out
 
 
+BOARD_CHIPS = ("esp32s3", "esp32p4")
+
+
+def built_seed(src, dst):
+    """The folder a seed cart's official entry is made from: `src` itself, or
+    for a compiled seed cart, which carries its source alone, `dst` holding
+    it built from its src/ (sdk/README.md, `moy app build`): its main.wasm by
+    the pinned wasi-sdk (fetched when absent), its AOT module per board chip
+    where the pinned compilers are here, and its native module per board chip
+    whose toolchain is here (tools/elf_cart.py; its manifest's `native` names
+    them), each signed with the OTA key where there is one. A console with no
+    native module for its chip runs the wasm one (app_perms.tier_of). The
+    same source and toolchains build the same bytes."""
+    with open(os.path.join(src, "manifest.json"), "rb") as f:
+        man = json.loads(f.read().decode())
+    main = man.get("main") or ""
+    if man.get("runtime") != "wasm" or os.path.exists(os.path.join(src, main)) \
+            or not os.path.isdir(os.path.join(src, "src")):
+        return src
+    if ROOT not in sys.path:
+        sys.path.insert(0, ROOT)
+    from tools import elf_cart, wasm_cart, wasm_module
+    signed = wasm_module.signing_key() is not None
+    aot = all(os.path.isfile(os.path.join(wasm_module.DIST, c["file"]))
+              for c in wasm_module.COMPILERS.values())
+    try:
+        wasm_cart.build(src, dst, BOARD_CHIPS if aot else (), signed=signed)
+    except wasm_cart.ToolchainMissing as exc:
+        raise PageError("%s: %s to build its main.wasm" % (os.path.basename(src), exc))
+    if isinstance((man.get("moybyte") or {}).get("native"), list):
+        chips = [c for c in BOARD_CHIPS if elf_cart.available(c)]
+        if chips:
+            elf_cart.build(dst, dst, chips, signed=signed)
+    return dst
+
+
 def seed_entry(src, digest, folder, core=()):
     """The official entry of the seed cart folder `src` for the page
     `digest`, its zip and its cover written into `folder` (a name already
@@ -211,7 +248,9 @@ def seed_entry(src, digest, folder, core=()):
     with open(os.path.join(src, "manifest.json"), "rb") as f:
         man = json.loads(f.read().decode())
     cid = man["id"]
-    files = seed_files(src)
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        files = seed_files(built_seed(src, os.path.join(tmp, cid + ".moy")))
     data = io_zip(cid + ".moy", files)
     name = SEED_NAME % (cid, hashlib.sha256(data).hexdigest()[:ID_HEX])
     dest = os.path.join(folder, name)

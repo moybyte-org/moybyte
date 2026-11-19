@@ -29,6 +29,7 @@ from ws_helpers import make_drv, no_unlock_banner, open_cart, quiesce
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DUAL = os.path.join(ROOT, "tests", "fixtures", "wasm", "dual.moy")
+SAKURA = os.path.join(ROOT, "system_carts", "moybyte.sakura_c.moy")
 _DT = 1.0 / 30.0
 
 
@@ -84,6 +85,16 @@ def test_one_source_draws_the_same_frame_on_both_targets(tmp_path):
         assert kind == "ElfGame"
         assert wasm == native
         assert len(set(wasm)) > 8               # it drew something
+    finally:
+        ws.spine.exit()
+
+
+def test_sakura_c_runs_on_both_targets(tmp_path):
+    ws = _ws(tmp_path, SAKURA, "moybyte.sakura_c.moy")
+    try:
+        assert _frame(ws, "Sakura C", 10)[0] == "WasmHostRun"
+        _opt(ws, "moybyte.sakura_c", "Sakura C")
+        assert _frame(ws, "Sakura C", 10)[0] == "ElfGame"
     finally:
         ws.spine.exit()
 

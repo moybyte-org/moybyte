@@ -562,7 +562,7 @@ def main(argv=None):
         write_png(args.png, sc.buf)
         print("preview ->", args.png)
     if not args.dry_run:
-        for slug in ("moybyte.sakura", "moybyte.sakura_lua"):
+        for slug in ("moybyte.sakura", "moybyte.sakura_lua", "moybyte.sakura_c"):
             d = os.path.join(ROOT, "system_carts", slug + ".moy", "images")
             os.makedirs(d, exist_ok=True)
             with open(os.path.join(d, "bg.moyimg"), "w") as f:
@@ -570,7 +570,7 @@ def main(argv=None):
             print("wrote", os.path.join(d, "bg.moyimg"), len(blob), "bytes")
     if args.emit:
         scene = emit_scene(_emit_points(clumps, random.Random(SEED + 1)))
-        for slug in ("moybyte.sakura", "moybyte.sakura_lua"):
+        for slug in ("moybyte.sakura", "moybyte.sakura_lua", "moybyte.sakura_c"):
             d = os.path.join(ROOT, "system_carts", slug + ".moy", "scenes")
             os.makedirs(d, exist_ok=True)
             path = os.path.join(d, "blossoms.moyscene")

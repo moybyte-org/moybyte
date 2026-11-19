@@ -49,10 +49,15 @@ def console(tmp_path_factory):
     per cart would be.
     """
     store = tmp_path_factory.mktemp("carts")
+    import sys
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import web_pack
     for name in sorted(os.listdir(SYSTEM_CARTS)):
         if name.endswith(".moy"):
-            shutil.copytree(os.path.join(SYSTEM_CARTS, name),
-                            os.path.join(str(store), name))
+            # a compiled one as its release builds it
+            dst = os.path.join(str(store), name)
+            if web_pack.built_seed(os.path.join(SYSTEM_CARTS, name), dst) != dst:
+                shutil.copytree(os.path.join(SYSTEM_CARTS, name), dst)
     ws = host_app.build_workstation(str(store))
     driver = host_app.ConsoleDriver(ws)
     ws.launcher.items = shelf(ws.carts_root)
