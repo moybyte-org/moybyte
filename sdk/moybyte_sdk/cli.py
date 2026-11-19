@@ -35,8 +35,9 @@ have, so with this package installed (`pip install -e .` in moybyte puts
         native module's frames under its own symbols; --gdb opens gdb on it
 
 The tiers are the start-here table's: `wasm` is an app compiled to wasm
-(moybyte.app imports), `wasi` a WASI command or service, `c` a native (ELF)
-module.
+(moybyte.app imports), and with `--type game` a compiled cart, one C source
+that builds to main.wasm and to a native module per chip (moybyte/cart.h);
+`wasi` a WASI command or service, `c` a native (ELF) module.
 """
 
 import argparse
@@ -723,6 +724,11 @@ def new_cart(name, tier="python", service=None, typ=None, into="."):
         else:
             files["main" + ext] = templates.PY_APP if tier == "python" else templates.LUA_APP
             ven["permissions"] = ["prefs"]
+    elif tier == "wasm" and typ == "game":
+        man.update({"runtime": "wasm", "main": "main.wasm", "memory": 2,
+                    "canvas": "320x240", "input": ["buttons"]})
+        files["src/main.c"] = templates.CART_GAME
+        ven["native"] = []
     elif tier == "wasm":
         man.update({"runtime": "wasm", "main": "main.wasm", "memory": 2,
                     "extensions": [WASM_APP]})
@@ -762,8 +768,8 @@ def new_cart(name, tier="python", service=None, typ=None, into="."):
     return folder
 
 
-def _build_hint(folder, tier, service):
-    if tier == "c" or service == "c":
+def _build_hint(folder, tier, service, typ=None):
+    if tier == "c" or service == "c" or (tier == "wasm" and typ == "game"):
         return ["%s build %s --chip esp32s3 --chip esp32p4" % (PROG, folder)]
     if tier in ("wasm", "wasi") or service == "wasi":
         return ["%s build %s" % (PROG, folder)]
@@ -776,7 +782,7 @@ def cmd_new(a):
     except Refused as e:
         return die(str(e))
     print("wrote %s" % folder)
-    for h in _build_hint(folder, a.tier, a.service):
+    for h in _build_hint(folder, a.tier, a.service, a.type):
         print("  build: " + h)
     print("  next: %s check %s" % (PROG, folder))
     return 0

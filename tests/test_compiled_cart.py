@@ -6,7 +6,8 @@ to a native module a chip, both in one .moy, and the console picks which runs
   * the two draw the same frame from the same cart: tests/fixtures/wasm/
     dual.moy uses every kind of verb, the sheet, the map, a layer, a paint
     image, a scene, the config, par's items and a file's round trip, on the
-    host's WAMR and as the host's module;
+    host's WAMR and as the host's module, and so does a game
+    `moy app new --tier wasm --type game` writes;
   * the native module keeps what the wasm one keeps and plays what it plays
     (native/moy_elf/moy_os.h, A GAME'S CHANNELS): pmem, a pref and a written
     file across runs, a blit through a palette, blit565 and a blit of
@@ -192,6 +193,22 @@ def test_the_audio_verbs_and_the_stream_reach_the_session_on_both_targets(tmp_pa
         assert w_snd[0] > 2048 and w_snd[0] % 256 == 0 and w_snd[2] == 0, w_snd
         assert n_snd[0] % 256 == 0 and abs(n_snd[0] - w_snd[0]) <= 1024, n_snd
         assert n_snd[1] > 0 and n_snd[2] == 0, n_snd
+    finally:
+        ws.spine.exit()
+
+
+def test_a_new_compiled_game_draws_the_same_frame_on_both_targets(tmp_path):
+    from sdk.moybyte_sdk import cli
+    src = cli.new_cart("Fresh", tier="wasm", typ="game", into=str(tmp_path))
+    ws = _ws(tmp_path, src, "fresh.moy")
+    try:
+        kind, wasm = _frame(ws, "Fresh")
+        assert kind == "WasmHostRun"
+        _opt(ws, "local.fresh", "Fresh")
+        kind, native = _frame(ws, "Fresh")
+        assert kind == "ElfGame"
+        assert wasm == native
+        assert len(set(wasm)) > 2               # it drew something
     finally:
         ws.spine.exit()
 

@@ -11,8 +11,9 @@ each verb on the host.
     declared one nothing uses warned, a row the SDK's C library links only
     noted;
   * build: a compiled template built into its own folder on the host chip
-    checks with nothing left to build; a script cart has nothing to build,
-    and a native one needs a chip;
+    checks with nothing left to build; a new compiled game builds from its
+    one source to main.wasm and a native module per chip named; a script
+    cart has nothing to build, and a native one needs a chip;
   * stubs: what it writes is tools/gen_os_table.py's output byte for byte;
   * push: into a simulator store, the stubs left behind, a cart that does
     not check refused;
@@ -238,6 +239,31 @@ def test_build_leaves_a_template_nothing_to_build(tmp_path, tier, service):
     if tier in ("wasm", "wasi"):
         assert built["main"] == os.path.join(cart, "main.wasm")
         assert not os.path.exists(os.path.join(cart, "main.host.elf"))
+    errors, warnings, _notes = cli.check_cart(cart)
+    assert errors == [] and warnings == []
+
+
+def test_a_new_compiled_game_builds_wasm_and_a_module_per_chip(tmp_path, capsys):
+    _wasi_sdk_or_skip()
+    from tools import elf_cart
+    chips = ["host"] + [c for c in ("esp32s3", "esp32p4") if elf_cart.available(c)]
+    assert cli.main(["new", "My Game", "--tier", "wasm", "--type", "game",
+                     "--dir", str(tmp_path)]) == 0
+    cart = str(tmp_path / "my_game.moy")
+    hint = capsys.readouterr().out
+    assert "--chip esp32s3 --chip esp32p4" in hint
+    man = cli.read_manifest(cart)
+    assert man["runtime"] == "wasm" and man["moybyte"]["native"] == []
+    assert cli.tier_of(man, cart) == "wasm"
+    args = ["build", cart, "--unsigned"]
+    for c in chips:
+        args += ["--chip", c]
+    assert cli.main(args) == 0
+    assert os.path.getsize(os.path.join(cart, "main.wasm")) > 0
+    for c in chips:
+        assert os.path.getsize(os.path.join(cart, "main.%s.elf" % c)) > 0
+    assert cli.read_manifest(cart)["moybyte"]["native"] == [
+        c for c in elf_cart.CHIPS if c in chips]
     errors, warnings, _notes = cli.check_cart(cart)
     assert errors == [] and warnings == []
 

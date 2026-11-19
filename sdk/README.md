@@ -14,6 +14,7 @@ subcommand it does not have; Moybyte's is `moy-app`, the package
 
 ```
 moy app new <name> [--tier python|lua|wasm|wasi|c] [--service python|lua|wasi|c]
+                   [--type app|service|command|game]
 moy app check <cart> [--strict]
 moy app build <cart> [--chip esp32s3|esp32p4|host ...] [--unsigned]
 moy app stubs <cart>
@@ -22,9 +23,11 @@ moy app coredump <board> [--gdb] [--port PORT] [--elf ELF] [--symbols DIR]
 ```
 
 - `new` writes `<name>.moy` from a template per tier (`sdk/moybyte_sdk/templates.py`;
-  `wasm` is an app compiled to wasm, `wasi` a WASI command or service, `c` a
-  native module), its manifest carrying Moybyte's fields, and with
-  `--service` the app's own service as its `entries`.
+  `wasm` is an app compiled to wasm, and with `--type game` a compiled cart,
+  which `build` makes into main.wasm and a native module per `--chip` (below,
+  "A compiled cart"); `wasi` a WASI command or service, `c` a native module),
+  its manifest carrying Moybyte's fields, and with `--service` the app's own
+  service as its `entries`.
 - `check` reads the manifest as the console's readers do (a Moybyte field at
   the top level, an unknown permission, a `required` one not asked for, a
   native cart without `full_access`, an `entries` that does not read are
