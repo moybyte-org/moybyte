@@ -418,10 +418,15 @@ store op a frame that ends when the ring is full (or empty) or after
 `link_beam.STORE_MS`, the file it is on held open from frame to frame. A
 beam's RAM is fixed: the ring, one block and a cart's head. **A chunk is as
 long as both links carry**: a beam's frames are the only ones longer than
-250 bytes, ESP-NOW v2's 1470 between two consoles whose radio is the chip's
-own (`moy_link_frame_max`); the offer names the sender's chunk and the
-receiver takes the smaller of it and its own, so a P4, whose C6 shim carries
-v1 frames, sends and takes chunks that fit 250 bytes.
+250 bytes, ESP-NOW v2's 1470 between two consoles whose radio carries v2
+(`moy_link_frame_max`: the chip's own, or a P4's C6 from shim 4 on); the offer
+names the sender's chunk and the receiver takes the smaller of it and its own,
+so a P4 whose C6 runs an older shim sends and takes chunks that fit 250 bytes.
+From shim 4 a P4's queued sends also leave as one SEND_BATCH RPC to its C6,
+not one RPC a frame (`native/p4/moy_c6/espnow_shim_proto.h`), and leave at the
+link's rate: the C6 is a Wi-Fi 6 chip, where `esp_wifi_config_espnow_rate`
+fails, so its shim sets the rate per peer, and below shim 4 every frame leaves
+at 1M.
 
 **The receiver drives completion, because the ack lies** (§4). The sender
 offers on the air until a console answers; the receiver's yes binds the two

@@ -24,6 +24,11 @@
 //     report is SEND_STATUS (the radio's own send callback, forwarded); an
 //     error ACK synthesizes a FAILED send_cb so modespnow's sync accounting
 //     (tx_responses vs tx_packets) never hangs on a slave-side error.
+//   * From shim 4 (MOYC6_SHIM_BATCH) the queued sends leave as SEND_BATCH,
+//     every frame queued when the TX task wakes in one RPC, and frames run to
+//     ESP-NOW v2's 1470 bytes (moy_c6_frame_max, the link's frame). An older
+//     slave keeps one SEND per frame of at most 250, so this image needs no
+//     new C6.
 //
 // The hosted callbacks (ACK/RECV/SEND_STATUS) run on the hosted RPC task.
 // modespnow's recv_cb is safe there by upstream's own design -- on a radio
@@ -31,6 +36,7 @@
 // the MP task, callbacks scheduled via mp_sched_schedule.
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -38,6 +44,7 @@
 #include "freertos/semphr.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "freertos/idf_additions.h"
 
 #include "py/obj.h"
 #include "py/runtime.h"
@@ -45,11 +52,13 @@
 #include "py/mperrno.h"
 
 #include "esp_err.h"
+#include "esp_heap_caps.h"
 #include "esp_now.h"
 #include "esp_wifi.h"
 #include "esp_hosted.h"
 
 #include "espnow_shim_proto.h"
+#include "moy_c6.h"
 
 #define MOYC6_PEERS_MAX     (8)     // broadcast + a match peer + slack
 #define MOYC6_HANDSHAKE_MS  (2000)  // covers a busy SDIO; a stock slave never answers
@@ -72,7 +81,13 @@ static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t s_rx_packets, s_rx_dropped, s_tx_packets;
 static uint32_t s_acks, s_ack_errors;
 static uint32_t s_tx_qfull, s_tx_rpc_err;
+static uint32_t s_tx_batches;
 static int32_t s_last_err;
+
+// The slave's shim version as it last answered (-1: never), and the longest
+// frame esp_now_send takes, which follows from it at init.
+static int s_shim = -1;
+static uint16_t s_frame = MOYC6_FRAME_V1;
 
 // -- the TX queue ------------------------------------------------------------
 //
@@ -87,15 +102,26 @@ static int32_t s_last_err;
 // answers ESP_ERR_ESPNOW_NO_MEM, which is espnow's own backpressure word for
 // "TX buffers exhausted" (the sender counts a drop).
 
+// With SEND_BATCH the queue is what a batch is made of, so it is deeper and
+// its items v2-long, in PSRAM; below shim 4 it is the 12 v1 items it always
+// was.
+
 #define MOYC6_TX_QUEUE_LEN  (12)
+#define MOYC6_TX_QUEUE_V2   (32)
 
 typedef struct {
     moyc6_send_t msg;
     uint16_t payload_len;
-    uint8_t payload[ESP_NOW_MAX_DATA_LEN];
+    uint8_t payload[MOYC6_FRAME_V2];
 } moyc6_tx_item_t;
 
+// An item's bytes for frames up to `frame`: the queue copies no more.
+#define MOYC6_TX_ITEM(frame) (offsetof(moyc6_tx_item_t, payload) + (frame))
+
 static QueueHandle_t s_tx_queue;
+static uint8_t *s_batch;            // MOYC6_BATCH_BYTES, the TX task's own
+
+static int moyc6_shim(void);
 
 // -- hosted plumbing ---------------------------------------------------------
 
@@ -105,13 +131,63 @@ static esp_err_t moyc6_rpc(const void *msg, size_t msg_len,
         return esp_hosted_send_custom_data(MOYC6_H2S, (const uint8_t *)msg, msg_len);
     }
     // One contiguous message: the seam has no scatter-gather.
-    uint8_t buf[sizeof(moyc6_send_t) + ESP_NOW_MAX_DATA_LEN];
+    uint8_t buf[sizeof(moyc6_send_t) + MOYC6_FRAME_V2];
     if (msg_len + payload_len > sizeof(buf)) {
         return ESP_ERR_INVALID_SIZE;
     }
     memcpy(buf, msg, msg_len);
     memcpy(buf + msg_len, payload, payload_len);
     return esp_hosted_send_custom_data(MOYC6_H2S, buf, msg_len + payload_len);
+}
+
+// `n` frames the radio never took: modespnow's tx accounting balanced with a
+// FAILED send_cb each, exactly as the error-ACK path does.
+static void moyc6_tx_failed(uint32_t n) {
+    for (uint32_t i = 0; s_send_cb != NULL && i < n; i++) {
+        esp_now_send_info_t info = { 0 };
+        s_send_cb(&info, ESP_NOW_SEND_FAIL);
+    }
+}
+
+static void moyc6_tx_done(esp_err_t err, uint32_t frames) {
+    portENTER_CRITICAL(&s_lock);
+    if (err == ESP_OK) {
+        s_tx_packets += frames;
+    } else {
+        s_tx_rpc_err += frames;
+        s_last_err = err;
+    }
+    portEXIT_CRITICAL(&s_lock);
+    if (err != ESP_OK) {
+        moyc6_tx_failed(frames);
+    }
+}
+
+// The batch: the item already taken, then every queued item that fits,
+// taken without waiting (the queue fills while the last RPC is out, so a
+// busy link batches by itself and a quiet one sends at once).
+static void moyc6_tx_batch(moyc6_tx_item_t *item) {
+    uint32_t used = 0, frames = 0;
+    for (;;) {
+        uint32_t next = moyc6_batch_put(s_batch, used,
+            item->msg.dst_valid ? item->msg.dst : NULL,
+            item->payload, item->payload_len);
+        if (next == 0) {
+            break;                  // cannot happen: fit is checked first
+        }
+        used = next;
+        frames++;
+        if (frames >= MOYC6_BATCH_FRAMES
+                || xQueuePeek(s_tx_queue, item, 0) != pdTRUE
+                || !moyc6_batch_fits(used, item->payload_len)) {
+            break;
+        }
+        xQueueReceive(s_tx_queue, item, 0);
+    }
+    moyc6_tx_done(esp_hosted_send_custom_data(MOYC6_H2S, s_batch, used), frames);
+    portENTER_CRITICAL(&s_lock);
+    s_tx_batches++;
+    portEXIT_CRITICAL(&s_lock);
 }
 
 static void moyc6_tx_task(void *arg) {
@@ -121,23 +197,11 @@ static void moyc6_tx_task(void *arg) {
         if (xQueueReceive(s_tx_queue, &item, portMAX_DELAY) != pdTRUE) {
             continue;
         }
-        esp_err_t err = moyc6_rpc(&item.msg, sizeof(item.msg),
-            item.payload, item.payload_len);
-        if (err == ESP_OK) {
-            portENTER_CRITICAL(&s_lock);
-            s_tx_packets++;
-            portEXIT_CRITICAL(&s_lock);
+        if (s_batch != NULL) {
+            moyc6_tx_batch(&item);
         } else {
-            portENTER_CRITICAL(&s_lock);
-            s_tx_rpc_err++;
-            s_last_err = err;
-            portEXIT_CRITICAL(&s_lock);
-            if (s_send_cb != NULL) {
-                // Balance modespnow's tx accounting, exactly as the
-                // error-ACK path does: the radio never took this one.
-                esp_now_send_info_t info = { 0 };
-                s_send_cb(&info, ESP_NOW_SEND_FAIL);
-            }
+            moyc6_tx_done(moyc6_rpc(&item.msg, sizeof(item.msg),
+                item.payload, item.payload_len), 1);
         }
     }
 }
@@ -197,11 +261,10 @@ static void moyc6_on_ack(const uint8_t *data, size_t len) {
         s_last_err = ack.err;
     }
     portEXIT_CRITICAL(&s_lock);
-    if (ack.verb == MOYC6_V_SEND && ack.err != ESP_OK && s_send_cb != NULL) {
-        // Balance modespnow's tx accounting: the radio never took this one,
-        // so its real send callback will never fire.
-        esp_now_send_info_t info = { 0 };
-        s_send_cb(&info, ESP_NOW_SEND_FAIL);
+    if (ack.verb == MOYC6_V_SEND && ack.err != ESP_OK) {
+        // The radio never took this one, so its real send callback will
+        // never fire.
+        moyc6_tx_failed(1);
     }
     if (s_ack_sem != NULL && ack.verb == s_ack_verb) {
         // THE ANSWER TRAVELS HERE. s_ack_err was declared on day one and
@@ -211,6 +274,33 @@ static void moyc6_on_ack(const uint8_t *data, size_t len) {
         // (V_VERSION: the ACK's err carries the shim version) got None from
         // a slave that was answering correctly (found on glass 2026-08-25).
         s_ack_err = ack.err;
+        xSemaphoreGive(s_ack_sem);
+    }
+}
+
+static void moyc6_on_batch_status(const uint8_t *data, size_t len) {
+    if (len < sizeof(moyc6_batch_status_t)) {
+        return;
+    }
+    moyc6_batch_status_t st;
+    memcpy(&st, data, sizeof(st));
+    portENTER_CRITICAL(&s_lock);
+    s_acks++;
+    s_ack_errors += st.failed;
+    s_last_err = st.err;
+    portEXIT_CRITICAL(&s_lock);
+    moyc6_tx_failed(st.failed);
+}
+
+static moyc6_diag_t s_diag;
+
+static void moyc6_on_diag(const uint8_t *data, size_t len) {
+    if (len < sizeof(moyc6_diag_t)) {
+        return;
+    }
+    memcpy(&s_diag, data, sizeof(s_diag));
+    if (s_ack_sem != NULL && s_ack_verb == MOYC6_V_DIAG) {
+        s_ack_err = ESP_OK;
         xSemaphoreGive(s_ack_sem);
     }
 }
@@ -270,6 +360,12 @@ static void moyc6_on_s2h(uint32_t id, const uint8_t *data, size_t len, void *ctx
         case MOYC6_V_SEND_STATUS:
             moyc6_on_send_status(data, len);
             break;
+        case MOYC6_V_BATCH_STATUS:
+            moyc6_on_batch_status(data, len);
+            break;
+        case MOYC6_V_DIAG_REPLY:
+            moyc6_on_diag(data, len);
+            break;
         default:
             break;
     }
@@ -286,13 +382,36 @@ esp_err_t esp_now_init(void) {
         return err;
     }
     if (s_tx_queue == NULL) {
-        s_tx_queue = xQueueCreate(MOYC6_TX_QUEUE_LEN, sizeof(moyc6_tx_item_t));
+        // Once a boot: the slave's version changes only with a C6 update,
+        // which reboots the console.
+        if (moyc6_shim() >= MOYC6_SHIM_BATCH) {
+            s_batch = heap_caps_malloc(MOYC6_BATCH_BYTES, MALLOC_CAP_SPIRAM);
+            s_tx_queue = s_batch == NULL ? NULL : xQueueCreateWithCaps(
+                MOYC6_TX_QUEUE_V2, MOYC6_TX_ITEM(MOYC6_FRAME_V2), MALLOC_CAP_SPIRAM);
+            if (s_tx_queue == NULL) {
+                heap_caps_free(s_batch);
+                s_batch = NULL;
+            } else {
+                s_frame = MOYC6_FRAME_V2;
+            }
+        }
+        if (s_tx_queue == NULL) {
+            s_frame = MOYC6_FRAME_V1;
+            s_tx_queue = xQueueCreate(MOYC6_TX_QUEUE_LEN, MOYC6_TX_ITEM(MOYC6_FRAME_V1));
+        }
         if (s_tx_queue == NULL) {
             return ESP_ERR_NO_MEM;
         }
         if (xTaskCreate(moyc6_tx_task, "moyc6_tx", 3072, NULL, 5, NULL) != pdPASS) {
-            vQueueDelete(s_tx_queue);
+            if (s_batch != NULL) {
+                vQueueDeleteWithCaps(s_tx_queue);
+                heap_caps_free(s_batch);
+                s_batch = NULL;
+            } else {
+                vQueueDelete(s_tx_queue);
+            }
             s_tx_queue = NULL;
+            s_frame = MOYC6_FRAME_V1;
             return ESP_ERR_NO_MEM;
         }
     }
@@ -342,7 +461,7 @@ esp_err_t esp_now_send(const uint8_t *peer_addr, const uint8_t *data, size_t len
     if (!s_inited) {
         return ESP_ERR_ESPNOW_NOT_INIT;
     }
-    if (len > ESP_NOW_MAX_DATA_LEN) {
+    if (len > s_frame) {
         return ESP_ERR_ESPNOW_ARG;
     }
     static moyc6_tx_item_t item;    // modespnow is the sole caller (MP task)
@@ -545,7 +664,29 @@ static MP_DEFINE_CONST_FUN_OBJ_0(moy_c6_ping_obj, moy_c6_ping);
 // POSITIVE (ESP_ERR_TIMEOUT is 0x107), and a version is small by construction.
 int moy_c6_version(void) {
     esp_err_t got = moyc6_handshake(MOYC6_V_VERSION);
-    return got <= 0 || got >= 0x100 ? -1 : (int)got;
+    int v = got <= 0 || got >= 0x100 ? -1 : (int)got;
+    if (v >= 0) {
+        s_shim = v;
+    }
+    return v;
+}
+
+// Asked once: a slave that does not answer (a stock one, or the v1 shim)
+// costs one handshake timeout a boot, not one per caller.
+static int moyc6_shim(void) {
+    static bool asked;
+    if (!asked) {
+        asked = true;
+        moy_c6_version();
+    }
+    return s_shim;
+}
+
+// The longest frame this console's ESP-NOW carries (native/moy_net/
+// moy_link.c's moy_link_frame_max on a SoC without a radio): v2's 1470 from
+// shim 4 on, 250 below it or before the slave has answered.
+uint32_t moy_c6_frame_max(void) {
+    return moyc6_shim() >= MOYC6_SHIM_BATCH ? MOYC6_FRAME_V2 : MOYC6_FRAME_V1;
 }
 
 static mp_obj_t moy_c6_shim_version(void) {
@@ -555,7 +696,7 @@ static mp_obj_t moy_c6_shim_version(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_c6_shim_version_obj, moy_c6_shim_version);
 
 static mp_obj_t moy_c6_stats(void) {
-    mp_obj_t items[8];
+    mp_obj_t items[9];
     portENTER_CRITICAL(&s_lock);
     items[0] = mp_obj_new_int(s_rx_packets);
     items[1] = mp_obj_new_int(s_rx_dropped);
@@ -565,10 +706,29 @@ static mp_obj_t moy_c6_stats(void) {
     items[5] = mp_obj_new_int(s_last_err);
     items[6] = mp_obj_new_int(s_tx_qfull);
     items[7] = mp_obj_new_int(s_tx_rpc_err);
+    items[8] = mp_obj_new_int(s_tx_batches);
     portEXIT_CRITICAL(&s_lock);
-    return mp_obj_new_tuple(8, items);
+    return mp_obj_new_tuple(9, items);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_c6_stats_obj, moy_c6_stats);
+
+// The C6's own view (moyc6_diag_t) as a tuple: heap free, its low-water
+// mark, the largest block, frames and control messages its forwarder
+// dropped, ticks its batches waited for the radio, frames the radio refused.
+// None from a slave below shim 4.
+static mp_obj_t moy_c6_diag(void) {
+    if (moyc6_shim() < MOYC6_SHIM_BATCH || moyc6_handshake(MOYC6_V_DIAG) != ESP_OK) {
+        return mp_const_none;
+    }
+    const uint32_t v[7] = { s_diag.heap_free, s_diag.heap_min, s_diag.heap_largest,
+        s_diag.rx_dropped, s_diag.ctl_dropped, s_diag.batch_waits, s_diag.batch_failed };
+    mp_obj_t items[7];
+    for (int i = 0; i < 7; i++) {
+        items[i] = mp_obj_new_int_from_uint(v[i]);
+    }
+    return mp_obj_new_tuple(7, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_c6_diag_obj, moy_c6_diag);
 
 // The streamed slave OTA, as native/moy_net/moy_ota.c's C6 sink: 0, or the
 // hosted error. Activate reboots the C6; the updater's caller reboots the
@@ -596,6 +756,7 @@ static const mp_rom_map_elem_t moy_c6_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_ping), MP_ROM_PTR(&moy_c6_ping_obj) },
     { MP_ROM_QSTR(MP_QSTR_shim_version), MP_ROM_PTR(&moy_c6_shim_version_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&moy_c6_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_slave_diag), MP_ROM_PTR(&moy_c6_diag_obj) },
 };
 static MP_DEFINE_CONST_DICT(moy_c6_module_globals, moy_c6_module_globals_table);
 
