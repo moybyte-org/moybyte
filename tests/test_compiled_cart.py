@@ -442,4 +442,5 @@ def test_a_native_wallpaper_is_scaled_from_its_own_memory(tmp_path, monkeypatch)
         assert bytes(new._buf) == bytes(old._buf)
         assert len(set(memoryview(new._buf).cast("H"))) > 16
     finally:
+        ws.look.select_wallpaper(None, persist=False)   # its game's thread ends here
         ws.spine.exit()
