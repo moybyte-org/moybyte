@@ -241,7 +241,7 @@ def kernel(d):
     same library. No audio library: a session is STALE, which is silence."""
     try:
         from . import audio_binding
-        ap = audio_binding._lib()
+        ap = audio_binding.get()._d
         for slot, name in ((HK_SFX, "moy_aud_sfx"), (HK_BEEP, "moy_aud_beep"),
                            (HK_MUSIC, "moy_aud_music"), (HK_MUSIC_STOP, "moy_aud_music_stop"),
                            (HK_STOP, "moy_aud_stop"), (HK_LEVEL, "moy_aud_level")):

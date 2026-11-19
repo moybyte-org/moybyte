@@ -72,8 +72,9 @@ void hl_kernel(int which, void *fn)
 #define AUD(i, T, ...) (K[i] ? ((T)K[i])(__VA_ARGS__) : MOY_AUD_STALE)
 int moy_aud_sfx(uint32_t s, int n, int chan)
 { return AUD(HK_SFX, int (*)(uint32_t, int, int), s, n, chan); }
+/* The audio library is built double-widened (runtime/host/audio_binding.py). */
 int moy_aud_beep(uint32_t s, float f, float d)
-{ return AUD(HK_BEEP, int (*)(uint32_t, float, float), s, f, d); }
+{ return AUD(HK_BEEP, int (*)(uint32_t, double, double), s, (double)f, (double)d); }
 int moy_aud_music(uint32_t s, int track, int loop)
 { return AUD(HK_MUSIC, int (*)(uint32_t, int, int), s, track, loop); }
 int moy_aud_music_stop(uint32_t s)
