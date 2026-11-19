@@ -21,6 +21,9 @@
 //                           status, RUNNING (-100) while it goes on;
 //                           ABSENT: not a command it serves
 //   step JOB / stop JOB     its next step, the same answers / end it (130)
+//   unask JOB               JOB's session's question is over (moy_sh.h's
+//                           `unask`): what its role commands kept for the
+//                           line's runs goes; 0
 //   read PATH / list DIR    the bytes / a name a line (a folder's ends in /)
 //   write PATH BYTES        0, or an errno
 //   df PATH / mem           text: `total free`

@@ -64,8 +64,9 @@ static void sfree(moy_sh_t *s, void *p) {
 }
 
 // The line's answers to its questions zeroed (a password among them) and
-// given back.
+// given back, and the host told its question is over.
 static void drop_answers(moy_sh_t *s) {
+    int had = s->nanswers > 0 || s->ask_line != NULL;
     for (int i = 0; i < s->nanswers; i++) {
         for (volatile char *p = s->answers[i]; *p; p++) {
             *p = 0;
@@ -74,6 +75,9 @@ static void drop_answers(moy_sh_t *s) {
         s->answers[i] = NULL;
     }
     s->nanswers = s->next_answer = 0;
+    if (had && s->host.unask != NULL) {
+        s->host.unask(s->host.ctx, s);
+    }
 }
 
 void *moy_sh_malloc(size_t n) {
@@ -280,6 +284,7 @@ void moy_sh_free(moy_sh_t *s) {
     if (s == NULL) {
         return;
     }
+    drop_answers(s);
     if (s->g != NULL) {
         struct moy_sh_globals *was = enter(s);
         moy_sh_sys_end(s);
@@ -292,7 +297,6 @@ void moy_sh_free(moy_sh_t *s) {
     if (s->ask_line != NULL) {
         hfree(s->host.ctx, s->ask_line);
     }
-    drop_answers(s);
     if (s->roles != NULL) {
         hfree(s->host.ctx, s->roles);
     }
@@ -385,10 +389,10 @@ const char *moy_sh_cwd(moy_sh_t *s) {
 
 void moy_sh_cancel(moy_sh_t *s) {
     s->pending_n = 0;
+    drop_answers(s);
     sfree(s, s->ask_line);
     s->ask_line = NULL;
     s->ask_flags = 0;
-    drop_answers(s);
 }
 
 int moy_sh_ask(moy_sh_t *s, const char *prompt, int flags) {
@@ -414,6 +418,14 @@ int moy_sh_ask(moy_sh_t *s, const char *prompt, int flags) {
 
 const char *moy_sh_answer(moy_sh_t *s) {
     return s->next_answer < s->nanswers ? s->answers[s->next_answer++] : NULL;
+}
+
+int moy_sh_asking(const moy_sh_t *s) {
+    return s->ask_line != NULL;
+}
+
+int moy_sh_replaying(const moy_sh_t *s) {
+    return s->next_answer < s->nanswers;
 }
 
 int moy_sh_asking_secret(const moy_sh_t *s) {

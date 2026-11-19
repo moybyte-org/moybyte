@@ -54,7 +54,12 @@ A command asks the user nothing over its stdin on an interactive face: it
 asks the session a QUESTION (`moy_sh_ask`, `moy_sh.h`). The question takes
 the prompt's place and ends the run; the next line typed is its answer, and
 the line that asked runs again, its answers handed back in the order they
-were typed (`moy_sh_answer`) until a run of it asks nothing more. The door's
+were typed (`moy_sh_answer`) until a run of it asks nothing more. A re-run
+shows nothing of what it writes to the terminal until it takes its last
+answer, since the run before showed it, so a transcript holds each line once;
+when the question is over the host's `unask` tells the door (`unask JOB`),
+and what a role command kept for the line's runs goes (`pkg`'s checked
+download, which the re-runs take up in place of fetching it again). The door's
 first run of a command nobody consented to asks so (`runtime/shell/sh_door.py`),
 and so do `pkg`'s licence, password and install questions
 (`runtime/shell/sh_roles.py`). A SECRET question (`MOY_SH_ASK_SECRET`, the

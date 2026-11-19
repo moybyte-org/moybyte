@@ -9,6 +9,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include "moy_proc_exit.h"
 #include "moy_tty.h"
 #include "moy_tty_int.h"
 
@@ -41,6 +42,7 @@ struct moy_tty {
     int started;                // 1 the face task took it, 2 the reaper did
     int more, esc, esc_num, last_cr, eof, front;
     int secret;                 // the prompt is a secret question's: its answer is not echoed
+    int once;                   // an exec answering its command's question: ends when none waits
     volatile int interrupt;     // a `signal` request (INT)
     volatile int resized;       // a window-change request
     volatile int exited;        // the status is final: Dropbear may reap it
@@ -365,6 +367,10 @@ static void finish(moy_tty_t *f, int status) {
     __atomic_store_n(&f->done, 1, __ATOMIC_RELEASE);
 }
 
+static int asking(moy_tty_t *f) {
+    return shell()->asking != NULL && shell()->asking(f->sh);
+}
+
 static int front(moy_tty_t *f) {
     return shell()->front != NULL ? shell()->front(f->sh) : MOY_TTY_FRONT_SHELL;
 }
@@ -565,7 +571,7 @@ static int run_line(moy_tty_t *f) {
         wipe(f->line, f->n);
     }
     f->n = 0;
-    if (r == SH_EXIT) {
+    if (r == SH_EXIT || (f->once && !asking(f))) {
         finish(f, shell()->status(f->sh));
         return 1;
     }
@@ -612,6 +618,11 @@ static int key(moy_tty_t *f, char c) {
         moy_tty_out(f, "^C\n", 3);
         if (f->secret) {
             wipe(f->line, f->n);
+        }
+        if (f->once && f->front == MOY_TTY_FRONT_SHELL) {
+            shell()->cancel(f->sh);
+            finish(f, MOY_PROC_INTERRUPTED);
+            return 1;
         }
         f->n = f->cur = 0;
         f->hi = f->nhist;
@@ -781,10 +792,13 @@ static void face_run(moy_tty_t *f) {
         int r = shell()->run(f->sh, f->cmd, strlen(f->cmd));
         if (r == SH_MORE) {
             // an unfinished command (an open quote): ended as sh -c would
-            shell()->run(f->sh, "\n", 1);
+            r = shell()->run(f->sh, "\n", 1);
         }
-        finish(f, shell()->status(f->sh));
-        return;
+        if (r == SH_EXIT || !f->pty || !asking(f)) {
+            finish(f, shell()->status(f->sh));
+            return;
+        }
+        f->once = 1;
     }
     settle(f);
     for (;;) {

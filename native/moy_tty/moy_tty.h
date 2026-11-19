@@ -25,7 +25,9 @@
 // escape's bytes together (a lone ESC after PEND_MS). Without a terminal
 // (`ssh host CMD`) it runs CMD, its standard input the stream's, and ends with
 // its status; such a session asks no questions (moy_sh_set_questions), so a
-// command reads its answers from that input.
+// command reads its answers from that input. With a terminal (`ssh -t host
+// CMD`) a question CMD asks is the terminal's prompt, read as an interactive
+// session reads it, and the face ends once a line's run asks nothing more.
 //
 // ONE FACE AT A TIME across the transports: an open while another
 // transport's face runs answers MOY_TTY_EBUSY. Each transport holds the face
@@ -84,8 +86,10 @@ typedef struct {
     // stream's end: its exit status (may be NULL: no SFTP).
     int (*sftp)(void *sh);
     // Whether the prompt is a secret question's (may be NULL: never), whose
-    // answer the face echoes by nothing and keeps from its history.
+    // answer the face echoes by nothing and keeps from its history; whether
+    // it is a question's at all (may be NULL: never).
     int (*secret)(void *sh);
+    int (*asking)(void *sh);
 } moy_tty_shell_t;
 
 void moy_tty_set_shell(const moy_tty_shell_t *shell);

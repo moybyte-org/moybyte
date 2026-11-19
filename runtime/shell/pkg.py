@@ -2,6 +2,8 @@
 #   -- the checks Get Carts shares   fit_why, depends_why, blocker, install_check, manifest_check, origin_of, gated
 #   -- the store's trust             revocations, revoked_rows
 #   -- the steps it shares           through, removed, landed, land_now: a store op a frame
+#   Asked                            a question the terminal asked: the run ends, the line runs again
+#   Stopped                          Ctrl-C came
 #   Pkg                              the shell's `pkg`: the verbs over one installer
 #   Pkg.update                       fetch every source's index into the cache
 #   Pkg.install                      depends first, then each cart through cart_index.Install
@@ -80,6 +82,29 @@ ASKED = object()                # an answer the terminal asks for: the run ends 
 class Asked(Exception):
     """A question the session asked (moy_sh.h's moy_sh_ask): the run ends,
     and the line runs again with its answer."""
+
+
+# Session -> (its index entry, as text, sha256s and all; its Install, waiting
+# at the install prompt; the list its prompt's check filled): the build a
+# line's question left checked, which the line's next run takes up in place
+# of a second download. It goes when that run finishes it, or when the
+# session's question is over (`forget`, the door's `unask`).
+_KEPT = {}
+
+
+def _drop(job):
+    """An install that will not land, stopped and its build deleted."""
+    job.cancel()
+    while job.step(STEP_MS):
+        pass
+
+
+def forget(session):
+    """Session `session`'s question is over (moy_sh.h's `unask`): the build
+    kept for its line goes."""
+    got = _KEPT.pop(session, None)
+    if got is not None:
+        _drop(got[1])
 WRONG_PASSWORD = "That isn't the console's password."
 NO_PASSWORD = "This console has a password: install it from Get Carts, which asks for it."
 CACHE_DIR = "pkg"
@@ -244,6 +269,9 @@ def gated(inst, lines):
     return _perms.warned(lines) and bool(inst.locked())
 
 
+# -- the steps it shares ------------------------------------------------------------
+
+
 def through(steps):
     """`yield from` it: the generator `steps` a resume a frame; closed
     partway (Ctrl-C, the app shut), the rest done at once, so a removal or a
@@ -392,11 +420,13 @@ class Pkg:
     is a yes or no from the user (None: nobody to ask, a no) and
     `password(question)` the line they type, either ASKED where the
     terminal asks it as its prompt (the verb raises Asked, and its line runs
-    again with the answer); `stopped()` is True once Ctrl-C came. The transport is the install role's
+    again with the answer, the build that asked kept for it where `session`
+    names the session); `stopped()` is True once Ctrl-C came. The transport is the install role's
     (`inst.net()`: the http worker's where it verifies, cart_index.Worker)."""
 
-    def __init__(self, inst, out, err, ask=None, stopped=None, password=None):
+    def __init__(self, inst, out, err, ask=None, stopped=None, password=None, session=None):
         self.inst = inst
+        self.session = session          # the asking session's (the door's JOB): its build kept (_KEPT)
         self.out = out
         self.err = err
         self.ask = ask
@@ -650,41 +680,42 @@ class Pkg:
         return accepted
 
     def _one(self, c, p, yes):
-        accepted = yield from self._licences(c, p, yes)
-        if accepted is None:
-            self.err("%s: %s" % (c["id"], _ci.NO_LICENCE))
-            return 1
-        yield from self._online()
-        arc = 0
-        for e in p["external"]:
-            arc += e["archive"]["size"]
-        mem = self.inst.memory()
-        keep = "store" if (arc and mem is not None
-                           and mem[1] < ARCHIVE_RAM_SHARE * arc) else "ram"
-        consented = []
-
-        def ask(stage):
-            got = install_check(self.inst, stage, c["folder"], self.inst.carts(), c)
-            consented[:] = [(got[0], got[1], got[3])]
-            return got[2]
-
-        job = _ci.Install(c, p, self.inst.net(), self.inst.root(), self.inst.op,
-                          accepted, archive=keep, keep=self.inst.keep(), ask=ask)
-        self.out("Getting %s %d (%s)\n" % (c["id"], c["version"],
-                                            size_text(p["download_bytes"])))
+        key = json.dumps(c, sort_keys=True, default=str)
+        kept = _KEPT.pop(self.session, None) if self.session is not None else None
+        if kept is not None and kept[0] != key:
+            _drop(kept[1])
+            kept = None
+        if kept is not None:
+            _key, job, consented = kept
+            for _e in p["external"]:    # the licences' answers, given before the download
+                ok = yes or (self.ask is not None and self.ask("Agree?"))
+                if ok is ASKED:
+                    _KEPT[self.session] = kept
+                    raise Asked()
+                if not ok:
+                    _drop(job)
+                    self.err("%s: %s" % (c["id"], _ci.NO_LICENCE))
+                    return 1
+        else:
+            job, consented = yield from self._start(c, p, yes)
+            if job is None:
+                return 1
         stepped_through = False
         try:
             while job.step(STEP_MS):
                 yield
                 if job.asking is not None:
                     self.release()
-                    self.out("".join(ln + "\n" for ln in job.asking))
+                    if kept is None:
+                        self.out("".join(ln + "\n" for ln in job.asking))
                     why = self._gate(job.asking)
                     ok = why is None and (yes or (self.ask is not None and self.ask("Install?")))
                     if why is ASKED or ok is ASKED:
-                        job.cancel()
-                        while job.step(STEP_MS):
-                            pass
+                        if self.session is not None:
+                            _KEPT[self.session] = (key, job, consented)
+                            stepped_through = True
+                        else:
+                            _drop(job)
                         raise Asked()
                     if why is not None:
                         job.cancel()
@@ -706,6 +737,34 @@ class Pkg:
         yield from through(landed(self.inst, job.path, consented[0] if consented else None))
         self.out("%s %d installed: %s\n" % (c["id"], c["version"], job.report()))
         return 0
+
+    def _start(self, c, p, yes):
+        """`yield from` it: cart `c`'s install begun, its licences accepted:
+        `(job, consented)`, the list the install prompt's check fills; None
+        for the job where a licence was not accepted."""
+        accepted = yield from self._licences(c, p, yes)
+        if accepted is None:
+            self.err("%s: %s" % (c["id"], _ci.NO_LICENCE))
+            return None, None
+        yield from self._online()
+        arc = 0
+        for e in p["external"]:
+            arc += e["archive"]["size"]
+        mem = self.inst.memory()
+        keep = "store" if (arc and mem is not None
+                           and mem[1] < ARCHIVE_RAM_SHARE * arc) else "ram"
+        consented = []
+
+        def ask(stage):
+            got = install_check(self.inst, stage, c["folder"], self.inst.carts(), c)
+            consented[:] = [(got[0], got[1], got[3])]
+            return got[2]
+
+        job = _ci.Install(c, p, self.inst.net(), self.inst.root(), self.inst.op,
+                          accepted, archive=keep, keep=self.inst.keep(), ask=ask)
+        self.out("Getting %s %d (%s)\n" % (c["id"], c["version"],
+                                            size_text(p["download_bytes"])))
+        return job, consented
 
     def _gate(self, lines):
         """None when the prompt `lines` may be answered; else why not: the

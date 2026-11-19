@@ -402,6 +402,24 @@ def test_a_secret_question_is_answered_unseen_and_kept_from_the_history(harness)
         "an exec asks no questions: its command reads its answers from stdin"
 
 
+def test_an_exec_with_a_terminal_answers_its_command_s_question_there(harness):
+    """`ssh -t host CMD`: a question CMD asks is the terminal's prompt, its
+    answer typed unseen, and the session ends once the line asks nothing."""
+    r = subprocess.Popen(["ssh"] + options(harness) + [
+        "-o", "PubkeyAuthentication=no", "-o", "PreferredAuthentications=password",
+        "-tt", "moy@127.0.0.1", "pkg ask"], env=env_of(harness, PASSWORD),
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    time.sleep(1.2)
+    r.stdin.write(b"sesame42\r")
+    r.stdin.flush()
+    time.sleep(1.0)                     # the session ends by itself, its stdin still open
+    out, _err = r.communicate(timeout=20)
+    assert r.returncode == 0, out
+    assert b"Password: " in out and b"sesame" not in out, out
+    harness["log"].seek(0)
+    assert "ANSWER sesame42\n" in harness["log"].read()
+
+
 def test_tab_completes_a_command_and_a_path_and_lists_what_it_cannot_choose(harness):
     """Tab is the Terminal's completion (moy_sh_cands): a command's name, a
     path's from its folder, and with nothing more to share the names listed

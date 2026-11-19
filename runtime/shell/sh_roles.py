@@ -517,7 +517,7 @@ def r_pkg(d, a):
     a = [w for w in a if w != "-y"]
     p = pkg.Pkg(ShellInstall(d.ws), d.out, lambda line: d.err("pkg", line),
                 ask=lambda q: _yes(d, q), stopped=lambda: stopped(d),
-                password=lambda q: _typed(d, q))
+                password=lambda q: _typed(d, q), session=getattr(d, "job", None))
     verb, rest = (a[0], a[1:]) if a else ("", [])
     try:
         if verb == "update" and not rest:

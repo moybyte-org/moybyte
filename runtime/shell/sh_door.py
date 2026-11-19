@@ -459,6 +459,7 @@ class ShellDoor:
         self.io = io if io is not None else _io()
         self.exits = []                 # [(pid, code)] of background commands
         self.jobs = {}                  # JOB -> (name, generator): role commands going on
+        self.job = None                 # the session the role command started last runs in
 
     def __call__(self, args):
         fields = bytes(args).split(b"\0")
@@ -803,6 +804,7 @@ class ShellDoor:
         if fn is None:
             return ABSENT
         self.v_stop(job)
+        self.job = job
         r = self._as_shell(argv[0], lambda: fn(self, list(argv[1:])))
         if not hasattr(r, "send"):
             return r
@@ -824,6 +826,13 @@ class ShellDoor:
         if r != RUNNING:
             self.jobs.pop(job, None)
         return r
+
+    def v_unask(self, job):
+        """Session `job`'s question is over (moy_sh.h's `unask`): what pkg
+        kept for its line's runs goes."""
+        import pkg
+        self._as_shell("pkg", lambda: pkg.forget(job))
+        return 0
 
     def v_stop(self, job):
         got = self.jobs.pop(job, None)
