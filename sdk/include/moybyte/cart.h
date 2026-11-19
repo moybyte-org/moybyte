@@ -24,8 +24,9 @@
 // What a native module does not do as the wasm module does: no sound (the
 // audio verbs are silent, moy_snd answers no room), pmem writes last the run,
 // the cart's files read as absent and none is written (moy_read, moy_write,
-// moy_erase, moy_list), moy_blit's palette and moy_blit565 are not shown, and
-// moy_par runs its items one after another.
+// moy_erase, moy_list), no pref is set or kept (game_prefs_get,
+// game_prefs_set and game_prefs_clear answer -8), moy_blit's palette and
+// moy_blit565 are not shown, and moy_par runs its items one after another.
 
 #ifndef MOYBYTE_CART_H
 #define MOYBYTE_CART_H
@@ -113,12 +114,14 @@
 #define MOYBYTE_SCENES(name) __attribute__((import_module("moybyte.scenes"), import_name(#name)))
 #define MOYBYTE_IMAGES(name) __attribute__((import_module("moybyte.images"), import_name(#name)))
 #define MOYBYTE_MOUSE(name) __attribute__((import_module("moybyte.mouse"), import_name(#name)))
+#define MOYBYTE_PREFS(name) __attribute__((import_module("moybyte.prefs"), import_name(#name)))
 #else
 #undef MOY_EXPORT
 #define MOY_EXPORT(name)
 #define MOYBYTE_SCENES(name)
 #define MOYBYTE_IMAGES(name)
 #define MOYBYTE_MOUSE(name)
+#define MOYBYTE_PREFS(name)
 #endif
 
 #ifdef __cplusplus
@@ -168,6 +171,18 @@ void image_spr(int32_t h, int32_t x, int32_t y) MOYBYTE_IMAGES(image_spr);
 // bytes hold), as Python's mouse() answers them: `left` the press edge,
 // middle, right and the scrolls 0. 1 while a pointer is down, else 0.
 int32_t mouse(int32_t *out, uint32_t cap) MOYBYTE_MOUSE(mouse);
+
+// moybyte.prefs
+// The game's prefs, each a JSON value under a key, kept across runs
+// (docs/app_api_v1.md section 5). The value of `key` as JSON text into
+// `json`: its length, or -8 for a key never set.
+int32_t game_prefs_get(const char *key, uint32_t key_n, char *json,
+                  uint32_t cap) MOYBYTE_PREFS(get);
+// `key` set to the JSON value `json`: 0, or -7 for text that is no JSON value.
+int32_t game_prefs_set(const char *key, uint32_t key_n, const char *json,
+                  uint32_t json_n) MOYBYTE_PREFS(set);
+// `key` gone: 0, or -8 for a key never set.
+int32_t game_prefs_clear(const char *key, uint32_t key_n) MOYBYTE_PREFS(clear);
 
 #ifdef __cplusplus
 }

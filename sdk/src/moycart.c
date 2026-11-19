@@ -679,6 +679,30 @@ int32_t mouse(int32_t *out, uint32_t cap) {
     return st != 0;
 }
 
+// The prefs are the console's settings rows, which a native module has no
+// channel to: every key reads as never set.
+int32_t game_prefs_get(const char *key, uint32_t key_n, char *json, uint32_t cap) {
+    (void)key;
+    (void)key_n;
+    (void)json;
+    (void)cap;
+    return -8;
+}
+
+int32_t game_prefs_set(const char *key, uint32_t key_n, const char *json, uint32_t json_n) {
+    (void)key;
+    (void)key_n;
+    (void)json;
+    (void)json_n;
+    return -8;
+}
+
+int32_t game_prefs_clear(const char *key, uint32_t key_n) {
+    (void)key;
+    (void)key_n;
+    return -8;
+}
+
 // -- the game ------------------------------------------------------------------------
 
 int main(int argc, char **argv) {

@@ -835,7 +835,7 @@ _LUA_PRELUDE = PRELUDE_HANDLES + PRELUDE_FASTMATH
 
 # Moybyte's extensions a compiled cart imports from (native/moycore/
 # moycore_wasm_ext.h), bit i the i-th; moycore_run.h's MOYCORE_EXT_NAMES.
-WASM_EXTS = ("moybyte.scenes", "moybyte.images", "moybyte.mouse")
+WASM_EXTS = ("moybyte.scenes", "moybyte.images", "moybyte.mouse", "moybyte.prefs")
 
 
 def wasm_exts(cart):

@@ -912,6 +912,7 @@ same here as on any other console that implements the spec.
 | `time()` | milliseconds since the cart started |
 | `quit()` | END this cart and return to the launcher (or the editor it was run from). Bind it to a key or an on-screen ✕/back button. Optional: the console's key opens a pause menu with Quit in every mode. (It was a no-op for **Lua** carts until 2026-09-12: libmoy set a snapshot flag that nothing on either tier read back) |
 | `pmem(index, value=None)` | persistent memory: `pmem(i)` reads an int, `pmem(i, v)` writes+persists (high scores, saves) |
+| `prefs.get(key)`, `prefs.set(key, value)`, `prefs.clear(key)` | a game's settings: any value JSON carries, under its own key, kept across runs; `None` (Lua `nil`) for a key never set. Every game holds them without asking; an app asks for them with the `prefs` permission. They are Moybyte's, not moy-spec's, and `docs/app_api_v1.md` §5 is their guide |
 | `cfg(key, default=None)` | read a value from the cart's `config.json` — the **"Make it mine"** tuning a kid edits (speed, counts, colors…) |
 | `col(name_or_index)` | resolve a color **name** (0–15) or int to a `0–63` palette index |
 | `rnd(n=1.0)` | random float in `[0, n)` |
@@ -963,11 +964,12 @@ the boards, the host and the browser run.
 | `moybyte.scenes` | `scene(name, name_n, out, cap)`, `load_scene(name, name_n)`, `scene_name(i, dst, cap)`, `scene_flags(name, name_n, i, dst, cap)` | `scene()`, `scene(name)` and `load_scene(name)` above: the actors as 32-byte records (tile, x, y, flip as `int32`, then the tag cut at 15 bytes), the count answered, -1 for no such scene; an empty name is the active scene, the first at each run. A scene's names and an actor's `flags` object (as JSON text) have their own rows. The live actor world is the cart's own arrays |
 | `moybyte.images` | `image(name, name_n)`, `image_size(h)`, `image_spr(h, x, y)` | `image(name)`: a handle, 0 for none; its size as `w << 16 \| h`; placed on the draw target (the screen, or the layer `target` chose) under its camera, clip, `pal` and `palt` |
 | `moybyte.mouse` | `mouse(out, cap)` | `mouse()`: the seven numbers as `int32` at `out`, 1 while a pointer is down |
+| `moybyte.prefs` | `get(key, key_n, json, cap)`, `set(key, key_n, json, json_n)`, `clear(key, key_n)` | `prefs.get`, `prefs.set` and `prefs.clear` (State & utility): a value as its JSON text, its length answered, -8 for a key never set, -7 for text that is no JSON value. `sdk/include/moybyte/cart.h` names them `game_prefs_get`, `game_prefs_set` and `game_prefs_clear` (an app's `prefs_get` is `moybyte.app`'s). The game's run holds a grant with the prefs role, and these are its app-extension rows `prefs_get`, `prefs_set` and `prefs_clear` |
 | `moybyte.app` | `moybyte_award`, `moybyte_progress`, `moybyte_dev_open`, ... | a game's achievements and device handles (`docs/app_api_v1.md` §9, §10): a compiled game that declares it holds a grant of its own, as an app does, under its permissions and their consent |
 
-A cart declaring `moybyte.scenes` or `moybyte.images` keeps the VM up
-(`native/moy_play/moy_play.h`'s rule): the console hands the run its scenes and
-paint images. `tests/fixtures/wasm/game_ext.moy` uses every row.
+A cart declaring `moybyte.scenes`, `moybyte.images` or `moybyte.prefs` keeps
+the VM up (`native/moy_play/moy_play.h`'s rule): the console hands the run its
+scenes and paint images, and makes the grant its prefs are served from. `tests/fixtures/wasm/game_ext.moy` uses every row.
 
 ---
 

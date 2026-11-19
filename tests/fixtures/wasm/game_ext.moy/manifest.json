@@ -6,7 +6,7 @@
   "main": "main.wasm",
   "memory": 2,
   "input": ["buttons", "touch"],
-  "extensions": ["moybyte.app", "moybyte.scenes", "moybyte.images", "moybyte.mouse"],
+  "extensions": ["moybyte.app", "moybyte.scenes", "moybyte.images", "moybyte.mouse", "moybyte.prefs"],
   "moybyte": {
     "type": "game",
     "permissions": ["pins"],

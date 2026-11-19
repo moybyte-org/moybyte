@@ -25,4 +25,9 @@ typedef struct moy_app_run {
     uint32_t roles;         // 1 << MOY_ROLE_* for each role the permissions name
 } moy_app_run_t;
 
+// In `roles`, beside them: a game's run (runtime/run/player.py's `_game`),
+// whose Lua state opens its roles' names and none of an app run's own (the
+// `os` clock). No role is this bit; a grant never holds it.
+#define MOY_APP_RUN_GAME (1u << 31)
+
 #endif // MOY_APP_RUN_H

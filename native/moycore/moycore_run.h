@@ -156,7 +156,7 @@ int moycore_wasm_open_c(const moycore_open_c_t *o, char *err, size_t n);
 // Moybyte's extensions a compiled cart may import from, bit i the i-th
 // (moycore_wasm_ext.h has their tables, runtime/run/lua_ext.py's WASM_EXTS the
 // same names), and the bits of those a manifest's "extensions" JSON list names.
-#define MOYCORE_EXT_NAMES "moybyte.scenes", "moybyte.images", "moybyte.mouse"
+#define MOYCORE_EXT_NAMES "moybyte.scenes", "moybyte.images", "moybyte.mouse", "moybyte.prefs"
 uint32_t moycore_exts_of(const char *v, const char *v_end);
 int moycore_wasm_ran(void);
 void moycore_close_c(void);

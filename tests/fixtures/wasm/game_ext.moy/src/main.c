@@ -1,8 +1,9 @@
 // Game Ext Wasm: a compiled GAME in C reaching what a Python or Lua game
 // holds by name (docs/moy_cart_api.md, "A compiled cart's Moybyte verbs"):
 // its badges and a device handle through moybyte.app, under the grant its
-// run holds as an app's does, and its scenes, its paint image and the
-// mouse through Moybyte's own extensions. Built by tools/wasm_cart.py.
+// run holds as an app's does, and its scenes, its paint image, the mouse
+// and its prefs through Moybyte's own extensions. Built by
+// tools/wasm_cart.py.
 //
 // Its findings are its pmem slots, which every tier's `state` reads:
 //    0  award("started")'s answer        1  progress("steps", 3)'s answer
@@ -17,6 +18,9 @@
 //   19  frames a pointer was down       20  presses (mouse's left edge)
 //   21  the last x down                 22  the last y down
 //   23  frames run
+//   24  game_prefs_get("runs")'s answer       25  the runs it read (0 for none)
+//   26  game_prefs_set("runs", runs + 1)'s   27  game_prefs_set of text no JSON is
+//   28  game_prefs_clear("never")'s answer
 // It draws main's actors as 8x8 squares (colour 8), the paint image at
 // (100, 100) and, while a pointer is down, a square at it (colour 11).
 // tests/test_wasm_game_ext.py and tests/test_web_wasm_e2e.py drive it.
@@ -83,6 +87,16 @@ EXPORT(_init) void init(void) {
     put(17, image(S("nope")));
     int32_t pins = moybyte_dev_open(S("pins"), S("gpio20=1"));
     put(18, pins > 0 ? 1 : pins);
+    int32_t n = game_prefs_get(S("runs"), buf, sizeof buf), runs = 0;
+    for (int32_t i = 0; i < n && i < (int32_t)sizeof buf; i++) {
+        runs = runs * 10 + (buf[i] - '0');
+    }
+    put(24, n);
+    put(25, runs);
+    buf[0] = (char)('0' + (runs + 1) % 10);
+    put(26, game_prefs_set(S("runs"), buf, 1));
+    put(27, game_prefs_set(S("bad"), S("{nope")));
+    put(28, game_prefs_clear(S("never")));
 }
 
 EXPORT(_update) void update(float dt) {

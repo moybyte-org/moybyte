@@ -109,9 +109,10 @@ static bool declares(const moy_cat_entry_t *e, const char *name) {
 }
 
 // The extensions whose data the Python console hands a compiled run before
-// its load (device/moycore_glue.py's WasmRun): a cart declaring one keeps the
-// VM, its extension named as the import.
-static const char *const VM_EXTS[] = { "moybyte.scenes", "moybyte.images" };
+// its load (device/moycore_glue.py's WasmRun), and the prefs, whose grant the
+// Player makes: a cart declaring one keeps the VM, its extension named as the
+// import.
+static const char *const VM_EXTS[] = { "moybyte.scenes", "moybyte.images", "moybyte.prefs" };
 
 typedef struct {
     char *imp;

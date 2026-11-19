@@ -82,7 +82,7 @@ WASM_APP = "moybyte.app"
 WASM_OS = "moybyte.os"
 # Moybyte's own extensions a compiled cart imports from by their names
 # (native/moycore/moycore_wasm_ext.h, sdk/include/moybyte/cart.h).
-WASM_CART_EXTS = ("moybyte.scenes", "moybyte.images", "moybyte.mouse")
+WASM_CART_EXTS = ("moybyte.scenes", "moybyte.images", "moybyte.mouse", "moybyte.prefs")
 # A WASI program's own files: WASI's path calls, which reach only the folder
 # its `files` permission names, beside its moybyte.os `files_*` rows; read
 # from its source, the C library's file calls.

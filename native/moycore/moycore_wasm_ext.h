@@ -39,6 +39,18 @@
 //                                              as Python's mouse() answers
 //                                              them; 1 while a pointer is
 //                                              down, else 0
+//   moybyte.prefs
+//     get(key, key_n, json, cap) -> i32        the value of `key` as JSON text:
+//                                              its length, -8 (ABSENT) for a
+//                                              key never set
+//     set(key, key_n, json, json_n) -> i32     `key` set to the JSON value: 0,
+//                                              -7 (BAD) for text that is no
+//                                              JSON value
+//     clear(key, key_n) -> i32                 `key` gone: 0, -8 for none
+//   The game's prefs (docs/app_api_v1.md section 5): an app's "moybyte.app"
+//   prefs rows, served from the grant the Player makes a game's run
+//   (native/moy_app/moy_app_wasm.h's moy_app_wasm_prefs_*); a negative
+//   answer is moy_app.h's code negated.
 //
 // A name and a buffer are a pointer and its length ('*~'), never
 // NUL-terminated; an answer longer than its buffer is cut, its whole length
@@ -70,7 +82,8 @@
 #define MOYCORE_EXT_SCENES 1u
 #define MOYCORE_EXT_IMAGES 2u
 #define MOYCORE_EXT_MOUSE  4u
-#define MOYCORE_EXT_COUNT  3u
+#define MOYCORE_EXT_PREFS  8u
+#define MOYCORE_EXT_COUNT  4u
 
 static const char MX_ITEM[] = "moy: an import called from a par item";
 
@@ -201,6 +214,40 @@ static int32_t mx_mouse(void *e, uint8_t *out, uint32_t cap)
     return st != 0;
 }
 
+// -- moybyte.prefs ------------------------------------------------------------
+
+// native/moy_app's rows; weak, so an image without the app ABI answers
+// ABSENT (-8) for each, as a run with no grant does.
+#pragma weak moy_app_wasm_prefs_get
+#pragma weak moy_app_wasm_prefs_set
+#pragma weak moy_app_wasm_prefs_clear
+int32_t moy_app_wasm_prefs_get(void *e, const uint8_t *key, uint32_t key_n, uint8_t *json,
+                               uint32_t json_cap);
+int32_t moy_app_wasm_prefs_set(void *e, const uint8_t *key, uint32_t key_n,
+                               const uint8_t *json, uint32_t json_n);
+int32_t moy_app_wasm_prefs_clear(void *e, const uint8_t *key, uint32_t key_n);
+#define MX_ABSENT (-8)
+
+static int32_t mx_prefs_get(void *e, const uint8_t *key, uint32_t n, uint8_t *json,
+                            uint32_t cap)
+{
+    if (!mx_bound(e)) return MX_ABSENT;
+    return moy_app_wasm_prefs_get ? moy_app_wasm_prefs_get(e, key, n, json, cap) : MX_ABSENT;
+}
+
+static int32_t mx_prefs_set(void *e, const uint8_t *key, uint32_t n, const uint8_t *json,
+                            uint32_t jn)
+{
+    if (!mx_bound(e)) return MX_ABSENT;
+    return moy_app_wasm_prefs_set ? moy_app_wasm_prefs_set(e, key, n, json, jn) : MX_ABSENT;
+}
+
+static int32_t mx_prefs_clear(void *e, const uint8_t *key, uint32_t n)
+{
+    if (!mx_bound(e)) return MX_ABSENT;
+    return moy_app_wasm_prefs_clear ? moy_app_wasm_prefs_clear(e, key, n) : MX_ABSENT;
+}
+
 // -- the tables ---------------------------------------------------------------
 
 // Each in strcmp order of its names, which WAMR's sorted registration takes
@@ -222,6 +269,12 @@ static const NativeSymbol MX_MOUSE[] = {
     { "mouse", (void *)mx_mouse, "(*~)i", NULL },
 };
 
+static const NativeSymbol MX_PREFS[] = {
+    { "clear", (void *)mx_prefs_clear, "(*~)i", NULL },
+    { "get", (void *)mx_prefs_get, "(*~*~)i", NULL },
+    { "set", (void *)mx_prefs_set, "(*~*~)i", NULL },
+};
+
 #define MX_ROWS(t) (uint32_t)(sizeof(t) / sizeof((t)[0]))
 
 // The extensions, bit i the i-th (moycore_run.h's MOYCORE_EXT_NAMES).
@@ -230,6 +283,7 @@ static const moy_wasm_ext MOYCORE_EXTS[MOYCORE_EXT_COUNT] = {
     { MX_NAMES[0], MX_SCENES, MX_ROWS(MX_SCENES) },
     { MX_NAMES[1], MX_IMAGES, MX_ROWS(MX_IMAGES) },
     { MX_NAMES[2], MX_MOUSE, MX_ROWS(MX_MOUSE) },
+    { MX_NAMES[3], MX_PREFS, MX_ROWS(MX_PREFS) },
 };
 
 // The extensions of `mask` (the ones the cart declares) into `out`, which

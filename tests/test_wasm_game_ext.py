@@ -10,6 +10,8 @@ WAMR, through the same C a board runs (native/moycore/moycore_wasm_ext.h):
   * image, image_size and image_spr reach its paint image;
   * mouse answers Python's mouse(), and a press on a console frame that
     runs no tick reaches the next tick (the kernel Player's pointer latch);
+  * game_prefs_get, game_prefs_set and game_prefs_clear keep the game's prefs
+    across a restart of its run, from the grant its run holds;
   * a module importing from an extension its manifest does not declare is
     refused at load, the import named;
   * the VM-free rule keeps the VM for a compiled cart declaring scenes or
@@ -118,6 +120,19 @@ def test_a_compiled_game_opens_a_device_handle_its_permission_grants(tmp_path):
         lease_sim.reset()
 
 
+def test_a_compiled_game_keeps_its_prefs_across_a_restart(game):
+    """moybyte.prefs's get, set and clear (docs/app_api_v1.md section 5):
+    the first run finds no "runs", sets it, and the next run reads it back."""
+    ws, _drv = game
+    p = _pmem(ws)
+    assert p[24:29] == [-8, 0, 0, -7, -8], p[24:29]
+    ws.spine.exit()
+    open_cart(ws, "Game Ext Wasm")
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    p = _pmem(ws)
+    assert p[24:27] == [1, 1, 0], p[24:27]
+
+
 def test_a_compiled_game_reads_its_scenes(game):
     ws, _drv = game
     p = _pmem(ws)
@@ -195,13 +210,15 @@ def test_an_undeclared_extension_is_refused_naming_the_import(tmp_path):
         ws.spine.exit()
 
 
-def test_a_game_that_declares_no_app_extension_holds_no_grant(tmp_path):
+def test_a_game_that_declares_no_app_extension_imports_none_of_it(tmp_path):
+    """Its grant is the prefs role's alone, which its module reaches through
+    "moybyte.prefs" only: an import from "moybyte.app" is refused at load."""
     def drop(man):
-        man["extensions"] = [e for e in man["extensions"] if e != "moybyte.app"]
+        man["extensions"] = [e for e in man["extensions"]
+                             if e not in ("moybyte.app", "moybyte.prefs")]
     ws = _ws(tmp_path, drop)
     try:
         open_cart(ws, "Game Ext Wasm")
-        assert ws.run.player.app_ctx is None
         assert "moybyte.app" in (ws.run.player.cart_error or ""), ws.run.player.cart_error
     finally:
         ws.spine.exit()

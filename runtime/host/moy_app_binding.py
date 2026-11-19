@@ -67,6 +67,7 @@ _TABLE = [{"role": r["name"].split(".", 1)[0], "verb": r["name"].split(".", 1)[1
           if r.get("server") in ("c", "shell", "call") or r.get("server", "").startswith("proc:")
           or r.get("door")]
 ROLE_N = len(_SRC["roles"])
+RUN_GAME = 1 << 31        # a game's run, "game" in run()'s roles (moy_app_run.h)
 ROW_N = sum(1 for r in _TABLE if r["server"] == "c")
 
 
@@ -458,13 +459,16 @@ def binding(sanitize=False):
         def run(self, g, roles=()):
             """An app's run on a tier binding (native/moy_app/moy_app_run.h):
             the bytes a Lua or wasm run's open copies, or None for g 0; and
-            this state the one the theme is read from (moy_app_wasm_live)."""
+            this state the one the theme is read from (moy_app_wasm_live).
+            "game" among `roles` is a game's run (MOY_APP_RUN_GAME)."""
             lib.moy_app_wasm_live(self._p)
             g = int(g) & 0xFFFFFFFF
             if not g:
                 return None
             r = _Run()
-            lib.moy_app_run_make(self._p, g, mask_of(roles), c.byref(r))
+            game = RUN_GAME if "game" in roles else 0
+            lib.moy_app_run_make(self._p, g, mask_of(r for r in roles if r != "game") | game,
+                                 c.byref(r))
             return bytes(r)
 
         def stop_hold(self, run):

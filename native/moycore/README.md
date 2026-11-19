@@ -468,9 +468,10 @@ the load (`scene_put`), are parsed there into Lua row tables, and
 `draw_scene` draws the live rows, so no scene verb crosses.
 
 A compiled cart reaches the same tables, and `mouse`'s snapshot, through
-three import modules named for the extensions its manifest declares
+four import modules named for the extensions its manifest declares
 (`moycore_wasm_ext.h`: `moybyte.scenes`, `moybyte.images`,
-`moybyte.mouse`), one body `moycore_wasm.c` and the host's
+`moybyte.mouse`, and `moybyte.prefs`, the game's prefs from its run's
+grant, native/moy_app/moy_app_wasm.h), one body `moycore_wasm.c` and the host's
 `runtime/host/moyhost_wasm.c` both include; the glue hands a declaring run
 its texts with `image_put` and `scene_put` before `wasm_open`
 (`lua_ext.put_wasm_media`), and the run's close frees them as a Lua run's.

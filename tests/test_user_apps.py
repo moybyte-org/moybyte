@@ -395,7 +395,9 @@ def test_the_scope_is_a_speed_bump_not_a_sandbox(tmp_path):
         assert not hasattr(role, "_ws"), type(role).__name__
 
 
-def test_a_game_gets_no_app_api_at_all(tmp_path):
+def test_a_game_gets_prefs_and_no_other_app_api(tmp_path):
+    """A game holds `prefs` without asking (docs/app_api_v1.md section 5),
+    and no other app name, whatever its manifest asks for."""
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Gamey", "def _update(dt):\n    pass\n\n\ndef _draw():\n"
                                 "    cls(0)\n",
@@ -404,9 +406,9 @@ def test_a_game_gets_no_app_api_at_all(tmp_path):
     _open(ws, "Gamey")
     _frames(ws)
     ns = ws.run.player.ns
-    for absent in ("files", "prefs", "set_theme", "ui", "screen", "theme",
-                   "bar_h"):
+    for absent in ("files", "set_theme", "ui", "screen", "theme", "bar_h"):
         assert absent not in ns, absent + " reached a GAME"
+    assert ns["prefs"].get("never") is None
 
 
 def test_an_identity_cart_of_a_shipped_app_is_not_a_user_app(tmp_path):

@@ -16,9 +16,10 @@
 //      table takes a compiled program's leases without MOY_LEASE_VM, and a
 //      lease a VM process holds keeps the VM at the stop's verdict instead
 //      (moy_play_stop.c). A permission the kernel does not know keeps the VM.
-//      A compiled cart declaring `moybyte.scenes` or `moybyte.images` keeps
-//      it too (WHY_IMPORT, the extension named): the Python console hands
-//      its scenes and paint images to the run.
+//      A compiled cart declaring `moybyte.scenes`, `moybyte.images` or
+//      `moybyte.prefs` keeps it too (WHY_IMPORT, the extension named): the
+//      Python console hands its scenes and paint images to the run, and makes
+//      the grant its prefs are served from.
 // A cart that fails it runs with the VM up, and `why` names the first clause
 // it failed. Everything outside the native set keeps the VM, by name:
 // `network`, `console`, `pins`, `files` and every `files:<folder>`, `prefs`, and

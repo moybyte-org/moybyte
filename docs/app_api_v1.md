@@ -549,7 +549,11 @@ the ui used. A Python process reads raw input records, timestamped, with
 **Prefs** (`prefs`): `prefs.get(key)`, `prefs.set(key, value)`,
 `prefs.clear(key)`, any value JSON carries, each a row of the console's
 settings namespaced under your app's `id`, saved as it is written; `None`
-(Lua `nil`) for a key never set. Your app and its service share them.
+(Lua `nil`) for a key never set. Your app and its service share them. Games
+hold the same `prefs` (owner, 2026-11-18, #261) and ask for no permission:
+a game's run's grant carries the prefs role alone, under the game's `id`, so a game
+that becomes an app keeps its rows; a compiled game imports them from
+`"moybyte.prefs"` (`docs/moy_cart_api.md`, "A compiled cart's Moybyte verbs").
 
 **A cart's own files** need no permission either: any cart, app or game,
 reads its own folder and writes the paths its manifest declares `writable`

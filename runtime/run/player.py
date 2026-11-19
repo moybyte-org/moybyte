@@ -121,8 +121,30 @@ SUPPORTED_EXTENSIONS = (
     "moybyte.app",        # #224: a compiled app's role imports (native/moy_app/moy_app_wasm.h)
     "moybyte.ui",         # the public UI API, a Lua cart's `ui` (native/moycore/moycore_ui.h)
     "moybyte.mouse",      # a compiled cart's mouse import (native/moycore/moycore_wasm_ext.h)
+    "moybyte.prefs",      # a compiled game's prefs imports (native/moycore/moycore_wasm_ext.h)
 )
 APP_EXT = "moybyte.app"
+PREFS_EXT = "moybyte.prefs"
+
+
+def _game(cart, spine):
+    """A game: a cart that is no app (user, shipped or system). Its run holds
+    a grant of its own with the prefs role, which a game holds without asking
+    (docs/app_api_v1.md section 5): `prefs` in Python and Lua, the
+    "moybyte.prefs" imports in a compiled game that declares them."""
+    return (cart is not None and cart.get("type") != "app"
+            and not spine.is_user_app(cart) and not spine.is_system_app(cart))
+
+
+def _game_perms(cart, granted):
+    """The permissions a game's grant is made from: the prefs role's alone,
+    and a compiled game declaring the app extension its own beside it, for
+    its imports from that (`_wasm_ext_game`)."""
+    perms = ("prefs",)
+    if cart.get("runtime") == "wasm" and APP_EXT in (cart.get("extensions") or ()):
+        own = granted if granted is not None else (cart.get("permissions") or ())
+        perms = tuple(p for p in own if p != "prefs") + perms
+    return perms
 
 
 def _wasm_ext_game(cart, spine):
@@ -290,7 +312,8 @@ class Player(PlayerDiag):
         self._responsive = False      # the app defines `_layout` (Player._wants_layout)
         self.ui = None               # a Python app's frame of ui verbs: [context, input, canvas]
         self._run_handle = 0          # the kernel Player's handle on this run, or 0
-        self.app_ctx = None          # a user app's or script's context: its run grant
+        self.app_ctx = None          # a user app's, script's or game's context: its run grant
+        self._grant_perms = None     # a game's grant's permissions (_game_perms)
         self._files = None            # a Python run's files (_open_files)
                                       # when the run is not guarded
         self._restore_bg = None       # #63: the api's declared-background restore hook
@@ -433,6 +456,7 @@ class Player(PlayerDiag):
         left open at its close, through the grant, so the grant outlives it."""
         self._close_lua()
         ctx, self.app_ctx = self.app_ctx, None
+        self._grant_perms = None
         if ctx is not None:
             ctx.end()
         self.ws.store.end_all()
@@ -453,7 +477,9 @@ class Player(PlayerDiag):
                 or APP_EXT not in (cart.get("extensions") or ())
                 or not (ws.spine.is_user_app(cart) or _wasm_ext_game(cart, ws.spine))):
             return
-        roles, kind = _moy_app.policy(self.granted)
+        perms = (_game_perms(cart, self.granted) if _wasm_ext_game(cart, ws.spine)
+                 else self.granted)
+        roles, kind = _moy_app.policy(perms)
         needs = roles + tuple(r for r in ("surface", "theme") if r not in roles)
         app_id = _moy_app.id_for(cart.get("id"), cart.get("title"))
         g = app.grant(app_id, needs, kind=kind, ns=app_id, run=True, owner=self.pid or 0)
@@ -484,11 +510,12 @@ class Player(PlayerDiag):
         permissions name, for a compiled user app that declares the app
         extension, whose imports reach them, for a native app, whose rows
         reach them (runtime/run/elf_run.py), and for a Lua app or script,
-        whose state opens their names (moy_app_lua.h). A compiled game that
-        declares the extension holds one too (`_wasm_ext_game`). The run's
-        own: the namespace hands it to the runtime's open, which copies it,
-        so two runs hold two grants. None otherwise, so a module's imports
-        from the extension are refused at load and a Lua game holds none."""
+        whose state opens their names (moy_app_lua.h). A game holds one too
+        (`_game`): a Lua game's state opens `prefs` and no `os` ("game"
+        among the roles), and a compiled game that declares the app
+        extension or "moybyte.prefs" serves its imports from it. The run's own: the namespace hands it to the runtime's open,
+        which copies it, so two runs hold two grants. None otherwise, so a
+        module's imports from the extension are refused at load."""
         app = getattr(self.ws, "app_abi", None)
         run = getattr(app, "run", None)
         if run is None:
@@ -496,10 +523,15 @@ class Player(PlayerDiag):
         ctx = self.app_ctx
         rt = cart.get("runtime") if cart is not None else None
         native_app = cart is not None and cart.get("type") == "app" and bool(cart.get("native"))
+        exts = (cart.get("extensions") or ()) if cart is not None else ()
         if (ctx is None or not (rt == "lua" or native_app or (
-                rt == "wasm" and APP_EXT in (cart.get("extensions") or ())))):
+                rt == "wasm" and (APP_EXT in exts or PREFS_EXT in exts)))):
             return run(0, ())
-        return run(ctx.grant, _moy_app.policy(self.granted)[0])
+        perms = self._grant_perms if self._grant_perms is not None else self.granted
+        roles = _moy_app.policy(perms)[0]
+        if self._grant_perms is not None:
+            roles += ("game",)          # its Lua state opens no app run's own
+        return run(ctx.grant, roles)
 
     def flush_editors(self):
         """Write every handle this run opened that holds an edit: the run is
@@ -1323,9 +1355,13 @@ class Player(PlayerDiag):
                                       owner=self.pid))
             if "ui" in ns:
                 self.face.bind(ns, cart)
-        elif _wasm_ext_game(cart, ws.spine):
-            make_run_grant(ws.app_context, cart, keep=self._keep_grant,
-                           perms=self.granted, owner=self.pid)
+        elif _game(cart, ws.spine):
+            perms = _game_perms(cart, self.granted)
+            ctx = make_run_grant(ws.app_context, cart, keep=self._keep_grant,
+                                 perms=perms, owner=self.pid)[0]
+            self._grant_perms = perms
+            if cart.get("runtime", "python") == "python":
+                ns["prefs"] = ctx.prefs
         if console is not None:
             ns.update(console.api())
         # A permission the manifest lists that Settings turned off reads None
