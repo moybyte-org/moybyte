@@ -640,6 +640,26 @@ def _reference(tmp_path, row, col, monkeypatch, built):
     return _REF[key]
 
 
+def test_a_linked_toolkit_lends_no_bar_beside_an_open_lua_run(tmp_path, monkeypatch, built):
+    """An app linking its own toolkit (a WASI or native app) lends the host's
+    bar nothing, while the run's context (native/moy_ui/moy_ui_run.c) still
+    answers for a Lua app's run another workstation left open: its title
+    showed in the C app's bar."""
+    from runtime.toolkit import ui_draw
+    Rig(tmp_path / "lua", "lua_app", "button", monkeypatch, built)
+    assert ui_draw.bar_lent(ui_draw.RUN_UI) is not None, "the Lua run lends its bar"
+    ran = 0
+    for layer in ("wasm_app", "elf_app"):
+        if isinstance(built[(layer, "button")], Exception):
+            continue
+        rig = Rig(tmp_path / layer, layer, "button", monkeypatch, built)
+        assert rig.ws.run.player.face.bar_ctx() is None, layer
+        rig.ws.spine.exit()
+        ran += 1
+    if not ran:
+        pytest.skip("no WASI or ELF build here")
+
+
 @pytest.mark.parametrize("layer,row,col", CELLS, ids=["-".join(c) for c in CELLS])
 def test_cell(tmp_path, monkeypatch, built, layer, row, col):
     what = GESTURES[row][col]

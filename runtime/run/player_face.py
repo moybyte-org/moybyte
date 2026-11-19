@@ -151,11 +151,15 @@ class AppFace:
     def bar_ctx(self):
         """The ui context whose `ui.bar` lends the host's bar: the Player's
         for a Python app, the run's own (`ui_draw.RUN_UI`) for any other
-        (a Lua or compiled app's; one linking a toolkit of its own lends
-        none there); None for a game or before a frame."""
+        (a Lua or compiled app's); None for a game, before a frame, and for
+        an app linking a toolkit of its own (`own_ui`: a WASI or native
+        app), whose run the run's context (native/moy_ui/moy_ui_run.c) is
+        not: that answers for the last Lua or compiled run, which may still
+        be open."""
         pl = self.pl
         if pl.lua is not None:
-            return _ui_draw.RUN_UI if pl._tool else None
+            own = getattr(pl.lua, "own_ui", False)
+            return _ui_draw.RUN_UI if pl._tool and not own else None
         ui = pl.ui
         return ui[0] if ui else None
 
