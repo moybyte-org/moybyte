@@ -680,7 +680,7 @@ class Pkg:
         return accepted
 
     def _one(self, c, p, yes):
-        key = json.dumps(c, sort_keys=True, default=str)
+        key = json.dumps(c)
         kept = _KEPT.pop(self.session, None) if self.session is not None else None
         if kept is not None and kept[0] != key:
             _drop(kept[1])
