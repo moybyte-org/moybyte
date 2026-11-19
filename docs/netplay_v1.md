@@ -175,7 +175,13 @@ one beacon tick in `MOY_MATCH_PROBE_EVERY` on the next channel of a probe list
 (6 and 11 first), and a pinned peer heard there is followed to its channel for
 as long as it is heard, so the match forms there with the station still
 associated. A pinned console never moves, and a live match never tunes
-(`moy_link_channel`, the io's `channel`).
+(`moy_link_channel`, the io's `channel`). A console in a beam's receive
+state (§7) has a person watching it, so while it listens it walks the list
+a channel every `MOY_MATCH_BEAM_PROBE_MS`, home each
+`MOY_MATCH_BEAM_PROBE_HOME`-th dwell, and an offer is said again every
+`MOY_MATCH_BEAM_OFFER_MS`, inside one dwell; the sender's own walk keeps the
+match's pace, which is what a free sender takes to reach a listener pinned
+to its AP's channel.
 
 **The handshake is BROADCAST, addressed in the payload** — START and JOIN carry
 the destination MAC as six bytes. Unicast was the protocol's only such frame and
@@ -299,6 +305,16 @@ either field, and the kernel's loop writes both from its own match
   in BEFORE `active(True)` — reconfiguring the ring live desyncs it until a full
   activation cycle — and `RATE_54M` after. At the 526-byte default, 64 of 200
   messages arrived while `send(sync=True)` answered True for every one.
+- **At 54M a frame's delivery depends on its bytes, so a beam sends at 12M**
+  (2026-11-19, on glass, #7). A Guition S3's 54M frames reach a T-Deck and a
+  Waveshare P4 by content: a given full frame arrives nearly every time or
+  never, whatever the number of sends, and the same frames all arrive at 12M
+  and at 6M. A match never notices (its frames are small, and each carries
+  the inputs the last one did), but a beam resends the same bytes: a report
+  whose bitmap was all ones never bound its sender, and a chunk of the wrong
+  bytes would stall a file for good. `EspNowLink.phy` gives the radio
+  `RATE_12M` while a beam holds it and the match's `RATE_54M` back when a
+  game takes it; at a beam's pace the air time of 12M is not what bounds it.
 - **The receive ring is the kernel's** (`native/moy_net/moy_link.c`, since
   2026-10-07). The port's modespnow committed a record in three ring puts while
   its reader waited only for the header, so a busy drain catching one
@@ -440,11 +456,16 @@ ends; a beam its console stops looking at for `MOY_MATCH_BEAM_TEND_MS` (a VM
 that went away) ends and tells its peer; a no, a refusal, a stop on either
 side and a damaged copy each end both, every end is said on whatever screen
 is up, and none leaves a temporary behind (each beam's start sweeps one a
-reset left). A no is said as often as a DONE (`MOY_MATCH_BEAM_DONES`), and
-the console keeps its radio up `link_beam.PART_MS` after a beam ends,
-because the Waveshare P4's sends are queued (§5) and a radio stopped in the
-same call never sends them, and `link_beam.KEEP_MS` after a receive it
-finished, for the sender's SUM. No beam starts while a match is live or a
+reset left). A no is said as often as a DONE (`MOY_MATCH_BEAM_DONES`) and
+kept as a verdict is: an offering sender spends one beacon tick in
+`MOY_MATCH_PROBE_EVERY` off its channel and hears none of the copies said
+meanwhile, so for `MOY_MATCH_BEAM_KEEP_MS` the console that said no answers
+every frame of that beam its peer still sends (its next offer, a report, a
+chunk) with the no again, from the channel it said it on. The console keeps
+its radio up `link_beam.PART_MS` after a beam ends, because the Waveshare
+P4's sends are queued (§5) and a radio stopped in the same call never sends
+them, and `link_beam.KEEP_MS` after a receive it finished and after a no it
+keeps. No beam starts while a match is live or a
 game holds the radio, a beam under way ends when a match goes live (in C) or
 a game takes the radio (`EspNowLink.start`), and a beam holds the channel
 while it is bound, as a peer on the cart does (§2's probes): a free station

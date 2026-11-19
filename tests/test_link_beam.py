@@ -312,9 +312,11 @@ def test_a_decline_writes_nothing_and_the_sender_hears_no(tmp_path):
     assert _shelf(wsb) == before and _stage(wsb) == []
     assert wsa.notices.said[-1][:2] == ("NOT SENT", "Bo said no")
     assert wsb.notices.said[-1][:2] == ("Stopped receiving", "")
-    # The radio outlives the no by PART_MS, so a queued send still leaves.
+    # The radio outlives the no by KEEP_MS: the link says it again to a
+    # sender that still offers.
+    _run(a, b, wsa, wsb, clock, link_beam.KEEP_MS - 500)
     assert b.active and wsb.spine.held == {"link"}
-    _run(a, b, wsa, wsb, clock, link_beam.PART_MS + 100)
+    _run(a, b, wsa, wsb, clock, 600)
     assert not b.active and wsb.spine.held == set()
 
 
@@ -399,6 +401,85 @@ def test_one_lost_no_still_reaches_the_sender(tmp_path):
     assert wsa.notices.said[-1][:2] == ("NOT SENT", "Bo said no")
 
 
+_DONES = 3                              # MOY_MATCH_BEAM_DONES
+
+
+def _first_nos(count):
+    """An air that loses the first `count` NOs, and the list it counts in."""
+    lost = []
+
+    def lose(src, payload):
+        if payload[1] == players_mod.T_BEAM and payload[2] == 4 and len(lost) < count:
+            lost.append(src)
+            return True
+        return False
+    return _PickyAir(lose), lost
+
+
+@pytest.mark.parametrize("how", ["decline", "stop", "room"])
+def test_a_no_whose_every_copy_is_lost_is_said_again_to_the_next_offer(
+        tmp_path, monkeypatch, how):
+    """The sender was on a probe tick while the receiver said no: its next
+    offer is answered from the no the link keeps."""
+    air, lost = _first_nos(_DONES)
+    air, clock, a, b, wsa, wsb = _setup(tmp_path, air)
+    if how == "room":
+        monkeypatch.setattr(link_beam, "free_bytes", lambda root: 1000)
+    b.beam_receive(wsb)
+    a.beam_send(wsa, _cart(wsa))
+    if how == "room":
+        assert _run(a, b, wsa, wsb, clock, 3000, until=lambda: b.beam_role() is None)
+    else:
+        _offered(a, b, wsa, wsb, clock)
+        if how == "decline":
+            wsb.confirm.cancel()
+        else:
+            b.beam_stop(wsb)
+    assert _run(a, b, wsa, wsb, clock, 2000, until=lambda: a.beam_role() is None)
+    assert lost == [B_MAC] * _DONES
+    assert wsa.notices.said[-1][:2] == (
+        "NOT SENT", "Bo has no room for it" if how == "room" else "Bo said no")
+    assert _stage(wsa) == [] and _stage(wsb) == []
+
+
+def test_a_no_said_again_does_not_end_the_next_offer(tmp_path):
+    """The no is kept for one beam: the same console's next offer is asked
+    about."""
+    air, clock, a, b, wsa, wsb = _setup(tmp_path)
+    cart = _cart(wsa)
+    b.beam_receive(wsb)
+    a.beam_send(wsa, cart)
+    _offered(a, b, wsa, wsb, clock)
+    wsb.confirm.cancel()
+    assert _run(a, b, wsa, wsb, clock, 3000, until=_both_done(a, b))
+    b.beam_receive(wsb)
+    a.beam_send(wsa, cart)
+    _offered(a, b, wsa, wsb, clock)
+    wsb.confirm.yes()
+    assert _run(a, b, wsa, wsb, clock, 30000, until=_both_done(a, b))
+    assert wsb.notices.said[-1][0] == "Got Pong"
+
+
+@pytest.mark.parametrize("who", ["sender", "receiver"])
+def test_a_stop_mid_transfer_whose_every_no_is_lost_still_ends_the_peer_as_stopped(
+        tmp_path, who):
+    air, lost = _first_nos(_DONES)
+    air, clock, a, b, wsa, wsb = _setup(tmp_path, air)
+    b.beam_receive(wsb)
+    a.beam_send_file(wsa, _file(wsa, size=3000000))
+    _offered(a, b, wsa, wsb, clock)
+    wsb.confirm.yes()
+    _run(a, b, wsa, wsb, clock, 1500)
+    stopper, ws, peer, wsp = (a, wsa, b, wsb) if who == "sender" else (b, wsb, a, wsa)
+    stopper.beam_stop(ws)
+    assert _run(a, b, wsa, wsb, clock, 1000, until=lambda: peer.beam_role() is None)
+    assert len(lost) == _DONES
+    assert wsp.notices.said[-1][:2] == (
+        ("RECEIVE FAILED", "Ada stopped sending") if who == "sender"
+        else ("SEND FAILED", "Bo stopped receiving"))
+    assert _stage(wsa) == [] and _stage(wsb) == [] and _downloads(wsb) == []
+
+
 def test_a_free_receiver_stays_on_the_channel_it_heard_the_offer_on(tmp_path):
     """The sender's station is on its AP's channel and its beacons are lost:
     the free receiver takes the offer on a probe tick and stays there while
@@ -417,6 +498,83 @@ def test_a_free_receiver_stays_on_the_channel_it_heard_the_offer_on(tmp_path):
     assert wsb.notices.said[-1][0] == "Got Pong" and wsa.notices.said[-1][0] == "Sent Pong"
     _parted(a, b, wsa, wsb, clock)
     assert _run(a, b, wsa, wsb, clock, 2000) is False and not b.active
+
+
+@pytest.mark.parametrize("ch", range(1, 14))
+def test_a_listening_console_finds_an_offer_on_any_channel_in_seconds(tmp_path, ch):
+    """The person who opened the receive state is watching: the free
+    console walks the probe list a channel a dwell while it listens, and
+    finds a sender pinned to any channel (its beacons lost) well inside the
+    twelve probe ticks a console with no beam takes."""
+    air = _PickyAir(lambda src, payload: src == A_MAC and payload[1] == players_mod.T_BEACON)
+    air, clock, a, b, wsa, wsb = _setup(tmp_path, air)
+    if ch != 1:
+        a.wlan.ch, a.wlan.assoc = ch, True
+    b.beam_receive(wsb)
+    a.beam_send(wsa, _cart(wsa))
+    assert _run(a, b, wsa, wsb, clock, 3200, until=lambda: wsb.confirm.open)
+    assert b.wlan.ch == ch
+    wsb.confirm.yes()
+    assert _run(a, b, wsa, wsb, clock, 30000, until=_both_done(a, b))
+    assert wsb.notices.said[-1][0] == "Got Pong"
+
+
+class _LeakyAir(tel._Air):
+    """A frame is also heard one channel up, as two consoles side by side
+    hear each other."""
+
+    def carry(self, src, dst, payload):
+        self.sent += 1
+        ch = tel._ch(self.radios.get(src))
+        for mac, r in self.radios.items():
+            if mac != src and tel._ch(r) in (ch, ch + 1) and dst in (tel.BROADCAST, mac):
+                r.inbox.append((src, payload))
+
+
+def test_an_offer_heard_a_channel_away_is_answered_where_its_sender_rests(tmp_path):
+    """The listening console took the offer on channel 2 while its sender
+    sat on 1: it goes where the sender's beacons say, so its yes binds and
+    its no is heard."""
+    air, clock, a, b, wsa, wsb = _setup(tmp_path, _LeakyAir())
+    b.beam_receive(wsb)
+    _run(a, b, wsa, wsb, clock, 2000, until=lambda: b.wlan.ch == 2)
+    assert b.wlan.ch == 2
+    a.beam_send(wsa, _cart(wsa))
+    assert _run(a, b, wsa, wsb, clock, 1000, until=lambda: wsb.confirm.open)
+    _run(a, b, wsa, wsb, clock, 1500)
+    assert b.wlan.ch == 1
+    wsb.confirm.yes()
+    assert _run(a, b, wsa, wsb, clock, 30000, until=_both_done(a, b))
+    assert wsb.notices.said[-1][0] == "Got Pong" and wsa.notices.said[-1][0] == "Sent Pong"
+
+
+def test_an_offer_is_never_said_from_a_probe_channel(tmp_path):
+    """A listening console that took an offer on the sender's probe tick
+    would ask, answer and say its no where the sender is not."""
+    said = []
+    links = []
+
+    def watch(src, payload):
+        if src == A_MAC and payload[1] == players_mod.T_BEAM and payload[2] == 1:
+            said.append(links[0].wlan.ch)
+        return False
+    air, clock, a, b, wsa, wsb = _setup(tmp_path, _PickyAir(watch))
+    links.append(a)
+    a.beam_send(wsa, _cart(wsa))
+    seen = set()
+    _run(a, b, wsa, wsb, clock, 8000, each=lambda: seen.add(a.wlan.ch))
+    assert len(seen) > 3 and len(said) > 30 and set(said) == {1}
+
+
+def test_a_console_with_no_beam_probes_at_the_matchs_pace(tmp_path):
+    """The receive state alone walks fast: a console at its home with the
+    radio up for a sender's offer keeps the match's one tick in three."""
+    air, clock, a, b, wsa, wsb = _setup(tmp_path)
+    a.beam_send(wsa, _cart(wsa))
+    seen = []
+    _run(a, b, wsa, wsb, clock, 6000, each=lambda: seen.append(a.wlan.ch))
+    away = sum(1 for c in seen if c != 1)
+    assert 0.25 < away / len(seen) < 0.42
 
 
 def test_a_stopped_game_leaves_no_cart_in_the_beacon_a_beam_brings_up(tmp_path):
@@ -476,6 +634,29 @@ def test_a_beam_never_starts_beside_a_game_and_a_game_ends_one(tmp_path):
     assert b.beam_role() is None
     assert wsb.notices.said[-1][:2] == ("BEAM STOPPED", "A game is using the radio")
     assert b.active and "link" in wsb.spine.held   # the game's hold stands
+
+
+def test_a_beam_sends_at_its_own_phy_rate_and_a_game_takes_the_matchs_back(tmp_path):
+    """A beam resends the same bytes, so it leaves at a rate where a frame's
+    delivery does not depend on them; the match keeps its own."""
+    air, clock, a, b, wsa, wsb = _setup(tmp_path)
+    for lk in (a, b):
+        lk._rate_match, lk._rate_beam = 54, 12
+    b.beam_receive(wsb)
+    a.beam_send(wsa, _cart(wsa))
+    assert a.radio.cfg["rate"] == 12 and b.radio.cfg["rate"] == 12
+    _offered(a, b, wsa, wsb, clock)
+    wsb.confirm.yes()
+    assert _run(a, b, wsa, wsb, clock, 30000, until=_both_done(a, b))
+    _parted(a, b, wsa, wsb, clock)
+    assert not a.active and not b.active
+    a.start()                              # a game brings the radio up
+    assert a.radio.cfg["rate"] == 54
+    a.stop()
+    b.beam_receive(wsb)                    # ...and one that starts over a beam
+    assert b.radio.cfg["rate"] == 12
+    b.start()
+    assert b.radio.cfg["rate"] == 54 and b.beam_role() is None
 
 
 def test_a_live_match_refuses_a_beam_in_c(tmp_path):
@@ -1055,6 +1236,7 @@ def test_the_consoles_numbers_are_the_headers():
     assert link_beam.WAIT_MS == val("MOY_MATCH_BEAM_WAIT_MS")
     assert link_beam.KEEP_MS == val("MOY_MATCH_BEAM_KEEP_MS")
     assert players_mod.T_BEAM == val("MOY_MATCH_T_BEAM")
+    assert _DONES == val("MOY_MATCH_BEAM_DONES")
     assert (link_beam.SEND, link_beam.RECEIVE) == (val("MOY_BEAM_SEND"), val("MOY_BEAM_RECEIVE"))
     assert (link_beam.CART, link_beam.FILE) == (val("MOY_BEAM_CART"), val("MOY_BEAM_FILE"))
     for s in ("OFFERING", "LISTENING", "OFFERED", "MOVING", "DONE", "FAILED"):

@@ -70,7 +70,9 @@
 // BEAMING A FILE. A console sends one file -- a cart's `.moy` archive or a
 // person's file -- as bytes to one console nearby that is not playing a match
 // (T_BEAM, BEAM_* below). The sender OFFERS it on the air (its id, size,
-// what it is, its console's name and the item's title) every BEAM_OFFER_MS;
+// what it is, its console's name and the item's title) every BEAM_OFFER_MS
+// (never from a probe channel: a console that took it there would answer
+// where its sender is not);
 // a console takes an offer only while a person on it has opened the receive
 // state (moy_match_beam_listen), holds the first one it hears and asks its
 // person, or refuses it (moy_match_beam_refuse: no room). Its accept is a
@@ -104,7 +106,11 @@
 // BEAM_SILENT_MS ends with GONE; a beam its console stops looking at
 // (moy_match_beam_info, every frame) for BEAM_TEND_MS ends with STOPPED and
 // tells its peer, which is what a VM that went away leaves. A decline, a
-// refusal and either side's stop is NO, carrying why. A match outranks a
+// refusal and either side's stop is NO, carrying why, said BEAM_DONES times
+// and kept as a verdict is: for BEAM_KEEP_MS the console answers NO to every
+// frame of that beam its peer still sends (an offer again, a NEED, a chunk),
+// on the channel it was said on, so a peer that missed each copy (it was on
+// a probe tick) hears it at its next frame. A match outranks a
 // beam: none starts while a match is live, and one going on ends when one
 // begins.
 //
@@ -184,8 +190,16 @@ enum {
 // every PROBE_EVERY-th beacon tick it visits the next channel of the probe
 // list for one tick, and a pinned peer heard there is followed to its
 // channel for as long as it is heard. A pinned console never moves; a live match never tunes.
+// A beacon says the channel its sender rests on, home while it probes, and a
+// console holding a beam goes where its peer's beacons say: a frame is heard
+// a channel away at times, and an answer sent there reaches nobody.
+// A console whose person opened the receive state (BEAMING A FILE) is being
+// watched: while it listens it walks the list a channel every BEAM_PROBE_MS,
+// home every BEAM_PROBE_HOME-th, each dwell longer than an offer's resend.
 #define MOY_MATCH_HOME_CH 1
 #define MOY_MATCH_PROBE_EVERY 3
+#define MOY_MATCH_BEAM_PROBE_MS 150
+#define MOY_MATCH_BEAM_PROBE_HOME 4
 #define MOY_MATCH_PEER_TTL_MS 2000
 #define MOY_MATCH_DRAIN_MAX 24
 #define MOY_MATCH_START_TRIES 12
@@ -242,7 +256,7 @@ enum { MOY_MATCH_FROM_ANY = 0, MOY_MATCH_FROM_MATCH = 1 };
 #define MOY_MATCH_BEAM_CHUNK (MOY_MATCH_FRAME - MOY_MATCH_BEAM_HDR)
 #define MOY_MATCH_BEAM_WINDOW 128
 #define MOY_MATCH_BEAM_RING (MOY_MATCH_BEAM_WINDOW * MOY_MATCH_BEAM_CHUNK)
-#define MOY_MATCH_BEAM_OFFER_MS 500     // an offer's resend
+#define MOY_MATCH_BEAM_OFFER_MS 100     // an offer's resend
 #define MOY_MATCH_BEAM_NEED_MS 200      // a receiver's report, and a sender's SUM
 #define MOY_MATCH_BEAM_WAIT_MS 60000    // an offer or a receive state nobody answers
 #define MOY_MATCH_BEAM_SILENT_MS 3000   // a bound peer heard from
@@ -487,13 +501,19 @@ typedef struct {
     bool pinned;                        // ...an associated station's
     uint8_t probe;                      // beacon ticks since the last probe, and its place
     uint8_t probe_at;
+    uint32_t tuned_at;                  // the last look at the channel
+    bool away;                          // ...which left it on a probe channel
     moy_match_budget_t ports_budget;    // every port's sends together
     struct moy_beam *beam;              // the beam under way, NULL none (BEAMING A FILE)
     // The last beam this console received to its end, whose SUM it answers
-    // for BEAM_KEEP_MS: its id, sender and verdict (1 whole, 2 damaged).
-    uint32_t kept_id, kept_at;
+    // for BEAM_KEEP_MS: its id, sender and verdict (1 whole, 2 damaged) -- or
+    // the last it said NO to once bound or offered (3, and the why), which it
+    // says again to each frame of that beam its peer sends meanwhile,
+    // BEAM_NEED_MS apart at most.
+    uint32_t kept_id, kept_at, kept_said;
     uint8_t kept_peer[6];
-    uint8_t kept;
+    uint8_t kept, kept_why;
+    uint32_t polled;                    // the last poll's clock
 } moy_match_t;
 
 extern const uint8_t MOY_MATCH_BROADCAST[6];

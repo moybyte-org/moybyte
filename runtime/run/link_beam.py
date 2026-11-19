@@ -39,8 +39,9 @@ link's own holder); a game that takes the radio ends the beam
 (`EspNowLink.start`), and a beam never starts beside one. A beam that ends
 keeps the radio up PART_MS more, as its last frame (a no, a stop) is still in
 the transport's send queue on a board whose radio is another chip (the
-Waveshare P4's), and a receive that finished KEEP_MS, the link's
-BEAM_KEEP_MS, so a sender whose DONEs were lost still hears the verdict.
+Waveshare P4's), and KEEP_MS, the link's BEAM_KEEP_MS, after a receive that
+finished and after a no said to a console that offered or was bound, so a
+peer that missed every DONE or NO hears it at its next frame.
 """
 
 import moy_carts as _carts
@@ -243,6 +244,8 @@ class Beam:
         self.parting = None
         self.part_ms = PART_MS
         if self.link._up():
+            if not self.link._game:
+                self.link.phy(True)
             return True
         self._let_go(ws, True)
         return False
@@ -262,6 +265,7 @@ class Beam:
         link = self.link
         self.parting = None
         link._beaming = False
+        link.phy(False)
         if link._game:
             return
         if link._m is None or not link._m.ports_open():
@@ -411,6 +415,7 @@ class Beam:
                 free = _op(ws, lambda: free_bytes(ws.carts_root))
                 if free is not None and free < need:
                     m.beam_refuse(ROOM)
+                    self.part_ms = KEEP_MS
                     self._end(ws)
                     _say(ws, "NO ROOM", "%s needs %s" % (short, size_text(need)), "warn")
                     return
@@ -512,6 +517,9 @@ class Beam:
     def _end(self, ws):
         m = self.link._m
         if m is not None:
+            info = m.beam_info()
+            if info is not None and info[1] in (OFFERED, MOVING):
+                self.part_ms = KEEP_MS      # the link keeps this no, to say it again
             m.beam_end()
         self._close_question(ws)
         self._discard(ws)

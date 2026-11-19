@@ -782,6 +782,8 @@ class EspNowLink:
     _game = False                       # the game in front holds the radio
     _beaming = False                    # ...and a beam (link_beam.Beam)
     _beam = None
+    _rate_match = None                  # the PHY rates the radio offers: a match's
+    _rate_beam = None                   # ...and a beam's (`phy`)
 
     # -- lifecycle --
     def start(self):
@@ -791,7 +793,25 @@ class EspNowLink:
         self._game = True
         if self._beaming and self._m is not None:
             self._m.beam_end()
-        return self._up()
+        up = self._up()
+        self.phy(False)
+        return up
+
+    def phy(self, beam):
+        """The PHY rate every frame leaves at: the match's 54M, where a
+        frame is small and a lost one is covered by the next, or a beam's
+        12M. A beam resends the same bytes, and at 54M a frame's delivery
+        depends on its bytes: from a Guition S3 some full frames never
+        arrive however often they are sent (docs/netplay_v1.md §4)."""
+        rate = self._rate_beam if beam else self._rate_match
+        if rate is None or rate == self._rate:
+            return
+        self._rate = rate
+        if self.active and self.radio is not None:
+            try:
+                self.radio.config(rate=rate)
+            except Exception as exc:  # noqa: BLE001
+                print("Moybyte espnow rate:", exc)
 
     def _up(self):
         if self.active:
@@ -812,7 +832,10 @@ class EspNowLink:
             if kernel:
                 import moy_net
                 self.radio = moy_net.Link()
-                self._rate = getattr(moy_net, "RATE_54M", None)
+                self._rate_match = getattr(moy_net, "RATE_54M", None)
+                self._rate_beam = getattr(moy_net, "RATE_12M", None)
+            if self._rate is None or self._game:
+                self._rate = self._rate_match
             try:
                 self.radio.config(rxbuf=RXBUF)      # BEFORE active(), never after
             except Exception as exc:  # noqa: BLE001

@@ -289,12 +289,17 @@ class moy_match_t(_c.Structure):
         ("pinned", _c.c_bool),
         ("probe", _c.c_uint8),
         ("probe_at", _c.c_uint8),
+        ("tuned_at", _c.c_uint32),
+        ("away", _c.c_bool),
         ("ports_budget", moy_match_budget_t),
         ("beam", _c.c_void_p),
         ("kept_id", _c.c_uint32),
         ("kept_at", _c.c_uint32),
+        ("kept_said", _c.c_uint32),
         ("kept_peer", _c.c_uint8 * 6),
         ("kept", _c.c_uint8),
+        ("kept_why", _c.c_uint8),
+        ("polled", _c.c_uint32),
     ]
 
 

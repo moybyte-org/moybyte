@@ -18,6 +18,9 @@ static void on_beam(moy_match_t *m, const uint8_t mac[6], const uint8_t *msg, si
 static void beam_tick(moy_match_t *m, uint32_t now);
 static bool beam_holds_channel(const moy_match_t *m);
 static bool beam_hears(const moy_match_t *m, uint32_t now);
+static bool beam_keeps(const moy_match_t *m, uint32_t now);
+static bool beam_listens(const moy_match_t *m);
+static int beam_rests(moy_match_t *m, uint32_t now);
 
 static void say(moy_match_t *m, const char *fmt, ...) {
     char line[160];
@@ -689,7 +692,7 @@ static void beacon(moy_match_t *m) {
     char body[sizeof(m->name) + sizeof(m->board) + sizeof(m->cart) + 8];
     int n = snprintf(body, sizeof(body), "%s|%s|%s|%d|%d", m->name, m->board, m->cart,
                      m->rate ? m->rate : MOY_MATCH_TICK_HZ,
-                     m->pinned ? -(int)m->ch : (int)m->ch);
+                     m->pinned ? -(int)m->ch : m->away ? MOY_MATCH_HOME_CH : (int)m->ch);
     if (n < 0) {
         n = 0;
     }
@@ -1193,8 +1196,12 @@ static const uint8_t PROBE[] = {6, 11, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13};
 // a free station goes where a pinned peer was heard, else stays where its
 // beam's peer was last heard (an offer taken on a probe tick, whose sender's
 // beacon was missed), else home, else -- with no peer on its cart and no beam
-// bound, every PROBE_EVERY-th tick -- one tick on the next probe channel.
+// bound, every PROBE_EVERY-th tick -- one tick on the next probe channel. A
+// listening beam's console is tuned every BEAM_PROBE_MS instead, and probes
+// on every look but each BEAM_PROBE_HOME-th.
 static void tune(moy_match_t *m, uint32_t now) {
+    m->tuned_at = now;
+    m->away = false;
     if (m->io == NULL || m->io->channel == NULL || m->s.live) {
         return;
     }
@@ -1217,13 +1224,24 @@ static void tune(moy_match_t *m, uint32_t now) {
         kin = kin || (m->cart[0] && strcmp(p->cart, m->cart) == 0);
     }
     kin = kin || beam_holds_channel(m);
-    if (want == 0 && beam_hears(m, now)) {
+    if (want == 0) {
+        want = beam_rests(m, now);
+    }
+    if (want == 0 && (beam_hears(m, now) || beam_keeps(m, now))) {
         want = m->ch;
     }
     if (want == 0) {
         want = MOY_MATCH_HOME_CH;
-        if (!kin && ++m->probe >= MOY_MATCH_PROBE_EVERY) {
+        bool go = false;
+        if (!kin && beam_listens(m)) {
+            m->probe = (uint8_t)((m->probe + 1u) % MOY_MATCH_BEAM_PROBE_HOME);
+            go = m->probe != 0;
+        } else if (!kin && ++m->probe >= MOY_MATCH_PROBE_EVERY) {
             m->probe = 0;
+            go = true;
+        }
+        if (go) {
+            m->away = true;
             want = PROBE[m->probe_at];
             m->probe_at = (uint8_t)((m->probe_at + 1u) % sizeof(PROBE));
         }
@@ -1240,6 +1258,7 @@ int moy_match_poll(moy_match_t *m, uint32_t now) {
         return 0;
     }
     int n = 0;
+    m->polled = now;
     for (uint8_t i = 0; i < m->defer_n; i++) {
         moy_match_dispatch(m, m->defer_mac[i], m->defer[i], m->defer_len[i], now);
     }
@@ -1265,10 +1284,16 @@ int moy_match_poll(moy_match_t *m, uint32_t now) {
         }
     }
     beam_tick(m, now);
+    bool listens = beam_listens(m);
+    if (listens && (uint32_t)(now - m->tuned_at) >= MOY_MATCH_BEAM_PROBE_MS) {
+        tune(m, now);
+    }
     int32_t since = (int32_t)(now - m->beacon_at);
     if (since >= MOY_MATCH_BEACON_MS || since < 0) {
         m->beacon_at = now;
-        tune(m, now);
+        if (!listens) {
+            tune(m, now);
+        }
         beacon(m);
         expire(m, now);
         maybe_match(m, now);
@@ -1588,9 +1613,23 @@ static void beam_no(moy_match_t *m, const moy_beam_t *b, const uint8_t to[6], ui
     }
 }
 
+// The NO just said to the beam's peer, kept to be said again (moy_match.h).
+static void beam_keep_no(moy_match_t *m, const moy_beam_t *b, uint8_t why) {
+    m->kept = 3;
+    m->kept_why = why;
+    m->kept_id = b->id;
+    m->kept_at = m->kept_said = m->polled;
+    memcpy(m->kept_peer, b->peer, 6);
+}
+
+static bool beam_keeps(const moy_match_t *m, uint32_t now) {
+    return m->kept != 0 && (int32_t)(now - m->kept_at) < MOY_MATCH_BEAM_KEEP_MS;
+}
+
 static void beam_fail(moy_match_t *m, moy_beam_t *b, uint8_t why, bool tell) {
     if (tell && (b->bound || b->state == MOY_BEAM_OFFERED)) {
         beam_no(m, b, b->peer, why);
+        beam_keep_no(m, b, why);
     }
     b->state = MOY_BEAM_FAILED;
     b->why = why;
@@ -1604,6 +1643,24 @@ static bool beam_busy(const moy_beam_t *b) {
 static bool beam_holds_channel(const moy_match_t *m) {
     const moy_beam_t *b = m->beam;
     return b != NULL && (b->state == MOY_BEAM_OFFERED || b->state == MOY_BEAM_MOVING);
+}
+
+// The channel the beam's peer -- the one bound or offering, else the one a
+// kept verdict is for -- last said it rests on (its beacon's), 0 unknown: a
+// frame is heard a channel away at times, and an answer goes where its
+// reader is.
+static int beam_rests(moy_match_t *m, uint32_t now) {
+    const uint8_t *mac = beam_holds_channel(m) ? m->beam->peer
+                         : beam_keeps(m, now) ? m->kept_peer : NULL;
+    const moy_match_peer_t *p = mac != NULL ? peer_of(m, mac) : NULL;
+    if (p == NULL || (int32_t)(now - p->seen) > MOY_MATCH_PEER_TTL_MS) {
+        return 0;
+    }
+    return p->ch;
+}
+
+static bool beam_listens(const moy_match_t *m) {
+    return m->beam != NULL && m->beam->state == MOY_BEAM_LISTENING;
 }
 
 // The beam's peer was heard on this channel within BEAM_HERE_MS.
@@ -2009,7 +2066,7 @@ static void beam_heard_sum(moy_match_t *m, moy_beam_t *b, const uint8_t mac[6],
         beam_verdict(m, b, now);
         return;
     }
-    if (m->kept && id == m->kept_id && memcmp(mac, m->kept_peer, 6) == 0
+    if (m->kept != 3 && m->kept && id == m->kept_id && memcmp(mac, m->kept_peer, 6) == 0
             && (int32_t)(now - m->kept_at) < MOY_MATCH_BEAM_KEEP_MS) {
         uint8_t ok = m->kept == 1;
         beam_say_id(m, id, MOY_MATCH_BEAM_DONE, mac, &ok, 1);
@@ -2027,6 +2084,17 @@ static void on_beam(moy_match_t *m, const uint8_t mac[6], const uint8_t *msg, si
     if (kind == MOY_MATCH_BEAM_SUM) {
         if (n >= 17 && for_us(m, msg, n, 7)) {
             beam_heard_sum(m, b, mac, msg, n, now);
+        }
+        return;
+    }
+    // A beam this console said NO to, whose peer still sends: NO again.
+    if (m->kept == 3 && beam_keeps(m, now) && get32(msg + 3) == m->kept_id
+            && memcmp(mac, m->kept_peer, 6) == 0
+            && (kind == MOY_MATCH_BEAM_OFFER || for_us(m, msg, n, 7))) {
+        if (kind != MOY_MATCH_BEAM_NO
+                && (int32_t)(now - m->kept_said) >= MOY_MATCH_BEAM_NEED_MS) {
+            m->kept_said = now;
+            beam_say_id(m, m->kept_id, MOY_MATCH_BEAM_NO, mac, &m->kept_why, 1);
         }
         return;
     }
@@ -2103,7 +2171,8 @@ static void beam_tick(moy_match_t *m, uint32_t now) {
         case MOY_BEAM_OFFERING:
             if ((int32_t)(now - b->began) >= MOY_MATCH_BEAM_WAIT_MS) {
                 beam_fail(m, b, MOY_BEAM_WHY_NOBODY, false);
-            } else if (!b->has_sent || (int32_t)(now - b->sent_at) >= MOY_MATCH_BEAM_OFFER_MS) {
+            } else if (!m->away && (!b->has_sent
+                                    || (int32_t)(now - b->sent_at) >= MOY_MATCH_BEAM_OFFER_MS)) {
                 beam_offer_frame(m, b, now);
             }
             return;
@@ -2222,8 +2291,10 @@ void moy_match_beam_end(moy_match_t *m) {
     }
     if (b->state == MOY_BEAM_OFFERED) {
         beam_no(m, b, b->peer, MOY_BEAM_WHY_DECLINED);
+        beam_keep_no(m, b, MOY_BEAM_WHY_DECLINED);
     } else if (b->state == MOY_BEAM_MOVING) {
         beam_no(m, b, b->peer, MOY_BEAM_WHY_STOPPED);
+        beam_keep_no(m, b, MOY_BEAM_WHY_STOPPED);
     } else if (b->state == MOY_BEAM_OFFERING) {
         beam_no(m, b, MOY_MATCH_BROADCAST, MOY_BEAM_WHY_STOPPED);
     }
