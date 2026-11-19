@@ -2197,3 +2197,50 @@ def test_the_rotated_copy_last_copies_the_other_paint_buffer():
         syncs = ppa.syncs
         assert comp.copy_last(0, 0, 1280, 1)
         assert ppa.syncs == syncs + 1
+
+
+def _p4_l2_lines():
+    """Each P4 board's L2 line, as its sdkconfig.board leaves it: the
+    128-byte line only where the board selects it, IDF's 64 otherwise."""
+    lines = {}
+    for cfg in sorted(ROOT.glob("firmware/*/boards/*/sdkconfig.board")):
+        text = cfg.read_text()
+        if "CONFIG_CACHE_L2_" not in text:
+            continue
+        line = 128 if "CONFIG_CACHE_L2_CACHE_LINE_128B=y" in text else 64
+        lines[cfg.parent.parent.parent.name] = line
+    return lines
+
+
+def test_the_canvas_cache_line_is_the_boards_l2_line():
+    lines = _p4_l2_lines()
+    assert {"esp32_p4_wifi6_touch_lcd_7b", "guition_jc8012p4a1c"} <= set(lines)
+    P = _p4_canvas_class()
+    assert set(lines.values()) == {P.CACHE_LINE}
+    header = (ROOT / "native/p4/moy_ppa/moy_ppa.h").read_text()
+    assert "#define MOY_CACHE_LINE CONFIG_CACHE_L2_CACHE_LINE_SIZE" in header
+    mod = (ROOT / "native/p4/moy_ppa/modmoy_ppa.c").read_text()
+    assert ("{ MP_ROM_QSTR(MP_QSTR_CACHE_LINE), MP_ROM_INT(MOY_CACHE_LINE) }"
+            in mod)
+
+
+def test_enable_ppa_takes_the_line_from_moy_ppa(monkeypatch):
+    P = _p4_canvas_class()
+    fake = types.SimpleNamespace(CACHE_LINE=128, init=lambda: False)
+    monkeypatch.setitem(sys.modules, "moy_ppa", fake)
+    assert P.enable_ppa() is False
+    assert P.CACHE_LINE == 128, "a dead engine still names the line snap uses"
+
+
+@pytest.mark.parametrize("line", [64, 128])
+def test_the_frame_scratch_holds_every_span_snap_takes(line):
+    P, cv = _frame_canvas(types.SimpleNamespace(rotated=False), FramePpa())
+    cv.CACHE_LINE = line
+    for n in (2 * 320 * 240, 2 * 128 * 128 + 2, 2 * 7 * 3):
+        room = cv._snap_room(n)
+        assert room % line == 0
+        for off in range(line):
+            assert (off + n + line - 1) & -line <= room
+        cf = FrameStub()
+        cv.frame_scratch(cf, n // 2, 1)
+        assert len(cf.scr) == room + 2 * (n // 2) * P.PATCH_ROWS

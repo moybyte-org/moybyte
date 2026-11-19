@@ -55,12 +55,19 @@ class P4SystemCanvas(SystemCanvas):
     # PPA error demotes to the CPU kernel globally. None = CPU-only (blit565).
     _ppa = None
 
+    # The PSRAM (L2) cache line every snapshot span is aligned to: the build's
+    # CONFIG_CACHE_L2_CACHE_LINE_SIZE, which enable_ppa reads from
+    # moy_ppa.CACHE_LINE. 64 is the P4 boards' line, the host's stand-in, and
+    # tests/test_p4_display.py pins the two equal.
+    CACHE_LINE = 64
+
     @classmethod
     def enable_ppa(cls):
         """Probe + register the P4 PPA once (run_desktop calls this after the
         panel is up). Returns True if hardware compositing is live."""
         try:
             import moy_ppa
+            cls.CACHE_LINE = moy_ppa.CACHE_LINE
             if moy_ppa.init():
                 cls._ppa = moy_ppa
                 _IN_PLACE[0] = getattr(moy_ppa, "shift_in", None)
@@ -397,8 +404,15 @@ class P4SystemCanvas(SystemCanvas):
         present_frame takes it, for a run the kernel's front shows from the
         cart's memory (moy_glass.front): the same buffer either way, so
         neither path frees the other's. None when there is none to be had."""
-        n = 2 * gw * gh
-        return cf.scratch(((n + 191) & ~63) + 2 * gw * self.PATCH_ROWS)
+        return cf.scratch(self._snap_room(2 * gw * gh)
+                          + 2 * gw * self.PATCH_ROWS)
+
+    def _snap_room(self, n):
+        """The scratch bytes moy_ppa.snap may write for an `n`-byte frame:
+        the line-aligned span around it, which starts up to a line before the
+        frame and ends up to a line past it."""
+        line = self.CACHE_LINE
+        return (n + 3 * line - 1) & -line
 
     def present_frame(self, cf, view, gc, ox, oy, scale, src=None,
                       defer=False):
@@ -433,7 +447,7 @@ class P4SystemCanvas(SystemCanvas):
         if (ox < 0 or oy < 0 or ox + vw * scale > self.w
                 or oy + vh * scale > self.h):
             return False
-        base = (n + 191) & ~63            # past any span the snapshot takes
+        base = self._snap_room(n)
         pic_n = 2 * gw * self.PATCH_ROWS
         scr = cf.scratch(base + pic_n)
         if scr is None:
