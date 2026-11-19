@@ -446,6 +446,11 @@ int moy_sh_screen_status(moy_sh_screen_t *f) {
     return 0;
 }
 
+int moy_sh_screen_secret(moy_sh_screen_t *f) {
+    (void)f;
+    return 0;
+}
+
 void moy_sh_screen_cancel(moy_sh_screen_t *f) {
     (void)f;
 }

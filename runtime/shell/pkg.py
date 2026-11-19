@@ -74,6 +74,12 @@ import app_perms as _perms
 from player_fit import fit_notice as _fit_notice, board_share as _board_share
 
 InstallError = _ci.InstallError
+ASKED = object()                # an answer the terminal asks for: the run ends (Asked)
+
+
+class Asked(Exception):
+    """A question the session asked (moy_sh.h's moy_sh_ask): the run ends,
+    and the line runs again with its answer."""
 WRONG_PASSWORD = "That isn't the console's password."
 NO_PASSWORD = "This console has a password: install it from Get Carts, which asks for it."
 CACHE_DIR = "pkg"
@@ -383,8 +389,10 @@ KEEP_BYTES = 4096               # a cached index's bytes written in one step
 class Pkg:
     """The verbs over `inst` (the install role's server, bound, with `carts()`
     the scanned shelf), writing to `out(text)` and `err(line)`. `ask(question)`
-    is a yes or no from the user (None: nobody to ask, a no); `stopped()`
-    is True once Ctrl-C came. The transport is the install role's
+    is a yes or no from the user (None: nobody to ask, a no) and
+    `password(question)` the line they type, either ASKED where the
+    terminal asks it as its prompt (the verb raises Asked, and its line runs
+    again with the answer); `stopped()` is True once Ctrl-C came. The transport is the install role's
     (`inst.net()`: the http worker's where it verifies, cart_index.Worker)."""
 
     def __init__(self, inst, out, err, ask=None, stopped=None, password=None):
@@ -633,7 +641,10 @@ class Pkg:
             text = _ci.as_text((yield from self._wait(_ci.licence_fetch(self._net(), c, ref))))
             self.out("%s needs %s, under this licence:\n\n%s\n" % (
                 c["name"], e["path"], text.rstrip("\n")))
-            if not (yes or (self.ask is not None and self.ask("Agree?"))):
+            ok = yes or (self.ask is not None and self.ask("Agree?"))
+            if ok is ASKED:
+                raise Asked()
+            if not ok:
                 return None
             accepted.append(e["path"])
         return accepted
@@ -669,10 +680,16 @@ class Pkg:
                     self.release()
                     self.out("".join(ln + "\n" for ln in job.asking))
                     why = self._gate(job.asking)
+                    ok = why is None and (yes or (self.ask is not None and self.ask("Install?")))
+                    if why is ASKED or ok is ASKED:
+                        job.cancel()
+                        while job.step(STEP_MS):
+                            pass
+                        raise Asked()
                     if why is not None:
                         job.cancel()
                         self.err("%s: %s" % (c["id"], why))
-                    elif yes or (self.ask is not None and self.ask("Install?")):
+                    elif ok:
                         job.agree()
                     else:
                         job.cancel()
@@ -693,12 +710,15 @@ class Pkg:
     def _gate(self, lines):
         """None when the prompt `lines` may be answered; else why not: the
         console's password, asked for an unreviewed Python cart (`gated`),
-        not typed right, or nobody here to type it."""
+        not typed right, or nobody here to type it; ASKED where the terminal
+        asks for it."""
         if not gated(self.inst, lines):
             return None
         if self.password is None:
             return NO_PASSWORD
         typed = self.password("The console's password:")
+        if typed is ASKED:
+            return ASKED
         return None if typed and self.inst.unlock(typed) else WRONG_PASSWORD
 
     def remove(self, idents):

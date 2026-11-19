@@ -156,6 +156,10 @@ void moy_sh_face_pick(moy_sh_face_t *f, int i);
 // prompt the line shows into `out` (its length).
 int moy_sh_face_more(const moy_sh_face_t *f);
 size_t moy_sh_face_prompt(moy_sh_face_t *f, char *out, size_t cap);
+// The prompt row as a frame draws it: the prompt, then the line typed, or a
+// `*` a character of it while a secret question waits (moy_sh.h's
+// MOY_SH_ASK_SECRET), with its colours' escapes.
+const char *moy_sh_face_prompt_row(moy_sh_face_t *f);
 // The grid's lines taken again where its generation moved since the last
 // take: whether they were (a frame takes them itself).
 int moy_sh_face_take(moy_sh_face_t *f);

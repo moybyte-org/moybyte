@@ -205,6 +205,19 @@ static size_t prompt_of(moy_sh_face_t *f, char *out, size_t cap) {
     return n < cap ? n : cap - 1;
 }
 
+// A secret question waits (moy_sh.h's MOY_SH_ASK_SECRET): the line typed is
+// its answer, shown a `*` a character, kept from the history and completion.
+static int secret(moy_sh_face_t *f) {
+    return f->scr != NULL && !busy(f) && line_app(f) == NULL
+        && moy_sh_screen_secret(f->scr);
+}
+
+static void wipe(char *p, size_t n) {
+    for (volatile char *q = p; n--; q++) {
+        *q = 0;
+    }
+}
+
 static void fresh_line(moy_sh_face_t *f) {
     int c[3];
     moy_term_cursor(moy_sh_screen_term(f->scr), c);
@@ -213,15 +226,19 @@ static void fresh_line(moy_sh_face_t *f) {
     }
 }
 
-// The line echoed into the grid: the prompt dim, the text typed, `tail`.
+// The line echoed into the grid: the prompt dim, the text typed (none of a
+// secret answer), `tail`.
 static void echo(moy_sh_face_t *f, const char *tail) {
     char p[MOY_SH_FACE_LINE];
+    int hide = secret(f);
     fresh_line(f);
     prompt_of(f, p, sizeof p);
     write_s(f, ECHO);
     write_s(f, p);
     write_s(f, TYPED);
-    moy_term_write(moy_sh_screen_term(f->scr), f->line, (size_t)f->len);
+    if (!hide) {
+        moy_term_write(moy_sh_screen_term(f->scr), f->line, (size_t)f->len);
+    }
     write_s(f, PLAIN);
     write_s(f, tail);
 }
@@ -340,10 +357,14 @@ void moy_sh_face_submit(moy_sh_face_t *f) {
     char text[MOY_SH_FACE_LINE + 1];
     memcpy(text, f->line, (size_t)f->len);
     int32_t n = f->len;
+    int hide = secret(f);
     f->ncand = 0;
     echo(f, "\n");
+    if (hide) {
+        wipe(f->line, sizeof f->line);
+    }
     set_line(f, "", 0);
-    if (!blank(text, n)
+    if (!hide && !blank(text, n)
             && (f->nhist == 0 || strncmp(f->hist[f->nhist - 1], text, MOY_SH_FACE_LINE) != 0
                 || (int32_t)strlen(f->hist[f->nhist - 1]) != n)) {
         if (f->nhist == MOY_SH_FACE_HISTORY) {
@@ -367,6 +388,9 @@ void moy_sh_face_submit(moy_sh_face_t *f) {
     }
     text[n++] = '\n';
     int r = moy_sh_screen_run(f->scr, text, (size_t)n);
+    if (hide) {
+        wipe(text, sizeof text);
+    }
     if (r == MOY_SH_BUSY) {
         f->stale = 1;
         return;
@@ -386,6 +410,7 @@ static void interrupt(moy_sh_face_t *f) {
     }
     echo(f, "^C\n");
     moy_sh_screen_cancel(f->scr);
+    wipe(f->line, sizeof f->line);
     set_line(f, "", 0);
     moy_sh_app_t *a = line_app(f);
     if (a != NULL && moy_sh_app_keys(a, "\x03", 1) == MOY_SH_APP_END) {
@@ -398,7 +423,7 @@ static void interrupt(moy_sh_face_t *f) {
 
 // Up (-1) or down (+1) through the lines run before.
 void moy_sh_face_recall(moy_sh_face_t *f, int d) {
-    if (!f->nhist) {
+    if (!f->nhist || secret(f)) {
         return;
     }
     int hi = f->hi + d;
@@ -412,7 +437,7 @@ void moy_sh_face_recall(moy_sh_face_t *f, int d) {
 // -- completion ---------------------------------------------------------------------
 
 void moy_sh_face_complete(moy_sh_face_t *f) {
-    if (moy_sh_face_screen(f) == NULL || busy(f)) {
+    if (moy_sh_face_screen(f) == NULL || busy(f) || secret(f)) {
         return;
     }
     moy_sh_cands_t *a = f->alloc(NULL, sizeof *a);
@@ -811,6 +836,28 @@ static const uint8_t *prompt_get(void *src, int32_t i, size_t *n) {
     return (const uint8_t *)f->prompt_row;
 }
 
+// The prompt row: the prompt dim, the line typed (a `*` a character of a
+// secret answer); the prompt into p.
+static size_t prompt_row(moy_sh_face_t *f, char *p, size_t cap) {
+    size_t pn = prompt_of(f, p, cap);
+    const char *typed = f->line;
+    char stars[MOY_SH_FACE_LINE];
+    if (secret(f)) {
+        size_t k = moy_utf8_count(f->line, (size_t)f->len);
+        memset(stars, '*', k);
+        stars[k] = '\0';
+        typed = stars;
+    }
+    snprintf(f->prompt_row, sizeof f->prompt_row, "%s%s%s%s%s", ECHO, p, TYPED, typed, PLAIN);
+    return pn;
+}
+
+const char *moy_sh_face_prompt_row(moy_sh_face_t *f) {
+    char p[MOY_SH_FACE_LINE];
+    prompt_row(f, p, sizeof p);
+    return f->prompt_row;
+}
+
 int moy_sh_face_take(moy_sh_face_t *f) {
     if (f->scr == NULL) {
         if (f->count != 1 || f->stale) {
@@ -1133,10 +1180,9 @@ int moy_sh_face_draw(moy_sh_face_t *f, moy_ui_ctx_t *c, const moy_ui_sink_t *s,
         }
         return out;
     }
-    // the prompt row: the prompt dim, the line typed, the caret's column
+    // the prompt row, the caret's column
     char p[MOY_SH_FACE_LINE];
-    size_t pn = prompt_of(f, p, sizeof p);
-    snprintf(f->prompt_row, sizeof f->prompt_row, "%s%s%s%s%s", ECHO, p, TYPED, f->line, PLAIN);
+    size_t pn = prompt_row(f, p, sizeof p);
     int32_t caret = (int32_t)(moy_utf8_count(p, pn) + moy_utf8_count(f->line, (size_t)f->col));
     int32_t left = cols > 2 && caret - cols + 2 > 0 ? caret - cols + 2 : 0;
     int32_t popt[MOY_UI_TXO_LEN] = MOY_UI_TXO_DEFAULTS;

@@ -63,6 +63,19 @@ static void sfree(moy_sh_t *s, void *p) {
     }
 }
 
+// The line's answers to its questions zeroed (a password among them) and
+// given back.
+static void drop_answers(moy_sh_t *s) {
+    for (int i = 0; i < s->nanswers; i++) {
+        for (volatile char *p = s->answers[i]; *p; p++) {
+            *p = 0;
+        }
+        sfree(s, s->answers[i]);
+        s->answers[i] = NULL;
+    }
+    s->nanswers = s->next_answer = 0;
+}
+
 void *moy_sh_malloc(size_t n) {
     return moy_sh_arena_alloc(moy_sh_cur->arena, n);
 }
@@ -279,6 +292,7 @@ void moy_sh_free(moy_sh_t *s) {
     if (s->ask_line != NULL) {
         hfree(s->host.ctx, s->ask_line);
     }
+    drop_answers(s);
     if (s->roles != NULL) {
         hfree(s->host.ctx, s->roles);
     }
@@ -373,10 +387,13 @@ void moy_sh_cancel(moy_sh_t *s) {
     s->pending_n = 0;
     sfree(s, s->ask_line);
     s->ask_line = NULL;
+    s->ask_flags = 0;
+    drop_answers(s);
 }
 
-int moy_sh_ask(moy_sh_t *s, const char *prompt) {
-    if (s->pending_n == 0 || s->cmd_start >= s->pending_n) {
+int moy_sh_ask(moy_sh_t *s, const char *prompt, int flags) {
+    if (s->pending_n == 0 || s->cmd_start >= s->pending_n || s->no_questions
+            || s->nanswers >= MOY_SH_ANSWERS) {
         return -1;
     }
     size_t n = s->pending_n - s->cmd_start;
@@ -389,15 +406,22 @@ int moy_sh_ask(moy_sh_t *s, const char *prompt) {
     sfree(s, s->ask_line);
     s->ask_line = line;
     snprintf(s->ask_prompt, sizeof s->ask_prompt, "%s", prompt);
+    s->ask_flags = flags;
     s->asked = 1;
     s->interrupt = 1;                   // the rest of the line goes
     return 0;
 }
 
 const char *moy_sh_answer(moy_sh_t *s) {
-    const char *a = s->answer;
-    s->answer = NULL;                   // once: moy_sh_run frees it
-    return a;
+    return s->next_answer < s->nanswers ? s->answers[s->next_answer++] : NULL;
+}
+
+int moy_sh_asking_secret(const moy_sh_t *s) {
+    return s->ask_line != NULL && (s->ask_flags & MOY_SH_ASK_SECRET) != 0;
+}
+
+void moy_sh_set_questions(moy_sh_t *s, int on) {
+    s->no_questions = !on;
 }
 
 static int hold(moy_sh_t *s, const char *p, size_t n) {
@@ -445,20 +469,25 @@ int moy_sh_run(moy_sh_t *s, const char *text, size_t n) {
         while (k && (text[k - 1] == '\n' || text[k - 1] == '\r')) {
             k--;
         }
-        char *a = moy_sh_halloc(k + 1);
-        if (a != NULL) {
-            memcpy(a, text, k);
-            a[k] = 0;
+        char *a = s->host.alloc(s->host.ctx, k + 1);
+        if (a == NULL) {
+            moy_sh_cancel(s);
+            leave(was);
+            return MOY_SH_DONE;
         }
-        s->answer = s->answered = a;
+        memcpy(a, text, k);
+        a[k] = 0;
+        s->answers[s->nanswers++] = a;
         again = s->ask_line;
         s->ask_line = NULL;
+        s->ask_flags = 0;
         text = again;
         n = strlen(again);
     }
+    s->next_answer = 0;
     s->asked = 0;
     int held = hold(s, text, n);
-    moy_sh_hfree(again);
+    sfree(s, again);
     int early = -1;
     if (!held || (s->pending_n && s->pending[s->pending_n - 1] != '\n' && !hold(s, "\n", 1))) {
         early = MOY_SH_DONE;
@@ -466,8 +495,7 @@ int moy_sh_run(moy_sh_t *s, const char *text, size_t n) {
         early = MOY_SH_MORE;
     }
     if (early >= 0) {
-        moy_sh_hfree(s->answered);
-        s->answer = s->answered = NULL;
+        drop_answers(s);
         leave(was);
         return early;
     }
@@ -546,8 +574,9 @@ int moy_sh_run(moy_sh_t *s, const char *text, size_t n) {
     flushall();
 out:
     (void)pushed;
-    moy_sh_hfree(s->answered);
-    s->answer = s->answered = NULL;
+    if (!s->asked) {
+        drop_answers(s);
+    }
     s->status = s->exited ? s->status : exitstatus;
     leave(was);
     return ret;

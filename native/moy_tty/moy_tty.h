@@ -16,11 +16,16 @@
 // run before (an arrow as ESC [ or ESC O, however the reads split it), and Tab
 // completes the word left of the caret as the Terminal's face does
 // (moy_sh_cands: a command's name, a path's from its folder; several names
-// complete to what they share and a second Tab lists them). A text app in
+// complete to what they share and a second Tab lists them). While the prompt
+// is a secret question's (the console's password: moy_sh.h's moy_sh_ask,
+// MOY_SH_ASK_SECRET) it echoes nothing of the line typed -- no key, no
+// erase, no redraw -- its arrows and Tab do nothing, and the line is kept
+// from the history. A text app in
 // front (edit, top, python) gets the keys or the lines, a full-screen app an
 // escape's bytes together (a lone ESC after PEND_MS). Without a terminal
 // (`ssh host CMD`) it runs CMD, its standard input the stream's, and ends with
-// its status.
+// its status; such a session asks no questions (moy_sh_set_questions), so a
+// command reads its answers from that input.
 //
 // ONE FACE AT A TIME across the transports: an open while another
 // transport's face runs answers MOY_TTY_EBUSY. Each transport holds the face
@@ -78,6 +83,9 @@ typedef struct {
     // The SFTP server over the session's files tree (MOY_TTY_SFTP), to the
     // stream's end: its exit status (may be NULL: no SFTP).
     int (*sftp)(void *sh);
+    // Whether the prompt is a secret question's (may be NULL: never), whose
+    // answer the face echoes by nothing and keeps from its history.
+    int (*secret)(void *sh);
 } moy_tty_shell_t;
 
 void moy_tty_set_shell(const moy_tty_shell_t *shell);

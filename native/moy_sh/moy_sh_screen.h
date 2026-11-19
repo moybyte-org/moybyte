@@ -71,10 +71,12 @@ void moy_sh_screen_set_ctrl(moy_sh_screen_t *f, int ctrl);
 
 // What the face asks of the shell behind the screen: the prompt, the last
 // status, a held `more` dropped, Tab's names (moy_sh_cands); and the memory
-// a face takes (the board table's). A link's screen (moy_sh_screen_link.c)
-// has no shell: no prompt, status 0, no names.
+// a face takes (the board table's), and whether a secret question waits
+// (moy_sh.h's MOY_SH_ASK_SECRET). A link's screen (moy_sh_link.c)
+// has no shell: no prompt, status 0, no names, no question.
 size_t moy_sh_screen_prompt(moy_sh_screen_t *f, int more, char *out, size_t cap);
 int moy_sh_screen_status(moy_sh_screen_t *f);
+int moy_sh_screen_secret(moy_sh_screen_t *f);
 void moy_sh_screen_cancel(moy_sh_screen_t *f);
 int moy_sh_screen_cands(moy_sh_screen_t *f, const char *line, size_t col, moy_sh_cands_t *a);
 void moy_sh_screen_heap(void *(**alloc)(void *ctx, size_t n), void (**free_)(void *ctx, void *p));

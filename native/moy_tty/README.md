@@ -10,7 +10,7 @@ server could still serve the web terminal. How a face is reached is
 | file | what it is |
 |---|---|
 | `moy_tty.h` | the face's surface: a transport's open, reap, signal, resize and hold; the shell table; the tasks, the pair and the hop |
-| `moy_tty.c` | the face: the socket pair's end, the terminal's line discipline (its caret keys, history and Tab), `exec` with the stream as its stdin, a text app's keys, the exit status a transport reaps |
+| `moy_tty.c` | the face: the socket pair's end, the terminal's line discipline (its caret keys, history and Tab, and a secret question's answer echoed by nothing and kept from the history), `exec` with the stream as its stdin, a text app's keys, the exit status a transport reaps |
 | `moy_tty_sh.c` | the face's shell: a `moy_sh` session over the board's host table (`native/moy_sh/moy_sh_board.h`), the entries that cross the door hopped, Tab's names (`moy_sh_cands`), a full-screen text app drawn as VT100 |
 | `moy_tty_sys.c` | the face task, the hop to the console's task and its tail (`moy_tty_tail`, a weak hook in `native/moy_kernel/moy_loop_board.c`), the socket pair, PSRAM |
 | `moy_tty_sftp.c` | the SFTP server a face runs in place of a command (`MOY_TTY_SFTP`, SSH's `sftp` subsystem): SFTP version 3 over the stream, on the session's files tree through the shell's paths, each request one hop to the console's task, the shelf told of changed cart folders through the door's `rescan` (its header; `docs/os_2026-11/system.md` §4) |

@@ -118,7 +118,7 @@ _SIGS = (
     ("moy_sh_running", [], _P),
     ("moy_sh_fd_write", [_P, _I, _P, _SZ], ctypes.c_long),
     ("moy_sh_fd_read", [_P, _I, _P, _SZ], ctypes.c_long),
-    ("moy_sh_ask", [_P, _S], _I),
+    ("moy_sh_ask", [_P, _S, _I], _I),
     ("moy_sh_answer", [_P], _S),
     ("moy_sh_arena_in_use", [_P], _SZ),
     ("moy_sh_board_line", [_S], ctypes.c_bool),
@@ -171,6 +171,7 @@ _SIGS = (
     ("moy_sh_face_pick", [_P, _I], None),
     ("moy_sh_face_more", [_P], _I),
     ("moy_sh_face_prompt", [_P, _S, _SZ], _SZ),
+    ("moy_sh_face_prompt_row", [_P], _S),
     ("moy_sh_face_take", [_P], _I),
     ("moy_sh_face_in_row", [_P], _I),
     ("moy_sh_face_set_in_row", [_P, _I], None),
@@ -223,16 +224,17 @@ def read(fd, n):
     return buf.raw[:r]
 
 
-def ask(prompt):
+def ask(prompt, secret=False):
     """A question of the session that called the door (moy_sh.h's
-    moy_sh_ask): the next line typed is its answer."""
-    if _lib().moy_sh_ask(_running(), str(prompt).encode()) != 0:
+    moy_sh_ask): the next line typed is its answer, hidden as it is typed
+    where `secret`."""
+    if _lib().moy_sh_ask(_running(), str(prompt).encode(), 1 if secret else 0) != 0:
         raise OSError(5, "i/o error")
 
 
 def answer():
-    """The line typed to the question this run's command asked, once, or
-    None."""
+    """The next answer the line that asked holds for its questions, in the
+    order they were typed, or None."""
     a = _lib().moy_sh_answer(_running())
     return a.decode("utf-8", "replace") if a is not None else None
 
@@ -498,6 +500,9 @@ class Face:
         buf = ctypes.create_string_buffer(256)
         n = _lib().moy_sh_face_prompt(self._p(), buf, 256)
         return buf.raw[:n].decode("utf-8", "replace")
+
+    def prompt_row(self):
+        return _lib().moy_sh_face_prompt_row(self._p()).decode("utf-8", "replace")
 
     def take(self):
         return bool(_lib().moy_sh_face_take(self._p()))

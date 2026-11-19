@@ -454,20 +454,50 @@ def r_settings(d, a):
 # -- pkg --------------------------------------------------------------------------------
 
 
+def _asked(d, prompt, secret=False):
+    """The answer to `prompt` where the session asks questions (moy_sh.h's
+    moy_sh_ask, as `_first_run` asks): the line typed to it in an earlier run
+    of this line, or pkg.ASKED once it is asked (the run ends, and the line
+    runs again with it; a `secret` one is typed unseen). None where the
+    session asks nothing (a stream with no terminal), whose stdin answers."""
+    import pkg
+    ask = getattr(d.io, "ask", None)
+    if ask is None:
+        return None
+    try:
+        line = d.io.answer()
+        if line is not None:
+            return line
+        ask(prompt, secret)
+    except OSError:
+        return None
+    return pkg.ASKED
+
+
 def _yes(d, question):
-    d.out(question + " [y/N] ")
-    line = _door.In(d.io).readline().strip().lower()
-    if d.io is not None and not line:
-        d.out("\n")
-    return line in ("y", "yes")
+    """Whether the user says yes to `question`, or pkg.ASKED (`_asked`)."""
+    line = _asked(d, question + " [y/N] ")
+    if line is None:
+        d.out(question + " [y/N] ")
+        line = _door.In(d.io).readline()
+        if d.io is not None and not line.strip():
+            d.out("\n")
+    elif not isinstance(line, str):
+        return line
+    return line.strip().lower() in ("y", "yes")
 
 
 def _typed(d, question):
-    """A line the user types after `question`, or None at its end."""
-    d.out(question + " ")
-    line = _door.In(d.io).readline()
-    if d.io is not None and not line.endswith("\n"):
-        d.out("\n")
+    """A line the user types after `question`, unseen where the session
+    asks it (`_asked`): the line, None at its end, or pkg.ASKED."""
+    line = _asked(d, question + " ", secret=True)
+    if line is None:
+        d.out(question + " ")
+        line = _door.In(d.io).readline()
+        if d.io is not None and not line.endswith("\n"):
+            d.out("\n")
+    elif not isinstance(line, str):
+        return line
     return line.strip() or None
 
 
@@ -507,6 +537,8 @@ def r_pkg(d, a):
             return (yield from _then_release(p, p.upgrade(yes)))
     except pkg.Stopped:
         return INTERRUPTED
+    except pkg.Asked:
+        return _door.NOT_RUN
     except pkg.InstallError as exc:
         d.err("pkg", exc.text)
         return 1
