@@ -248,6 +248,7 @@ static bool proc_end(moy_os_proc_t *p) {
     }
     moy_os_free(p->argv);
     moy_os_free(p->env);
+    moy_os_free(p->data);
 #ifdef MOY_OS_UMODE
     while (p->retired != NULL) {
         retired_t *r = p->retired;
@@ -419,14 +420,18 @@ int moy_os_command(moy_sh_t *s, const moy_os_module_t *m, const moy_os_caps_t *c
 // with the reason in err.
 static moy_os_proc_t *loop_start(const moy_os_module_t *m, const moy_os_caps_t *caps,
                                  uint32_t pid, const char *id, int w, int h, int depth,
-                                 const moy_app_run_t *run, char *err, size_t errlen) {
+                                 const moy_app_run_t *run, uint8_t *data, size_t data_n,
+                                 char *err, size_t errlen) {
     moy_os_proc_t *p = proc_new(m, caps, pid, true, err, errlen);
     if (p == NULL) {
+        moy_os_free(data);
         if (m->unload != NULL) {
             m->unload(m->loaded);
         }
         return NULL;
     }
+    p->data = data;                            // freed with the record (proc_end)
+    p->data_n = data_n;
     p->prog.bg_pid = pid;
     if (run != NULL) {
         p->run = *run;
@@ -490,12 +495,12 @@ static moy_os_proc_t *loop_start(const moy_os_module_t *m, const moy_os_caps_t *
 moy_os_proc_t *moy_os_service(const moy_os_module_t *m, const moy_os_caps_t *caps,
                               uint32_t pid, const char *id, const moy_app_run_t *run,
                               char *err, size_t errlen) {
-    return loop_start(m, caps, pid, id, 0, 0, 0, run, err, errlen);
+    return loop_start(m, caps, pid, id, 0, 0, 0, run, NULL, 0, err, errlen);
 }
 
 moy_os_proc_t *moy_os_game(const moy_os_module_t *m, const moy_os_caps_t *caps, uint32_t pid,
                            const char *id, int w, int h, int depth, const moy_app_run_t *run,
-                           char *err, size_t errlen) {
+                           const void *data, size_t n, char *err, size_t errlen) {
     if (w <= 0 || h <= 0 || depth < 1 || depth > 2) {
         snprintf(err, errlen, "no screen for it");
         if (m->unload != NULL) {
@@ -511,7 +516,20 @@ moy_os_proc_t *moy_os_game(const moy_os_module_t *m, const moy_os_caps_t *caps, 
         app.stack *= 2;
         caps = &app;
     }
-    return loop_start(m, caps, pid, id, w, h, depth, run, err, errlen);
+    uint8_t *copy = NULL;
+    if (data != NULL && n > 0) {
+        copy = moy_os_alloc(n);
+        if (copy == NULL) {
+            snprintf(err, errlen, "out of memory");
+            if (m->unload != NULL) {
+                m->unload(m->loaded);
+            }
+            return NULL;
+        }
+        memcpy(copy, data, n);
+    }
+    return loop_start(m, caps, pid, id, w, h, depth, run, copy, copy != NULL ? n : 0, err,
+                      errlen);
 }
 
 // The record of `pid`, looked up under the lock: a command's record is freed

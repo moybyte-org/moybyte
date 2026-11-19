@@ -1296,3 +1296,13 @@ int moy_ui_tell(uint32_t answers)
     return ((moy_os_fn_moy_ui_tell *)__moy_os->fn[126])(answers);
 }
 #endif
+
+#if MOY_OS_ROW(127)
+#include "moybyte/os.h"
+typedef int moy_os_fn_moy_game_data(size_t off, void *dst, size_t n);
+MOY_OS_USED(127);
+int moy_game_data(size_t off, void *dst, size_t n)
+{
+    return ((moy_os_fn_moy_game_data *)__moy_os->fn[127])(off, dst, n);
+}
+#endif

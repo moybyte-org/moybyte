@@ -199,9 +199,13 @@ moy_os_proc_t *moy_os_service(const moy_os_module_t *m, const moy_os_caps_t *cap
 // (runtime/run/elf_run.py's post_paste), which the toolkit it links inserts
 // into its focused field (sdk/src/moyui_link.c).
 #define MOY_OS_PASTE "paste"
+// `data` (n bytes, copied; NULL: none) is what moy_game_data reads: the
+// console's hand-over to a game built from a compiled cart's source
+// (sdk/include/moybyte/cart.h, sdk/src/moycart.c: its sprites, map, flags,
+// config, scenes and paint images, runtime/run/elf_run.py's game_data).
 moy_os_proc_t *moy_os_game(const moy_os_module_t *m, const moy_os_caps_t *caps, uint32_t pid,
                            const char *id, int w, int h, int depth, const moy_app_run_t *run,
-                           char *err, size_t errlen);
+                           const void *data, size_t n, char *err, size_t errlen);
 // On the console's task, once a frame: its screen slot's frame call
 // (native/moy_kernel/moy_screen_slot.h): the frame the last call took let
 // go, the frame message posted unless one waits unread (its arguments

@@ -205,6 +205,8 @@ struct moy_os_proc {
     volatile uint8_t net_held;
     uint32_t wakes, events;
     uint8_t game;               // a game's (moy_os_game): its screen is a slot, moy_screen_slot.h
+    uint8_t *data;              // a game's data, handed at its start (moy_game_data)
+    size_t data_n;
 #ifdef MOY_OS_UMODE
     moy_u_proc_t *u;            // its memory, when its module runs in U-mode
     char **uargv;               // argv and the environment, in its main thread's U area

@@ -1259,6 +1259,30 @@ int moy_os_moy_present(const void *px, size_t n) {
     return r;
 }
 
+// Up to n bytes of the data the console handed the game at its start
+// (moy_os_game), from offset off into dst: how many, 0 past its end.
+int moy_os_moy_game_data(size_t off, void *dst, size_t n) {
+    thr_t *t = moy_os_enter();
+    int r = -1;
+    if (t == NULL || !t->p->game) {
+        moy_os_errno_set(ENODEV);
+    } else if (dst == NULL && n > 0) {
+        moy_os_errno_set(EFAULT);
+    } else {
+        size_t have = t->p->data_n;
+        size_t k = off < have ? have - off : 0;
+        if (k > n) {
+            k = n;
+        }
+        if (k > 0) {
+            memcpy(dst, t->p->data + off, k);
+        }
+        r = (int)k;
+    }
+    moy_os_leave(t);
+    return r;
+}
+
 // The toolkit's answers after a frame (moy_screen_slot.h, THE TOOLKIT'S
 // ANSWERS), into the game's slot for the console's input owner to read.
 int moy_os_moy_ui_tell(uint32_t answers) {

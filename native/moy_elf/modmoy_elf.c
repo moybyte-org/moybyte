@@ -507,8 +507,9 @@ static mp_obj_t mod_service(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_service_obj, 3, 5, mod_service);
 
-// game(path, pid, id, flags, w, h, run=None, depth=1) -> None, or why it did
-// not start: its screen w x h pixels of `depth` bytes (moy_os_game).
+// game(path, pid, id, flags, w, h, run=None, depth=1, data=None) -> None, or
+// why it did not start: its screen w x h pixels of `depth` bytes, `data` the
+// bytes its moy_game_data reads (moy_os_game).
 static mp_obj_t mod_game(size_t n_args, const mp_obj_t *args) {
     char err[ERR_MAX];
     moy_app_run_t run;
@@ -518,15 +519,19 @@ static mp_obj_t mod_game(size_t n_args, const mp_obj_t *args) {
         return mp_obj_new_str(err, strlen(err));
     }
     int depth = n_args > 7 ? mp_obj_get_int(args[7]) : 1;
+    mp_buffer_info_t data = { 0 };
+    if (n_args > 8 && args[8] != mp_const_none) {
+        mp_get_buffer_raise(args[8], &data, MP_BUFFER_READ);
+    }
     if (moy_os_game(&m, NULL, (uint32_t)mp_obj_get_int(args[1]), mp_obj_str_get_str(args[2]),
-                    mp_obj_get_int(args[4]), mp_obj_get_int(args[5]), depth, rp, err,
-                    sizeof err)
+                    mp_obj_get_int(args[4]), mp_obj_get_int(args[5]), depth, rp, data.buf,
+                    data.len, err, sizeof err)
             == NULL) {
         return mp_obj_new_str(err, strlen(err));
     }
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_game_obj, 6, 8, mod_game);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_game_obj, 6, 9, mod_game);
 
 // frame(pid, held, pressed, ms, max_us, words=None) -> moy_os_game_frame's
 // answer; `words` an array('i') of the frame's input words.

@@ -130,3 +130,4 @@
 124 moy_name | int32_t moy_name(void *name, size_t name_cap)
 125 moy_clock | int32_t moy_clock(int32_t local)
 126 moy_ui_tell | int moy_ui_tell(uint32_t answers)
+127 moy_game_data | int moy_game_data(size_t off, void *dst, size_t n)

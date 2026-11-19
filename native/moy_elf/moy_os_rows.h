@@ -206,5 +206,6 @@ int32_t moy_os_moy_aes_ccm_open(const void *key, size_t key_len, const void *sea
 int32_t moy_os_moy_name(void *name, size_t name_cap);
 int32_t moy_os_moy_clock(int32_t local);
 int moy_os_moy_ui_tell(uint32_t answers);
+int moy_os_moy_game_data(size_t off, void *dst, size_t n);
 
 #endif // MOY_OS_ROWS_H

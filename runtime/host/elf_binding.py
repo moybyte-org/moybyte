@@ -76,7 +76,7 @@ def _lib():
         d.moy_os_stats.restype = None
         d.moy_os_set_net.argtypes = [_NET_FN, _P]
         d.moy_os_set_net.restype = None
-        d.hl_elf_game.argtypes = [_C, _U32, _C, _U32, _I, _I, _I, _C, _C, _I]
+        d.hl_elf_game.argtypes = [_C, _U32, _C, _U32, _I, _I, _I, _C, _C, ctypes.c_size_t, _C, _I]
         d.hl_elf_game.restype = _I
         d.moy_os_game_frame.argtypes = [_U32, _U32, _U32, _U32, _U32, _P, _I]
         d.moy_os_game_frame.restype = _I
@@ -223,14 +223,17 @@ ENDED = -4              # moy_os.h's MOY_OS_ENDED
 FRAME_SENT, FRAME_SHOWN = 1, 2
 
 
-def game(path, pid, cid="", flags=0, w=0, h=0, run=None, depth=1):
+def game(path, pid, cid="", flags=0, w=0, h=0, run=None, depth=1, data=None):
     """Start the native game at `path` as process `pid` (its Player run's),
     its screen `w` x `h` pixels of `depth` bytes (palette indices, or an
-    app's RGB565), as the boards' `moy_elf.game`: None, or why not."""
+    app's RGB565), `data` the bytes its moy_game_data reads, as the boards'
+    `moy_elf.game`: None, or why not."""
     d = _lib()
     err = ctypes.create_string_buffer(256)
+    blob = bytes(data) if data else None
     if d.hl_elf_game(path.encode(), int(pid), (cid or "").encode(), int(flags), int(w), int(h),
-                     int(depth), _run(run), err, len(err)) != 0:
+                     int(depth), _run(run), blob, len(blob) if blob else 0,
+                     err, len(err)) != 0:
         return err.value.decode("utf-8", "replace")
     return None
 
