@@ -45,8 +45,36 @@ end
 
 -- error[CODE] WHERE: WHAT; fix: FIX (expected E, found F). The fix comes before
 -- expected and found: the console cuts a cart's error at about 200 characters.
+-- a code's fix where its site names none: every error says what to do
+local FIXES = {
+  A01 = "name an action declared with ui.action", A02 = "declare takes = \"row\", or hand it what it takes",
+  A03 = "give the handler one parameter per thing its takes hands it", A08 = "a label a person reads",
+  A09 = "a word: ui.action(\"add\", \"Add one\", add)", A10 = "call ui.after from a handler or the opened hook",
+  B01 = "bind it: a template \"{name}\" or a condition", B02 = "write state in a handler",
+  B03 = "declare it at the top level of the app", C01 = "a condition text, such as \"done && !busy\"",
+  C02 = "a ui.derive for each part", C03 = "a ui.derive for the bracketed part",
+  D01 = "one ui.app for the app", D02 = "size = { w, h } in desk units", D04 = "ui.app(\"TITLE\", { icon = \"...\" })",
+  E01 = "ui.enum(..., { init = \"...\" })", E02 = "an init that is one of the values", E03 = "values that are texts",
+  G01 = "a derive reads state, or derives that read no cycle", H01 = "an action, which a person sees",
+  H03 = "takes alone on a hook", I02 = "an icon's name", K01 = "a role of the app's, such as role:more",
+  K02 = "one key, one action", K03 = "a list of keys", N01 = "a prop the node has",
+  N02 = "a key per node: key = \"...\"", N03 = "rows at the page's level, and the row's parts in its body",
+  N04 = "the verb or prop the error names", N08 = "a node's key on the page shown",
+  O01 = "off = \"hide\" or off = \"grey\"", O02 = "drop off, or give the action a when",
+  O04 = "when and off on the action", P01 = "ui.page(NAME, BUILD) for it", P02 = "drop takes; the page's arg is its row",
+  P03 = "a push action has no handler", P04 = "arg names a ui.row_of state", S01 = "declare it in ui.state",
+  S02 = "a value of the field's type", S03 = "replace the whole value", S04 = "a declared field",
+  S05 = "a table of the declared fields", S06 = "write state in a handler", S07 = "ui.model { key = \"id\", id = \"\", ... }",
+  S09 = "write the names the derive reads", S10 = "read it; the engine writes it", S11 = "ui.row_of(\"MODEL\")",
+  S13 = "ui.opt(...) for a value that may be absent", T01 = "a transform the template language has",
+  T02 = "a system value: @desk, @handheld, @tall, @wide or @focus", T03 = "read a field of a record or a row_of",
+  T04 = "a label for every value", T05 = "a row's field inside the rows' body", U02 = "rename one",
+  W01 = "an action that takes nothing, reading the state", X01 = "report it: the layer missed a check",
+}
+
 local function fail(code, at, what, expected, found, fix)
   local msg = "error[" .. code .. "] " .. (at or where()) .. ": " .. what
+  fix = fix or FIXES[code]
   if fix then msg = msg .. "; fix: " .. fix end
   if expected then msg = msg .. " (expected " .. expected .. (found and ", found " .. found or "") .. ")" end
   error(msg, 0)
@@ -451,10 +479,11 @@ local S = setmetatable({}, {
   __newindex = function(_, k, v) setv(k, v) end,
 })
 
+local function an(w) return (w:match("^[aeiou]") and "an " or "a ") .. w end
 local function claim(name, what, at)
   if NAMES[name] then
     fail("U02", at, q(name) .. " is declared twice", "one name, one thing",
-         "a " .. what .. " and a " .. NAMES[name].what .. " (" .. NAMES[name].at .. ")", "rename one")
+         an(what) .. " and " .. an(NAMES[name].what) .. " (" .. NAMES[name].at .. ")", "rename one")
   end
   NAMES[name] = { what = what, at = at }
 end
@@ -1713,6 +1742,7 @@ end
 
 function T.rows(name, o, body)
   local at = where()
+  if body == nil and type(o) == "function" then o, body = nil, o end
   local n = node("rows", at)
   if ROWCTX then fail("N03", at, "ui.rows inside a row", "rows at a page's level", "rows in rows") end
   local m = model_arg("rows", name, at)
@@ -2137,7 +2167,19 @@ local function drew(n, id, txt)
 end
 
 local draw
-local ANCHOR_KEY = nil
+local ANCHOR_KEY, ANCHOR_AT = nil, false
+-- the anchor names a row by its key: the row's node, or a node in it
+local function anchored(id)
+  if ANCHOR_KEY == nil then return false end
+  local seg = "/" .. ANCHOR_KEY
+  local i = id:find(seg, 1, true)
+  while i do
+    local c = id:sub(i + #seg, i + #seg)
+    if c == "" or c == "/" then return true end
+    i = id:find(seg, i + 1, true)
+  end
+  return false
+end
 local function reg(id, n, row) IDS[id] = { n = n, row = row } end
 
 -- is the action a node names on, and how does it look while off
@@ -2209,11 +2251,13 @@ local function leafdraw(n, row, id)
       if enter and o.on then fire(o.on, "field " .. q(id)) end
     end
   elseif k == "bubble" then
-    eo.anchor = ANCHOR_KEY ~= nil and id:sub(-#ANCHOR_KEY - 1) == "/" .. ANCHOR_KEY or nil
+    eo.anchor = anchored(id) or nil
     local t = render(a[1], row)
     drew(n, id, t .. " [" .. tostring(eo.status or "") .. "]")
     local x, y, w, h, st = E.bubble(t, render(o.side or "in", row), eo)
     RECT[id] = { x, y, w, h }
+    -- the anchor's rect is placed where it is drawn, in its view
+    if eo.anchor then E.at(SYS.room[1] + L.g, y, SYS.room[3] - 2 * L.g, h); ANCHOR_AT = true end
     if st & 2 ~= 0 then
       if st & E.CUT ~= 0 and o.cut then fire(o.cut, "bubble " .. q(id) .. " (cut)", row)
       elseif o.on then fire(o.on, "bubble " .. q(id), row) end
@@ -2333,8 +2377,8 @@ local function overlay(n)
   if n.kind == "popover" then
     local w = n.o.w or SYS.room[3] - 2 * L.g
     local r = nil
-    if ANCHOR_KEY then
-      for id, rr in pairs(RECT) do if id:sub(-#ANCHOR_KEY - 1) == "/" .. ANCHOR_KEY then r = rr end end
+    if ANCHOR_KEY and not ANCHOR_AT then
+      for id, rr in pairs(RECT) do if anchored(id) then r = rr end end
     end
     if r then E.at(SYS.room[1] + L.g, r[2], w, r[4]) end
     if E.popover(n.a[1], w, over(n, n.o, nil, nil)) then
@@ -2413,6 +2457,9 @@ local function want_focus(n, found)
   end
   if n.kind == "popover" or n.kind == "dialog" then return end
   if STOPS[n.kind] and n.o.focus ~= nil and cond(n.o.focus) then found[1] = n.path return end
+  -- rows with a current mark are one stop, the list: its link's focus is the list's
+  local lk = n.kind == "rows" and n.o.current ~= nil and n.body and n.body.kids[1]
+  if lk and lk.kind == "link" and lk.o.focus ~= nil and cond(lk.o.focus) then found[1] = n.path return end
   for _, k in ipairs(n.kids) do want_focus(k, found) end
   if n.kind == "switch" then
     local c = n.built[tostring(lookup(n.a[1]))]
@@ -2429,10 +2476,31 @@ local function verb(name, row)
   return a.hint or render(a.label, row)
 end
 local ROLE_KEYS = { "more", "menu", "search", "undo", "redo", "play", "tools" }
+-- an open overlay the focus is not in yet: its first shown button confirms
+local function first_button(n)
+  if cond(n.o.shown) == false then return nil end
+  if n.kind == "button" and n.action and can(n.action) then return n end
+  local kids = n.kids
+  if n.kind == "switch" then
+    local c = n.built[tostring(lookup(n.a[1]))]
+    kids = c and c.kids or {}
+  end
+  for _, k in ipairs(kids or {}) do
+    local b = first_button(k)
+    if b then return b end
+  end
+end
 local function hints(p)
   local h = {}
   local f = IDS[FOCUSED or ""]
   local fname = nil
+  for _, k in ipairs(p.root.kids) do
+    if (k.kind == "popover" or k.kind == "dialog") and cond(k.o.shown) and k.kind == "popover"
+       and not (f and f.n.path and f.n.path:sub(1, #k.path) == k.path) then
+      local b = first_button(k)
+      f = b and { n = b } or nil
+    end
+  end
   if f then
     local n, does = f.n, nil
     if n.kind == "field" then
@@ -2495,7 +2563,7 @@ local function replay(p)
   end
   local body = nil
   if not scroll then body, head = head, {} end
-  ANCHOR_KEY = nil
+  ANCHOR_KEY, ANCHOR_AT = nil, false
   for _, k in ipairs(overs) do
     if k.o.anchor and cond(k.o.shown) then ANCHOR_KEY = render(k.o.anchor) end
   end
@@ -2635,6 +2703,17 @@ local function run_queue()
       in_handler = nil
     end
   end
+end
+
+-- one action's or hook's handler, run as a frame's queue runs it, with no
+-- page drawn: the checker's run of what a build never reaches
+function T._fire(name, ...)
+  local a = ACTIONS[name]
+  if not a then fail("A01", where(), q(name) .. " is no action or hook", "a declared name", q(name)) end
+  in_handler = name
+  local ok, e = pcall(a.fn, ...)
+  in_handler = nil
+  if not ok then error(e, 0) end
 end
 
 function _layout(w, h, fs) SYS.fs = fs or 1 end

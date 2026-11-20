@@ -1,0 +1,9 @@
+{
+  "format": "moy-1",
+  "title": "Mesh Radio",
+  "runtime": "lua",
+  "main": "main.lua",
+  "sources": ["data.lua", "stub.lua", "mesh.lua", "main.lua", "after.lua"],
+  "extensions": ["moybyte.ui"],
+  "moybyte": {"type": "app", "permissions": []}
+}

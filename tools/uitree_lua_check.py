@@ -85,9 +85,10 @@ def scripts_of(cart):
     return man.get("sources") or [man.get("main", "main.lua")]
 
 
-def run(cart):
-    """The run's lines (half 1)."""
-    names = scripts_of(cart)
+def run(cart, after=()):
+    """The run's lines (half 1); `after` are scripts run once the pages are
+    built (a test's ui._fire calls)."""
+    names = scripts_of(cart) + (["--"] + list(after) if after else [])
     r = subprocess.run([hostlua(), DRIVER, LAYER, cart] + names, capture_output=True, text=True, timeout=120)
     lines = r.stdout.splitlines()
     if r.returncode != 0:
@@ -267,10 +268,10 @@ def read_source(cart, facts):
     return errors
 
 
-def check(cart, snapshot=False):
+def check(cart, snapshot=False, after=()):
     """Every error of `cart` (a .moy folder), as lines; with `snapshot` the
     built pages' snapshot lines follow them."""
-    lines = run(cart)
+    lines = run(cart, after)
     facts = {"pages": [], "state": {}, "fields": {}, "actions": {}, "engine": set()}
     errors, snap = [], []
     for l in lines:
@@ -292,7 +293,7 @@ def check(cart, snapshot=False):
             facts["engine"].add(rest)
         elif kind == "SNAP":
             snap.append(rest)
-    if not any(e.startswith("check:") for e in errors) and facts["state"] or facts["actions"]:
+    if not any(e.startswith("check:") for e in errors) and (facts["state"] or facts["actions"]):
         errors += read_source(cart, facts)
     return errors + (snap if snapshot else [])
 

@@ -18,6 +18,7 @@ if ROOT not in sys.path:
 FIX = os.path.join(HERE, "fixtures", "uitree_lua")
 MESH = os.path.join(HERE, "fixtures", "apps", "moymesh.moy")
 DT = 1.0 / 30.0
+CLOCK = 1763553600 + 8 * 3600 + 20 * 60
 
 # a size: the console's (320x240 full screen) and the desk's (a 1024x600 window)
 SIZES = {"320": dict(sys_size=None, font_scale=1, windowed=False),
@@ -27,11 +28,15 @@ SIZES = {"320": dict(sys_size=None, font_scale=1, windowed=False),
 # A step is a key ("up", "a"), "type:TEXT", "enter", "key:CODE", "wait:N",
 # "tap:X,Y", "drag:X0,Y0,X1,Y1" or "shot:NAME"; DESK moves a 320 point into
 # the desk window.
-THREAD_SCRIPT = ["shot:thread", "tap:150,206", "wait:2", "shot:field", "type:hello mesh", "shot:typed", "enter", "wait:4", "shot:sent",
-                 "wait:40", "shot:failed", "up", "shot:up", "a", "wait:2", "shot:details", "b", "wait:4",
-                 "shot:closed", "wait:40", "shot:later"] + \
-                ["drag:160,70,160,200"] * 4 + ["wait:20", "shot:top"]
+THREAD_SCRIPT = ["shot:thread", "tap:150,206", "wait:2", "shot:field", "type:hello mesh", "shot:typed",
+                 "enter", "wait:4", "shot:sent", "wait:40", "shot:failed", "up", "wait:20", "shot:up"] + \
+                ["drag:160,70,160,200"] * 4 + ["wait:30", "shot:top", "a", "wait:20", "shot:details"]
+RADIO_SCRIPT = ["shot:radio", "down", "wait:10", "shot:region_link", "a", "wait:10", "shot:region",
+                "down", "a", "wait:10", "shot:chosen", "b", "wait:10", "shot:back"]
 PAIRS = {
+    "radio": (("mesh_radio_old", [(MESH, "mesh.lua"), (MESH, "main.lua"), ("mesh_thread", "data.lua"),
+                                  ("mesh_old", "stub.lua")]),
+              ("mesh_radio", [(MESH, "mesh.lua"), ("mesh_thread", "data.lua")]), RADIO_SCRIPT),
     "thread": (("mesh_old", [(MESH, "mesh.lua"), (MESH, "main.lua"), ("mesh_thread", "data.lua")]),
                ("mesh_thread", [(MESH, "mesh.lua")]), THREAD_SCRIPT),
 }
@@ -60,6 +65,11 @@ def play(name, extra, script, size, launch=None):
     host_app.moy_carts.ensure_dirs(carts)
     title = _stage(carts, name, extra)
     ws = host_app.build_workstation(carts, **SIZES[size])
+    # the bar's clock reads one minute, so a run crossing a minute matches
+    wcs = {getattr(m, "_wc", None) for n, m in list(sys.modules.items()) if n.endswith("bar_layer")} - {None}
+    kept = [(wc, wc.localtime) for wc in wcs]
+    for wc, lt in kept:
+        wc.localtime = lambda t=None, _lt=lt: _lt(CLOCK if t is None else t)
     ws.look.set_theme("moy", persist=False, variant="dark")
     ws.pointer.visible = False
     seq0 = moy_log.next()
@@ -118,6 +128,8 @@ def play(name, extra, script, size, launch=None):
     logs = [r[4] for r in moy_log.read(seq0, 4000)]
     ws.home.go_home()
     ws.spine.exit()
+    for wc, lt in kept:
+        wc.localtime = lt
     shutil.rmtree(root, ignore_errors=True)
     return (cv.w, cv.h), shots, errors, logs
 
