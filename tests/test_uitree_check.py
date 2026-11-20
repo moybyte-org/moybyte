@@ -30,6 +30,7 @@ PORTED = (
     "tasks_ui",
     "achievements_ui",
     "wifi_ui",
+    "uitree_editor_app",
 )
 
 

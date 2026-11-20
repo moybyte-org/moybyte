@@ -20,9 +20,6 @@ _FILL = ("switch", "panes", "pane", "text_editor", "slot", "panel", "case", "can
 _TEXT_PAD = 8          # moy_ui_api_int.h's TEXT_PAD: the view's text inset at the scale
 
 
-# the find strip Back closes: the stand-in engine knows the Editor's names
-FIND_STRIP = ("code__finding", "code__find_close")
-
 
 class Engine(uitree_app.Engine):
 
@@ -523,6 +520,13 @@ class Engine(uitree_app.Engine):
         return keys[0] if keys else None
 
     def keys(self, i):
+        was, _NOW.app = _NOW.app, self      # a size class (@desk) reads the app's
+        try:
+            return self._keys(i)
+        finally:
+            _NOW.app = was
+
+    def _keys(self, i):
         ch = getattr(i, "typed", 0) & 0xFF
         answer = [a for a in self.actions.values() if ch and any(S._chord_byte(k) == ch for k in a.keys)]
         live = [a for a in answer if a.live()]
@@ -565,22 +569,19 @@ class Engine(uitree_app.Engine):
                 return True
         return uitree_app.Engine.keys(self, i)
 
-    def back(self):
+    def _back(self):
         for k in self.shown_popovers():
             if "close" in k.l:
                 self.q.append((k.l["close"], self.args_for(k.l["close"]), "back on popover %r" % k.key))
                 self._damage.all()
                 return True
-        if self.s._v.get(FIND_STRIP[0]) and not self.popover_shown():
-            a = self.actions.get(FIND_STRIP[1])
-            if a is not None:
-                self.q.append((a, (), "back on the find strip"))
-                self._damage.all()
-                return True
-        return uitree_app.Engine.back(self)
+        return uitree_app.Engine._back(self)
 
-    def has_page(self):
-        return uitree_app.Engine.has_page(self) or self.popover_shown() or bool(self.s._v.get(FIND_STRIP[0]))
+    def _has_page(self):
+        """Back is the app's while a popover or a row with close= (a find
+        strip) is shown."""
+        return (uitree_app.Engine._has_page(self) or self.popover_shown()
+                or (self.root is not None and self._closer(self.root) is not None))
 
     # -- for the scripts --------------------------------------------------------
 
