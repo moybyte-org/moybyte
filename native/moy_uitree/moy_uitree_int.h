@@ -109,6 +109,8 @@ typedef struct {
 enum { NL_CYCLE = 1, NL_STEPS = 1, NL_COMMIT = 1, NL_SECRET = 2, NL_FIELD = 4 };
 // A label's text options (`nbtn`): wrap= in bits 0-1 (LT_WORD, LT_CHAR), its face's
 // role + 1 in bits 2-4, the toolkit's `centre` for align= in bits 5-7, lines= given.
+// A text view's options (`lit`); its syntax's index in `btn` (ui.py's _SYNTAXES).
+enum { TV_FOLLOW = 1, TV_WRAP = 2, TV_PROSE = 4 };
 enum { LT_WORD = 1, LT_CHAR = 2, LT_WRAP = 3, LT_FACE_SHIFT = 2, LT_ALIGN_SHIFT = 5, LT_LINES = 256 };
 
 typedef struct {
@@ -231,6 +233,13 @@ struct uit {
     int ndrafts, cdrafts;
     uint32_t edits;             // drafts' edits: the page's gen moves with them
     uint8_t gen_safe;           // no template names @focus, @input or @touch
+    // a text view's lines: where each line of text slot `tvl_slot` starts, as its version `tvl_ver` held
+    uint32_t *tvl;
+    int tvl_n, tvl_cap;
+    int16_t tvl_slot;
+    uint16_t tvl_ver;
+    const char *tvl_s;
+    uint8_t tv_stop, tv_stop_now;   // a text view that runs on drew last frame / this frame (the band's PgUp PgDn)
 };
 
 // Each kind's name, as the trace and the dump spell it.

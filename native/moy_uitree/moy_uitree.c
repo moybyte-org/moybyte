@@ -207,7 +207,7 @@ void uit_free(uit_t *e)
     UIT_FREE(e->conds); UIT_FREE(e->terms); UIT_FREE(e->nodes); UIT_FREE(e->props);
     UIT_FREE(e->btns); UIT_FREE(e->ids); UIT_FREE(e->prev); UIT_FREE(e->evs);
     UIT_FREE(e->drew); UIT_FREE(e->orders); UIT_FREE(e->want); UIT_FREE(e->drafts);
-    UIT_FREE(e->labels);
+    UIT_FREE(e->labels); UIT_FREE(e->tvl);
     uit_buf_free(&e->pool); uit_buf_free(&e->scratch); uit_buf_free(&e->evtext);
     uit_buf_free(&e->trace);
     UIT_FREE(e);
@@ -577,7 +577,7 @@ int uit_model_of(uit_t *e, int node)
 
 const char *const uit_kind_names[UIT_KINDS] = {"", "page", "group", "label", "info", "link", "button",
                                                "toggle", "rows", "dialog", "seg", "slider", "field",
-                                               "empty", "progress"};
+                                               "empty", "progress", "text_view"};
 
 static const char *TONES[] = {"ink", "dim", "value", "danger"};
 static const char *BKINDS[] = {"normal", "primary", "tonal", "danger", "toggle"};
@@ -736,7 +736,7 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         int t = s < 0 ? 0 : e->slots[s].type;
         int ok = kind == UIT_TOGGLE ? t == UIT_BOOL : kind == UIT_ROWS ? t == UIT_MODEL
                  : kind == UIT_SEG ? t == UIT_ENUM || t == UIT_ROWOF : kind == UIT_SLIDER ? t == UIT_INT
-                 : kind == UIT_FIELD ? t == UIT_TEXT : 0;
+                 : kind == UIT_FIELD ? t == UIT_TEXT : kind == UIT_TEXT_VIEW ? t == UIT_TEXT || t == UIT_MODEL : 0;
         if (!ok)
             return uit_fail(e, UIT_E_NAME, "%s bound to %s: no such state of its type", uit_kind_names[kind], src);
         N->slot = (int16_t)s;
@@ -774,6 +774,29 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
                 return add_prop(e, node, name, src, repr, PK_ACT, a);
             }
         return uit_fail(e, UIT_E_NAME, "%s %s=%s: no such action", uit_kind_names[kind], name, src);
+    }
+    if (kind == UIT_TEXT_VIEW && !strcmp(name, "field")) {
+        // a view of a model: each row's line, this text field
+        int f = N->slot >= 0 ? uit_field_find(e, N->slot, src, strlen(src)) : -1;
+        if (f < 0 || e->slots[N->slot].ftype[f] != UIT_TEXT)
+            return uit_fail(e, UIT_E_NAME, "text_view .%s: no text field of its model", src);
+        N->cur = (int16_t)f;
+        return 0;
+    }
+    if (kind == UIT_TEXT_VIEW && (!strcmp(name, "follow") || !strcmp(name, "wrap") || !strcmp(name, "face") ||
+                                  !strcmp(name, "syntax"))) {
+        static const char *const SYNTAXES[] = {"plain", "python", "lua", "json", "sgr", "markdown"};
+        if (name[0] == 's') {
+            int i = lit_index(src, SYNTAXES, 6);
+            N->btn = (uint16_t)(i < 0 ? 4 : i);
+        } else if (name[0] == 'f' && name[1] == 'o') {
+            N->lit = (uint8_t)((N->lit & ~TV_FOLLOW) | (!strcmp(src, "True") ? TV_FOLLOW : 0));
+        } else if (name[0] == 'w') {
+            N->lit = (uint8_t)((N->lit & ~TV_WRAP) | (!strcmp(src, "word") ? TV_WRAP : 0));
+        } else {
+            N->lit = (uint8_t)((N->lit & ~TV_PROSE) | (!strcmp(src, "ui") ? TV_PROSE : 0));
+        }
+        return add_prop(e, node, name, src, repr, PK_LIT, N->lit);
     }
     if (!strcmp(name, "current") && kind == UIT_ROWS) {
         int s = uit_slot_find(e, src, strlen(src));

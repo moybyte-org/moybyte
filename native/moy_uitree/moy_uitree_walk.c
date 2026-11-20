@@ -737,6 +737,10 @@ static void hints(uit_t *e, uit_buf_t *b, int pages)
                 hint_add(b, e->scratch.p + at, n);
             }
         }
+        if (F->kind == UIT_TEXT_VIEW) {
+            hint_add(b, "scroll", 6);       // a text that runs on: the arrows scroll it
+            hint_add(b, "Scroll", 6);
+        }
     } else {
         int a = role_action(e, UIT_A_ROLE_CONFIRM);
         if (a >= 0 && uit_act_can(e, a, -1, -1)) {
@@ -746,6 +750,10 @@ static void hints(uit_t *e, uit_buf_t *b, int pages)
                 hint_add(b, e->scratch.p + at, n);
             }
         }
+    }
+    if ((e->flags & UIT_F_DESK) && e->tv_stop && !(e->has_focused && e->focused.kind == UIT_TEXT_VIEW)) {
+        hint_add(b, "PgUp PgDn", 9);        // the page's text runs on: PgUp and PgDn page it
+        hint_add(b, "Scroll", 6);
     }
     for (int a = 0; a < e->nacts; a++)
         if (e->acts[a].letter && uit_act_can(e, a, -1, -1)) {
@@ -828,6 +836,67 @@ static void draw_field(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k,
         wrote_text(e, k, D->buf, nl, "typed", N->changed);
     if (done && N->on >= 0)
         fire(e, N->on, k, -1, -1, NULL);
+}
+
+// A text view's lines: a model's rows (each its text field), or a text cut at its newlines (none
+// for an empty text), where each starts kept while the text's version holds.
+typedef struct {
+    uit_t *e;
+    int slot, f;
+} tv_src_t;
+
+static const uint8_t *tv_line(void *src, int32_t i, size_t *len)
+{
+    tv_src_t *t = src;
+    uit_t *e = t->e;
+    const uit_slot_t *S = &e->slots[t->slot];
+    if (t->f >= 0) {
+        const char *v = uit_cell(e, t->slot, i, t->f);
+        *len = strlen(v);
+        return (const uint8_t *)v;
+    }
+    uint32_t a = e->tvl[i], b = i + 1 < e->tvl_n ? e->tvl[i + 1] - 1 : S->sn;
+    *len = b - a;
+    return (const uint8_t *)S->s + a;
+}
+
+static int tv_lines(uit_t *e, int slot)
+{
+    const uit_slot_t *S = &e->slots[slot];
+    if (e->tvl_slot == slot && e->tvl_ver == S->ver && e->tvl_s == S->s && e->tvl)
+        return e->tvl_n;
+    e->tvl_n = 0;
+    if (S->sn) {
+        for (uint32_t i = 0; i <= S->sn; i++) {
+            if (i && S->s[i - 1] != '\n')
+                continue;
+            if (uit_grow((void **)&e->tvl, &e->tvl_cap, e->tvl_n + 1, sizeof *e->tvl))
+                return e->tvl_n = 0;
+            e->tvl[e->tvl_n++] = i;
+        }
+    }
+    e->tvl_slot = (int16_t)slot, e->tvl_ver = S->ver, e->tvl_s = S->s;
+    return e->tvl_n;
+}
+
+static void draw_text_view(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row)
+{
+    const uit_node_t *N = NODE(k);
+    moy_ui_over_t o;
+    char id[UIT_ID_MAX + 1];
+    tv_src_t src = {e, N->slot, N->cur};
+    moy_ui_lines_t L = {&src, N->cur >= 0 ? e->slots[N->slot].nrows : tv_lines(e, N->slot), tv_line};
+    int32_t opt[MOY_UI_TXO_LEN] = MOY_UI_TXO_DEFAULTS, out[2];
+    opt[MOY_UI_TXO_SYNTAX] = N->btn;
+    opt[MOY_UI_TXO_KEYS] = 1;           // a stop where it runs on
+    opt[MOY_UI_TXO_FACE] = (N->lit & TV_PROSE) ? MOY_UI_TXF_UI : MOY_UI_TXF_MONO;
+    opt[MOY_UI_TXO_WRAP] = (N->lit & TV_WRAP) != 0;
+    opt[MOY_UI_TXO_FOLLOW] = (N->lit & TV_FOLLOW) != 0;
+    over_for(e, k, model, row, c, &o, id);
+    moy_ui_api_text_view(c, s, span_of(id, strlen(id)), &L, opt, NULL, &o, out);
+    int32_t box[4];
+    if (moy_ui_api_box(c, span_of(id, strlen(id)), box))
+        e->tv_stop_now = 1;
 }
 
 static void draw(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row)
@@ -995,6 +1064,9 @@ static void draw(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int m
             moy_ui_api_group(c, s, span_of("", 0), NULL);
         break;
     }
+    case UIT_TEXT_VIEW:
+        draw_text_view(e, c, s, k, model, row);
+        break;
     case UIT_PROGRESS: {
         uint32_t vn, hn, va = uit_tmpl_render(e, N->t_value, model, row, &vn);
         int32_t v = (int32_t)strtol(e->scratch.p + va, NULL, 10);
@@ -1320,7 +1392,9 @@ int uit_frame(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int x, int y, i
     e->dup = 0;
     char ahead[UIT_ID_MAX + 1];
     int moved = land_focus(e, c, ahead);
+    e->tv_stop_now = 0;
     walk(e, c, s, 0, -1, -1);
+    e->tv_stop = e->tv_stop_now;
     // after: what holds focus, and whether the band named another node's verbs
     int had = e->has_focused;
     uit_id_t was = e->focused;

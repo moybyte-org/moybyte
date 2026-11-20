@@ -43,12 +43,12 @@ A_HOOK, A_ROLE_CONFIRM, A_ROLE_BACK = 1, 2, 4
 INPUTS = ("keys", "tdeck", "pad", "touch")
 _KINDS = {"page": 1, "group": 2, "label": 3, "info": 4, "link": 5, "button": 6, "toggle": 7,
           "rows": 8, "dialog": 9, "seg": 10, "slider": 11, "field": 12, "empty": 13,
-          "progress": 14}
+          "progress": 14, "text_view": 15}
 _HEAD = {"rows": ("model",), "dialog": ("buttons",)}
 _KIND_NAMES = dict((v, k) for k, v in _KINDS.items())
 _KIND_NAMES[len(_KINDS) + 1] = "cycle"          # UIT_KINDS: a seg of the cycle look
-_BOUND = ("toggle", "seg", "slider", "field")       # a two-way control: bound to the state of its key
-_LIT_ONLY = {"seg": ("values", "words", "model", "labels")}   # what the reference keeps beside a node's props
+_BOUND = ("toggle", "seg", "slider", "field", "text_view")       # a two-way control: bound to the state of its key
+_LIT_ONLY = {"seg": ("values", "words", "model", "labels"), "text_view": ("name",)}   # what the reference keeps beside a node's props
 _TYPED = "typed in field "
 LOWERED = "lowered"         # an engine's root once its page is in the store: the Python tree is gone
 E_CHECK = -6                # UIT_E_CHECK: a mistake the spec names, its code `error_code()`
@@ -286,7 +286,7 @@ class CEngine(Engine):
             kind = kinds.get(nk)
             if kind is None:
                 raise EngineGap("a %s node" % nk)
-            field = l.get("field") if l else None
+            field = l.get("field") if l and nk != "text_view" else None
             if field and nk != "toggle":
                 raise EngineGap("a %s bound to a row's field" % nk)
             me = cnode(kind, n.key, parent)
@@ -300,6 +300,8 @@ class CEngine(Engine):
                     fail(r, "%s .%s" % (nk, field), n.where)
             elif nk in bound:
                 r = cprop(me, "bind", n.key, None)
+                if r >= 0 and nk == "text_view" and "field" in l:
+                    r = cprop(me, "field", l["field"], None)       # a model's lines: this text field
                 if r < 0:
                     fail(r, "%s %s" % (nk, n.key), n.where)
             if nk == "seg" and "labels" in l:
