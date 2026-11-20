@@ -379,8 +379,8 @@ class SettingsLayer(Layer):
         self.achievements = AchievementsPage(
             ws.app_context("achievements", AchievementsPage.NEEDS))
         self.licences = LicencesPage(ws.app_context("licences", LicencesPage.NEEDS))
-        self.syslog = LogPage()
         _pctx = ws.app_context("permissions", PermsPage.NEEDS + ("damage",))
+        self.syslog = LogPage(self._sub, _pctx.damage, ws)
         self.permits = PermsPage(_pctx, self._sub, _pctx.damage)
         self.pages = SettingsPages(ws, self._sub, _pctx.damage, self._drop)
         import settings_rows           # it reads this module's tables: imported once they are made
@@ -1556,8 +1556,6 @@ class SettingsLayer(Layer):
         if want is not None:
             host.focus(want)          # before the frame: its keys act on it
             self._want = None
-        if view == "log":
-            self.syslog.aim(host)
         host.begin(ws.sys_canvas, ws.theme_colors, self._content(),
                    _lb.metric_class() == _lb.DESK, ws.windowed_chrome)
         was = ws.frame_state.dirty
@@ -1606,7 +1604,9 @@ class SettingsLayer(Layer):
         self.syslog.open(pid)
 
     def _log_draw(self):
-        self.syslog.draw(self._content())
+        ws = self.ws
+        self.syslog.draw(ws.sys_canvas, ws.theme_colors, self._content(),
+                         _lb.metric_class() == _lb.DESK, self._dt)
 
     def _perms_open(self, _pid=None):
         self.permits.open()

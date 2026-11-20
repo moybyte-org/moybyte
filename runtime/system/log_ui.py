@@ -1,29 +1,39 @@
 """Settings' System log page: the OS log (native/moy_kernel/moy_log.h, through
-runtime/system/os_log.py) as one text view on the public UI API's verbs, its
+runtime/system/os_log.py) as one `uitree` lines view that follows, its
 newest record at the foot, each record a line `seconds level process: text`
 (a traceback's further lines under it, indented).
 
 The page follows the ring: a record written while it is open shows on the next
 frame (`moved`, which the console's animation gate asks): the page reads
-them before its host begins the frame (`aim`), and a view at its foot moves
-to the new foot as that frame's shift. Opened on one process (`open(pid)`) it
+them as the frame's first hook (`log_poll`), and a view at its foot moves to
+the new foot. Opened on one process (`open(pid)`) it
 shows that process's records alone: what a task manager's "this app crashed:
 details" and a crash notification open.
 """
 
-from array import array
-
-import ui as _ui
-import ui_draw as _ui_draw
+import uitree as ui
+import uitree_app
 import os_log as _log
 
 KEEP = 240                  # the lines the page holds, the oldest dropped first
 TITLE = "System log"
+
+s = ui.state(lines=ui.model(key="n", n=0, line=""))
+
+
+def log_poll(page):
+    """The records that came since the page last read the ring, onto its
+    lines (a view at its foot follows them)."""
+    if page._read():
+        s.lines = [{"n": n, "line": line} for n, line in enumerate(page.lines, page._first)]
+
+
 # Lines are cut at the view's edge, where they fade, not wrapped: a wrapped
 # view that follows its foot draws stale rows when its top line is cut
 # part-way (moy_ui's text view, measured 2026-11-03).
-_VIEW = _ui.text_options({"follow": True, "syntax": "plain"})
-_INTO = array("i", [0, 0])
+def log_page():
+    with ui.page(""):
+        ui.text_view("lines", follow=True)
 
 
 def record_lines(rec, out):
@@ -40,21 +50,24 @@ def record_lines(rec, out):
 
 class LogPage:
     """Settings' System log page (`SettingsLayer` draws it on its sub page's
-    host)."""
+    host): the ring's reader, and the page it fills."""
 
     NEEDS = ()
 
-    def __init__(self, ctx=None):
+    def __init__(self, host=None, damage=None, env=None):
         self.pid = None               # the one process shown, else every one
         self.lines = []
+        self._first = 0               # the running number of lines[0], each line's key
         self._seen = 0                # the seq the next read starts at
-        self._gen = 0
+        self.engine = None if host is None else uitree_app.Page(log_page, host, damage, env=env)
 
     def open(self, pid=None):
         self.pid = pid
         self.lines = []
+        self._first = 0
         self._seen = 0
-        self._gen += 1
+        if self.engine is not None:
+            self.engine.open()
 
     def title(self):
         if self.pid is not None:
@@ -67,12 +80,6 @@ class LogPage:
     def moved(self):
         """A record was written since the page last read the ring."""
         return _log.next_seq() != self._seen
-
-    def aim(self, host):
-        """Before `host` begins the frame: the records that came, and the
-        view at its foot moved to the new foot."""
-        if self._read():
-            _ui_draw.text_aim(host, TITLE, -1, len(self.lines))
 
     def _read(self):
         if not self.moved():
@@ -88,12 +95,11 @@ class LogPage:
             self._seen = recs[-1][0] + 1
         self._seen = _log.next_seq()
         if len(lines) > KEEP:
+            self._first += len(lines) - KEEP
             del lines[:len(lines) - KEEP]
-        self._gen += 1
         return True
 
-    def draw(self, rect):
-        x, y, w, h = _ui.page("")
-        _ui.at(x, y, w, h)
-        _VIEW[_ui.TXO_GEN] = self._gen
-        _ui.text_view(TITLE, self.lines, _VIEW, None, None, _INTO)
+    def draw(self, cv, th, rect, desk, dt):
+        self.engine.run(log_poll, self, action="log_poll")
+        ui.commit(self.engine)
+        self.engine.paint(dt, cv, th, rect, desk)

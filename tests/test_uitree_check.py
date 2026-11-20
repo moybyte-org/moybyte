@@ -23,6 +23,7 @@ PORTED = (
     "uitree_focus",
     "update_ui",
     "settings_rows",
+    "log_ui",
 )
 
 

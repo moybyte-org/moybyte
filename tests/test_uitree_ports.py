@@ -261,6 +261,10 @@ STALE_TOGGLE_HINT = ("the old rows page drew its hints before its rows, so the f
                      "turned still offered the turn it had just made (Turn off on a toggle now off); "
                      "the port's hints are the toggle's as it now is")
 
+LOG_BACK_BAND = ("the old System log filled its page by hand (`ui.at`) and drew no hints; the port "
+                 "takes the engine's layout (K5), whose band names Back on every page, a line "
+                 "shorter on a handheld")
+
 # (record name, surface, golden configuration, script[, {step: cause}])
 RUNS = (
     ("settings_permissions-tdeck", "settings_permissions", "tdeck_320x240_fs1_dark",
@@ -317,8 +321,9 @@ RUNS = (
      ["k:down"] * 22 + ["k:a", "k:down", "k:right"]),
     # the ring at its foot, scrolled up and down again, and closed
     ("settings_log-tdeck", "settings_log", "tdeck_320x240_fs1_dark",
-     ["f:2", "k:up", "k:up", "k:up", "k:down", "back"]),
-    ("settings_log-desk", "settings_log", "p4_1024x600_fs2_windowed", ["f:2", "k:up", "k:down"]),
+     ["f:2", "k:up", "k:up", "k:up", "k:down", "back"], dict.fromkeys(range(6), LOG_BACK_BAND)),
+    ("settings_log-desk", "settings_log", "p4_1024x600_fs2_windowed", ["f:2", "k:up", "k:down"],
+     dict.fromkeys(range(4), LOG_BACK_BAND)),
 )
 
 
