@@ -1,0 +1,43 @@
+{
+ "surface": "settings_rows",
+ "config": "p4_1024x600_cs2_fs1_windowed",
+ "commit": "b92e1c3f9",
+ "script": [
+  "k:down",
+  "k:down",
+  "k:right",
+  "k:down",
+  "k:down",
+  "k:down"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "11cbf91d551622b5827e44e851927d8e1ee44885d36f831bfc28ab26de9685d4"
+  ],
+  [
+   "k:down",
+   "fcefe2b35269071a78fa43364215170dc98f78a67b3ec1bd17d9999b7347d8d8"
+  ],
+  [
+   "k:down",
+   "d1d39c1343bbb306c62391f706345452a59a2cd813770761143e0b2417f3bf35"
+  ],
+  [
+   "k:right",
+   "256ffa33893d627bff23db87536b1fdf0e34664afaa693c35a1a91432609ff25"
+  ],
+  [
+   "k:down",
+   "ae88b79eddb468b97bec980620cc175c5e9d215091755103fde29a0d60c694e8"
+  ],
+  [
+   "k:down",
+   "5329ce1b2928070ce6ae57a493b9ee943ee25f8d0935014c89ba2ce701913061"
+  ],
+  [
+   "k:down",
+   "8d2fc9d5133b32e44ee4d873f25b18b6f81c10a9f7dd8201c5723c1fbb7e8867"
+  ]
+ ]
+}

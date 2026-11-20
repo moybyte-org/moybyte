@@ -1,0 +1,33 @@
+{
+ "surface": "tasks",
+ "config": "p4_1024x600_cs2_fs1_windowed",
+ "commit": "bb7e2ad7b",
+ "script": [
+  "k:down",
+  "k:up",
+  "k:up",
+  "k:right"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "5ce065849fd351f1c9d7acc4b62809b68a3b2c1643c72d0cbd7be389ec4dedf0"
+  ],
+  [
+   "k:down",
+   "f641a33e179f4ebec1fc7f6525a7faf537580d00d99185aafba6f3d8034f5354"
+  ],
+  [
+   "k:up",
+   "5ce065849fd351f1c9d7acc4b62809b68a3b2c1643c72d0cbd7be389ec4dedf0"
+  ],
+  [
+   "k:up",
+   "d5b74a9466cc4be7b91f6c786a17683a6aae48e93217a6b196fafa91173b07ff"
+  ],
+  [
+   "k:right",
+   "63565b1c3453339c3befc2853c3112a1a8e9152de3d37d0680de1c6b57c7b42d"
+  ]
+ ]
+}

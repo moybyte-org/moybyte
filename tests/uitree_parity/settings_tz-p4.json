@@ -1,0 +1,33 @@
+{
+ "surface": "settings_tz",
+ "config": "p4_1024x600_cs2_fs1_windowed",
+ "commit": "30d44f7de",
+ "script": [
+  "k:down",
+  "k:down",
+  "k:a",
+  "f:2"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "69809fe690127f0e567f1050fcdcb4459af240b8af104d9e098a2b6407833a7d"
+  ],
+  [
+   "k:down",
+   "0001f02efed4d12ede2a16bad97aa95865796d95c67fa6c6aebf008ab67d6e55"
+  ],
+  [
+   "k:down",
+   "31f119b062eaccc94539a01bb280ceca0fae012eab699028cbd8871823c5e26e"
+  ],
+  [
+   "k:a",
+   "be83fa6973c846df656105faa42b20c932336d5976564548e93514fbd109be84"
+  ],
+  [
+   "f:2",
+   "be83fa6973c846df656105faa42b20c932336d5976564548e93514fbd109be84"
+  ]
+ ]
+}

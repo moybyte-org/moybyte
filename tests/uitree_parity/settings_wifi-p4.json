@@ -1,0 +1,33 @@
+{
+ "surface": "settings_wifi",
+ "config": "p4_1024x600_cs2_fs1_windowed",
+ "commit": "0d7aedb1b",
+ "script": [
+  "k:down",
+  "k:a",
+  "f:2",
+  "k:down"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "755a98158945b83ef46571592b48b9f38f9d14a46a621034f4b3130606619792"
+  ],
+  [
+   "k:down",
+   "10d42242e0a4d726ffc1b6e81eb04ca8fc5f2f91a79b48f1a7f9a3114fe21694"
+  ],
+  [
+   "k:a",
+   "da0476e492a8daf391b798b004a0a610bd02f48b02c839e65eaacdab59751d2f"
+  ],
+  [
+   "f:2",
+   "da0476e492a8daf391b798b004a0a610bd02f48b02c839e65eaacdab59751d2f"
+  ],
+  [
+   "k:down",
+   "fb3beed3193cf66e80a008714ff38cbf7490ba2fad78d210e13c8cc2a3bbcb8e"
+  ]
+ ]
+}

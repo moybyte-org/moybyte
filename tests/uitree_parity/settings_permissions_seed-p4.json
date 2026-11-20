@@ -1,0 +1,28 @@
+{
+ "surface": "settings_permissions_seed",
+ "config": "p4_1024x600_cs2_fs1_windowed",
+ "commit": "23a5ba407",
+ "script": [
+  "k:down",
+  "k:down",
+  "k:down"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "47d3606003c05f5c34d278436a0011d573c34dfcd8741071ef4720be7c1ed83e"
+  ],
+  [
+   "k:down",
+   "39b9a46f36d76f9f1990a928a815e6b880793324939a941965991b98e9699588"
+  ],
+  [
+   "k:down",
+   "b85fe66915c145c9c50c69131cfc22d22eb2553c8aeefdcd69ac98ad19cd9ff3"
+  ],
+  [
+   "k:down",
+   "20bb890aec0b2182d025ec8f3e7d039eb1c04d6c54b9f2a11a31a5e1ff1c58aa"
+  ]
+ ]
+}

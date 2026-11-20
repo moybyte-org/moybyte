@@ -35,6 +35,19 @@ def _perms_carts(carts_dir):
         (d / "config.json").write_text("{}")
 
 
+# The seed carts that ask for more than a game does, as a board's store holds
+# them: their ids are a board's (`moybyte.` and the name), longer than the
+# fixtures' above.
+SEED_PERMS_CARTS = ("moybyte.brick_siege.moy", "moybyte.brick_siege_lua.moy",
+                    "moybyte.harpoon_pop.moy", "moybyte.notes.moy")
+
+
+def _seed_perms_carts(carts_dir):
+    import shutil
+    for name in SEED_PERMS_CARTS:
+        shutil.copytree(P.ROOT / "system_carts" / name, Path(carts_dir) / name)
+
+
 def _open_settings_page(page):
     def open_(ws):
         ws.open_settings()
@@ -361,6 +374,21 @@ def _open_web_console(ws):
     ws.web.toggle()
 
 
+def _open_web_console_none(ws):
+    """The web console with no address yet: a webhost serving on a network
+    that has given the board none."""
+    from test_shell_goldens import _GoldenWebHost
+
+    class _NoAddress(_GoldenWebHost):
+        def url(self):
+            return ""
+
+        def paired_url(self):
+            return ""
+    ws.webhost = _NoAddress()
+    ws.web.toggle()
+
+
 def _open_tasks(ws):
     """The task manager over two services, one crashed, and two
     notifications one of them posted (its banner taken down)."""
@@ -423,6 +451,7 @@ SURFACES = {
     "editor_desk_row": P.Surface(_open_editor("code"), probe=_desk_probe),
     "editor_desk_panes": P.Surface(_open_editor("code"), probe=_panes_probe),
     "settings_permissions": P.Surface(_open_settings_page("permissions"), _perms_carts),
+    "settings_permissions_seed": P.Surface(_open_settings_page("permissions"), _seed_perms_carts),
     "settings_tz": P.Surface(_open_tz),
     "settings_paired": P.Surface(_open_paired(BROWSERS, True)),
     "settings_paired_none": P.Surface(_open_paired({}, False)),
@@ -434,6 +463,8 @@ SURFACES = {
     "settings_rows_full": P.Surface(_open_rows_full),
     "settings_log": P.Surface(_open_log),
     "web_console": P.Surface(_open_web_console),
+    "web_console_none": P.Surface(_open_web_console_none),
+    "settings_licences": P.Surface(_open_settings_page("licences")),
     "tasks": P.Surface(_open_tasks),
     "achievements": P.Surface(_open_achievements),
     "settings_wifi": P.Surface(_open_wifi()),
@@ -449,6 +480,9 @@ NO_FALSE_HINT = ("the old page named Remove in its hints with nothing to remove;
 STALE_TOGGLE_HINT = ("the old rows page drew its hints before its rows, so the frame a toggle "
                      "turned still offered the turn it had just made (Turn off on a toggle now off); "
                      "the port's hints are the toggle's as it now is")
+
+CUT_ENDS_IN_ELLIPSIS = ("a value row's label wider than its room ends in an ellipsis (the toolkit's "
+                        "row), where the old row cut it hard: the SSH host key's line")
 
 LICENCES_K5 = ("Licences is a uitree page that takes the engine's layout (owner ruling K5): its "
                "frames are the port's, reviewed as side-by-sides and re-baked in its goldens")
@@ -484,7 +518,8 @@ RUNS = (
     # each browser by name and day, one forgotten, then Remove all; the host
     # key's fingerprint cut to the page's width
     ("settings_paired-tdeck", "settings_paired", "tdeck_320x240_fs1_dark",
-     ["k:down", "k:a", "f:2", "k:down", "k:a", "f:2", "back"], {5: NO_FALSE_HINT, 6: NO_FALSE_HINT}),
+     ["k:down", "k:a", "f:2", "k:down", "k:a", "f:2", "back"],
+     {i: (NO_FALSE_HINT + "; " if i >= 5 else "") + CUT_ENDS_IN_ELLIPSIS for i in range(7)}),
     ("settings_paired-desk", "settings_paired", "p4_1024x600_fs2_windowed",
      ["k:down", "k:down", "k:a", "f:2", "k:down", "k:a", "f:2"], {6: NO_FALSE_HINT, 7: NO_FALSE_HINT}),
     ("settings_paired_none-big", "settings_paired_none", "big_800x480_fs3_dark", ["k:down", "back"],
@@ -564,6 +599,27 @@ RUNS = (
      ["k:right", "k:a", "back", "k:down", "k:down", "k:a", "back", "f:2"]),
     ("achievements-desk", "achievements", "p4_1024x600_fs2_windowed",
      ["k:right", "k:a", "back", "k:down", "k:down", "k:down", "k:a", "back"]),
+    # The P4 as it ships (font scale 1 on the desk's unit of 2), the window
+    # a board opens a page in. Licences and the web console with no address
+    # are recorded from their ports (K5): the list column fits its names, the
+    # empty state stands where the code would
+    ("settings_licences-p4", "settings_licences", "p4_1024x600_cs2_fs1_windowed",
+     ["k:down", "k:down", "k:down", "k:a", "k:down"]),
+    ("web_console_none-tdeck", "web_console_none", "tdeck_320x240_fs1_dark", ["f:2"]),
+    ("web_console_none-p4", "web_console_none", "p4_1024x600_cs2_fs1_windowed", ["f:2", "k:down"]),
+    ("web_console-p4", "web_console", "p4_1024x600_cs2_fs1_windowed", ["f:2", "k:down"]),
+    ("settings_rows-p4", "settings_rows", "p4_1024x600_cs2_fs1_windowed",
+     ["k:down", "k:down", "k:right", "k:down", "k:down", "k:down"]),
+    ("settings_wifi-p4", "settings_wifi", "p4_1024x600_cs2_fs1_windowed", ["k:down", "k:a", "f:2", "k:down"]),
+    ("settings_tz-p4", "settings_tz", "p4_1024x600_cs2_fs1_windowed", ["k:down", "k:down", "k:a", "f:2"]),
+    ("settings_paired-p4", "settings_paired", "p4_1024x600_cs2_fs1_windowed", ["k:down", "k:down"]),
+    ("tasks-p4", "tasks", "p4_1024x600_cs2_fs1_windowed", ["k:down", "k:up", "k:up", "k:right"]),
+    ("update_sd-p4", "update_sd", "p4_1024x600_cs2_fs1_windowed", ["k:a", "f:3"]),
+    # the seed carts a board holds, whose ids are longer than the fixtures'
+    ("settings_permissions_seed-tdeck", "settings_permissions_seed", "tdeck_320x240_fs1_dark",
+     ["k:down", "k:down", "k:down"]),
+    ("settings_permissions_seed-p4", "settings_permissions_seed", "p4_1024x600_cs2_fs1_windowed",
+     ["k:down", "k:down", "k:down"]),
     ("editor_code-tdeck", "editor_code", "tdeck_320x240_fs1_dark", CODE_SCRIPT, P.BEHAVIOUR),
     ("editor_code-desk", "editor_code", "p4_1024x600_fs2_windowed", CODE_DESK_SCRIPT, P.BEHAVIOUR),
     ("editor_code-big", "editor_code", "big_800x480_fs3_dark", CODE_SCRIPT, P.BEHAVIOUR),
@@ -599,7 +655,10 @@ C_RUNS = ("settings_rows-tdeck", "settings_rows-desk", "settings_rows_layout-tde
           "update_online-big", "update_c6-desk", "settings_log-tdeck", "settings_log-desk",
           "wifi_popover-desk", "wifi_popover-tdeck", "settings_rows_full-desk",
           "web_console-tdeck", "web_console-desk", "tasks-tdeck", "tasks-desk",
-          "achievements-tdeck", "achievements-desk")
+          "achievements-tdeck", "achievements-desk",
+          "settings_rows-p4", "settings_wifi-p4", "settings_tz-p4", "settings_paired-p4", "tasks-p4",
+          "update_sd-p4", "web_console-p4", "settings_permissions_seed-tdeck",
+          "settings_permissions_seed-p4", "web_console_none-tdeck", "web_console_none-p4")
 
 
 @pytest.mark.parametrize("name", C_RUNS)

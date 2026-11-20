@@ -1,0 +1,28 @@
+{
+ "surface": "settings_permissions_seed",
+ "config": "tdeck_320x240_fs1_dark",
+ "commit": "23a5ba407",
+ "script": [
+  "k:down",
+  "k:down",
+  "k:down"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "0e1160b65cd14a6654764334ec3ee1e0d9a8b8c557ada4ead149f2ca322ed4c0"
+  ],
+  [
+   "k:down",
+   "f4529336943f59be86a4b41b9d07bfc00419ce596190ee2e76321dcc26bcb528"
+  ],
+  [
+   "k:down",
+   "dcca60a2e306c4c6271cca348f972f8fc88fd7581875f6a9d950795e9dd00efb"
+  ],
+  [
+   "k:down",
+   "49c69ba154460e0182054599388cb6cc6bc6725596ee6fdb385e3a269cea2c0d"
+  ]
+ ]
+}

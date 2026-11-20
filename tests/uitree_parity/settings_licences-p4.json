@@ -1,0 +1,38 @@
+{
+ "surface": "settings_licences",
+ "config": "p4_1024x600_cs2_fs1_windowed",
+ "commit": "b0be0599d",
+ "script": [
+  "k:down",
+  "k:down",
+  "k:down",
+  "k:a",
+  "k:down"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "e7cc7fec84b4a625293040104591235cbe7757e9dee7ccd42860e75a7ddbab49"
+  ],
+  [
+   "k:down",
+   "bcf1e9f1cad55bc743cdd0109ec3f5345bbeb58875c6fb8a3244d3e1a47dc700"
+  ],
+  [
+   "k:down",
+   "5a5432b4f24b293873ee7d6a44aa9a764af02b401d48689321180144d3416250"
+  ],
+  [
+   "k:down",
+   "a1ff3e7939d3550f3df2f070e012420315701fbb2ac118d6a58e99adb1b1a177"
+  ],
+  [
+   "k:a",
+   "a1ff3e7939d3550f3df2f070e012420315701fbb2ac118d6a58e99adb1b1a177"
+  ],
+  [
+   "k:down",
+   "6c2106133ee4e5c738943336c1819320ce506886c626c18d31bc4c26a63a8575"
+  ]
+ ]
+}
