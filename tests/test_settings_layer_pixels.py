@@ -272,7 +272,7 @@ def capture(cfg, carts_dir):
     sl.wifi_known = ["MoyNet-5G-Long-Name"]
     sl.wifi_msg = "scanning..."
     for sel in range(3):
-        out["wifi_list_%d" % sel] = page(sl._sub, "net%d" % sel)
+        out["wifi_list_%d" % sel] = page(sl._sub, "net%d/join" % sel)    # a row's node: ROWKEY/NODEKEY
     sl.wifi_pick = "MoyNet-5G-Long-Name"
     sl.wifi_pw = "hunter2hunter2"
     out["wifi_password"] = page()

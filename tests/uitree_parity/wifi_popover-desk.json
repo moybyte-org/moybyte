@@ -1,0 +1,73 @@
+{
+ "surface": "wifi_popover",
+ "config": "p4_1024x600_fs2_windowed",
+ "commit": "0d7aedb1b",
+ "script": [
+  "k:down",
+  "k:a",
+  "f:2",
+  "k:down",
+  "k:a",
+  "t:abc",
+  "enter",
+  "f:2",
+  "k:down",
+  "k:a",
+  "f:2",
+  "back"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "ac6e8aceaeeb5a27daeb844f5f7c3b0cc4e8a29c3ddcde3c97ba55b03a6d3459"
+  ],
+  [
+   "k:down",
+   "3239cec1ab9218392afcd3135000fb16718bc8f17b7ac3819453db5e56ac1ee1"
+  ],
+  [
+   "k:a",
+   "9f43b6a6eab22c28356cb6d857d93fedfd67c1be7cd639395861f24e44fe094c"
+  ],
+  [
+   "f:2",
+   "9f43b6a6eab22c28356cb6d857d93fedfd67c1be7cd639395861f24e44fe094c"
+  ],
+  [
+   "k:down",
+   "195985ab239ca9049902673bf9d918fe610353b423bee6153a6c06b01cc22e00"
+  ],
+  [
+   "k:a",
+   "3d4a09a581070bce4054ea9d55eb28e69fca475f326e8d3b60afb9a03594c41b"
+  ],
+  [
+   "t:abc",
+   "04683f06843f441f5d7e6e1ff725bc6d932bd1dc79935460db3c2b0a518cb4c4"
+  ],
+  [
+   "enter",
+   "6b9290dcb63263f401c81436274999b42256c9060f65a7c80a26162bac38c142"
+  ],
+  [
+   "f:2",
+   "6b9290dcb63263f401c81436274999b42256c9060f65a7c80a26162bac38c142"
+  ],
+  [
+   "k:down",
+   "6b38db8e8c0b502381b0a5cfd0a9d241365d84eb521acd5927d7eec0b9d9ce01"
+  ],
+  [
+   "k:a",
+   "6b38db8e8c0b502381b0a5cfd0a9d241365d84eb521acd5927d7eec0b9d9ce01"
+  ],
+  [
+   "f:2",
+   "6b38db8e8c0b502381b0a5cfd0a9d241365d84eb521acd5927d7eec0b9d9ce01"
+  ],
+  [
+   "back",
+   "9772ade4f6f1166b3f9586f0cb67b6fbb9b4dbddbdab67a6ee6cfe55e2d7a86d"
+  ]
+ ]
+}

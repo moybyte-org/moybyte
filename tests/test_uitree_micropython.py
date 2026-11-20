@@ -108,7 +108,8 @@ def pages(loop):
     _steps(loop, 20)
     shown["rows"] = ws.wm.top_kind()
     sl = ws.settings_layer
-    for p in ("tz", "paired", "log", "permissions", "licences", "achievements"):
+    ws.wifi = _Station()
+    for p in ("wifi", "tz", "paired", "log", "permissions", "licences", "achievements"):
         sl.open_page(p)
         if p == "achievements":
             _steps(loop)
@@ -127,6 +128,11 @@ def pages(loop):
         shown[p] = sl._stack[-1] if sl._stack else None
         sl.close_page()
         _steps(loop, 4)
+    ws.toggle_popover("wifi")              # the panel in the bar's popover
+    _steps(loop)
+    shown["wifi_popover"] = ws.sysmenu.widget if ws.sysmenu.open else None
+    ws.close_popover()
+    _steps(loop, 4)
     for how in ("open_update", "open_update_online", "open_update_c6"):
         getattr(ws.update_ui, how)()
         _steps(loop)
@@ -161,15 +167,16 @@ def pages(loop):
 # each ported page's build function, by name: Settings' rows, its tz, paired,
 # System log and App permissions pages, the update screen, the web console, and
 # Licences' list (a licence's text is a page pushed over it: shown["licence"]),
-# Achievements (a badge's popover: shown["badge"]),
+# Achievements (a badge's popover: shown["badge"]), the Wi-Fi panel in
+# Settings and in the bar's popover,
 # and the task manager on each of its tabs
 BUILDS = ("rows_page", "tz_page", "paired_page", "log_page", "build", "page", "web_page",
-          "list_page", "tasks_page", "achievements_page")
+          "list_page", "tasks_page", "achievements_page", "wifi_page", "popover_page")
 
 
 def test_every_ported_page_builds_and_draws_on_the_boards_micropython(tmp_path):
     PORTS._perms_carts(tmp_path / "carts")
-    sources = "\n\n".join(inspect.getsource(c) for c in (PORTS.Updater, PORTS.C6Updater, Webhost))
+    sources = "\n\n".join(inspect.getsource(c) for c in (PORTS.Updater, PORTS.C6Updater, Webhost, PORTS._Station))
     more = (PAGES.replace("@SOURCES@", sources)
             .replace("@BROWSERS@", repr(PORTS.BROWSERS))
             .replace("@LOG_RING@", repr(PORTS.LOG_RING)))
@@ -179,6 +186,7 @@ def test_every_ported_page_builds_and_draws_on_the_boards_micropython(tmp_path):
     shown, painted = info["shown"], info["painted"]
     assert not info["errors"], (info["errors"][:3], text[-3000:])
     assert shown["rows"] == "settings", shown
+    assert shown["wifi"] == "wifi" and shown["wifi_popover"] == "wifi", shown
     assert [shown[p] for p in ("tz", "paired", "log", "permissions", "licences", "achievements")] == \
         ["tz", "paired", "log", "permissions", "licences", "achievements"], shown
     assert shown["badge"] == "First Steps", shown

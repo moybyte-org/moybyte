@@ -29,6 +29,7 @@ PORTED = (
     "about_ui",
     "tasks_ui",
     "achievements_ui",
+    "wifi_ui",
 )
 
 

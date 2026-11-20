@@ -215,6 +215,49 @@ def _open_rows_full(ws):
     ws.open_settings()
 
 
+class _Station:
+    """A Wi-Fi station as Settings' Wi-Fi panel reads it: joined to its saved
+    network, three found by a scan (one open, two locked), joins that answer
+    at once (a typed password right only when it is "abc")."""
+
+    def __init__(self, nets=True):
+        self.on, self.saved = "MoyNet", {"MoyNet": "x"}
+        self.nets = [("MoyNet", -40, True), ("Guest", -60, False), ("Cafe", -70, True)] if nets else []
+
+    def status(self):
+        return (True, self.on, "192.168.1.155") if self.on else (False, None, None)
+
+    def known(self):
+        return list(self.saved)
+
+    def scan(self):
+        return list(self.nets)
+
+    def connect(self, ssid, pw):
+        ok = ssid == "Guest" or pw == "abc" or (not pw and ssid in self.saved)
+        if ok:
+            self.on = ssid
+            self.saved[ssid] = pw or self.saved.get(ssid, "")
+        return ok
+
+    def forget(self, ssid):
+        self.saved.pop(ssid, None)
+
+
+def _open_wifi(nets=True):
+    def open_(ws):
+        ws.wifi = _Station(nets)
+        ws.open_settings()
+        ws.settings_layer.open_page("wifi")
+    return open_
+
+
+def _open_wifi_popover(ws):
+    ws.wifi = _Station()
+    ws._golden_popover = True           # the goldens' settle leaves it open
+    ws.widget_tap("wifi")
+
+
 # name -> what a run opens
 # The System log's ring: (t_us, level, process, text) on a pinned clock, more
 # lines than a handheld's page holds, a traceback's lines under its record.
@@ -250,6 +293,9 @@ SURFACES = {
     "settings_rows": P.Surface(lambda ws: ws.open_settings()),
     "settings_rows_full": P.Surface(_open_rows_full),
     "settings_log": P.Surface(_open_log),
+    "settings_wifi": P.Surface(_open_wifi()),
+    "settings_wifi_none": P.Surface(_open_wifi(False)),
+    "wifi_popover": P.Surface(_open_wifi_popover),
 }
 
 # A step a port draws differently from its record on purpose: its cause,
@@ -267,6 +313,17 @@ LICENCES_K5 = ("Licences is a uitree page that takes the engine's layout (owner 
 LOG_BACK_BAND = ("the old System log filled its page by hand (`ui.at`) and drew no hints; the port "
                  "takes the engine's layout (K5), whose band names Back on every page, a line "
                  "shorter on a handheld")
+
+WIFI_OWN_HINT = ("the old Wi-Fi panel's band said Connect (Join in the popover) whatever was focused; "
+                 "the port's names what the focused row does: Scan again, Forget")
+
+WIFI_DIALOG_BAND = ("under the password dialog the old popover's band still named the list's keys "
+                    "(Join, Close); the port's names the dialog's (Connect, Cancel), as Settings' "
+                    "page always did")
+
+WIFI_RING_IN_VIEW = ("the old popover drew its menu with no page, so focus on its last row, Scan "
+                     "again, left the ring's reach under the card's foot; the port's page keeps "
+                     "it in view, the rows 2 px higher. " + WIFI_OWN_HINT)
 
 # (record name, surface, golden configuration, script[, {step: cause}])
 RUNS = (
@@ -327,6 +384,26 @@ RUNS = (
      ["f:2", "k:up", "k:up", "k:up", "k:down", "back"], dict.fromkeys(range(6), LOG_BACK_BAND)),
     ("settings_log-desk", "settings_log", "p4_1024x600_fs2_windowed", ["f:2", "k:up", "k:down"],
      dict.fromkeys(range(4), LOG_BACK_BAND)),
+    # the networks: an open one joined, a locked one's password typed wrong
+    # then right, the prompt cancelled by back, Scan again, the network
+    # picked forgotten, and back to the rows
+    ("settings_wifi-tdeck", "settings_wifi", "tdeck_320x240_fs1_dark",
+     ["k:down", "k:a", "f:2", "k:down", "k:a", "t:abd", "enter", "f:2", "k:a", "back", "k:a",
+      "t:abc", "enter", "f:2", "k:down", "k:a", "f:2", "k:down", "k:a", "f:2", "back"],
+     dict.fromkeys(range(15, 21), WIFI_OWN_HINT)),
+    ("settings_wifi-desk", "settings_wifi", "p4_1024x600_fs2_windowed",
+     ["k:down", "k:a", "f:2", "k:down", "k:a", "t:abc", "enter", "f:2", "k:down", "k:down",
+      "k:a", "f:2", "back"], dict.fromkeys(range(9, 13), WIFI_OWN_HINT)),
+    ("settings_wifi_none-big", "settings_wifi_none", "big_800x480_fs3_dark", ["k:down", "k:a", "f:2"],
+     dict.fromkeys(range(4), WIFI_OWN_HINT)),
+    # the bar's Wi-Fi popover: an open network joined, a locked one's
+    # password typed, then closed
+    ("wifi_popover-desk", "wifi_popover", "p4_1024x600_fs2_windowed",
+     ["k:down", "k:a", "f:2", "k:down", "k:a", "t:abc", "enter", "f:2", "k:down", "k:a", "f:2", "back"],
+     {5: WIFI_DIALOG_BAND, 6: WIFI_DIALOG_BAND, 9: WIFI_RING_IN_VIEW, 10: WIFI_RING_IN_VIEW,
+      11: WIFI_RING_IN_VIEW}),
+    ("wifi_popover-tdeck", "wifi_popover", "tdeck_320x240_fs1_dark",
+     ["k:down", "k:a", "f:2", "k:down", "k:a", "t:abc", "enter", "f:2", "back"]),
 )
 
 

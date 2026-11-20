@@ -1,0 +1,78 @@
+{
+ "surface": "settings_wifi",
+ "config": "p4_1024x600_fs2_windowed",
+ "commit": "0d7aedb1b",
+ "script": [
+  "k:down",
+  "k:a",
+  "f:2",
+  "k:down",
+  "k:a",
+  "t:abc",
+  "enter",
+  "f:2",
+  "k:down",
+  "k:down",
+  "k:a",
+  "f:2",
+  "back"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "2f6c957c900abd58c09b39d3e2bf980e6b5a3c30eb07c04169f34eb29b65b015"
+  ],
+  [
+   "k:down",
+   "c5afb2375d71f618566552e639d284fdf4e82b6291009e22e82c5291c071f0cb"
+  ],
+  [
+   "k:a",
+   "45aaffb3308b14e358b85b5ef113d25fc3775debb20456623567dc27ed685281"
+  ],
+  [
+   "f:2",
+   "45aaffb3308b14e358b85b5ef113d25fc3775debb20456623567dc27ed685281"
+  ],
+  [
+   "k:down",
+   "306ba1aef640aa049e8caab8cc26bfe52344d63e323865dd950917aa393eee93"
+  ],
+  [
+   "k:a",
+   "be8d3073f296fb641fff72c235bc8769f49d3bfa77e12fff1143d1e64aaa2a7a"
+  ],
+  [
+   "t:abc",
+   "a3fb8f9712289aaebf1c8abac99d29b486c4c1a042d0fed5fb63019b085d9eb1"
+  ],
+  [
+   "enter",
+   "c8aa9a433ce0982b99e4f5caeb6141cd92e502ca3f7bdf9ca7eb298abd5e1534"
+  ],
+  [
+   "f:2",
+   "c8aa9a433ce0982b99e4f5caeb6141cd92e502ca3f7bdf9ca7eb298abd5e1534"
+  ],
+  [
+   "k:down",
+   "398bf8d2b0850a2a514ad191a69a31b9fe225469db945bec2893b9f704a7cd0f"
+  ],
+  [
+   "k:down",
+   "162c4d43176e75a0a7a9ab9183a20ac3a90a22572c307894a15fee713b466630"
+  ],
+  [
+   "k:a",
+   "6871d3e8cd7b9d54290f677ad65c5a1cd773e7522dac2c05fc5aeffbf1e85872"
+  ],
+  [
+   "f:2",
+   "6871d3e8cd7b9d54290f677ad65c5a1cd773e7522dac2c05fc5aeffbf1e85872"
+  ],
+  [
+   "back",
+   "dbf29082ce5170cfc609fe7dc513a789dae167cc7fc0d4cb0050c098d0ce6808"
+  ]
+ ]
+}

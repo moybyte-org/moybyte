@@ -24,8 +24,8 @@ Licences (runtime/system/about_ui.py) and the System log
 (runtime/system/log_ui.py, `open_log`) are pages of
 their own in place of the rows, one stack over the `_PAGES` table:
 `open_page` pushes one, Settings' way back pops it; the Wi-Fi
-panel is also what the bar's wifi popover holds (`wifi_page`,
-runtime/system/popover.py).
+panel (runtime/system/wifi_ui.py) is also what the bar's wifi popover holds
+(runtime/system/popover.py).
 
 Boundary: SettingsLayer owns NO config. Every value it steps or shows is
 CART/SYSTEM state on Workstation -- ws.system (the system/settings rows),
@@ -52,6 +52,7 @@ from about_ui import LicencesPage, version_words, board_words
 from log_ui import LogPage
 from perms_ui import PermsPage
 from settings_ui import SettingsPages
+import wifi_ui as _wifi_ui
 from layers import Layer
 from audio_session import console_volume
 
@@ -225,10 +226,8 @@ NAME_MAX = 16                 # the Name row's bytes
 # The caption under the read-only Name where nothing can type (D-24's
 # interim words, `Text.can_type`).
 NAME_NO_KEYBOARD = "Pair a keyboard to change"
-WIFI_PW_MAX = 64              # a Wi-Fi password's bytes (WPA2 takes 63)
 
-_NETS = 24                    # the networks the Wi-Fi page lists
-WIFI_SCAN = "Scan again"       # the Wi-Fi popover's last row
+_NETS = 24                    # the keyboards the Bluetooth page lists
 WIFI_LOOKING = "Looking for networks..."  # the panel's line while a scan runs
 WIFI_POLL_MS = 100            # a running scan or join, asked this often
 
@@ -383,6 +382,7 @@ class SettingsLayer(Layer):
         self.syslog = LogPage(self._sub, _pctx.damage, ws)
         self.permits = PermsPage(_pctx, self._sub, _pctx.damage)
         self.pages = SettingsPages(ws, self._sub, _pctx.damage, self._drop)
+        self.wifi = _wifi_ui.WifiPage(self, self._sub, _pctx.damage)
         import settings_rows           # it reads this module's tables: imported once they are made
         self.rows = settings_rows.RowsPage(self, self._host)
         self.back_title = "Settings"
@@ -873,142 +873,18 @@ class SettingsLayer(Layer):
         self.wifi_pick = None
         self.ws.mark_dirty()
 
-    def wifi_input(self, i, host, popover=False):
-        """Keys for the wifi panel held by `host`. In PASSWORD mode the
-        prompt's field takes the typed bytes (ENTER connects, BACKSPACE
-        deletes -- Settings is a taskbar app, so BACKSPACE is an ordinary
-        key, spec §9) and ESC, or B, cancels; in LIST mode the page takes
-        the keys and B backs out. True when the panel took them."""
-        if self.wifi_pick is not None:
-            host.keys(i)
-            if host.inp[5] == 27 or i.pressed("b") or i.pressed("stop"):
-                host.inp[5] = 0
-                self._wifi_cancel()
-            return True
-        if i.pressed("b") or i.pressed("stop"):
-            self._wifi_back(popover)
-            return True
-        host.keys(i)
-        return True
-
-    def wifi_page(self, popover=False, scroll=False):
-        """The wifi panel as a page of the frame begun (the rows' place, or
-        the wifi popover's rect): the connection, the networks the last scan
-        found (a lock where one needs a password), Scan again and Forget; or,
-        while a password is typed, its field and Connect. `scroll`: the
-        popover's card is shorter than its rows, and the networks scroll."""
-        ws = self.ws
-        connected, ssid, ip = (False, None, None)
-        w = self._wifi.station()
-        if w is not None:
-            try:
-                connected, ssid, ip = w.status()
-            except Exception:  # noqa: BLE001
-                pass
-        if popover:
-            self._wifi_popover(connected, ssid, scroll)
-            return
-        _ui.page("")
-        if self.wifi_pick is not None and not ws.text.can_type():
-            _ui.hints(("back", "Cancel"))     # the prompt has no field and no Connect
-        elif self.wifi_pick is not None:
-            _ui.hints(("confirm", "Connect", "back", "Cancel"))
-        else:
-            _ui.hints(("confirm", "Connect", "back", "Back"))
-        _ui.group("Wi-Fi")
-        _ui.icon("wifi" if connected else "wifi_off")
-        _ui.info("Connected" if connected else "Not connected",
-                 str(ssid) if connected and ssid else "")
-        if connected and ip:
-            _ui.info("Address", str(ip))
-        if self.wifi_msg:
-            _ui.label(self.wifi_msg)
-        _ui.group("Networks")
-        if not self.wifi_nets:
-            _ui.label("No networks found.")
-        for k in range(min(len(self.wifi_nets), _NETS)):
-            ssid_k, _sig, locked = self.wifi_nets[k]
-            _ui.icon("lock" if locked else "wifi")
-            if _ui.link(str(ssid_k)[:24], "Saved" if str(ssid_k) in self.wifi_known else "",
-                        {"id": "net%d" % k}):
-                self.wifi_sel = k
-                self._wifi_activate()
-        _ui.group("Options")
-        if _ui.link("Scan again"):
-            self._wifi_rescan()
-            ws.mark_dirty()
-        sel = self.wifi_nets[self.wifi_sel % len(self.wifi_nets)][0] if self.wifi_nets else None
-        if sel is not None and str(sel) in self.wifi_known:
-            if _ui.link("Forget", str(sel)[:16]):
-                self._wifi_forget()
-        _ui.group()
-        if self.wifi_pick is not None:
-            self._wifi_prompt()
-            return
-        f = _ui.focus()
-        if f and f.startswith("net") and f[3:].isdigit():
-            self.wifi_sel = int(f[3:])
-
     def wifi_listed(self):
         """How many of the networks the last scan found the panel lists."""
-        return min(len(self.wifi_nets), _NETS)
+        return min(len(self.wifi_nets), _wifi_ui.NETS)
 
-    def _wifi_popover(self, connected, ssid, scroll=False):
-        """The page in the bar's Wi-Fi popover: the connection on its head,
-        then the networks the last scan found as a menu (the joined one
-        checked, a lock where one needs a password) and Scan again, in a
-        scroll region over the hints where the card is shorter than them."""
-        if _lb.metric_class() == _lb.DESK:
-            _ui.hints(("confirm", "Join", "back", "Close"))
-        _ui.info("Wi-Fi", str(ssid) if connected and ssid else "Not connected")
-        names, icons = [], []
-        for k in range(self.wifi_listed()):
-            ssid_k, _sig, locked = self.wifi_nets[k]
-            names.append(str(ssid_k)[:24])
-            icons.append("check" if connected and str(ssid_k) == str(ssid)
-                         else "lock" if locked else "wifi")
-        names.append(WIFI_SCAN)
-        icons.append("search")
-        if scroll:
-            _ui.scroll("wifi.nets")
-        got = _ui.menu("Networks" if len(names) > 1 else "", names, icons)
-        if scroll:
-            _ui.scroll()
-        if self.wifi_pick is not None:
-            self._wifi_prompt()
-            return
-        if got == len(names) - 1:
-            self._wifi_rescan()
-            self.ws.mark_dirty()
-        elif got >= 0:
-            self.wifi_sel = got
-            self._wifi_activate()
-        f = _ui.focus()
-        if f in names[:-1]:
-            self.wifi_sel = names.index(f)
+    def _wifi_open(self, _pid=None):
+        self.wifi_enter()
+        self.wifi.open()
 
-    def _wifi_prompt(self):
-        """The password for the network picked, over the list: a dialog of
-        the engine's field (focused as it opens: typing goes in) and Cancel
-        and Connect side by side at its foot. Enter in the field connects."""
-        title = ("Password for " + str(self.wifi_pick))[:30]
-        if not self.ws.text.can_type():
-            # nothing in use can type: no field and no Connect a key can't
-            # fill (#239 is the on-screen keyboard)
-            if _ui.dialog(title, ("Cancel",)) == 0:
-                self._wifi_cancel()
-            else:
-                _ui.label(self.ws.no_keyboard_text)
-            _ui.dialog()
-            return
-        pick = _ui.dialog(title, ("Cancel", "Connect"))
-        text, done = _ui.field("Password", self.wifi_pw, WIFI_PW_MAX, {"id": "password"})
-        _ui.dialog()
-        self.wifi_pw = text
-        if pick == 1 or done:
-            self._wifi_connect(self.wifi_pick, text)
-        elif pick == 0:
-            self._wifi_cancel()
+    def _wifi_draw(self):
+        ws = self.ws
+        self.wifi.draw(ws.sys_canvas, ws.theme_colors, self._content(),
+                       _lb.metric_class() == _lb.DESK, self._dt)
 
     # -- LAST CRASH page (the kernel's record, read-only) -----------------------
 
@@ -1465,7 +1341,7 @@ class SettingsLayer(Layer):
         ws = self.ws
         view = self.page
         if view == "wifi":
-            return self.wifi_input(i, self._sub)
+            return self.wifi.keys(i)
         if view == "usb" and self._usb_on() and (
                 i.pressed("home") or i.pressed("b") or i.pressed("stop")):
             return True                   # the page holds while the drive is on
@@ -1624,7 +1500,7 @@ class SettingsLayer(Layer):
 # back step, True where it took the back, else the back closes it).
 _L = SettingsLayer
 _PAGES = {
-    "wifi": ("wifi", _L.wifi_enter, _L.wifi_leave, _L.wifi_page, "wifi", _L._wifi_step),
+    "wifi": ("wifi", _L._wifi_open, _L.wifi_leave, _L._wifi_draw, "wifi", _L._wifi_step),
     "bt": ("bt", _L._bt_open, None, _L._bt_page, "bluetooth", None),
     "crash": ("crash", None, None, _L._crash_page, "crash", None),
     "tz": ("tz", _L._tz_open, None, _L._tz_page, "tz", None),

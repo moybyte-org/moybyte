@@ -1,0 +1,58 @@
+{
+ "surface": "wifi_popover",
+ "config": "tdeck_320x240_fs1_dark",
+ "commit": "0d7aedb1b",
+ "script": [
+  "k:down",
+  "k:a",
+  "f:2",
+  "k:down",
+  "k:a",
+  "t:abc",
+  "enter",
+  "f:2",
+  "back"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "1ac4c627d4a3ae4ddb3dbc8ea39ed93a9ac7ac5caac4cf196853e42ada8def09"
+  ],
+  [
+   "k:down",
+   "a418a59603a1efeef4a849b6765f6989715d13486943cacc04c29eca91f6b47e"
+  ],
+  [
+   "k:a",
+   "c713be0d5f8119b8c95f896eb8571965b9a5a380460c8005edacfa04277a4474"
+  ],
+  [
+   "f:2",
+   "c713be0d5f8119b8c95f896eb8571965b9a5a380460c8005edacfa04277a4474"
+  ],
+  [
+   "k:down",
+   "3c9462386d0c3e39f71ac5a7875157a37db85c0d51fba78f43a9b0429e9f566d"
+  ],
+  [
+   "k:a",
+   "57555788476ed2fd462c52fab1ecad21992af2e78d8e7c72e16d00fdaa56c4dd"
+  ],
+  [
+   "t:abc",
+   "6cbf8fe99e3ec02ead72a8fef812a8e491dc19eaaf93832d8a10b9f1dec13b4d"
+  ],
+  [
+   "enter",
+   "519d6929a52909238ba624b982ee99ae6fdc67c62483e0f1a6608c86b0c5d934"
+  ],
+  [
+   "f:2",
+   "519d6929a52909238ba624b982ee99ae6fdc67c62483e0f1a6608c86b0c5d934"
+  ],
+  [
+   "back",
+   "7580be5f86606a1e79fe26a120317c462a8788be7392d0b6115d343d9572d9ed"
+  ]
+ ]
+}

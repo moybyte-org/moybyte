@@ -161,14 +161,19 @@ class WifiPanel:
     """The `wifi` widget's component: Settings' Wi-Fi page (scan, pick, the
     password step, connect) drawn in the popover's card over its own UI
     context (`ui_draw.AppHost`), holding the radio lease Settings' page
-    holds, released on every close. One implementation:
-    `SettingsLayer.wifi_page`."""
+    holds, released on every close. One implementation: `wifi_ui`'s
+    popover page over `SettingsLayer`'s radio."""
 
     def __init__(self, ws):
         self.ws = ws
         self.rect = None
         self.need = 0                 # the card's height its rows take
         self.host = _ui_draw.AppHost()
+        self.page = None
+
+    def all(self):
+        """The page's damage: the popover draws another frame."""
+        self.ws.popover_touch()
 
     def size(self):
         desk = _desk()
@@ -186,7 +191,12 @@ class WifiPanel:
 
     def opened(self):
         self.host.reset()
-        self.ws.settings_layer.wifi_enter()
+        sl = self.ws.settings_layer
+        sl.wifi_enter()
+        if self.page is None:
+            import wifi_ui
+            self.page = wifi_ui.WifiPage(sl, self.host, self, popover=True)
+        self.page.open()
 
     def draw(self, cv, rect):
         ws = self.ws
@@ -194,7 +204,8 @@ class WifiPanel:
         before = self._radio()
         _fit(ws, self)
         self.host.begin(cv, ws.theme_colors, _inner(ws, rect), _desk(), "panel")
-        ws.settings_layer.wifi_page(popover=True, scroll=rect[3] < self.need)
+        self.page.scroll = rect[3] < self.need
+        self.page.draw(cv, ws.theme_colors, _inner(ws, rect), _desk(), 0.0)
         if self._radio() != before:
             ws.mark_dirty()          # the radio's state shows outside the panel
         elif self.host.due() or self.host.tap == 2:
@@ -211,7 +222,7 @@ class WifiPanel:
     def handle_input(self, i):
         before = self._state()
         radio = self._radio()
-        self.ws.settings_layer.wifi_input(i, self.host, popover=True)
+        self.page.keys(i)
         if self._radio() != radio:
             return "global"
         if self._state() != before or i.any_pressed() or i.last_key:

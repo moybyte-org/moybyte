@@ -90,7 +90,7 @@ class HomeSearch:
 
     def _handle_search_typing(self, i):
         """Keyboard while a search query is being TYPED (ws.search_typing, entered
-        via the sysmenu SEARCH item) -- mirrors settings_layer._wifi_input's
+        via the sysmenu SEARCH item) -- mirrors the Wi-Fi panel's (wifi_ui.WifiPage.keys)
         password-typing branch: typed ASCII bytes edit the query live (plain
         printable range only -- no `=[]{}<>%` needed, so it works on the T-Deck's
         keyboard), BACKSPACE deletes, ENTER leaves typing (keeping the filtered

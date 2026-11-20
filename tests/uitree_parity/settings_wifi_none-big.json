@@ -1,0 +1,28 @@
+{
+ "surface": "settings_wifi_none",
+ "config": "big_800x480_fs3_dark",
+ "commit": "0d7aedb1b",
+ "script": [
+  "k:down",
+  "k:a",
+  "f:2"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "21e1e7dca1cb96a934e49e8e857ffbff22f062bac7373b2d991c865f9ad6f894"
+  ],
+  [
+   "k:down",
+   "21e1e7dca1cb96a934e49e8e857ffbff22f062bac7373b2d991c865f9ad6f894"
+  ],
+  [
+   "k:a",
+   "21e1e7dca1cb96a934e49e8e857ffbff22f062bac7373b2d991c865f9ad6f894"
+  ],
+  [
+   "f:2",
+   "21e1e7dca1cb96a934e49e8e857ffbff22f062bac7373b2d991c865f9ad6f894"
+  ]
+ ]
+}

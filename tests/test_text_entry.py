@@ -192,17 +192,17 @@ def test_wifi_password_prompt_does_not_connect_on_the_enter_that_opened_it(tmp_p
     sl._wifi_activate()
     ws.input_policy.sync()
     assert sl.wifi_pick == "Locked" and ws.input.text_mode
-    sl.wifi_input(ws.input, sl._sub)                      # the byte is still held
+    sl.wifi.keys(ws.input)                      # the byte is still held
     sl._draw_page()
     assert sl.wifi_pick == "Locked", "a latched Enter must not connect with ''"
     ws.input.last_key = 0
 
     def key(code):
         ws.input.last_key = code
-        sl.wifi_input(ws.input, sl._sub)
+        sl.wifi.keys(ws.input)
         sl._draw_page()
         ws.input.last_key = 0
-        sl.wifi_input(ws.input, sl._sub)
+        sl.wifi.keys(ws.input)
         sl._draw_page()
     for ch in "pw":
         key(ord(ch))
