@@ -834,8 +834,11 @@ def labels(name, table):
 DOC_FIELDS = {"line": INT, "col": INT, "lines": INT, "sel": INT, "match": INT, "matches": INT,
               "can_undo": BOOL, "can_redo": BOOL, "edits": INT, "word": TEXT}
 
+# @input: the input in use now, as the toolkit names it (spec r3 §14 leaves
+# the spelling open, F-23): keys (a keyboard), tdeck (the T-Deck's), pad, touch
+INPUTS = ("keys", "tdeck", "pad", "touch")
 SYS = {"desk": BOOL, "handheld": BOOL, "wide": BOOL, "tall": BOOL, "current": BOOL,
-       "focus": TEXT, "touch": BOOL, "symbols": BOOL}
+       "focus": TEXT, "touch": BOOL, "symbols": BOOL, "input": Enum(INPUTS, "keys")}
 
 
 class Ctx:
@@ -862,6 +865,8 @@ def _ref(name, ctx, where):
             return BOOL, lambda row: row is not None and row._f[key] == st._v[cur]
         if n == "focus":
             return TEXT, lambda row: _NOW.app.focus_key if _NOW.app else ""
+        if n == "input":
+            return SYS["input"], lambda row: getattr(_NOW.app, "input", "keys") if _NOW.app else "keys"
         return BOOL, lambda row: n in (_NOW.app.classes if _NOW.app else ())
     if name.startswith("."):
         f = name[1:]
@@ -2360,6 +2365,7 @@ class Builder:
         self.clock = 0
         self.timers = []
         self.classes = ()
+        self.input = "keys"             # @input: the engine's replay sets it each frame
         self.focus_key = ""
         self.want_focus = None
         self.trace = collections.deque((), 200)

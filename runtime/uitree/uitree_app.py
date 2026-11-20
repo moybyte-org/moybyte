@@ -239,11 +239,11 @@ class Engine(S.Builder):
         """Whether every pixel the page's rows draw comes from state, so the
         page's gen (the sum of the state's versions) moves whenever one may:
         no canvas, picture, text editor or scope, and no template naming
-        @focus."""
+        @focus or @input."""
         if n.kind in self.GEN_UNSAFE:
             return False
         for v in n.src.values():
-            if isinstance(v, str) and "@focus" in v:
+            if isinstance(v, str) and ("@focus" in v or "@input" in v):
                 return False
         return all(self._gen_safe(k) for k in n.kids)
 
@@ -272,6 +272,8 @@ class Engine(S.Builder):
 
     def _replay_page(self, n):
         w, h = self.content[2], self.content[3]
+        kind = _v.input_kind()
+        self.input = kind if kind in S.INPUTS else "keys"
         self.classes = ("desk" if self.desk else "handheld", "wide" if w * 3 > h * 4 else "tall") + (
             ("symbols",) if _v.has_symbols() else ())
         S.LIVE = S.live_units(n)

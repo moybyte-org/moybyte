@@ -108,3 +108,29 @@ def test_a_command_outside_a_handler_is_a10():
     for call in (lambda: ui.focus("x"), lambda: ui.push(nothing), ui.pop,
                  lambda: ui.after(10, "x"), lambda: ui.text_size("x")):
         assert _code(call) == "A10"
+
+
+def test_input_is_a_system_value_of_four_words():
+    """@input (spec r3 §14): the input in use, an enum of the toolkit's
+    words, read by templates and conditions; an engine's replay sets it."""
+    ui.state(on=False)
+    t, get = ui._ref("@input", ui.Ctx(), ("t", 1))
+    assert isinstance(t, ui.Enum) and t.values == ("keys", "tdeck", "pad", "touch")
+    assert get(None) == "keys"
+    s = ui.state(on=False)
+
+    def page():
+        with ui.page("P"):
+            ui.label("{@input}")
+            ui.label("Tap", shown="@input=touch")
+    app = _App(ui.decl_of(__name__), page)
+    app._build()
+    assert app.root.kids[1].p["shown"](None) is False
+    app.input = "touch"
+    ui._NOW.app = app                   # as the replay evaluates: with its engine in force
+    try:
+        assert app.root.kids[0].p["text"](None) == "touch"
+        assert app.root.kids[1].p["shown"](None) is True
+    finally:
+        ui._NOW.app = None
+    del s
