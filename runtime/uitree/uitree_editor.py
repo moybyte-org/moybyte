@@ -70,7 +70,7 @@ def fit(start, mins, total):
     off): each held child at its size, at least its minimum, and the one
     that grows (None in `start`) the rest; where the rest falls under its
     minimum the held children give it room, last first, down to their own
-    (editor_panes._fit, the desk's rule)."""
+    (the desk Editor's rule)."""
     sizes = [0 if v is None else max(v, m) for v, m in zip(start, mins)]
     flex = start.index(None) if None in start else len(start) - 1
     rest = total - sum(sizes[i] for i in range(len(sizes)) if i != flex)
@@ -118,12 +118,23 @@ class Engine(uitree_app.Engine):
         self.held_legacy = None    # (node, rect) a press holds until its release
         # the panes: their splits as drawn, pane focus, the divider's flash
         self.du = 1                # the desk unit, this frame's
+        self.unit = 0              # a host's desk unit (0: the engine's, from the font scale)
         self.mouse = None          # a host's word on its pointer (True: hovers), else the surface's
         self.splits = {}           # split id -> (panes node, kids, sizes) as this frame placed them
         self.pane_order = []       # (pane node, rect) of the panes shown, in reading order
         self.panes_root = None     # the outermost panes shown this frame
         self.pane_cur = None       # the key of the pane the keys reach
         self.flash = None          # (pane node, words): a divider held at a minimum
+        self.div_held = None        # (split id, divider, at, stop, live): a divider held now
+        self.arranged = ([], [])   # the host's placement: ([(pane, rect, path)], [(path, i,
+                                   # "h"|"v", rect)]), the whole arrangement even under a pane alone
+        self.least = (0, 0)        # the outermost panes' least size, gutters in
+        self.alone_pane = None     # the pane the placement stood alone over the panes area
+        self.size_gen = 0          # moves whenever a held size is written or put back
+        self._path = ()            # the walk's path: child indices from the outermost panes
+        self._ghost = False        # the walk lays the arrangement out under a pane alone
+        self._arranging = True     # ...and records it (not while the pane alone is drawn)
+        self._split_o = {"drag": True}
         self._last_div = (None, 0)  # the last tap on a divider: (split id, divider), when
         self._ev = 0               # the last frame's key event
         self._focus_seen = None    # the focused node the last pass ended on
@@ -135,7 +146,7 @@ class Engine(uitree_app.Engine):
         self.classes = ("desk" if self.desk else "handheld", "wide" if w * 3 > h * 4 else "tall")
         self.lenders = {}
         S.LIVE = S.live_units(n, self.lenders)
-        self.du = max(1, _lb.chrome_size(self.fs) // _lb.render_scale())
+        self.du = self.unit or max(1, _lb.chrome_size(self.fs) // _lb.render_scale())
         self.pane_order = []
         self.panes_root = None
         self.splits = {}
@@ -211,16 +222,50 @@ class Engine(uitree_app.Engine):
             hint = self._hints()
             if hint and self._band_w(hint, cv, th) > 0:
                 rect = (rect[0], rect[1], rect[2], rect[3] - self._h_row())
-            self.placing = True
-            try:
-                self._stack(self.root, None, rect)
-            finally:
-                self.placing = False
+            self._place_walk(rect)
             if self.under and placed:
                 self._ground_round(cv, th, placed)
-            for n, row, r in placed:
+            self.draw_hosted(cv, th, dt)
+        finally:
+            _NOW.app, _NOW.frame = was
+
+    def _place_walk(self, rect):
+        self.placing = True
+        try:
+            self._stack(self.root, None, rect)
+        finally:
+            self.placing = False
+
+    def place(self, area, desk=True):
+        """A host's placement, with no frame begun and nothing drawn: the
+        page's regions laid out over `area` (a panes host hands its panes
+        area), each legacy node's rect in `placed`, the panes in
+        `arranged` and their splits for `draw_splits`. The bodies are drawn
+        by `draw_hosted`, as often as the host draws them."""
+        self._bind()
+        self.content = area
+        self.desk = desk
+        self._ready()
+        self.placed = []
+        was = _NOW.app, _NOW.frame
+        _NOW.app, _NOW.frame = self, True
+        try:
+            self._frame_setup(self.root)
+            self._place_walk(tuple(area))
+        finally:
+            _NOW.app, _NOW.frame = was
+        self._hosted_no = self.frame_no
+
+    def draw_hosted(self, cv, th, dt):
+        """Each legacy body where the last placement put it, in reading
+        order, each in its own verbs pass: a surface of its own, outside
+        this page's frame (it may be a page of its own, which writes its
+        state as its host syncs it)."""
+        was = _NOW.app, _NOW.frame
+        try:
+            for n, row, r in self.placed:
                 focused = self.focused is not None and self.focused[0] is n
-                _NOW.app, _NOW.frame = self, True
+                _NOW.app, _NOW.frame = self, False
                 n.l["draw"](cv, th, r[0], r[1], r[2], r[3], focused, dt)
                 cv.clip()
                 if "gen" in n.l:
@@ -228,6 +273,32 @@ class Engine(uitree_app.Engine):
                     self.legacy_gens[n.key] = n.l["gen"]()
         finally:
             _NOW.app, _NOW.frame = was
+
+    def draw_splits(self):
+        """The last placement's dividers drawn into the verbs pass the host
+        has open (its own: its focus, its split frame and its pad's moves
+        read them there), each split's focus its child pane the keys reach
+        (`pane_cur`). What a divider answers is the engine's: a let-go
+        writes the held sizes beside it, a double tap puts them back, one
+        held at a minimum sets `flash`; `div_held` says which is held."""
+        self.div_held = None
+        self.flash = None
+        if not self.splits:
+            return
+        self._bind()
+        was = _NOW.app
+        _NOW.app = self
+        try:
+            for sid, sp in self.splits.items():
+                n, kids, sizes, mins, held, rect, axis, gap = sp[:8]
+                self._split(n, sid, kids, sizes, mins, held, rect, axis, gap)
+        finally:
+            _NOW.app = was
+
+    def minimum(self):
+        """The least area the outermost panes hold (w, h), gutters in, as
+        the last placement found it."""
+        return self.least
 
     def _hosts(self, n):
         """Whether the page holds a legacy node (asked once a build)."""
@@ -330,8 +401,14 @@ class Engine(uitree_app.Engine):
         return k.parent is not None and k.parent.kind == "pane" and self.desk
 
     def _shown(self, k, row):
-        return uitree_app._shown(k, row) and (k.act is None or k.act.can(row)
-                                              or getattr(k.act, "off", "hide") == "grey")
+        if not (uitree_app._shown(k, row) and (k.act is None or k.act.can(row)
+                                               or getattr(k.act, "off", "hide") == "grey")):
+            return False
+        if k.kind == "pane" and "offered" in k.l:
+            return bool(self._offered(k))       # a pane left with no tab goes
+        if k.kind == "panes":
+            return any(self._shown(c, row) for c in k.kids)    # ...and a split left empty
+        return True
 
     def _o(self, n, row, **o):
         o = uitree_app.Engine._o(self, n, row, **o)
@@ -641,12 +718,38 @@ class Engine(uitree_app.Engine):
         if k.l.get("grow") or "size" not in k.l:
             return None
         v = self.s._v[k.l["size"]]
-        return k.l["start"] * self.du if v is None else v
+        return self._start_of(k) * self.du if v is None else v
+
+    def _start_of(self, k):
+        """A child's start= in desk units: a literal, or its int state's
+        value (the host writes it from the area and the cart)."""
+        st = k.l["start"]
+        return (self.s._v[st] or 0) if isinstance(st, str) else st
+
+    def _offered(self, pane):
+        """A tabbed pane's tabs on offer, in their enum's order (offered=
+        conditions each), else None."""
+        tabs = pane.l.get("tabs")
+        if tabs is None:
+            return None
+        off = pane.l.get("offered")
+        vals = self.s._t[tabs].values
+        if not off:
+            return vals
+        return tuple(v for v in vals if v not in off or off[v](None))
 
     def _min_of(self, k, axis):
         """A child's least size along `axis`, in pixels, its gutters in."""
         if k.kind == "pane":
-            return k.l.get("min", FLOOR)[axis] * self.du
+            m = k.l.get("min", FLOOR)
+            if isinstance(m, dict):
+                # by tab: the largest of the offered tabs'
+                d = m.get("_", FLOOR)
+                most = 0
+                for v in self._offered(k):
+                    most = max(most, m.get(v, d)[axis])
+                return most * self.du
+            return m[axis] * self.du
         if k.kind != "panes":
             return 0
         kids = [c for c in k.kids if self._shown(c, None)]
@@ -667,24 +770,54 @@ class Engine(uitree_app.Engine):
         return bool(getattr(p, "hovers", False))
 
     def _r_panes(self, n, row, rect):
-        """The desk Editor's rules (runtime/editors/editor_panes.py): sizes
+        """The desk Editor's rules (runtime/editors/editor_desk.py): sizes
         in desk units; held sizes yield to the area, last first, down to
         their minimums, so the growing child keeps its own; under the
         workspace's least size, or grown, one pane stands over the area
-        alone. The dividers are `ui.split`'s: a drag's let-go writes the
-        held sizes beside it, a double tap puts them back."""
+        alone. A split left one child shown is that child; where the child
+        that grows is not shown, the last one shown takes the rest. The
+        dividers are `ui.split`'s: a drag's let-go writes the held sizes
+        beside it, a double tap puts them back."""
         outer = n.parent is None or n.parent.kind not in ("pane", "panes")
         if outer:
             self.panes_root = n
+            self._path = ()
+            if self._arranging and self.placing:
+                self.arranged = ([], [])
+                self.least = (self._min_of(n, 0), self._min_of(n, 1))
             alone = self._alone(n, rect)
+            if self._arranging and self.placing:
+                self.alone_pane = alone
             if alone is not None:
-                self._draw(alone, row, rect)
+                if self.placing:
+                    # the arrangement under the pane alone, as a host's
+                    # placement answers it; nothing of it placed
+                    self._ghost = True
+                    try:
+                        self._lay_panes(n, row, rect)
+                    finally:
+                        self._ghost = False
+                self._arranging = False
+                try:
+                    self._draw(alone, row, rect)
+                finally:
+                    self._arranging = True
                 return
-        axis = self._axis(n)
+        self._lay_panes(n, row, rect)
+
+    def _lay_panes(self, n, row, rect):
         kids = [k for k in n.kids if self._shown(k, row)]
+        if len(kids) == 1:
+            self._draw(kids[0], row, rect)
+            return
+        axis = self._axis(n)
         gap = self._gap(n)
         span = rect[2 + axis] - gap * (len(kids) - 1)
         held = [self._size_of(k) for k in kids]
+        if held.count(None) > 1:
+            raise S.UIError("N07", "ui.panes(%r) shows %d children that grow" % (n.key, held.count(None)),
+                            where=n.where, found=", ".join(k.key for k, v in zip(kids, held) if v is None),
+                            fix="their shown= conditions never hold together")
         mins = [self._min_of(k, axis) for k in kids]
         sizes = fit(held, mins, span)
         rects, divs = [], []
@@ -703,12 +836,19 @@ class Engine(uitree_app.Engine):
                     y += sz + gap
                     h -= sz + gap
         sid = "split:" + "/".join(k.key for k in kids)
-        self.splits[sid] = (n, kids, sizes)
+        base = self._path
+        if not self._ghost:
+            self.splits[sid] = (n, kids, sizes, mins, held, rect, axis, gap, base)
         if not self.placing:
             self._split(n, sid, kids, sizes, mins, held, rect, axis, gap)
             self.dividers[sid] = divs
-        for k, r in zip(kids, rects):
+        record = self._arranging and self.placing
+        for j, (k, r) in enumerate(zip(kids, rects)):
+            self._path = base + (j,)
             self._draw(k, row, r)
+            if record and j < len(divs):
+                self.arranged[1].append((base, j, "h" if axis == 0 else "v", divs[j]))
+        self._path = base
 
     def _split(self, n, sid, kids, sizes, mins, held, rect, axis, gap):
         """The dividers of panes `n` on `ui.split`: drawn, a press on one
@@ -716,16 +856,20 @@ class Engine(uitree_app.Engine):
         minimum, the flash."""
         u = self.du
         mouse = self._mouse()
-        o = {"drag": True, "gap": gap, "mins": mins, "line": 2 * u,
-             "slop": 0 if mouse else DRAG_SLOP * u, "handle": (HANDLE[0] * u, HANDLE[1] * u),
-             "hit": None if mouse else (HANDLE_HIT[0] * u, HANDLE_HIT[1] * u),
-             "focus": self._keys_child(kids)}
+        o = self._split_o
+        o["gap"] = gap
+        o["mins"] = mins
+        o["line"] = 2 * u
+        o["slop"] = 0 if mouse else DRAG_SLOP * u
+        o["handle"] = (HANDLE[0] * u, HANDLE[1] * u)
+        o["hit"] = None if mouse else (HANDLE_HIT[0] * u, HANDLE_HIT[1] * u)
+        o["focus"] = self._keys_child(kids)
         _v.at(*rect)
         out = self.split_out
         got = list(sizes)
         _v.split(sid, "x" if axis == 0 else "y", got, o, out)
         nk = len(kids)
-        i, stop, bits = out[4 * nk], out[4 * nk + 2], out[4 * nk + 3]
+        i, at, stop, bits = out[4 * nk], out[4 * nk + 1], out[4 * nk + 2], out[4 * nk + 3]
         if i < 0:
             return
         if bits & _v.LET_GO:
@@ -737,11 +881,14 @@ class Engine(uitree_app.Engine):
                 if last == (sid, i) and self.clock - at < DOUBLE_MS:
                     self._last_div = (None, 0)
                     self._unhold(kids[i:i + 2], "divider %d of %r tapped twice" % (i, sid))
+                else:
+                    return
             self._damage.all()
-        elif bits & _v.LIVE and stop >= 0:
-            child = kids[i + stop]
-            pane = self._first_pane(child)
-            m = self._min_of(child, axis)
+            return
+        self.div_held = (sid, i, at, stop, bool(bits & _v.LIVE))
+        if bits & _v.LIVE and stop >= 0:
+            pane = self._first_pane(kids[i + stop])
+            m = self._min_of(pane, axis)
             self.flash = (pane, "%s stops at its minimum, %d %s" % (
                 self._pane_name(pane), m, "wide" if axis == 0 else "tall"))
 
@@ -758,6 +905,7 @@ class Engine(uitree_app.Engine):
             old = self.s._v[nm]
             self.s._v[nm] = sizes[j]
             self.s._ver[nm] += 1
+            self.size_gen += 1
             S._trace("state", nm, "%r -> %r   (%s)" % (old, sizes[j], why))
 
     def _unhold(self, kids, why):
@@ -768,20 +916,21 @@ class Engine(uitree_app.Engine):
                 old = self.s._v[nm]
                 self.s._v[nm] = None
                 self.s._ver[nm] += 1
+                self.size_gen += 1
                 S._trace("state", nm, "%r -> None   (%s)" % (old, why))
 
-    @staticmethod
-    def _first_pane(n):
+    def _first_pane(self, n):
         while n.kind == "panes":
-            n = n.kids[0]
+            n = next(k for k in n.kids if self._shown(k, None))
         return n
 
     def _pane_name(self, pane):
+        """A pane's name: its title, else its first tab's."""
         if "title" in pane.p:
             return self._t(pane, "title", None)
         tabs = pane.l.get("tabs")
         if tabs:
-            return self.decl.labels[pane.l["labels"]][self.s._v[tabs]]
+            return self.decl.labels[pane.l["labels"]][self._offered(pane)[0]]
         return pane.key
 
     def _alone(self, n, rect):
@@ -821,24 +970,25 @@ class Engine(uitree_app.Engine):
         return node
 
     def _keys_child(self, kids):
-        """The child of a split the keys reach (its pane, or the panes
-        holding it), -1 where none does."""
+        """The child of a split that is the pane the keys reach, -1 where
+        none is (the split's focus: its split frame and the pad's moves
+        start there)."""
         p = self._pane_named(self.panes_root, self.pane_cur) if self.panes_root is not None else None
-        while p is not None:
-            if p in kids:
-                return kids.index(p)
-            p = p.parent
-        return -1
+        return kids.index(p) if p is not None and p in kids else -1
 
     def _r_pane(self, n, row, rect):
+        if self._arranging and self.placing:
+            self.arranged[0].append((n, rect, self._path))
+        if self._ghost:
+            return
         x, y, w, h = rect
         u = self.du
-        hh = HEADER * u
+        hh = 0 if n.l.get("head") is False else HEADER * u
         self.pane_order.append((n, rect))
         body = [k for k in n.kids if k.kind != "tools"]
         tmp = S.Node("case", n.key + ":body", n.where)
         tmp.kids, tmp.parent = body, n
-        if not self.placing:
+        if not self.placing and hh:
             self._pane_head(n, row, rect, hh)
         self._stack(tmp, row, (x, y + hh, w, max(0, h - hh)))
 
@@ -947,28 +1097,36 @@ class Engine(uitree_app.Engine):
             self._damage.all()
             return True
         if ctrl and not mods & (_ALT | _KSHIFT) and code == ord("0"):
-            def walk(k):
-                for c in k.kids:
-                    if c.kind in ("pane", "panes"):
-                        self._unhold([c], "Ctrl+0")
-                        walk(c)
-            walk(root)
-            self._damage.all()
+            self.reset_sizes()
             return True
         if ctrl and mods & _ALT and code in (_LEFT, _RIGHT, _UP, _DOWN):
-            return self._nudge(code)
+            return self.nudge(code)
         return False
 
-    def _nudge(self, code):
+    def reset_sizes(self):
+        """Every divider back where its panes start (Ctrl+0)."""
+        def walk(k):
+            for c in k.kids:
+                if c.kind in ("pane", "panes"):
+                    self._unhold([c], "Ctrl+0")
+                    walk(c)
+        self._bind()
+        if self.panes_root is not None:
+            walk(self.panes_root)
+        self._damage.all()
+
+    def nudge(self, code):
         """Ctrl+Alt+arrows: the focused pane's right (left and right) or
         bottom (up and down) divider moves KEY_STEP units, neither pane
         beside it under its minimum."""
+        self._bind()
         axis = 0 if code in (_LEFT, _RIGHT) else 1
         step = KEY_STEP * self.du * (-1 if code in (_LEFT, _UP) else 1)
         p = self._pane_named(self.panes_root, self.pane_cur)
         while p is not None and p.parent is not None and p.parent.kind == "panes":
             par = p.parent
-            for sid, (pn, kids, sizes) in self.splits.items():
+            for sid, sp in self.splits.items():
+                pn, kids, sizes = sp[:3]
                 if pn is par and self._axis(par) == axis and p in kids and kids.index(p) < len(kids) - 1:
                     i = kids.index(p)
                     lo = self._min_of(kids[i], axis)

@@ -1860,7 +1860,7 @@ SCHEMA = {
     "panes": dict(_C, dir="choice", gap="lit", size="lit", start="lit", min="lit", grow="lit",
                   focused="lit", grown="lit"),
     "pane": dict(_C, title="text", icon="text", size="lit", start="lit", min="lit", grow="lit",
-                 tabs="lit", labels="lit"),
+                 tabs="lit", labels="lit", offered="conds", head="lit"),
     "text_editor": dict(_C, find="lit", find_on="cond", marks="lit", gutter="cond", focus="cond"),
     "slot": dict(_C, min="lit"),
     # §7.7's bridge: a surface still on today's verbs hosted in one node
@@ -2451,7 +2451,19 @@ def tabs(name, labels, **p):
 
 
 def _sized(kind, key, p, where):
-    """A child of ui.panes holds its size in state or grows (EXT-4)."""
+    """A child of ui.panes holds its size in state or grows (EXT-4). Its
+    start= is desk units, or names an int state its host writes (a start
+    that depends on the area or the cart: a build reads no state)."""
+    st = p.get("start")
+    if isinstance(st, str):
+        nm = _state_name(st, (INT, Opt), "ui.%s start=" % kind, where)
+        t = _st()._t[nm]
+        if t is not INT and t.base is not INT:
+            raise UIError("T03", "ui.%s start=%r is %s" % (kind, nm, t), where=where,
+                          fix="%s=340 in the state, which the host writes from the area" % nm)
+    elif st is not None and type(st) is not int:
+        raise UIError("N01", "ui.%s(%r) start=%r" % (kind, key, st), where=where,
+                      fix="start=340 (desk units), or the name of an int state")
     if p.get("size") is not None:
         nm = _state_name(p["size"], (Opt,), "ui.%s size=" % kind, where)
         if _st()._t[nm].base is not INT:
@@ -2492,15 +2504,35 @@ def panes(dir, key=None, **p):
 def pane(key, **p):
     """One pane of ui.panes: size= names an opt(int) state the engine
     writes when a divider beside it is let go (absent: start=), or grow=True
-    takes what is left. min= is its least (w, h). tabs= names an enum whose
-    ui.switch is its body, labels= that enum's table; its header shows them."""
+    takes what is left. min= is its least (w, h), or by tab ({value: (w,
+    h), "_": (w, h)}: the largest of its offered tabs'). tabs= names an enum
+    whose ui.switch is its body, labels= that enum's table; its header
+    shows them, offered= a condition a value (a value whose condition fails
+    has no tab; a pane left with none is not shown). head=False: no header,
+    the body is the pane's whole rect."""
     where = _caller()
     _sized("pane", key, p, where)
     if p.get("size") is None and not p.get("grow"):
         raise UIError("N01", "ui.pane(%r) neither holds a size nor grows" % key, where=where,
                       fix='size="name", start=N; or grow=True on the one that takes the rest')
-    if p.get("tabs") is not None:
-        _state_name(p["tabs"], (Enum,), "ui.pane tabs=", where)
+    tabs = p.get("tabs")
+    if tabs is not None:
+        _state_name(tabs, (Enum,), "ui.pane tabs=", where)
+    values = _st()._t[tabs].values if tabs is not None else ()
+    for prop in ("offered", "min"):
+        v = p.get(prop)
+        if not isinstance(v, dict):
+            continue
+        if tabs is None:
+            raise UIError("N01", "ui.pane(%r) %s= by tab with no tabs=" % (key, prop), where=where,
+                          fix="%s on a tabbed pane, else %s" % (prop, "min=(64, 48)" if prop == "min" else "shown="))
+        extra = [x for x in v if x not in values and not (prop == "min" and x == "_")]
+        if extra:
+            raise UIError("N01", "ui.pane(%r) %s= names %s, not a tab" % (key, prop, ", ".join(extra)),
+                          where=where, expected=", ".join(values), fix="a key for a value of %r" % tabs)
+    if p.get("head") not in (None, True, False):
+        raise UIError("N01", "ui.pane(%r) head=%r" % (key, p["head"]), where=where,
+                      fix="head=False: a pane with no header, its body its whole rect")
     return _node("pane", key, p, where)
 
 
@@ -2607,9 +2639,12 @@ def _anchors(root):
 
     def check(n):
         if n.kind == "panes":
+            # exactly one grows among the children shown together: one, or
+            # several each shown by a condition (the layout holds the rest)
             grow = [k.key for k in n.kids if k.l.get("grow") or (
                 k.kind in ("pane", "panes") and "size" not in k.l)]
-            if len(grow) != 1:
+            always = [k for k in n.kids if k.key in grow and "shown" not in k.src]
+            if not grow or len(always) > 1 or (always and len(grow) > 1):
                 raise UIError("N07", "ui.panes has %d children that grow" % len(grow), where=n.where,
                               found=", ".join(map(str, grow)) or "none",
                               fix='exactly one grows; the others hold size="name", start=N')

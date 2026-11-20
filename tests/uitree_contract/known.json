@@ -108,7 +108,9 @@
   "prop not in the table: legacy.keys",
   "prop not in the table: legacy.pointer",
   "prop not in the table: panes.focused",
-  "prop not in the table: panes.grown"
+  "prop not in the table: panes.grown",
+  "prop not in the table: pane.head",
+  "prop not in the table: pane.offered"
  ],
  "lua": [
   "code not in the table: X01",

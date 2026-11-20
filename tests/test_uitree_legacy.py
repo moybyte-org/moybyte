@@ -264,6 +264,20 @@ BAD = {
                             '            with ui.pane("p", grow=True):\n                pass\n'
                             '            with ui.panes("col", "b", size="w", start=10, focused="on"):\n'
                             '                with ui.pane("q", grow=True):\n                    pass\n', 12),
+    # a start= naming state names an int one
+    "start_text": ("T03", 'def build():\n    with ui.page("P"):\n        with ui.panes("row", "a"):\n'
+                          '            ui.pane("p", grow=True)\n'
+                          '            ui.pane("q", size="w", start="on")\n', 11),
+    # min= and offered= by tab need tabs=, and name its values
+    "min_no_tabs": ("N01", 'def build():\n    with ui.page("P"):\n        with ui.panes("row", "a"):\n'
+                           '            ui.pane("p", grow=True, min={"x": (1, 1)})\n', 10),
+    "offered_extra": ("N01", 'def build():\n    with ui.page("P"):\n        with ui.panes("row", "a"):\n'
+                             '            ui.pane("p", grow=True, tabs="t", labels="T", offered={"z": "big"})\n', 10),
+    "head_word": ("N01", 'def build():\n    with ui.page("P"):\n        with ui.panes("row", "a"):\n'
+                         '            ui.pane("p", grow=True, head="no")\n', 10),
+    # two that grow, neither shown by a condition
+    "two_grow": ("N07", 'def build():\n    with ui.page("P"):\n        with ui.panes("row", "a"):\n'
+                        '            ui.pane("p", grow=True)\n            ui.pane("q", grow=True, shown="big")\n', 9),
 }
 
 
@@ -272,7 +286,8 @@ def test_the_bridge_and_the_panes_refuse_their_mistakes(case, tmp_path):
     import uitree_check
     code, src, line = BAD[case]
     path = tmp_path / ("legacy_%s.py" % case)
-    path.write_text('import uitree as ui\ns = ui.state(w=ui.opt(0), on=ui.opt(""))\n\n\n'
+    path.write_text('import uitree as ui\ns = ui.state(w=ui.opt(0), on=ui.opt(""), big=True,\n'
+                    '                 t=ui.enum("x", "y", init="x"))\nui.labels("T", {"x": "X", "y": "Y"})\n'
                     'def draw(cv, th, x, y, w, h, focused, dt):\n    pass\n' + src)
     res = uitree_check.check(str(path))
     got = [(e.code, e.where[1] if e.where else None) for e in res.errors]
