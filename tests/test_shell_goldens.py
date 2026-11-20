@@ -2357,7 +2357,7 @@ def test_tab_ladder_is_fully_covered():
     """Every real Editor tab has a golden (the sentinel PROJECTS/UNDO/REDO/PLAY
     zone entries are actions, not tabs)."""
     from runtime import editor_app
-    live = tuple(t for t, _glyph in editor_app._ZONE_TABS
+    live = tuple(t for t, _glyph in editor_app.ZONE_ITEMS
                  if t and not t.startswith("\x00"))
     assert live == TABS, (
         "the Editor tab ladder changed (%s) -- add the new tab here and "

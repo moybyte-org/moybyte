@@ -430,7 +430,7 @@ def test_the_desk_facts_stand_on_the_buttons_columns(tmp_path, monkeypatch):
 
 def test_the_narrow_editor_bar_keeps_play_clear_of_the_status(tmp_path):
     """The handheld Editor's bar: Play's icon ends 6 pixels before its zone
-    does, so with the bar's gap its ink stands 10 clear of Wi-Fi's (design
+    does (the end run's room, `uitree_editor.BarZone.END`), so with the bar's gap its ink stands 10 clear of Wi-Fi's (design
     review R4-26)."""
     ws = _ws(tmp_path, HANDHELD, "moy", "dark")
     ws.open_in_editor(g._cart_by_title(ws, "Star Catcher"))
@@ -438,8 +438,7 @@ def test_the_narrow_editor_bar_keeps_play_clear_of_the_status(tmp_path):
     _frame(ws, 2)
     app = ws.editor_app
     zone = ws.bar_layer.zone_rect("menu")
-    assert app._compact(zone)
-    rects = app._ladder_rects(zone)
+    rects = app.zone_cells(zone)
     play = rects[-1][2]
     assert rects[-1][0] is None, "Play ends the ladder"
     assert zone[0] + zone[2] - (play[0] + play[2]) >= 6 * ws.layout.fs

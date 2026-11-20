@@ -186,8 +186,7 @@ def _tap(ws, px, py):
 
 def test_tab_ladder_and_router_carry_the_scene_tab(tmp_path):
     from runtime import editor_app as EA
-    assert "scene" in [t for t, _g in EA._ZONE_TABS]
-    assert "scene" in [t for t, _l, _i in EA._TAB_CHIPS]
+    assert "scene" in [t for t, _g in EA.ZONE_ITEMS]
     ws = _open_ws(tmp_path)
     ws.text.open_scene()
     assert ws.menu_view == "scene" and ws.editor_app.tab == "scene"

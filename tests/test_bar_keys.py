@@ -166,7 +166,7 @@ def _editor_row(ws):
     bar = bl.cell("menu", "zone")[0]
     zone = bl.lent_zone("menu", bar)
     named = {}
-    for tab, _glyph, r in ws.editor_app._ladder_layout(zone)[0]:
+    for tab, _glyph, r in ws.editor_app.zone_cells(zone):
         named[r[0]] = {editor_app._ZONE_UNDO: "undo", editor_app._ZONE_REDO: "redo",
                        None: "play"}.get(tab, tab)
     return [(r[0], name or named[r[0]]) for _bi, r, name in bl.focus_items("menu")]

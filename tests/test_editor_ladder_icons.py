@@ -31,7 +31,7 @@ from ws_helpers import build_ws, device_frames, image_without_icon_sets
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "firmware" / "web_runner"
 
-# Wraps the Editor's draw_zone: after each draw, per ladder entry, the
+# Wraps the Editor's head row's zone draw (its `bar_zone`): after each draw, per ladder entry, the
 # distinct pixels in the middle of its icon's box (an inset of a quarter of
 # the box each side, which every icon's art crosses). One colour there is a
 # blank icon, a bare pill on the open tab. Plain Python, as MicroPython runs
@@ -39,7 +39,8 @@ WEB = ROOT / "firmware" / "web_runner"
 PROBE = '''
 def ladder_probe(ws):
     ed = ws.editor_app
-    orig = ed.draw_zone
+    z = ed._head()
+    orig = z.draw_zone
     got = []
     def draw_zone(cv, rect):
         orig(cv, rect)
@@ -48,7 +49,7 @@ def ladder_probe(ws):
         ox = getattr(cv, "_ox", 0) or 0
         oy = getattr(cv, "_oy", 0) or 0
         out = []
-        for tab, glyph, r in ed._ladder_rects(rect):
+        for tab, glyph, r in ed.zone_cells(rect):
             x, y, w, ic = r
             q = ic // 4
             x0 = ox + x + (w - ic) // 2 + q
@@ -60,7 +61,7 @@ def ladder_probe(ws):
                     seen.add(buf[j] << 8 | buf[j + 1])
             out.append([tab, glyph, tab is not None and tab == ed.tab, len(seen)])
         got.append(out)
-    ed.draw_zone = draw_zone
+    z.draw_zone = draw_zone
     return got
 '''
 

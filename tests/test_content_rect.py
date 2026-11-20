@@ -312,7 +312,7 @@ def test_an_editor_tab_routes_its_bottom_bar(tmp_path):
     _bottom(ws)
     SURFACES["menu"](ws)
     got = []
-    ws.editor_app.zone_tap = lambda px, py, rect: got.append((px, py, rect))
+    (ws.editor_app.bar_zone or ws.editor_app).zone_tap = lambda px, py, rect: got.append((px, py, rect))
     zone = ws.bar_layer.zone_rect("menu")
     zx, zy, zw, zh = zone
     by = ws.bar_layer.bar_rect(0, "menu")[1]

@@ -683,14 +683,13 @@ def test_window_local_tap_hits_the_apps_bar(tmp_path):
     drv.frame(1 / 30)
     assert ws.menu_view == "cards"        # Config-first landing
     win = ws.wm.windows["menu"]
-    # The Editor's lent zone at shelf density: the labeled CODE tab chip (visual
-    # identity v1 Phase 3) -- resolve its rect through the SAME geometry the
-    # draw/tap path uses (editor_app._zone_parts + _shelf_rects), so this
-    # test tracks the layout instead of a hardcoded stride. The app's bar row
+    # The Editor's lent zone: the CODE tab's cell, resolved through the
+    # layout the head row's draw and tap share (`zone_cells`), so this test
+    # tracks the layout instead of a hardcoded stride. The app's bar row
     # sits below the WM title strip.
-    zone = win.ctx.layout.zone_left
-    tabs_area, _play = ws.editor_app._zone_parts(zone)
-    rects = dict((tid, r) for tid, r, _l in ws.editor_app._shelf_rects(tabs_area))
+    bl = ws.bar_layer
+    zone = bl.lent_zone("menu", bl.cell("menu", "zone")[0])
+    rects = dict((tid, r) for tid, _i, r in ws.editor_app.zone_cells(zone))
     cx, cy = rects["code"][0] + 2, rects["code"][1] + 2
     drv.touch(win.x + 1 + cx, win.y + 1 + win.title_h + cy)
     drv.frame(1 / 30)
@@ -3643,9 +3642,9 @@ def test_while_a_playtest_runs_play_reads_stop_and_restart(tmp_path):
     drv.frame(1 / 30)
     assert app.playing()
     zone = ws.bar_layer.zone_rect("menu")
-    tabs_area, play_r = app._zone_parts(zone)
-    restart_r, stop_r = app._run_rects(play_r)
-    assert app.zone_tap(stop_r[0] + stop_r[2] // 2, stop_r[1] + stop_r[3] // 2, zone)
+    from runtime.editor_app import _ZONE_STOP
+    stop_r = dict((t, r) for t, _i, r in app.zone_cells(zone))[_ZONE_STOP]
+    assert app.bar_zone.zone_tap(stop_r[0] + stop_r[2] // 2, stop_r[1] + stop_r[3] // 2, zone)
     drv.frame(1 / 30)
     assert "desktop" not in ws.wm.windows and not app.playing()
 

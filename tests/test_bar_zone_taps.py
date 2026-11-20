@@ -27,9 +27,9 @@ TAPFLOOR = "guition_tapfloor_dark"
 GUITION_P4 = "guition_p4_1280x800_windowed"
 DESKS = (DESK, GUITION_P4)
 # Every item the Editor's bar owes: the seven tabs, undo, redo and Play.
-_ALL = [tab for tab, _glyph in editor_app._ZONE_TABS]
+_ALL = [tab for tab, _glyph in editor_app.ZONE_ITEMS]
 # glyph (or icon-set slot) -> the zone action it draws
-_ACTION = {glyph: tab for tab, glyph in editor_app._ZONE_TABS}
+_ACTION = {glyph: tab for tab, glyph in editor_app.ZONE_ITEMS}
 _ACTION.update({slot: _ACTION[glyph] for glyph, slot in editor_app._SET_KIND.items()})
 # The desk Editor's row (look step 30): the five workspaces, undo, redo and Play.
 _WS_BY_LABEL = {label: "ws:" + key for key, label, _icon in editor_app._WORKSPACES}
@@ -139,12 +139,13 @@ def _drawn_in(ws, drv, monkeypatch):
             got.append((_ACTION[kind], (x, y, side, side)))
         return real_icon(kind, x, y, cv, *a, **kw)
 
-    real_zone = app.draw_zone
+    owner = app.bar_zone or app
+    real_zone = owner.draw_zone
     real_tab, real_button = editor_app._ui_draw.tab, editor_app._ui_draw.button
     real_history, real_play, real_bare = app._draw_history_icon, app._draw_play, app._bare_play
     real_icon = ws.icon
     with monkeypatch.context() as m:
-        m.setattr(app, "draw_zone", zone)
+        m.setattr(owner, "draw_zone", zone)
         m.setattr(editor_app._ui_draw, "tab", tab)
         m.setattr(editor_app._ui_draw, "button", button)
         m.setattr(app, "_draw_history_icon", history)
@@ -162,6 +163,8 @@ def _taps(ws, drv, monkeypatch, drawn):
     fired = []
     monkeypatch.setattr(app, "_activate_zone_tab",
                         lambda tab: fired.append(tab) or True)
+    # undo and redo live (off, a tap on them is the no-op test_top_bar pins)
+    monkeypatch.setattr(ws.history, "can_both", lambda: (True, True))
     ox, oy = _bar_origin(ws)
     out = []
     for action, (x, y, w, h) in drawn:
@@ -180,6 +183,8 @@ def _hit_runs(ws, monkeypatch, drawn, band):
     fired = []
     monkeypatch.setattr(app, "_activate_zone_tab",
                         lambda tab: fired.append(tab) or True)
+    # undo and redo live (off, a tap on them is the no-op test_top_bar pins)
+    monkeypatch.setattr(ws.history, "can_both", lambda: (True, True))
     x0, _y0, bw, _bh = band
     out = []
     for action, (x, y, w, h) in drawn:
@@ -187,7 +192,7 @@ def _hit_runs(ws, monkeypatch, drawn, band):
 
         def fires(px):
             del fired[:]
-            app.zone_tap(px, py, band)
+            (app.bar_zone or app).zone_tap(px, py, band)
             return fired == [action]
 
         cx = x + w // 2

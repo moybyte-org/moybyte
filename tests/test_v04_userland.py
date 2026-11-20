@@ -808,7 +808,7 @@ def test_code_editor_symbol_palette_inserts(tmp_path):
     # RUN dissolved into the unified bar (Stage-4 rollout): the code tab shows the SAME
     # zoned bar as every editor, so PLAY (in the bar's lent left zone) runs the cart.
     # The code tab is system-canvas, so the bar uses the responsive layout.zone_left.
-    play = [r for t, _g, r in ws.editor_app._ladder_rects(ws.bar_layer.zone_rect("menu"))
+    play = [r for t, _g, r in ws.editor_app.zone_cells(ws.bar_layer.zone_rect("menu"))
             if t is None][0]                                 # PLAY entry (tab is None)
     drv.click(play[0] + play[2] // 2, play[1] + play[3] // 2)
     drv.frame(1 / 30)

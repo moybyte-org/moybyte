@@ -32,6 +32,8 @@ PORTED = (
     "wifi_ui",
     "uitree_editor_app",
     "code_ui",
+    "editor_ui",
+    "uitree_bar_row",
 )
 
 

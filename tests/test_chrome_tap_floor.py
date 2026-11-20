@@ -222,13 +222,13 @@ def test_every_editor_tab_re_derives_on_BOTH_scales(tmp_path):
     pixels, because that is the thing a future `relayout(w, h, fs)` call site
     would silently drop -- the goldens would only show it on whichever surface
     happened to be captured after a tab entry."""
-    from runtime.editor_app import _TAB_LAYOUT_UI, _ZONE_TABS
+    from runtime.editor_app import _TAB_LAYOUT_UI, ZONE_ITEMS
 
     ws = host_app.build_workstation(
         str(tmp_path / "carts"), sys_size=(480, 320), font_scale=1,
         panel_diagonal_in=3.5)
     cart = next(c for c in ws.carts.all if c.get("title") == "Star Catcher")
-    tabs = [t for t, _glyph in _ZONE_TABS if t and not t.startswith("\x00")]
+    tabs = [t for t, _glyph in ZONE_ITEMS if t and not t.startswith("\x00")]
     assert tabs, "the Editor tab ladder is empty -- this test covers nothing"
     for tab in tabs:
         ws.open_in_editor(cart)
@@ -287,7 +287,6 @@ def test_the_editor_zone_is_drawn_and_hit_tested_on_ONE_scale(tmp_path):
     number now, and all seven tabs stay reachable on the bar the tap floor
     shortened."""
     from runtime import editor_app as _ea
-    from runtime import ui_draw as _ui_draw
     for diag, cs in ((None, 1), (3.5, 2)):
         ws = host_app.build_workstation(
             str(tmp_path / ("z%s" % diag)), sys_size=(480, 320), font_scale=1,
@@ -297,11 +296,10 @@ def test_the_editor_zone_is_drawn_and_hit_tested_on_ONE_scale(tmp_path):
         ws.open_in_editor(cart)
         ed = ws.editor_app
         assert ed._zone_scale() == ws.sys_canvas.font_scale
-        tabs_area, _play = ed._zone_parts(ws.layout.zone_left)
-        slim = [(tid, label) for tid, label, _ic in _ea._TAB_CHIPS]
-        rects = _ui_draw.tab_row_rects(tabs_area, slim, ed._zone_scale())
-        assert [t for t, _r, _l in rects] == [t for t, _l, _i in _ea._TAB_CHIPS]
-        assert rects[0][1][3] == ws.layout.bar_icon      # ...as tall as the band
+        ws.bar_layer.invalidate()
+        cells = ed.zone_cells(ws.bar_layer.zone_rect("menu"))
+        assert {t for t in _ea._OPENS if ed._offers(t)} <= {t for t, _i, _r in cells}
+        assert cells[0][2][3] == ws.layout.bar_icon      # ...as tall as the band
 
 
 # -- CHROME SIZE: the user's chrome scale, above the floor ---------------------

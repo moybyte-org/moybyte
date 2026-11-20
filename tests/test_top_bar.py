@@ -622,7 +622,7 @@ def test_zoned_bar_editor_zone_switches_tabs_and_plays(tmp_path):
 def _ladder_center(ws, rect, target):
     """Center of the ladder icon `target` in the lent `rect`, through the
     geometry the draw and the tap share (the open tab's chip is wider)."""
-    for tab, _g, (x, y, w, h) in ws.editor_app._ladder_rects(rect):
+    for tab, _g, (x, y, w, h) in ws.editor_app.zone_cells(rect):
         if tab == target:
             return (x + w // 2, y + h // 2)
     raise AssertionError("not on the ladder: %r" % (target,))
@@ -1185,11 +1185,12 @@ def test_the_editor_ladder_under_an_icon_set_is_the_looks(tmp_path, monkeypatch)
     # Day and Night take one rule: the T-Deck's one bar (no chevron, no
     # Wi-Fi, look step 30) names the open tab in either mode.
     zone = ws.bar_layer.zone_rect("menu")
-    day = (ws.editor_app._open_label(zone), ws.editor_app._ladder_layout(zone)[1])
+    def named(zone):     # the tabs the bar shows with their names
+        return [t for t, _i, r in ws.editor_app.zone_cells(zone) if r[2] > r[3]]
+    day = named(zone)
     ws.look.set_theme("moy", persist=False, variant="dark")
-    zone = ws.bar_layer.zone_rect("menu")
-    night = (ws.editor_app._open_label(zone), ws.editor_app._ladder_layout(zone)[1])
-    assert day[0] == night[0] == "Code" and day[1] >= 0 and night[1] >= 0
+    night = named(ws.bar_layer.zone_rect("menu"))
+    assert day == night == ["code"]
 
 
 def test_the_keys_stepping_on_the_bar_draw_the_pill_alone(tmp_path):

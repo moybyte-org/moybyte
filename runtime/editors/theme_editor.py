@@ -48,7 +48,6 @@ import json as _json
 import iconsets as _iconsets
 import ui as _ui
 import ui_draw as _ui_draw
-from bar_layer import glyph as _bar_glyph
 from layers import Layer
 import text_modes as _modes
 import layout_base as _lb
@@ -439,132 +438,9 @@ def _builtin_names():
 
 # -- the bar ------------------------------------------------------------------------
 #
-# The bar's theme mode, by the regular Editor's rule (EditorApp.draw_zone):
-# ‹ (Done) a 28 px target on every board, the open tab labelled on the
-# current mark and the other an icon, a hairline, the theme's name, and undo
-# and redo at the zone's right end; no Play.
-
-_BACK_HIT = 28                   # ‹'s tap target on every board, at fs 1
-_TAB_GAP = 2
-
-
-def zone_parts(app, rect):
-    """The zone's parts in bar coordinates: (back rect, [(tab, label, icon,
-    rect, labelled)], hairline x, name x, undo rect, redo rect)."""
-    fs = app._zone_scale()
-    x, y, w, h = rect
-    ic = 16 * fs
-    touch = _floor(app)
-    back = (x, y, (28 if touch else 20) * fs, h)
-    xx = x + back[2]
-    tabs = []
-    for tab, label, icon in TABS:
-        if tab == app.tab:
-            got = _ui_draw.tab_row_rects((xx, y, w, h), [(tab, label)], fs)
-            tw = got[0][1][2] if got and got[0][2] else ic + (12 if touch else 6) * fs
-            if touch:
-                tw += 8 * fs
-            tabs.append((tab, label, icon, (xx, y, tw, h), bool(got and got[0][2])))
-        else:
-            tw = ic + (12 if touch else 6) * fs
-            tabs.append((tab, label, icon, (xx, y, tw, h), False))
-        xx += tw + _TAB_GAP * fs
-    line = xx + 4 * fs
-    redo = (x + w - ic - 6 * fs, y, ic + 6 * fs, h)
-    undo = (redo[0] - ic - 6 * fs, y, ic + 6 * fs, h)
-    return back, tabs, line, line + 6 * fs, undo, redo
-
-
-def _floor(app):
-    """Whether the bar takes the tap floor's targets: a touch input, or a
-    chrome scale over the font's (the S3)."""
-    lay = app.ws.layout
-    return _ui_draw.input_kind() == "touch" or lay.cs > lay.fs
-
-
-def zone_need(app, h):
-    fs = app._zone_scale()
-    return (20 + 2 * 22 + 60 + 2 * 22 + 40) * fs
-
-
-def draw_zone(app, cv, rect):
-    ws = app.ws
-    th = ws.theme_colors
-    fs = app._zone_scale()
-    doc = app.theme
-    back, tabs, line, name_x, undo, redo = zone_parts(app, rect)
-    ic = 16 * fs
-    ink = th["chrome_ink"]
-    y = rect[1] + (rect[3] - ic) // 2
-    bx = back[0] + (back[2] - ic) // 2 if _floor(app) else back[0] + 2 * fs
-    if not ws.draw_icon("back", (bx, y, ic, ic), ink, cv):
-        _bar_glyph("arr_l", (bx, y, ic, ic), ink, cv, fs)
-    sets = ws.icon_spec() is not None
-    for tab, label, icon, r, labelled in tabs:
-        if tab == app.tab:
-            mark = app._open_mark(cv, r)
-            tink = ink if mark is None else mark
-            if labelled:
-                _ui_draw.tab(cv, th, r, False, label, True, tink,
-                             ws.icon_image_keyed(icon),
-                             icon_draw=app._set_icon(cv, tink) if sets else None, kind=icon)
-                continue
-            _icon_in(ws, cv, icon, r, tink)
-        else:
-            _icon_in(ws, cv, icon, r, ink)
-    top, bh = rect[1], rect[3]
-    cut = 2 * fs if bh <= 20 * fs else 7 * fs     # the lent zone is an icon high
-    cv.rect(line, top + cut, fs, bh - 2 * cut, th["border"])
-    tf = _ui_draw.font("ui")
-    was = _ui_draw.print_font(tf[0])
-    try:
-        room = max(0, undo[0] - 8 * fs - name_x)
-        s = _ui_draw.print_cut(doc.name, room, fs)
-        cv.print(s, name_x, top + (bh - tf[2] * fs) // 2, th["chrome_ink_dim"], 1)
-    finally:
-        _ui_draw.print_font(was)
-    cv.rect(undo[0] - 6 * fs, top + cut, fs, bh - 2 * cut, th["border"])
-    for glyph, r, can in (("undo", undo, ws.history.can_undo()),
-                          ("redo", redo, ws.history.can_redo())):
-        app._draw_history_icon(cv, glyph, r[0] + (r[2] - ic) // 2, y, ic, can)
-
-
-def _icon_in(ws, cv, icon, r, ink):
-    fs = max(1, ws.layout.fs)
-    ic = 16 * fs
-    x = r[0] + (r[2] - ic) // 2
-    y = r[1] + (r[3] - ic) // 2
-    if not ws.draw_icon(icon, (x, y, ic, ic), ink, cv):
-        ws.icon(icon, x, y, cv, ink=ink)
-
-
-def zone_targets(app, rect):
-    """The zone's targets the keys walk on the bar (`BarLayer.focus_items`):
-    Done, the two tabs, undo and redo."""
-    back, tabs, _line, _nx, undo, redo = zone_parts(app, rect)
-    return [back] + [t[3] for t in tabs] + [undo, redo]
-
-
-def zone_tap(app, px, py, rect):
-    back, tabs, _line, _nx, undo, redo = zone_parts(app, rect)
-    fs = app._zone_scale()
-    hit = (back[0] - 4 * fs, back[1], max(back[2], _BACK_HIT * fs), back[3])
-    if hit[0] <= px < hit[0] + hit[2] and hit[1] <= py < hit[1] + hit[3]:
-        app.ws.defer(app.close_theme)
-        return True
-    for tab, _l, _i, r, _on in tabs:
-        if r[0] <= px < r[0] + r[2] + _TAB_GAP * fs and r[1] <= py < r[1] + r[3]:
-            app.theme_tab(tab)
-            app.zone_opened = True
-            return True
-    if undo[0] <= px < undo[0] + undo[2]:
-        app.ws.history.undo()
-        return True
-    if redo[0] <= px < redo[0] + redo[2]:
-        app.ws.history.redo()
-        return True
-    return False
-
+# The bar's theme mode on a handheld is the head row's other case
+# (runtime/editors/editor_ui.py: Done, the two tabs, the theme's name, undo
+# and redo); the desk row's is here.
 
 def row_layout(app, rect):
     """The desk row's theme mode: the two tabs labelled from the left, undo

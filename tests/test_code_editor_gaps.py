@@ -961,8 +961,9 @@ def test_the_open_tabs_icon_takes_the_current_marks_ink(tmp_path):
     ws, _drv, _lay, _ed = _look_ws(tmp_path, "moy", "light")
     cv, th = ws.sys_canvas, ws.theme_colors
     app = ws.editor_app
-    rect = (0, 0, cv.w, 20)
-    assert not app._compact(rect), "the labelled ladder fits the strip"
+    rect = (0, 0, 700, 20)                       # a desk window's lent zone
+    assert [r[2] > 20 for t, _i, r in app.zone_cells(rect) if t in ("code", "blocks")] == \
+        [True, True], "the labelled ladder fits the strip"
     cur = ui_draw.current_ink(cv, th)
     assert cur is not None and cur != th["chrome_ink"]
     seen = {}
@@ -970,7 +971,7 @@ def test_the_open_tabs_icon_takes_the_current_marks_ink(tmp_path):
     ws.draw_icon = lambda kind, r, ink, c=None: (seen.setdefault(kind, ink),
                                                  real(kind, r, ink, c))[1]
     try:
-        app.draw_zone(cv, rect)
+        app.bar_zone.draw_zone(cv, rect)
     finally:
         ws.draw_icon = real
     assert seen["code"] == cur, seen
@@ -985,15 +986,15 @@ def test_the_labelled_ladder_keeps_8px_from_a_pill_to_the_next_icon(tmp_path):
     ws, _drv, _lay, _ed = _look_ws(tmp_path, "moy", "light")
     app = ws.editor_app
     rect = (0, 0, 700, 20)                       # a desk window's lent zone
-    tabs_area, _play = app._zone_parts(rect)
-    rects = app._shelf_rects(tabs_area)
+    rects = [(t, r) for t, _i, r in app.zone_cells(rect) if t in ("cards", "blocks", "code",
+                                                                  "paint", "map", "scene", "music")]
     fs = app._zone_scale()
     pad = ui_draw.metrics("tab")[ui_draw.TAB_PAD] * fs
-    assert len(rects) == len(app._chips()) and rects[0][2], "the whole ladder, labelled"
-    for (_a, r, _on), (_b, nxt, _on2) in zip(rects, rects[1:]):
+    assert len(rects) == 7 and all(r[2] > 20 for _t, r in rects), "the whole ladder, labelled"
+    for (_a, r), (_b, nxt) in zip(rects, rects[1:]):
         assert nxt[0] + pad - (r[0] + r[2]) >= 8 * fs, (r, nxt)
-    for tid, r, _on in rects:
-        assert app.zone_tap(r[0] + r[2] // 2, r[1] + r[3] // 2, rect) is not False, tid
+    for tid, r in rects:
+        assert app.bar_zone.zone_tap(r[0] + r[2] // 2, r[1] + r[3] // 2, rect) is not False, tid
 
 
 def test_a_labelled_chips_icon_ink_starts_at_its_pad(tmp_path):
@@ -1004,16 +1005,14 @@ def test_a_labelled_chips_icon_ink_starts_at_its_pad(tmp_path):
     ws, _drv, _lay, _ed = _look_ws(tmp_path, "moy", "light")
     app = ws.editor_app
     rect = (0, 0, 700, 20)
-    tabs_area, _play = app._zone_parts(rect)
-    chips = dict((tid, r) for tid, r, _on in app._shelf_rects(tabs_area))
-    pad = (ui_draw.metrics("tab")[ui_draw.TAB_PAD] * app._zone_scale()
-           + app._shelf_layout(tabs_area)[1])     # the pill's grown pad (D-03.3)
+    chips = dict((tid, r) for tid, _i, r in app.zone_cells(rect))
+    pad = ui_draw.metrics("tab")[ui_draw.TAB_PAD] * app._zone_scale()
     drawn = []
     real = ws.draw_icon
     ws.draw_icon = lambda kind, r, ink, c=None: (drawn.append((kind, r)),
                                                  real(kind, r, ink, c))[1]
     try:
-        app.draw_zone(ws.sys_canvas, rect)
+        app.bar_zone.draw_zone(ws.sys_canvas, rect)
     finally:
         ws.draw_icon = real
     spec = ws.icon_spec()

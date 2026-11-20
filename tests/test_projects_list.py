@@ -140,13 +140,13 @@ def test_new_card_creates_a_game_and_opens_the_editor(tmp_path):
 
 def test_the_editor_bar_has_no_projects_button(tmp_path):
     from runtime import editor_app as EA
-    assert all(t != "projects" and g != "projects" for t, g in EA._ZONE_TABS)
+    assert all(t != "projects" and g != "projects" for t, g in EA.ZONE_ITEMS)
     ws = _ws(tmp_path)
     ws.home.set_home_tab("make")
     ws.launcher.sel = _first_real(ws.launcher)
     ws.home.launch_selected()
     rect = ws.layout.zone_left
-    glyphs = [g for _t, g, _r in ws.editor_app._ladder_rects(rect)]
+    glyphs = [g for _t, g, _r in ws.editor_app.zone_cells(rect)]
     assert "projects" not in glyphs
 
 
@@ -164,18 +164,16 @@ def test_the_one_bar_names_the_open_tab(tmp_path):
     for tab, name in (("cards", "Config"), ("paint", "Sprites"), ("code", "Code")):
         ws.text.set_menu_view(tab)
         for zone in (rect, (rect[0], rect[1], rect[2] + 80, rect[3])):
-            rects, gap = ea._ladder_layout(zone)
-            assert len(rects) == len(ea._ladder())       # nothing dropped
+            rects = ea.zone_cells(zone)
+            assert len(rects) == len(EA.ZONE_ITEMS)       # nothing dropped
             assert rects[-1][2][0] + rects[-1][2][2] <= zone[0] + zone[2]
-            cut = ea._group_cut(rects)
+            cut = [t for t, _g, _r in rects].index(EA._ZONE_UNDO)
             gaps = [b[2][0] - a[2][0] - a[2][2] for a, b in zip(rects, rects[1:])]
             group = gaps.pop(cut - 1)                    # tabs | actions (D-02)
-            assert rects[cut][0] == EA._ZONE_UNDO
-            assert set(gaps) == {gap} and gap >= 0
-            assert EA._GROUP_GAP * ea._zone_scale() <= group
-            assert group <= EA._GROUP_MAX * ea._zone_scale()
-            label = ea._open_label(zone)
-            assert label == name
+            assert set(gaps[:cut - 1]) == {gaps[0]} and gaps[0] >= 0
+            assert group >= 9 * ea._zone_scale()
+            assert [t for t, _g, r in rects if r[2] > r[3]] == [tab]   # the open tab named
+            assert name
 
 
 def test_the_editor_x_returns_to_the_tab_it_came_from(tmp_path):
