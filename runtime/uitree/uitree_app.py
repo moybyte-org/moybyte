@@ -16,6 +16,7 @@ from layout_base import bar_rows, content_of, metric_class, DESK
 import uitree as S
 from uitree import _NOW
 
+_UP, _DOWN = 1 << 2, 1 << 3     # the up and down bits of a host's frame buttons (ui_draw._HOST_BUTTONS)
 ID_MAX = 31            # bytes of a node id the host engine keeps (seen: a longer focus id comes back cut)
 _GAP = {"s": (6, 10), "m": (8, 16), "l": (16, 24), "0": (0, 0)}
 
@@ -62,10 +63,33 @@ class Engine(S.Builder):
         self._page_o = {"gen": 0}       # the page's gen: moves when what its rows show may have
         self._gen_ok = False
         self._edits = 0                 # a commit field's draft edits, which move the gen too
+        self._buttons = 0               # the frame's buttons, as keys() handed them to the host
+        st = decl.state                 # this engine's own values: two consoles in one process each hold theirs
+        self._vals = dict((k, st._init.get(k)) for k in st._t)
+        self._vers = dict.fromkeys(st._t, 0)
+
+    def _bind(self):
+        """The module's state holds this engine's values: at every way in (a
+        frame, a handler, input, an opening, a way out) an engine that is not
+        the last one in puts the other's values by and takes its own. The
+        first engine in takes the module's as they are. The dicts stay the
+        objects templates and derives read."""
+        st = self.s
+        was = st.__dict__.get("_owner")
+        if was is self:
+            return
+        if was is not None:
+            was._vals, was._vers = dict(st._v), dict(st._ver)
+            st._v.clear()
+            st._v.update(self._vals)
+            st._ver.clear()
+            st._ver.update(self._vers)
+        object.__setattr__(st, "_owner", self)
 
     # -- the engine's counted runs (G12) ------------------------------------
 
     def run(self, fn, *args, action=None):
+        self._bind()
         if action != "setup":
             self.calls += 1
         return S.Builder.run(self, fn, *args, action=action)
@@ -144,6 +168,7 @@ class Engine(S.Builder):
         """The app opens: its first page, and its `opened` hook (or the hook
         a hosted page names) run once, handed the launch argument when it
         takes=\"arg\"."""
+        self._bind()
         self.pages = self.pages[:1]
         self.openers = []
         self._ui.reset()
@@ -169,6 +194,7 @@ class Engine(S.Builder):
     def paint(self, dt, cv, th, content, desk):
         """One frame: posts, timers, the page replayed into `content` of a
         frame the host began, the queued handlers as one commit, work."""
+        self._bind()
         self.frame_no += 1
         self.calls = 0
         self._posts()
@@ -197,6 +223,7 @@ class Engine(S.Builder):
             self._replay_page(self.root)
         finally:
             _NOW.app, _NOW.frame = None, False
+        self._buttons = 0
         q, self.q = self.q, []
         for act, args, src in q:
             self.run_action(act, args, src)
@@ -258,6 +285,15 @@ class Engine(S.Builder):
             rect = _v.page(n.p["title"](None), o)
         else:
             rect = _v.page(n.p["title"](None))
+        f = _v.focus()
+        last = self.focused                     # the last frame's focus
+        now = self.ids.get(f)
+        if now is not None:
+            self.focused = now                  # a pointer's move lands at the frame's begin
+        elif f == "" and self.focused is not None:
+            self.focused = self._stepped(n)     # a key's step lands as the stops draw: where it will
+        if self.focused is None and self.want_focus is None:
+            self.focused = next(self._stops(n), None)   # where focus starts: the first stop
         hint = self._hints()
         placed = any(k.kind in ("split", "grid", "foot") for k in shown)
         if not hint:
@@ -305,13 +341,13 @@ class Engine(S.Builder):
         if ahead is not None and ahead not in self.ids:
             self.want_focus = ahead                     # foreseen and not drawn after all: next frame
         f = _v.focus()
-        was = self.focused
+        hinted = self.focused
         self.focused = self.ids.get(f)
         self.focus_key = f or ""
-        if was is not None and was[0].kind == "field" and was[0].key in self.drafts and (
-                self.focused is None or self.focused[0] is not was[0]):
-            self._commit_field(was[0])          # focus left a commit field: its draft is written
-        if self.focused is not was and self._hints() != hint:
+        if last is not None and last[0].kind == "field" and last[0].key in self.drafts and (
+                self.focused is None or self.focused[0] is not last[0]):
+            self._commit_field(last[0])         # focus left a commit field: its draft is written
+        if (self.focused and self.focused[0]) is not (hinted and hinted[0]) and self._hints() != hint:
             self._damage.all()                  # the band named another node's verbs: draw it again
         if self.focused is not None and not moved:
             node, row = self.focused
@@ -349,6 +385,52 @@ class Engine(S.Builder):
                     return got
             return None
         return walk(self.root) if self.root is not None else None
+
+    STOPS = ("link", "button", "toggle", "slider", "field", "seg", "item", "card", "tabs")
+
+    def _stops(self, n, row=None):
+        """The (node, row) of each focus stop this frame draws, in order:
+        shown, its action on (a greyed one is no stop), in the current case
+        of a switch, in each row of a list; none in a dialog or popover."""
+        for k in n.kids:
+            if not _shown(k, row):
+                continue
+            if k.kind == "switch":
+                v = self.s._v[k.l["name"]]
+                case = next((c for c in k.kids if c.l["v"] == v), None) or next(
+                    (c for c in k.kids if c.l["v"] == "_"), None)
+                if case is not None:
+                    yield from self._stops(case, row)
+            elif k.kind in ("rows", "cards", "table"):
+                for r in self.s._v[k.l["model"]]:
+                    if k.kind == "rows":
+                        yield from self._stops(k, r)
+                    else:
+                        yield (k, r)
+                        break
+            elif k.kind in ("dialog", "popover"):
+                continue
+            elif k.kind in self.STOPS:
+                if k.act is None or k.act.can(row):
+                    yield (k, row)
+            else:
+                yield from self._stops(k, row)
+
+    def _stepped(self, n):
+        """Where this frame's up or down step takes focus from the focused
+        stop: the stop before or after it in the page's order (None where the
+        frame steps no way the order says)."""
+        b = self._buttons
+        d = 1 if b & _DOWN else -1 if b & _UP else 0
+        if not d:
+            return None
+        node, row = self.focused
+        stops = list(self._stops(n))
+        for i in range(len(stops)):
+            if stops[i][0] is node and stops[i][1] is row:
+                j = i + d
+                return stops[j] if 0 <= j < len(stops) else stops[i]
+        return None
 
     def _row_node_id(self, lst, rowkey, nodekey):
         row = next((r for r in self.s._v[lst.l["model"]] if str(r._f[r._m.key]) == rowkey), None)
@@ -709,6 +791,7 @@ class Engine(S.Builder):
 
     def leave(self):
         """Every way out of the page: a commit field's draft is written."""
+        self._bind()
         for n, _row in list(self.ids.values()):
             if n.kind == "field" and n.key in self.drafts:
                 self._commit_field(n)
@@ -1015,9 +1098,11 @@ class Engine(S.Builder):
 
     # -- input --------------------------------------------------------------
 
-    def keys(self, i):
+    def keys(self, i, damage=True):
         """A frame's input: an action's letter or typed characters, then the
-        host's keys (focus, the arrows, Enter)."""
+        host's keys (focus, the arrows, Enter). A host that draws its own
+        frame for its keys (Settings) passes damage=False."""
+        self._bind()
         ch = getattr(i, "typed", 0)
         if ch and not self.dialog_shown():
             c = chr(ch)
@@ -1029,15 +1114,17 @@ class Engine(S.Builder):
                     self.q.append((a, (c,), "typed %r" % c))
                     break
         took = self._ui.keys(i)
-        if self.focused is None and not self.dialog_shown() and i.pressed("a"):     # no node takes it
+        self._buttons = self._ui.inp[0] if hasattr(self._ui, "inp") else 0     # the host's begin consumes them
+        if self.focused is None and not self.dialog_shown() and (i.pressed("a") or i.pressed("run")):
             a = self.role_action("confirm")
             if a is not None and a.can():
                 self.q.append((a, self.args_for(a), "role confirm"))
-        if took or self.q:
+        if damage and (took or self.q) or self.q:
             self._damage.all()
         return True
 
     def point(self, px, py, click):
+        self._bind()
         if self._ui.point(px, py, click):
             self._damage.all()
         return True
@@ -1063,6 +1150,7 @@ class Engine(S.Builder):
         return n if n.kind == "group" and "close" in n.l else None
 
     def back(self):
+        self._bind()
         g = self._closer(self.root) if self.root is not None and not self.dialog_shown() else None
         if g is not None:
             act = g.l["close"]

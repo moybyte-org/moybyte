@@ -117,3 +117,18 @@ def test_a_page_with_no_stop_answers_confirm_and_back_through_its_role_actions(t
         S._NOW.app = None
     assert eng.role("back") and R.s.left == 2           # a host routing its own keys
     assert fs[1].buf == fs[0].buf                        # the page drew nothing new
+
+
+def test_two_engines_over_one_module_each_hold_their_own_state():
+    """Two consoles in one process (a test's pair of desks) each open the
+    module's page: each engine's handlers read and write its own values."""
+    import uitree_app
+    import uitree_focus as F
+    a = uitree_app.Page(F.build, None, None)
+    b = uitree_app.Page(F.build, None, None)
+    a.run(lambda: setattr(F.s, "seen", 3), action="t")
+    b.run(lambda: setattr(F.s, "seen", 5), action="t")
+    got = []
+    a.run(lambda: got.append(F.s.seen), action="t")
+    b.run(lambda: got.append(F.s.seen), action="t")
+    assert got == [3, 5]

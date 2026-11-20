@@ -551,6 +551,7 @@ class State:
                 v[k] = DocBuf(t[k].text, t[k].lang)
         object.__setattr__(self, "_t", t)
         object.__setattr__(self, "_v", v)
+        object.__setattr__(self, "_init", dict(v))    # what each engine over this state starts from
         object.__setattr__(self, "_ver", dict.fromkeys(t, 0))
         object.__setattr__(self, "_derive", {})       # name -> its getter, in evaluation order
         object.__setattr__(self, "_dsrc", {})         # name -> (its expression, the names it reads)
@@ -1695,7 +1696,6 @@ def _node(kind, key, props, where, act=None):
             n.p[k] = cond(v, b.ctx, where)
         elif pt in ("action0", "action1"):
             want = "row" if pt == "action1" else "none"
-            a = _d().actions.get(v) if isinstance(v, str) else None
             n.l[k] = _action(v, want, "ui.%s %s=" % (kind, k), where, seen=False)
         else:
             n.p[k] = _prop(pt, k, v, b.ctx, where, kind)
@@ -1867,20 +1867,6 @@ def toggle(label, name, **p):
             n.l["on"] = _action(on, "row", "ui.toggle %s on=" % name, where, seen=False)
         return n
     return _node("toggle", _state_name(name, (BOOL,), "ui.toggle", where), dict(p, label=label), where)
-
-
-def slider(label, name, lo, hi, **p):
-    where = _caller()
-    if isinstance(name, str) and name.startswith("."):
-        f = _row_field("slider", name, INT, where)
-        on = p.pop("on", None)
-        n = _node("slider", f, dict(p, label=label, lo=lo, hi=hi), where)
-        n.l["field"] = f
-        if on is not None:          # it hands its row (G10)
-            n.l["on"] = _action(on, "row", "ui.slider %s on=" % name, where, seen=False)
-        return n
-    return _node("slider", _state_name(name, (INT,), "ui.slider", where),
-                 dict(p, label=label, lo=lo, hi=hi), where)
 
 
 def _look(kind, look, looks, where):
