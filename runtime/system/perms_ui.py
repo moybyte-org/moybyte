@@ -11,38 +11,78 @@ it on: `app_perms.NATIVE_LINE`, consent to `full_access` (`Consent.opt`),
 from which the cart runs its native module rather than its wasm one.
 
 A shipped app the shell runs as its own layer (Files, Paint, Appearance) holds
-no grant to narrow and is not listed. The page reaches the shell through its
-AppContext (`PermsPage.NEEDS`): the carts role for the shelf, the install
-role for the consent records, the nav role for which carts are the shell's.
+no grant to narrow and is not listed. The page is a `uitree` build that
+Settings hosts (`PermsPage`); it reaches the shell through its AppContext
+(`PermsPage.NEEDS`): the carts role for the shelf, the install role for the
+consent records, the nav role for which carts are the shell's.
 """
 
-import ui as _ui
+import uitree as ui
 import app_perms as _perms
 
 TITLE = "App permissions"
+EMPTY = "No app on this console asks for more than a game does."
+NATIVE = "native"             # the native-module switch's permission in a row
 
-# The keycap hints for a switch, by whether it is on (Settings' own).
-_HINTS = (("confirm", "Turn on", "back", "Back"), ("confirm", "Turn off", "back", "Back"))
-_EMPTY = ("No app on this console asks for more than a game does.",)
-_NATIVE = "native"            # the native-module switch's key in a row
+s = ui.state(grants=ui.model(key="id", id="", app="", aid="", perm="", line="", on=False))
+
+_ctx = [None]                 # the AppContext of the console that hosts the page
+_asked = {}                   # app id -> its manifest's permissions (a native switch's)
+
+
+def opened():
+    """A row per permission the install prompt names, grouped by cart in
+    the shelf's order."""
+    ctx = _ctx[0]
+    consent = ctx.install.consent()
+    rows = []
+    for cart in ctx.carts.all() or ():
+        if ctx.nav.is_system_app(cart):
+            continue                  # the shell's own: no grant to narrow
+        aid = _perms.app_id(cart)
+        lines = [(p, _perms.line(p)) for p in _perms.asked(_perms.perms_of(cart), _perms.tiers_of(cart))]
+        if _perms.native_choice(cart):
+            lines.append((NATIVE, _perms.NATIVE_LINE))
+            _asked[aid] = list(cart.get("permissions") or ())
+        for perm, line in lines:
+            on = (_perms.native_opted(consent.get(aid)) if perm == NATIVE else consent.is_on(aid, perm))
+            rows.append({"id": aid + " " + perm, "app": cart.get("title") or "?", "aid": aid,
+                         "perm": perm, "line": line, "on": on})
+    s.grants = rows
+
+
+def turn(row):
+    consent = _ctx[0].install.consent()
+    if row.perm == NATIVE:
+        consent.opt(row.aid, "full_access", row.on, _asked.get(row.aid, ()))
+    else:
+        consent.turn(row.aid, row.perm, row.on)
+
+
+ui.hook("opened", opened)
+ui.hook("turn", turn, takes="row")
+
+
+def build():
+    with ui.page(""):
+        ui.empty(TITLE, icon="check", line=EMPTY, shown="!grants")
+        with ui.rows("grants", group="{.app}"):
+            ui.toggle("{.line}", ".on", on="turn", hint="{.on?Turn off:Turn on}")
 
 
 class PermsPage:
-    """Settings' App permissions page (`SettingsLayer` draws it on its sub
-    page's host)."""
+    """The page as Settings hosts it: opened on each visit, drawn into its
+    sub page's frame."""
 
     NEEDS = ("carts", "install", "nav")
 
-    def __init__(self, ctx):
-        self._carts = ctx.carts
-        self._inst = ctx.install
-        self._nav = ctx.nav
-        self._rows = None             # ((title, app id, ((perm, line), ...)), ...)
-        self._on = {}                 # a switch's id -> whether it showed on
-        self._asked = {}              # app id -> its manifest's permissions (a native switch's)
+    def __init__(self, ctx, host, damage):
+        _ctx[0] = ctx
+        import uitree_app
+        self.page = uitree_app.Page(build, host, damage)
 
     def open(self):
-        self._rows = None
+        self.page.open()
 
     def title(self):
         return TITLE
@@ -50,47 +90,5 @@ class PermsPage:
     def back(self):
         return False
 
-    def rows(self):
-        """The carts the page shows, made once an opening: (title, app id,
-        ((permission, its line), ...)) in the shelf's order."""
-        if self._rows is None:
-            out = []
-            for cart in self._carts.all() or ():
-                if self._nav.is_system_app(cart):
-                    continue              # the shell's own: no grant to narrow
-                perms = _perms.asked(_perms.perms_of(cart), _perms.tiers_of(cart))
-                lines = [(p, _perms.line(p)) for p in perms]
-                if _perms.native_choice(cart):
-                    lines.append((_NATIVE, _perms.NATIVE_LINE))
-                    self._asked[_perms.app_id(cart)] = list(cart.get("permissions") or ())
-                if lines:
-                    out.append((cart.get("title") or "?", _perms.app_id(cart), tuple(lines)))
-            self._rows = tuple(out)
-        return self._rows
-
-    def draw(self, rect):
-        _ui.page("")
-        rows = self.rows()
-        consent = self._inst.consent()
-        f = _ui.focus()
-        if f in self._on:
-            _ui.hints(_HINTS[bool(self._on[f])])
-        if not rows:
-            _ui.empty("check", TITLE, _EMPTY)
-            return
-        for title, aid, perms in rows:
-            _ui.group(title)
-            for perm, line in perms:
-                sid = aid + " " + perm
-                native = perm == _NATIVE
-                on = (_perms.native_opted(consent.get(aid)) if native
-                      else consent.is_on(aid, perm))
-                self._on[sid] = on
-                now = _ui.toggle(line, on, {"id": sid})
-                if now != on:
-                    if native:
-                        consent.opt(aid, "full_access", now, self._asked.get(aid, ()))
-                    else:
-                        consent.turn(aid, perm, now)
-                    self._on[sid] = now
-            _ui.group()
+    def draw(self, cv, th, rect, desk, dt):
+        self.page.paint(dt, cv, th, rect, desk)

@@ -15,8 +15,8 @@ its fix, and the run goes on past it:
    `with ui.page(...)`). A page function reads no state, so one run visits
    every node: props, templates, conditions, actions, `takes=` at every
    site, switches and label tables, checked against the types.
-4. Evaluate every bound prop for each size class and each row the models
-   hold after the app's `opened` hook.
+4. Evaluate every bound prop for each size class (rows the models hold at
+   their declared start; no handler runs, `opened` included).
 
 Exit status 0 when there is no error. A module is named as Python imports
 it (`perms_ui`) or by its path.
@@ -286,12 +286,9 @@ def check(target, snap=False):
         if not res.pages:
             res.errors.append(_err("P01", "no page function", path, 1,
                                    fix="def build():\n    with ui.page(\"Title\"):\n        ..."))
-        opened = decl.actions.get("opened")
-        for i, name in enumerate(res.pages):
+        for name in res.pages:
             app = Recorder(decl, getattr(mod, name))
             try:
-                if i == 0 and opened is not None and opened.hook and opened.takes == "none":
-                    app.run(opened.fn, action="opened")
                 app._build()
             except S.UIError as e:
                 res.errors.append(e)

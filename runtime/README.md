@@ -12,6 +12,7 @@ device required, so it is the fast dev loop.
 | `shell/` | the console kernel: `console` and its `console_*` bases, `chrome`, the layer stack and the bars, the shell's stores and services, the input state |
 | `wm/` | the window managers: `wm` (the small screen's back stack), `wm_windowed` and its `wm_*` parts |
 | `toolkit/` | the draw toolkit: the public UI API (`ui`), `ui_draw` and its `ui_*` halves, widgets, layouts, fonts, icons, the clock (`ticks`) |
+| `uitree/` | the UI tree API (`import uitree as ui`): typed state, named actions, pages as build functions, replayed into the toolkit's verbs |
 | `home/` | the home: `launcher_layer` and its `home_*` parts |
 | `system/` | the system's own surfaces: Settings, the bar's popovers, the perf HUD, update, about, achievements, licences, the web console, the wallpaper, QR |
 | `apps/` | the built-in apps: calc, files, get carts, paint, my art, the storybook, appearance, the text console |
@@ -139,6 +140,22 @@ code) and **host glue**.
 | `ui_cover.py` | **(shared, staged)** a coverless cart's generated cover (`initial_cover`): its title's letter on a colour block that stays the cart's (`initial_block`), the letter's rects kept per card size (`initial_parts`) |
 | `file_widgets.py` | **(shared, staged)** `Bitmap`, the duck-typed indexed image both system canvases accept, carrying the #186 `owner` that names who hands back the off-heap buffer a full-surface RGB565 bake takes, and `cover_indices`, the nearest-neighbour cover crop with a caller-supplied `out` for the screen-sized case |
 
+### `uitree/` -- the UI tree API
+
+A screen written against it is a module: typed state (`ui.state`), actions
+and hooks with what they take (`ui.action`, `ui.hook`), and pages as
+functions that read no state. `tools/uitree_check.py` checks a module
+without drawing it; `tests/uitree_parity.py` holds a ported surface to the
+frames its old code drew.
+
+| file | what it is |
+|---|---|
+| `uitree.py` | **(shared, staged)** the API an app imports as `ui`: declarations per app module (`Decl`), the types, templates and conditions, node kinds, the build, the errors (each with its code, file:line and fix) |
+| `uitree_app.py` | **(shared, staged)** the replay into the toolkit's verbs: `Engine` (a built tree in a frame its host began, handlers run as one commit), `App` and `app_layer` (a registered app whose screen is a build), `Page` (a build hosted by a surface still on today's verbs) |
+| `uitree_editor.py` | **(shared, staged)** the Editor's kinds over the replay: rows, tabs, panes, the text editor, slots, the status line |
+| `uitree_doc.py` | **(shared, staged)** a `ui.doc`'s engine side: the Code tab's `CodeEditor` and the op journal under one object |
+| `uitree_pics.py` | **(shared, staged)** an `image` value found, decoded, cached under a byte budget and drawn |
+
 ### `home/` -- the home
 
 | file | role |
@@ -166,7 +183,7 @@ code) and **host glue**.
 | `web_console_ui.py` | **(shared, staged)** `WebConsoleUI` — the WEB CONSOLE connection screen (#197), held as `ws.web.ui`: the surface the glass PARKS on while wasm mode is on. A page: the QR of the paired url (`http://<ip>/#t=TOKEN&b=ID`), "Open in a browser", the address and how else to sign in (the console's password, or the QR alone with none set); back turns it off (and a Turn off button under touch and on the desk). Wasm mode is a SWITCH, not a session: `WebConsole.park`/`unpark` + the `parked` flag `go_home` re-parks on. It holds an AppContext (`surface`, `theme`, `damage`) and the `WebConsole` that owns it, never the console; its layer hands it the content rect and draws the bar's strip |
 | `moy_qr.py` | **(shared, staged)** a dependency-free QR encoder — byte mode, EC level L, versions 1-4, one fixed mask. Written rather than vendored because there is no library on a board and the pairing pin is not a constant anything could be baked with; `tests/test_moy_qr.py` pins it against a third-party encoder |
 | `perf_line.py` | **(shared, staged)** the `PERF` line's field table and parser, for every board (#206). Its one writer is `native/moy_kernel/moy_perf.c` -- printing under Settings -> PERF DIAG alone, so a reader turns the diag on -- and `tools/p4_perf.py --diag` reads it back into #66's per-phase numbers (its default, the shipping fps, reads the drawn-frame counter with the diag off), so the line is a CONTRACT -- and until 2026-08-28 it was three shapes wearing one name, with the T-Deck's `Moybyte <uptime> ` prefix making every sample from the board most in need of measuring invisible to the tool that produces the fps ledger. The field set is the UNION and identical everywhere, because per-board subsets are exactly what drifted. A field a board cannot measure prints `-`, never `0`, since a frozen 0 is also what a broken lever looks like. Both readers tokenise on whitespace, so the emitter slugs a cart title and joins a compound value with `/` |
-| `perms_ui.py` | **(shared, staged)** `PermsPage`, Settings' App permissions page: every cart the shell does not run as its own layer that lists a permission with a prompt line, a group per cart and a switch per permission over `app_perms.Consent.turn` |
+| `perms_ui.py` | **(shared, staged)** Settings' App permissions page, a `uitree` build Settings hosts (`PermsPage`): every cart the shell does not run as its own layer that lists a permission with a prompt line, a group per cart and a switch per permission over `app_perms.Consent.turn` |
 | `os_log.py` / `moy_logging.py` / `log_ui.py` | **(shared, staged)** the OS log's Python half (native/moy_kernel/moy_log.h; `docs/os_2026-11/processes.md` §9): `os_log` makes a Player run a process of the log (a pid named by the cart's id, current while it runs), writes a script's print under it (and to serial) and a run's crash at `crit` (a Python traceback, else the panel's words), and answers `crash_of(pid)`, what a crash's "details" open; `moy_logging` is micropython-lib's `logging` for a Python app over the ring, which `import logging` finds on a VM with none of its own (the host's CPython keeps its standard library's); `log_ui.LogPage` is Settings' System log page, the ring in one text view following its foot, on one process where `Workstation.open_log(pid)` names it |
 | `tasks_ui.py` | **(shared, staged)** `TasksLayer` — the task manager (`docs/os_2026-11/processes.md` §6, §7), the kernel kind `tasks`: two tabs, Running (`Procs.rows` in a `ui.table`: name, state, CPU, approximate memory; the current row's verbs Switch to, Close, Stop, Details, Home on a handheld) and Notifications (the list `notifications.NOTES` keeps: Open, the app's named actions, Clear); opened by `Workstation.open_tasks` from the system menu and the console's key held, a window on the desk; a registered app no cart is (`ws.app("tasks")`) |
 | `achievements.py` | **(shared, staged)** the console's end of the achievements process (`system_carts/moybyte.achievements.moy`, `docs/os_2026-11/processes.md` §8): `Link`, `ws.ach` -- it starts the process and hands it `game(app)` (a sender's name and declared badges) and `clock_day()`, sends the console's own badges as `award`/`progress` messages from the system (its counted milestones kept in `system/settings`' `milestones` row), reads the process's prefs row for Settings (`groups`, `count`, `total`) and turns its notification into the unlock banner (`badge_of`) -- `NotifyRole`, the `notify` role's server (`proc:achievements`), `SHELL`, the console's own declaration, and the strict readers both ends share (`declared`, `read_badges`) |

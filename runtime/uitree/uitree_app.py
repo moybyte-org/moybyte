@@ -54,10 +54,8 @@ class Engine(S.Builder):
         self.focused = None
         self.drawn = {}
         self.actions = decl.actions
-        import uitree_pics
-        cv0 = surface.canvas()
-        self.pics = uitree_pics.PicEngine(self, files, getattr(cv0, "swapped565", False),
-                                          uitree_pics.budget_for(cv0.w, cv0.h))
+        self.files = files
+        self.pics = None                # the picture engine, made at the first frame over its canvas
         self.calls = 0                  # handler runs this frame: actions, hooks, timers, posts, work steps
         self.frame_calls = []
         self.work_run = {}              # work name -> [first frame, frames, steps, ms, over, wrote]
@@ -73,12 +71,12 @@ class Engine(S.Builder):
 
     @property
     def idle_owed(self):
-        return self.pics.idle_owed
+        return self.pics is not None and self.pics.idle_owed
 
     def idle_step(self):
         """A frame with nothing to paint: one owed picture decoded, the card
         showing it from the next frame."""
-        if self.pics.idle_step():
+        if self.pics is not None and self.pics.idle_step():
             self._damage.all()
 
     def _posts(self):
@@ -172,6 +170,10 @@ class Engine(S.Builder):
             self.timers.remove(t)
             self.run_action(t[1], (), "timer")
         self.cv, self.th = cv, th
+        if self.pics is None:
+            import uitree_pics
+            self.pics = uitree_pics.PicEngine(self, self.files, getattr(cv, "swapped565", False),
+                                              uitree_pics.budget_for(cv.w, cv.h))
         fs = max(1, getattr(cv, "font_scale", 1))
         self.content = content
         if self.root is None:
@@ -512,6 +514,9 @@ class Engine(S.Builder):
         nr = S.Row(row._m, d)
         self.s._v[name] = tuple(nr if r is row else r for r in self.s._v[name])
         self.s._ver[name] += 1
+        for i, (node, r) in list(self.ids.items()):
+            if r is row:                # the frame's nodes on that row see it as it now is
+                self.ids[i] = (node, nr)
         was, _NOW.app = _NOW.app, self
         S._trace("state", name, "%r: %s %r -> %r   (from %s .%s)" % (key, f, old, new, n.kind, f))
         _NOW.app = was
@@ -966,9 +971,10 @@ def app_layer(id, title, build, is_app=None, needs=()):
 
 
 class Page(Engine):
-    """A `uitree` page hosted by today's surface (the bridge): the surface
-    begins the frame on its own host, and this replays the page into its
-    content rect. Removed with the old engine."""
+    """A `uitree` page hosted by a surface still drawn with today's verbs
+    (the bridge): the surface begins the frame on its own host and routes
+    the keys to it; `paint` replays the page into its content rect. It goes
+    with the old engine."""
 
-    def __init__(self, build, host, surface, damage, files=None):
-        Engine.__init__(self, S.decl_of(build.__module__), build, host, surface, damage, files)
+    def __init__(self, build, host, damage, files=None):
+        Engine.__init__(self, S.decl_of(build.__module__), build, host, None, damage, files)

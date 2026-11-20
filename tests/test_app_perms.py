@@ -579,10 +579,13 @@ def test_settings_lists_each_carts_permissions_and_a_switch_turns_one_off(tmp_pa
     sl.open_page("permissions")
     ws.frame(DT)
     assert sl.page_title() == "App permissions"
-    rows = {title: perms for title, _aid, perms in sl.permits.rows()}
+    import perms_ui
+    rows = {}
+    for r in perms_ui.s.grants:           # the page's model: a row per switch
+        rows[r.app] = rows.get(r.app, ()) + ((r.perm, r.line),)
     assert rows["Holder"] == (("prefs", "Keep its own settings"),
                               ("pins", "Switch the console's pins"))
-    sid = aid + " prefs"
+    sid = aid + " prefs" + "/on"           # the switch on that row
     x, y, w, h = sl._sub.box(sid)
     sl.handle_pointer(x + w // 2, y + h // 2, True)
     ws.mark_dirty()

@@ -1,0 +1,78 @@
+{
+ "surface": "settings_permissions",
+ "config": "tdeck_320x240_fs1_dark",
+ "commit": "23a5ba407",
+ "script": [
+  "k:down",
+  "k:a",
+  "k:down",
+  "k:down",
+  "k:a",
+  "k:a",
+  "k:down",
+  "k:down",
+  "k:down",
+  "k:down",
+  "k:down",
+  "k:a",
+  "k:up"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "0cc9856072918dddc51a7463d492cf994d724bfc4b52d860977d2ee4724e186c"
+  ],
+  [
+   "k:down",
+   "c3bd1ac8932621a10a612522b7835b6891379f28913b11ccba5bd93e1ce57866"
+  ],
+  [
+   "k:a",
+   "3e3f96d622b2c932e423fdeca0d921e7b87e611e790535859390424f07b29f54"
+  ],
+  [
+   "k:down",
+   "da0a0cc0d6cd5bd079af796ad506ed7855d79852f5cedc431fc93923d6c489eb"
+  ],
+  [
+   "k:down",
+   "b0014bc634b3fc3837f6db77f483f43a0aa93bc7b7f80188e4a7a49dabe79711"
+  ],
+  [
+   "k:a",
+   "20f0b1c614d76844040d95246c79803d2728b44b3d7be69cdf029efce786bf48"
+  ],
+  [
+   "k:a",
+   "b0014bc634b3fc3837f6db77f483f43a0aa93bc7b7f80188e4a7a49dabe79711"
+  ],
+  [
+   "k:down",
+   "0fbbf7c3530c0a43892a9d8d1f51a170117061f06ef0f590da2d3f758b383dbb"
+  ],
+  [
+   "k:down",
+   "ed1b2f7905ff188753bc8a8e3aba233fd34a8eb8da9d12b12d9b993421d576af"
+  ],
+  [
+   "k:down",
+   "ab9e1bb1ec4565d3d291995b07774704997236b17c0282de44890aec0ee212fc"
+  ],
+  [
+   "k:down",
+   "0041215da4e242f614d611f2d71d84388321d39f58126c40bb5401e00760beee"
+  ],
+  [
+   "k:down",
+   "a71575419b3f0c6a7569bfd7c834a8dbd45fec576619f1d08d9d50eb05efb5af"
+  ],
+  [
+   "k:a",
+   "d5673e7db6d89af898fa43eabc7ef0f88f88efb6fb677dd9c29816e6f195b6dd"
+  ],
+  [
+   "k:up",
+   "d321b49b69d3d7d5af5deac460e13b498c915518370bbbcf7a0fc1b753500fee"
+  ]
+ ]
+}

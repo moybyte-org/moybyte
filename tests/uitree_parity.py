@@ -9,7 +9,7 @@ typed text are compared too.
     frames(config, open_surface, script, carts_dir)   -> [Frame]
     compare(old, new, out_dir)                         -> None, or AssertionError
 
-`open_surface(ws)` opens the surface on a fresh workstation (`ws.open_settings()`
+`surface` (a `Surface`, or a function of the workstation) opens the surface on a fresh workstation (`ws.open_settings()`
 then `ws.settings_layer.open_page("permissions")`, `ws.spine.open_app(...)`).
 
 A step of a script, one string each:
@@ -32,7 +32,8 @@ port is held to them after the old code is gone; `check_recorded` runs the
 port against them and, when a step moved, writes the port's frame and says
 how to see the old one:
 
-    .venv/bin/python tests/uitree_parity.py show NAME     # old (at its commit) | new | diff
+    .venv/bin/python tests/uitree_parity.py show NAME          # old (at its commit) | new | diff
+    .venv/bin/python tests/uitree_parity.py record NAME REF    # the record, from the old code at REF
 """
 
 import hashlib
@@ -48,6 +49,15 @@ RECORDS = ROOT / "tests" / "uitree_parity"
 OUT = ROOT / ".build" / "uitree_parity"
 DT = 1.0 / 30.0
 SETTLE = 8                  # frames a step may take to settle
+
+
+class Surface:
+    """What a parity run opens: `open(ws)` on the built workstation, after
+    `prepare(carts_dir)` wrote what its store needs (carts that ask for
+    permissions, a document)."""
+
+    def __init__(self, open, prepare=None):
+        self.open, self.prepare = open, prepare
 
 
 class Frame:
@@ -101,16 +111,24 @@ def _step(ws, driver, step):
         raise ValueError("parity step %r: one of k:NAME t:TEXT enter del back f:N" % step)
 
 
-def frames(config, open_surface, script, carts_dir=None):
+def frames(config, surface, script, carts_dir=None):
     """The settled frame after the opening and after each step of `script`,
-    on a fresh workstation of golden configuration `config`."""
+    on a fresh workstation of golden configuration `config`. `surface` is a
+    Surface, or the function that opens one."""
     g = _goldens()
     from runtime.host_api import ConsoleDriver
-    carts_dir = carts_dir or tempfile.mkdtemp(prefix="uitree_parity_")
+    if not isinstance(surface, Surface):
+        surface = Surface(surface)
+    # the console's system store (settings, consent) lies beside the carts:
+    # a run of its own, never a neighbour's
+    carts_dir = str(carts_dir or os.path.join(tempfile.mkdtemp(prefix="uitree_parity_"), "carts"))
+    if surface.prepare is not None:
+        os.makedirs(carts_dir, exist_ok=True)
+        surface.prepare(carts_dir)
     ws = g._build(g.CONFIGS[config], carts_dir)
     out = []
     try:
-        open_surface(ws)
+        surface.open(ws)
         driver = ConsoleDriver(ws)
         cv = ws.glass_canvas
         out.append(Frame("(open)", _settle(ws, g, driver), cv.w, cv.h))
@@ -203,25 +221,15 @@ def _head():
                           capture_output=True, text=True).stdout.strip()
 
 
-def record(name, config, open_surface, script):
-    """Keep the old surface's frames as hashes, with the commit they came from."""
-    fs = frames(config, open_surface, script)
-    RECORDS.mkdir(parents=True, exist_ok=True)
-    body = {"config": config, "commit": _head(), "script": list(script),
-            "frames": [[f.step, f.digest()] for f in fs]}
-    (RECORDS / (name + ".json")).write_text(json.dumps(body, indent=1) + "\n", encoding="utf-8")
-    return body
-
-
 def load(name):
     return json.loads((RECORDS / (name + ".json")).read_text(encoding="utf-8"))
 
 
-def check_recorded(name, open_surface):
+def check_recorded(name, surface, carts_dir=None):
     """Run the port through the recorded script; raise at the first step
     whose frame is not the recorded one."""
     body = load(name)
-    fs = frames(body["config"], open_surface, body["script"])
+    fs = frames(body["config"], surface, body["script"], carts_dir)
     for i, (f, (step, want)) in enumerate(zip(fs, body["frames"])):
         if f.digest() != want:
             sys.path.insert(0, str(ROOT / "tools"))
@@ -245,30 +253,67 @@ def _surfaces():
     return test_uitree_ports.SURFACES
 
 
-def _show(name):
-    """The old frames from the recorded commit's tree, the new from this
-    one's, compared: the first differing step's side-by-side."""
-    body = load(name)
-    opener = _surfaces()[name]
+def frames_at(commit, surface_name, config, script):
+    """The frames of `script` drawn by the runtime of `commit` (a detached
+    tree beside this one, with its toolchains linked), the surface opened by
+    this tree's SURFACES: the old half of a port, after or before it lands."""
     with tempfile.TemporaryDirectory(prefix="uitree_old_") as old_tree:
-        subprocess.run(["git", "-C", str(ROOT), "worktree", "add", "--detach", old_tree, body["commit"]],
+        subprocess.run(["git", "-C", str(ROOT), "worktree", "add", "--detach", old_tree, commit],
                        check=True, capture_output=True)
+        sys.path.insert(0, str(ROOT / "tools"))
+        import worktree                 # the old tree takes this one's toolchains and built trees
+        for rel in worktree.links(str(ROOT)) + worktree.mpy_trees(str(ROOT)):
+            worktree.link(str(ROOT), old_tree, rel)
         try:
-            code = ("import sys, json, pickle; sys.path.insert(0, %r); sys.path.insert(0, %r);"
+            code = ("import sys, pickle; sys.path.insert(0, %r); sys.path.insert(0, %r);"
+                    "import runtime;"
+                    "assert runtime.__file__.startswith(%r), runtime.__file__;"
                     "import uitree_parity as P, test_uitree_ports as T;"
                     "fs = P.frames(%r, T.SURFACES[%r], %r);"
+                    "import runtime as R2; assert R2.__file__.startswith(%r), R2.__file__;"
                     "sys.stdout.buffer.write(pickle.dumps([(f.step, f.buf, f.w, f.h) for f in fs]))"
-                    % (str(Path(old_tree) / "tests"), old_tree, body["config"], name, body["script"]))
+                    % (str(ROOT / "tests"), old_tree, old_tree, config, surface_name, list(script), old_tree))
             env = dict(os.environ, PYTHONPATH=old_tree)
             r = subprocess.run([sys.executable, "-c", code], capture_output=True, env=env, cwd=old_tree)
             if r.returncode:
                 raise SystemExit(r.stderr.decode()[-2000:])
             import pickle
-            old = [Frame(*t) for t in pickle.loads(r.stdout)]
+            return [Frame(*t) for t in pickle.loads(r.stdout)]
         finally:
             subprocess.run(["git", "-C", str(ROOT), "worktree", "remove", "--force", old_tree],
                            capture_output=True)
-    new = frames(body["config"], opener, body["script"])
+
+
+def _run(name):
+    sys.path.insert(0, str(ROOT / "tests"))
+    import test_uitree_ports
+    run = next((r for r in test_uitree_ports.RUNS if r[0] == name), None)
+    if run is None:
+        raise SystemExit("no run %r in tests/test_uitree_ports.py RUNS" % name)
+    return run
+
+
+def record_at(name, commit):
+    """Record run `name` of tests/test_uitree_ports.py RUNS from the old code at `commit`."""
+    _n, surface_name, config, script = _run(name)
+    sha = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--short=9", commit],
+                         capture_output=True, text=True, check=True).stdout.strip()
+    fs = frames_at(sha, surface_name, config, script)
+    RECORDS.mkdir(parents=True, exist_ok=True)
+    body = {"surface": surface_name, "config": config, "commit": sha, "script": list(script),
+            "frames": [[f.step, f.digest()] for f in fs]}
+    (RECORDS / (name + ".json")).write_text(json.dumps(body, indent=1) + "\n", encoding="utf-8")
+    print("recorded %s at %s: %d frames" % (name, sha, len(fs)))
+    return 0
+
+
+def _show(name):
+    """The old frames from the recorded commit's runtime, the new from this
+    tree's, both opened by this tree's SURFACES, compared: the first
+    differing step's side-by-side."""
+    body = load(name)
+    old = frames_at(body["commit"], body["surface"], body["config"], body["script"])
+    new = frames(body["config"], _surfaces()[body["surface"]], body["script"])
     try:
         compare(old, new, OUT / name, name)
     except AssertionError as e:
@@ -278,9 +323,18 @@ def _show(name):
     return 0
 
 
-if __name__ == "__main__":
-    if len(sys.argv) == 3 and sys.argv[1] == "show":
-        sys.path.insert(0, str(ROOT))
-        sys.exit(_show(sys.argv[2]))
+def _main(argv):
+    sys.path.insert(0, str(ROOT))
+    sys.path.insert(0, str(ROOT / "tests"))
+    import runtime  # noqa: F401  -- the flat module namespace
+    import uitree_parity            # one module object for the surfaces' Surface class
+    if len(argv) == 2 and argv[0] == "show":
+        return uitree_parity._show(argv[1])
+    if len(argv) == 3 and argv[0] == "record":
+        return uitree_parity.record_at(argv[1], argv[2])
     print(__doc__)
-    sys.exit(2)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(_main(sys.argv[1:]))

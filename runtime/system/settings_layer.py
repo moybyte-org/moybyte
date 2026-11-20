@@ -407,12 +407,14 @@ class SettingsLayer(Layer):
         self._ach_n = -1              # the badges the Achievements row last said
         self._ach_t = -1              # ...of how many
         self._rect = (0, 0, 0, 0)     # the layout's content rect, as the page takes it
+        self._dt = 0.0                # the frame's dt, for a hosted page's clock
         self._ach_words = ""
         self.achievements = AchievementsPage(
             ws.app_context("achievements", AchievementsPage.NEEDS))
         self.licences = LicencesPage(ws.app_context("licences", LicencesPage.NEEDS))
         self.syslog = LogPage()
-        self.permits = PermsPage(ws.app_context("permissions", PermsPage.NEEDS))
+        _pctx = ws.app_context("permissions", PermsPage.NEEDS + ("damage",))
+        self.permits = PermsPage(_pctx, self._sub, _pctx.damage)
         self.back_title = "Settings"
         self._name = None             # the Name being typed, until it is stored
         # The rows page's gen (docs/history/scroll_and_text_2026-10.md §3.3), moved by
@@ -1883,6 +1885,7 @@ class SettingsLayer(Layer):
         """The Settings app: its page and the ground around it (the bar's
         band, wherever the bar sits); the frame draws the bar over them."""
         ws = self.ws
+        self._dt = dt
         cv = ws.sys_canvas
         g = ws.theme_colors["panel"]
         x, y, w, h = self._content()
@@ -1980,7 +1983,9 @@ class SettingsLayer(Layer):
         self.permits.open()
 
     def _perms_draw(self):
-        self.permits.draw(self._content())
+        ws = self.ws
+        self.permits.draw(ws.sys_canvas, ws.theme_colors, self._content(),
+                          _lb.metric_class() == _lb.DESK, self._dt)
 
 
 # The pages over Settings' rows: name -> (its kind, which one open of replaces;

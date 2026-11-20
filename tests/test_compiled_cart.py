@@ -360,9 +360,12 @@ def test_settings_switch_runs_the_native_module_and_remembers(tmp_path):
         sl = ws.settings_layer
         sl.open_page("permissions")
         ws.frame(_DT)
-        rows = {title: perms for title, _aid, perms in sl.permits.rows()}
+        import perms_ui
+        rows = {}
+        for r in perms_ui.s.grants:           # the page's model: a row per switch
+            rows[r.app] = rows.get(r.app, ()) + ((r.perm, r.line),)
         assert rows["Dual C"] == (("native", app_perms.NATIVE_LINE),)
-        sid = aid + " native"
+        sid = aid + " native" + "/on"           # the switch on that row
         x, y, w, h = sl._sub.box(sid)
         for down in (True, False):
             sl.handle_pointer(x + w // 2, y + h // 2, down)
