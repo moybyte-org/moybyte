@@ -195,6 +195,18 @@ static mp_obj_t ui_api_space(mp_obj_t a0, mp_obj_t a1) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_space_obj, ui_api_space);
 
+static mp_obj_t ui_api_dock(mp_obj_t a0, mp_obj_t a1) {
+    moy_ui_ctx_t *c = ctx_of(a0);
+    int32_t out[4];
+    if (!moy_ui_api_dock(c, num(a1), out)) {
+        return mp_const_none;
+    }
+    mp_obj_t t_[4] = {mp_obj_new_int(out[0]), mp_obj_new_int(out[1]), mp_obj_new_int(out[2]),
+                      mp_obj_new_int(out[3])};
+    return ret_tuple(4, t_);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_dock_obj, ui_api_dock);
+
 static mp_obj_t ui_api_part_at(mp_obj_t a0) {
     moy_ui_ctx_t *c = ctx_of(a0);
     int32_t out[2];
@@ -836,6 +848,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_lost_obj, ui_api_lost);
     { MP_ROM_QSTR(MP_QSTR_api_part), MP_ROM_PTR(&ui_api_part_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_api_measure), MP_ROM_PTR(&ui_api_measure_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_api_space), MP_ROM_PTR(&ui_api_space_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_api_dock), MP_ROM_PTR(&ui_api_dock_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_api_part_at), MP_ROM_PTR(&ui_api_part_at_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_api_split_at), MP_ROM_PTR(&ui_api_split_at_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_api_split_toward), MP_ROM_PTR(&ui_api_split_toward_obj) }, \

@@ -385,6 +385,13 @@ def measure(verb, text, o=None):
     return _C.api_measure(t[0], t[1], t[2], _MEASURE.index(verb), text, _over(o))
 
 
+def dock(h):
+    """The open page's last `h` pixels become a docked foot's: the page's
+    rows end above them, as they do above the keys band, on the ground the
+    page drew. `(x, y, w, h)`, or None where no page is open."""
+    return _C.api_dock(_T[0], h)
+
+
 def space(h):
     """The stack moves `h` pixels down, drawing nothing and placing no stop
     (a column centred from its `measure`)."""

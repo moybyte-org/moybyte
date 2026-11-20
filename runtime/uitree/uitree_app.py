@@ -407,11 +407,11 @@ class Engine(S.Builder):
         shown = [k for k in n.kids if _shown(k, None)]
         foot = self._foot_of(n)
         band = None
-        if foot is not None:
+        if foot is not None and not self.desk:
             rest = self.content
-            if not self.desk and self._keys_shown():    # a handheld's band is the content's last line
+            if self._keys_shown():              # a handheld's band is the content's last line
                 band, rest = _v.cut_bottom(rest, 20 * self.fs)
-            self.foot_r, body = _v.cut_bottom(rest, (44 if self.desk else 22 * self.fs) + self._foot_line(foot))
+            self.foot_r, body = _v.cut_bottom(rest, 22 * self.fs + self._foot_line(foot))
             _v.at(*body)
         o = self._page_o
         o["id"] = self._page_id()
@@ -448,6 +448,11 @@ class Engine(S.Builder):
             import ui_draw as _ud
             _v.hints(hint)
             rect = _v.cut_bottom(rect, _ud.metrics("value_row")[17] * self.fs)[1]
+        if foot is not None and self.desk:  # the desk's foot: docked above the band, on the page's ground
+            got = _v.dock(44 + self._foot_line(foot))
+            if got is not None:
+                self.foot_r = got
+                rect = (rect[0], rect[1], rect[2], max(0, got[1] - rect[1]))
         prev, self.ids = self.ids, {}
         moved = False
         want = [(self.want_focus, None)] if self.want_focus is not None else []
@@ -1335,17 +1340,19 @@ class Engine(S.Builder):
                  n.p["lines"](row) if "lines" in n.p else [])
 
     def _r_foot(self, n, row, rect):
-        """The page's docked foot: its ground, a rule along its top, its
-        buttons at their natural widths at its end and a label before them;
-        `look="share"`: its buttons share its width, its label a line of
-        its own over them."""
+        """The page's docked foot: its buttons at their natural widths at
+        its end and a label before them; `look="share"`: its buttons share
+        its width, its label a line of its own over them. On a handheld it
+        lies outside the page, on its own ground under a rule along its top;
+        on the desk it is the page's (`ui.dock`), on the page's ground."""
         x, y, w, h = self.foot_r
         desk, fs = self.desk, self.fs
         fh, pad, m = (30, 7, 16) if desk else (20 * fs, fs, 4 * fs)
         by = y + h - fh - pad
-        cv = self.cv
-        cv.rect(x, y, w, h, self.th["panel"])
-        cv.rect(x + m, y, w - 2 * m, 1, self.th["border"])
+        if not desk:
+            cv = self.cv
+            cv.rect(x, y, w, h, self.th["panel"])
+            cv.rect(x + m, y, w - 2 * m, 1, self.th["border"])
         btns = [k for k in n.kids if k.kind == "button" and _shown(k, row) and k.act.can(row)]
         if n.l.get("look") == "share":
             lab = self._foot_label(n)

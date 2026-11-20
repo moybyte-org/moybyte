@@ -1355,6 +1355,11 @@ int moy_ui_api_measure(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy_ui
 // that draws nothing and is no stop would, with no gap after it (a column
 // the caller centres from its measure).
 void moy_ui_api_space(moy_ui_ctx_t *c, int h);
+// ui.dock(h): the open page's last `h` pixels (at most its height) become a
+// docked foot's: the page's room ends above them, as the keys band's does
+// (moy_ui_api_hints with no `at`), on the ground the page drew; their box at
+// out. 0 where no page is open.
+int moy_ui_api_dock(moy_ui_ctx_t *c, int h, int32_t out[4]);
 // ui.split(id, dir, sizes, o) (docs/ui_api_2026-10.md §5a): ui.at's
 // rect (else the page's, from its row cursor down) cut into `n` panes along
 // one axis, `gap` pixels apart -- left to right, or with MOY_UI_SPLIT_Y top

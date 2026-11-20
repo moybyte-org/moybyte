@@ -271,8 +271,9 @@ def _foot(tmp_path, config, script=("f:2",)):
 @pytest.mark.parametrize("config", ("tdeck_320x240_fs1_dark", "p4_1024x600_fs2_windowed"))
 def test_a_shared_foot_splits_its_width_under_its_line(tmp_path, config):
     """F-13 `foot look="share"`: its buttons are equally wide across the
-    foot, its label on a line of its own above them; on a handheld the keys
-    band stays the content's last line, under the foot."""
+    foot, its label on a line of its own above them; the keys band stays
+    the content's last line, under the foot (on the desk the foot is the
+    page's, docked above the band on the page's ground: `ui.dock`)."""
     fs, eng = _foot(tmp_path, config)
     a, b = eng._ui.box("mark"), eng._ui.box("drop")
     assert a and b and a[1] == b[1] and abs(a[2] - b[2]) <= 1, (a, b)
@@ -281,6 +282,9 @@ def test_a_shared_foot_splits_its_width_under_its_line(tmp_path, config):
     assert a[1] > y + h // 3, (a, eng.foot_r)          # the label's line above them
     if config.startswith("tdeck"):
         assert y + h <= eng.content[1] + eng.content[3] - 20, (eng.foot_r, eng.content)
+    else:
+        assert eng.rect[1] + eng.rect[3] <= y, (eng.rect, eng.foot_r)        # the rows end above it
+        assert y + h + 20 <= eng.content[1] + eng.content[3], (eng.foot_r, eng.content)   # the band under it
 
 
 def test_a_table_is_named_by_its_key_before_it_draws(tmp_path):

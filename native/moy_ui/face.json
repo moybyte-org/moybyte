@@ -30,6 +30,7 @@
       {"api": "part", "out": {"out": 5}, "run": "draw"},
       {"api": "measure", "out": {"out": 5}, "doc": "The box the next call of a verb would take, drawing nothing (moy_ui_api_measure): x, y, w, h and the stack's step at out."},
       {"api": "space"},
+      {"api": "dock", "out": {"out": 4}, "ret": "if", "doc": "The open page's last h pixels a docked foot's, cut from its room on its ground (moy_ui_api_dock): its box at out, else 0."},
       {"api": "part_at", "out": {"out": 2}, "ret": "if", "run": "query:0", "doc": "Where the pointer is inside the part answered last (moy_ui_api_part_at): 1 with x, y at out, else 0."},
       {"api": "split", "hand": true, "run": "draw", "run_ret": "cur", "doc": "The panes (moy_ui_api_split): the focused pane at *cur, the panes' rects and the drag's words at out, a divider let go after a drag writing `sizes`."},
       {"api": "split_at", "ret": "bool"},

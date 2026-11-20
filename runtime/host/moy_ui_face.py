@@ -365,6 +365,7 @@ SIGS = (
     ("moy_ui_api_measure", [c.c_void_p, c.POINTER(moy_ui_sink_t), c.c_int, moy_ui_span_t,
      c.c_void_p, c.c_void_p], c.c_int),
     ("moy_ui_api_space", [c.c_void_p, c.c_int], None),
+    ("moy_ui_api_dock", [c.c_void_p, c.c_int, c.c_void_p], c.c_int),
     ("moy_ui_api_part_at", [c.c_void_p, c.c_void_p], c.c_int),
     ("moy_ui_api_split_at", [c.c_void_p, c.c_int, c.c_int], c.c_int),
     ("moy_ui_api_split_toward", [c.c_void_p, c.c_int, c.c_int, c.c_int, c.c_int, c.c_void_p],
@@ -582,6 +583,13 @@ def install(m, lib, ctx_, sink, span0, over, box_of):
         p_, k_ = ctx_(ctx)
         lib.moy_ui_api_space(p_, int(h))
     m.api_space = api_space
+    def api_dock(ctx, h):
+        p_, k_ = ctx_(ctx)
+        out_w = (c.c_int32 * 4)()
+        if not lib.moy_ui_api_dock(p_, int(h), out_w):
+            return None
+        return tuple(out_w)
+    m.api_dock = api_dock
     def api_part_at(ctx):
         p_, k_ = ctx_(ctx)
         out_w = (c.c_int32 * 2)()
