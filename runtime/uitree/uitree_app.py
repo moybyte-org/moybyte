@@ -7,7 +7,6 @@ frame, as one commit.
 `Engine` replays into a frame its host began. `App` is a registered app
 whose screen is a build (`app_layer` makes the class a manifest names);
 `Page` is a build hosted by a surface still drawn with today's verbs."""
-import re
 
 import ui as _v
 from layers import AppLayer
@@ -49,6 +48,8 @@ class Engine(S.Builder):
         self.ids = {}
         self.dups = set()
         self._sync = {}
+        self._orders = {}               # a list's key -> the order of its rows (_after_removal)
+        self.cell_used = {}             # a centred column's height this frame, by its id
         self.curs = []
         self.fresh = False
         self.focused = None
@@ -77,7 +78,7 @@ class Engine(S.Builder):
         first engine in takes the module's as they are. The dicts stay the
         objects templates and derives read."""
         st = self.s
-        was = st.__dict__.get("_owner")
+        was = st._owner
         if was is self:
             return
         if was is not None:
@@ -108,7 +109,7 @@ class Engine(S.Builder):
 
     def _posts(self):
         q, self.decl.posts[:] = list(self.decl.posts), []
-        tk = self.s.__dict__.get("_tickets", {})
+        tk = self.s._tickets
         for act, arg, ticket in q:
             if ticket is not None and tk.get(ticket.load) != ticket.n:
                 was, S._NOW.app = S._NOW.app, self
@@ -178,7 +179,7 @@ class Engine(S.Builder):
         self.want_focus = None          # a fresh visit: no focus, cur or row order carried over
         self._sync, self.ids, self.focused, self.drawn = {}, {}, None, {}
         self.drafts = {}
-        self.__dict__.pop("_orders", None)
+        self._orders = {}
         self._lists_now = self._lists_before = set()
         hook = self.actions.get(hook)
         if hook is not None and hook.hook:
@@ -475,7 +476,7 @@ class Engine(S.Builder):
         if w in self.dups:
             self.want_focus = None
             raise S.UIError("N08", "ui.focus(%r): two shown nodes are keyed %r" % (
-                re.sub(r"\b(\w+?)__(\w+)", r"\1.\2", w), w), where=("(run)", 0),
+                S.dotted(w), w), where=("(run)", 0),
                 fix="give the two uses of the fragment different parents' keys and name the parent: "
                     "ui.focus(\"panel/key\"), or show one at a time")
 
@@ -487,7 +488,7 @@ class Engine(S.Builder):
         """G15's removal rule: the current row gone, the next row in the old
         order that is still there, else the one before it, else none."""
         ck = lst.src.get("cur")
-        orders = self.__dict__.setdefault("_orders", {})
+        orders = self._orders
         old = orders.get(lst.key)
         orders[lst.key] = keys
         if not ck or old is None:
@@ -1027,7 +1028,7 @@ class Engine(S.Builder):
         (`align="center"`, the default), else at the top."""
         if d != "row" or n.l.get("align", "center") != "center":
             return 0
-        used = self.__dict__.setdefault("cell_used", {}).get(sid)
+        used = self.cell_used.get(sid)
         return max(0, (r[3] - used) // 2) if used is not None else 0
 
     def _cell_measure(self, sid, cell):
@@ -1035,7 +1036,7 @@ class Engine(S.Builder):
         stack's foot); a change asks for the frame that centres it."""
         y = self._blank(sid + " foot", 1)[1]
         used = y - cell[1]
-        cu = self.__dict__.setdefault("cell_used", {})
+        cu = self.cell_used
         if cu.get(sid) != used:
             cu[sid] = used
             self._damage.all()
@@ -1319,8 +1320,7 @@ class Engine(S.Builder):
         return False
 
     def trace_text(self):
-        import re
-        return re.sub(r"\b([a-z]\w*?)__(\w+)", r"\1.\2", "\n".join(self.trace))
+        return S.dotted("\n".join(self.trace), lead=True)
 
     def snapshot(self):
         return S.snapshot(self)
@@ -1340,7 +1340,7 @@ class App(AppLayer):
     def __init__(self, ctx, names=None):
         self._surf, self._theme, self._damage = ctx.surface, ctx.theme, ctx.damage
         build = self.BUILD[0]
-        self.engine = Engine(S.decl_of(build.__module__), build, ctx.ui, ctx.surface, ctx.damage,
+        self.engine = Engine(S.decl_of(S.module_of(build)), build, ctx.ui, ctx.surface, ctx.damage,
                              getattr(ctx, "files", None), env=ctx)
 
     def is_app(self, cart):
@@ -1403,12 +1403,12 @@ def app_layer(id, title, build, is_app=None, needs=()):
     if not callable(build):
         raise S.UIError("N01", "app_layer(%r): build is not a function" % id,
                         fix="pass the module's page function itself: app_layer(%r, %r, build)" % (id, title))
-    ad = S.decl_of(build.__module__).app
+    ad = S.decl_of(S.module_of(build)).app
     if ad is None and title is None:
-        raise S.UIError("D04", "app %r has no ui.app declaration" % id, where=(build.__module__, 0),
-                        fix='ui.app("Title", icon="...") at the top of %s' % build.__module__)
+        raise S.UIError("D04", "app %r has no ui.app declaration" % id, where=(S.module_of(build), 0),
+                        fix='ui.app("Title", icon="...") at the top of %s' % S.module_of(build))
     if ad is not None:
-        if ad.back != "pages" and ad.back not in S.decl_of(build.__module__).actions:
+        if ad.back != "pages" and ad.back not in S.decl_of(S.module_of(build)).actions:
             raise S.UIError("A01", "ui.app back=%r names no action" % ad.back, where=ad.where,
                             fix='declare ui.action(%r, ...), or back="pages"' % ad.back)
         title = ad.title()
@@ -1424,5 +1424,5 @@ class Page(Engine):
     with the old engine."""
 
     def __init__(self, build, host, damage, files=None, close=None, gen=False, env=None):
-        Engine.__init__(self, S.decl_of(build.__module__), build, host, None, damage, files, gen, env)
+        Engine.__init__(self, S.decl_of(S.module_of(build)), build, host, None, damage, files, gen, env)
         self.close_root = close

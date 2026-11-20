@@ -29,6 +29,57 @@ try:
 except (ImportError, AttributeError):
     difflib = inspect = _frame = None
 
+# What else a board's MicroPython lacks, met here and nowhere else: `re` has
+# no fullmatch (a pattern anchored with `$` matches the same names), a
+# function takes no attributes (a wrapper keeps its own __name__ there) and
+# has no __module__, and an instance's __dict__ is read-only (the layer keeps
+# its own attributes as plain ones, set at __init__).
+if hasattr(re, "fullmatch"):
+    _fullmatch = re.fullmatch
+else:
+    def _fullmatch(pattern, s):
+        return re.match(pattern + "$", s)
+
+
+def _wraps(call, fn):
+    try:
+        call.__name__, call.__doc__, call.__wrapped__ = fn.__name__, fn.__doc__, fn
+    except AttributeError:
+        pass
+    return call
+
+
+def module_of(fn):
+    """The name of the module that defines `fn` (a board's functions carry
+    their globals, not __module__)."""
+    return fn.__globals__["__name__"]
+
+
+def _word(c):
+    return c.isalpha() or c.isdigit() or c == "_"
+
+
+def dotted(s, lead=False):
+    """A fragment's flattened key read back as its path: in each word, the
+    first "__" with a character on both sides becomes "." ("panel__ok" is
+    "panel.ok"). `lead` takes only words that start with a lowercase letter."""
+    out, i, n = [], 0, len(s)
+    while i < n:
+        if not _word(s[i]):
+            out.append(s[i])
+            i += 1
+            continue
+        j = i
+        while j < n and _word(s[j]):
+            j += 1
+        w = s[i:j]
+        k = w.find("__", 1)
+        if k > 0 and k + 2 < len(w) and (not lead or "a" <= w[0] <= "z"):
+            w = w[:k] + "." + w[k + 2:]
+        out.append(w)
+        i = j
+    return "".join(out)
+
 # the layer's own files: an error's file:line is the first frame outside them
 _SKIP = ("uitree.py", "uitree_app.py", "uitree_editor.py", "uitree_doc.py", "uitree_pics.py")
 
@@ -557,6 +608,8 @@ class State:
         object.__setattr__(self, "_ver", dict.fromkeys(t, 0))
         object.__setattr__(self, "_derive", {})       # name -> its getter, in evaluation order
         object.__setattr__(self, "_dsrc", {})         # name -> (its expression, the names it reads)
+        object.__setattr__(self, "_owner", None)      # the engine whose values these are (uitree_app)
+        object.__setattr__(self, "_tickets", {})      # a load's name -> its current ticket
 
     def __getattr__(self, k):
         if k.startswith("__"):
@@ -885,7 +938,7 @@ def app(title, **fields):
         raise UIError("D01", "ui.app glass=%r" % (fields["glass"],), where=where, expected=", ".join(GLASS),
                       fix='glass="may"')
     b = fields.get("back", "pages")
-    if not isinstance(b, str) or not re.fullmatch(r"[a-z_][a-z0-9_]*", b):
+    if not isinstance(b, str) or not _fullmatch(r"[a-z_][a-z0-9_]*", b):
         raise UIError("D01", "ui.app back=%r" % (b,), where=where,
                       expected='"pages", or the name of an action', fix='back="pages"')
     d.app = AppDecl(title, tmpl(title, Ctx(), where, "title").g, fields, where)
@@ -1090,8 +1143,16 @@ def cond(src, ctx, where):
 def cond_full(src, ctx, where):
     """A derive's condition: terms as in `cond`, `!`, and brackets; `&` and
     `|` may both appear, but one bracket level joins with one of them."""
-    toks = re.findall(r"\(|\)|&|\||[^()&|]+", src)
-    toks = [t.strip() for t in toks if t.strip()]
+    toks, run = [], ""
+    for ch in src + "&":
+        if ch in "()&|":
+            if run.strip():
+                toks.append(run.strip())
+            toks.append(ch)
+            run = ""
+        else:
+            run += ch
+    toks.pop()
     pos = [0]
 
     def peek():
@@ -1278,8 +1339,8 @@ def _piece(body, src, ctx, where):
         a, b = a.replace("\\:", ":").replace("\\?", "?"), b.replace("\\:", ":").replace("\\?", "?")
         if "{" in a or "{" in b:        # H8: text with plain references, never another choice
             for br in (a, b):
-                for inner in re.findall(r"\{([^{}]*)\}", br):
-                    if "?" in inner:
+                for inner in br.split("{")[1:]:
+                    if "}" in inner and "?" in inner[:inner.index("}")]:
                         raise UIError("T01", "template %r: a branch holds another choice" % src, where=where,
                                       fix="a derive for the inner choice, read here by name")
             ga, gb = tmpl(a, ctx, where).g, tmpl(b, ctx, where).g
@@ -1490,7 +1551,7 @@ OFFS = ("hide", "grey")
 
 def _declare(name, label, fn, takes, where, what):
     _declaring(what)
-    if not isinstance(name, str) or not re.fullmatch(r"[a-z_][a-z0-9_]*", name):
+    if not isinstance(name, str) or not _fullmatch(r"[a-z_][a-z0-9_]*", name):
         raise UIError("A03", "%s name %r" % (what, name), where=where,
                       expected="a lower-case name: letters, digits and _",
                       fix='ui.%s("save", ...)' % what)
@@ -1835,7 +1896,7 @@ def _texts(gs):
 
 def _prop(pt, k, v, ctx, where, kind):
     if pt == "image":
-        if not isinstance(v, str) or not re.fullmatch(r"[.@]?[A-Za-z_][\w.]*", v):
+        if not isinstance(v, str) or not _fullmatch(r"[.@]?[A-Za-z_][\w.]*", v):
             raise UIError("T03", "ui.%s %s=%r: an image names an image state or a row's image field" % (
                 kind, k, v), where=where, fix="%s=.cover (a row's field) or %s=NAME (an image state)" % (k, k))
         t, g = _ref(v, ctx, where)
@@ -2658,7 +2719,7 @@ class LoadView:
             _NOW.load_move = False
 
     def start(self):
-        tk = self._s.__dict__.setdefault("_tickets", {})
+        tk = self._s._tickets
         tk[self._n] = tk.get(self._n, 0) + 1
         self._move("loading")
         return Ticket(self._n, tk[self._n])
@@ -2815,8 +2876,7 @@ def _collecting(fn, returns_node):
         except UIError as e:
             _NOW.collect.append(e)
             return _Refused(e.where) if returns_node else (a[0] if a else None)
-    call.__name__, call.__doc__, call.__wrapped__ = fn.__name__, fn.__doc__, fn
-    return call
+    return _wraps(call, fn)
 
 
 NODE_CALLS = ("page", "group", "label", "info", "link", "button", "item", "card", "toggle", "slider",

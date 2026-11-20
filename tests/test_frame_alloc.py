@@ -1395,10 +1395,12 @@ def main():
 
         moy_runtime._Storage.load = _load
         moy_runtime.POWER_SAVE_MS = 0
-        measure(_Loop(moy_runtime.run_desktop()))
+        @ENTRY@(_Loop(moy_runtime.run_desktop()))
     except BaseException as exc:             # noqa -- say it, then end the run
         sys.print_exception(exc)
     DONE.release()
+
+@MORE@
 
 
 # The console's imports nest deeper than the desktop port's main-thread C stack
@@ -1567,13 +1569,17 @@ def _stage_app_data(dest):
                             moy_carts.encode_moyimg(w, h, bytes(px)), root)
 
 
-def _run(tmp_path):
+def _run(tmp_path, entry="measure", more="", why=None):
+    """Boot the T-Deck's console on the boards' model and hand its loop to
+    the driver's `entry`: `measure` by default, or a function `more` (driver
+    source) defines. Returns the RESULT line's dict and the run's output."""
     exe = require_unix_mp(
         "moycore", "moy_gfx", "moy_audio", board_model=True,
-        why="This is the only check that a play frame allocates nothing on "
+        why=why or (
+            "This is the only check that a play frame allocates nothing on "
             "the boards' Python heap. A board pays for garbage in whole-heap "
             "collections that stop the frame and starve a compiled cart's "
-            "sound; nothing else in the suite measures a frame's allocation.")
+            "sound; nothing else in the suite measures a frame's allocation."))
     _stage(tmp_path, exe, apps=True)
     script = tmp_path / "driver.py"
     script.write_text(DRIVER.replace("@ROOT@", repr(str(tmp_path)))
@@ -1581,7 +1587,8 @@ def _run(tmp_path):
                       .replace("@MIN_FRAMES@", str(MIN_FRAMES))
                       .replace("@BAND_MOVES@", str(BAND_MOVES))
                       .replace("@BAND_STEPS@", str(BAND_STEPS))
-                      .replace("@FLING_STEPS@", str(FLING_STEPS)))
+                      .replace("@FLING_STEPS@", str(FLING_STEPS))
+                      .replace("@ENTRY@", entry).replace("@MORE@", more))
     out_path = tmp_path / "out.txt"
     # stdin stays OPEN and silent, as a board's serial does between commands:
     # the dev channel polls it every frame.
