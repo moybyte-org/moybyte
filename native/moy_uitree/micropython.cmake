@@ -14,5 +14,6 @@ target_include_directories(usermod_moy_uitree INTERFACE ${CMAKE_CURRENT_LIST_DIR
     ${CMAKE_CURRENT_LIST_DIR}/../moy_gfx ${CMAKE_CURRENT_LIST_DIR}/../moy_gfx/libmoy
     ${CMAKE_CURRENT_LIST_DIR}/../moy_glass
     ${CMAKE_CURRENT_LIST_DIR}/../moy_spine)
-target_compile_definitions(usermod_moy_uitree INTERFACE MOY_PIXEL_RGB565=1)
+# UIT_TERSE: a refusal carries its code and the names involved, not prose.
+target_compile_definitions(usermod_moy_uitree INTERFACE MOY_PIXEL_RGB565=1 UIT_TERSE=1)
 target_link_libraries(usermod INTERFACE usermod_moy_uitree)

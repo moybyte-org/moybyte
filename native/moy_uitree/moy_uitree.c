@@ -236,9 +236,9 @@ const char *uit_error_code(const uit_t *e)
 int uit_state(uit_t *e, const char *name, int type, const char *values, size_t vlen)
 {
     if (e->decl_done)
-        return uit_fail(e, UIT_E_ARG, "state %s declared after the first build", name);
+        return uit_fail(e, UIT_E_ARG, UIT_MSG("state %s declared after the first build", "%s"), name);
     if (type < UIT_BOOL || type > UIT_MODEL)
-        return uit_fail(e, UIT_E_ARG, "state %s: no type %d", name, type);
+        return uit_fail(e, UIT_E_ARG, UIT_MSG("state %s: no type %d", "state %s %d"), name, type);
     if (UIT_GROW(e, slots, nslots, cslots))
         return UIT_E_NOMEM;
     uit_slot_t *S = &e->slots[e->nslots];
@@ -266,7 +266,7 @@ int uit_model(uit_t *e, int slot, const char *names, size_t nlen, const uint8_t 
 {
     if (slot < 0 || slot >= e->nslots || e->slots[slot].type != UIT_MODEL || nf < 1 || nf > UIT_FIELDS ||
         key < 0 || key >= nf)
-        return uit_fail(e, UIT_E_ARG, "model: bad slot %d or %d fields", slot, nf);
+        return uit_fail(e, UIT_E_ARG, UIT_MSG("model: bad slot %d or %d fields", "model %d %d"), slot, nf);
     uit_slot_t *S = &e->slots[slot];
     S->nf = (uint8_t)nf;
     S->key = (uint8_t)key;
@@ -295,7 +295,7 @@ int uit_labels(uit_t *e, const char *name, const char *keys, size_t klen, const 
                size_t wlen)
 {
     if (e->decl_done)
-        return uit_fail(e, UIT_E_ARG, "labels %s declared after the first build", name);
+        return uit_fail(e, UIT_E_ARG, UIT_MSG("labels %s declared after the first build", "%s"), name);
     int n = 0;
     for (size_t i = 0; i <= klen; i++)
         n += i == klen || keys[i] == 0;
@@ -303,7 +303,7 @@ int uit_labels(uit_t *e, const char *name, const char *keys, size_t klen, const 
     for (size_t i = 0; i <= wlen; i++)
         w += i == wlen || words[i] == 0;
     if (n != w)
-        return uit_fail(e, UIT_E_ARG, "labels %s: %d keys, %d words", name, n, w);
+        return uit_fail(e, UIT_E_ARG, UIT_MSG("labels %s: %d keys, %d words", "labels %s %d %d"), name, n, w);
     if (UIT_GROW(e, labels, nlabels, clabels))
         return UIT_E_NOMEM;
     int a = pool_puts(e, name), b = pool_put(e, keys, klen), c = pool_put(e, words, wlen);
@@ -334,7 +334,7 @@ int uit_action(uit_t *e, const char *name, const char *label, const char *hint, 
                int off, int flags, const char *letters, const char *icon)
 {
     if (e->decl_done)
-        return uit_fail(e, UIT_E_ARG, "action %s declared after the first build", name);
+        return uit_fail(e, UIT_E_ARG, UIT_MSG("action %s declared after the first build", "%s"), name);
     if (UIT_GROW(e, acts, nacts, cacts))
         return UIT_E_NOMEM;
     uit_act_t A;
@@ -443,7 +443,7 @@ int uit_set_model(uit_t *e, int slot, int n, const char *cells, size_t len)
         if (p > len) {
             UIT_FREE(c);
             UIT_FREE(at);
-            return uit_fail(e, UIT_E_ARG, "model: %d cells short", n * S->nf - i);
+            return uit_fail(e, UIT_E_ARG, UIT_MSG("model: %d cells short", "model %d"), n * S->nf - i);
         }
         at[i] = (uint32_t)p;
         p += text_len(c + p, len - p) + 1;
@@ -532,9 +532,9 @@ static uint16_t up(int k)
 int uit_node(uit_t *e, int kind, const char *key, int parent)
 {
     if (kind < UIT_PAGE || kind >= UIT_KINDS)
-        return uit_fail(e, UIT_E_KIND, "no kind %d", kind);
+        return uit_fail(e, UIT_E_KIND, UIT_MSG("no kind %d", "%d"), kind);
     if ((parent < 0) != (kind == UIT_PAGE) || parent >= e->nnodes)
-        return uit_fail(e, UIT_E_ARG, "node %s: parent %d", key, parent);
+        return uit_fail(e, UIT_E_ARG, UIT_MSG("node %s: parent %d", "node %s %d"), key, parent);
     if (UIT_GROW(e, nodes, nnodes, cnodes))
         return UIT_E_NOMEM;
     int k = pool_puts(e, key);
@@ -651,13 +651,13 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         if (t < 0)
             return t;
         if (e->tmpls[t].type == UIT_BOOL || e->tmpls[t].type == UIT_MODEL)
-            return uit_check_fail(e, "T03", "empty lines=%s is a %s, not a text", src,
+            return uit_check_fail(e, "T03", UIT_MSG("empty lines=%s is a %s, not a text", "%s %s"), src,
                                   uit_type_name(e->tmpls[t].type));
         return add_prop(e, node, name, src, repr, PK_TMPL, t);
     } else if (kind == UIT_SEG && !strcmp(name, "text")) {
         // a seg over a row_of: each row's word, a template over its model's rows
         if (N->slot < 0 || e->slots[N->slot].type != UIT_ROWOF)
-            return uit_fail(e, UIT_E_ARG, "seg text=%s before its row_of", src);
+            return uit_fail(e, UIT_E_ARG, UIT_MSG("seg text=%s before its row_of", "%s"), src);
         model = e->slots[N->slot].model;
         tslot = &N->t_value;
     } else if (!strcmp(name, "title") || !strcmp(name, "caption") || !strcmp(name, "text") ||
@@ -669,7 +669,7 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         tslot = &N->t_aux;
     else if (kind == UIT_SPLIT && (!strcmp(name, "dir") || !strcmp(name, "sizes"))) {
         if (name[0] == 'd' && !strchr(src, '{') && strcmp(src, "row") && strcmp(src, "col"))
-            return uit_check_fail(e, "T03", "ui.split dir=%s: one of row, col", src);
+            return uit_check_fail(e, "T03", UIT_MSG("ui.split dir=%s: one of row, col", "ui.split dir=%s"), src);
         tslot = name[0] == 'd' ? &N->t_value : &N->t_aux;
     }
     else if (!strcmp(name, "icon"))
@@ -691,11 +691,11 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
             for (; *d && lit_int; d++)
                 lit_int = *d >= '0' && *d <= '9';
             if (T->type != UIT_INT && !lit_int)
-                return uit_check_fail(e, "T03", "%s %s=%s is a %s, not an int", uit_kind_names[kind], name, src,
+                return uit_check_fail(e, "T03", UIT_MSG("%s %s=%s is a %s, not an int", "%s %s %s %s"), uit_kind_names[kind], name, src,
                                       uit_type_name(T->type));
         } else if (!(kind == UIT_SEG && !strcmp(name, "text"))) {      // a seg's row words: any type
             if (T->type == UIT_BOOL || T->type == UIT_MODEL)
-                return uit_check_fail(e, "T03", "%s %s=%s is a %s, not a text", uit_kind_names[kind], name, src,
+                return uit_check_fail(e, "T03", UIT_MSG("%s %s=%s is a %s, not a text", "%s %s %s %s"), uit_kind_names[kind], name, src,
                                       uit_type_name(T->type));
         }
         *tslot = (int16_t)t;
@@ -704,7 +704,7 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
     if (!strcmp(name, "tone") && kind == UIT_LABEL) {
         int i = lit_index(src, TONES, 4);
         if (i <= 0)
-            return uit_fail(e, UIT_E_KIND, "label tone=%s: an ink role this engine does not draw yet", src);
+            return uit_fail(e, UIT_E_KIND, UIT_MSG("label tone=%s: an ink role this engine does not draw yet", "label tone=%s"), src);
         N->lit = (uint8_t)i;
         return add_prop(e, node, name, src, repr, PK_LIT, i);
     }
@@ -716,7 +716,7 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         int i = name[0] == 'w' ? lit_index(src, WRAPS, 3) : name[0] == 'f' ? lit_index(src, FACES, 7)
                 : name[0] == 'a' ? lit_index(src, ALIGNS, 3) : (int)strtol(src, NULL, 10);
         if (i < 0)
-            return uit_fail(e, UIT_E_KIND, "label %s=%s", name, src);
+            return uit_fail(e, UIT_E_KIND, UIT_MSG("label %s=%s", "%s %s"), name, src);
         if (name[0] == 'w')
             N->nbtn = (uint16_t)((N->nbtn & ~LT_WRAP) | i);
         else if (name[0] == 'f')
@@ -737,7 +737,7 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         static const char *const GAPS[] = {"s", "m", "l", "0"}, *const ALIGNS[] = {"start", "center", "end"};
         int i = name[0] == 'a' ? lit_index(src, ALIGNS, 3) : lit_index(src, GAPS, 4);
         if (i < 0)
-            return uit_fail(e, UIT_E_KIND, "split %s=%s", name, src);
+            return uit_fail(e, UIT_E_KIND, UIT_MSG("split %s=%s", "%s %s"), name, src);
         if (name[0] == 'p')
             N->btn = (uint16_t)i;
         else if (name[0] == 'g')
@@ -760,7 +760,7 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         int m = uit_model_of(e, node);
         int f = uit_field_find(e, m, src, strlen(src));
         if (f < 0 || e->slots[m].ftype[f] != UIT_BOOL)
-            return uit_fail(e, UIT_E_NAME, "toggle .%s: no bool field of its rows", src);
+            return uit_fail(e, UIT_E_NAME, UIT_MSG("toggle .%s: no bool field of its rows", "toggle .%s"), src);
         N->slot = (int16_t)m;
         N->cur = (int16_t)f;
         N->lit |= NL_FIELD;
@@ -773,7 +773,7 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
                  : kind == UIT_SEG ? t == UIT_ENUM || t == UIT_ROWOF : kind == UIT_SLIDER ? t == UIT_INT
                  : kind == UIT_FIELD ? t == UIT_TEXT : kind == UIT_TEXT_VIEW ? t == UIT_TEXT || t == UIT_MODEL : 0;
         if (!ok)
-            return uit_fail(e, UIT_E_NAME, "%s bound to %s: no such state of its type", uit_kind_names[kind], src);
+            return uit_fail(e, UIT_E_NAME, UIT_MSG("%s bound to %s: no such state of its type", "%s bound to %s"), uit_kind_names[kind], src);
         N->slot = (int16_t)s;
         return 0;               // the head, not a prop the dump lists
     }
@@ -783,7 +783,7 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
                 N->cur = (int16_t)i;
                 return add_prop(e, node, name, src, repr, PK_LIT, i);
             }
-        return uit_fail(e, UIT_E_NAME, "seg labels=%s: no label table of that name", src);
+        return uit_fail(e, UIT_E_NAME, UIT_MSG("seg labels=%s: no label table of that name", "seg labels=%s"), src);
     }
     if (!strcmp(name, "look") && (kind == UIT_SEG || kind == UIT_SLIDER || kind == UIT_PROGRESS)) {
         if (!strcmp(src, kind == UIT_SEG ? "cycle" : kind == UIT_SLIDER ? "steps" : "count"))
@@ -808,13 +808,13 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
                     N->changed = (int16_t)a;
                 return add_prop(e, node, name, src, repr, PK_ACT, a);
             }
-        return uit_fail(e, UIT_E_NAME, "%s %s=%s: no such action", uit_kind_names[kind], name, src);
+        return uit_fail(e, UIT_E_NAME, UIT_MSG("%s %s=%s: no such action", "%s %s=%s"), uit_kind_names[kind], name, src);
     }
     if (kind == UIT_TEXT_VIEW && !strcmp(name, "field")) {
         // a view of a model: each row's line, this text field
         int f = N->slot >= 0 ? uit_field_find(e, N->slot, src, strlen(src)) : -1;
         if (f < 0 || e->slots[N->slot].ftype[f] != UIT_TEXT)
-            return uit_fail(e, UIT_E_NAME, "text_view .%s: no text field of its model", src);
+            return uit_fail(e, UIT_E_NAME, UIT_MSG("text_view .%s: no text field of its model", "text_view .%s"), src);
         N->cur = (int16_t)f;
         return 0;
     }
@@ -837,14 +837,14 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         int s = uit_slot_find(e, src, strlen(src));
         int t = s < 0 ? 0 : e->slots[s].type;
         if (t != UIT_TEXT && t != UIT_ROWOF && t != UIT_INT)
-            return uit_fail(e, UIT_E_NAME, "rows current=%s: no text, int or row_of of that name", src);
+            return uit_fail(e, UIT_E_NAME, UIT_MSG("rows current=%s: no text, int or row_of of that name", "rows current=%s"), src);
         N->current = (int16_t)s;
         return add_prop(e, node, name, src, repr, PK_LIT, s);
     }
     if (!strcmp(name, "cur") && kind == UIT_ROWS) {
         int s = uit_slot_find(e, src, strlen(src));
         if (s < 0 || e->slots[s].type != UIT_ROWOF)
-            return uit_fail(e, UIT_E_NAME, "rows cur=%s: no row_of of that name", src);
+            return uit_fail(e, UIT_E_NAME, UIT_MSG("rows cur=%s: no row_of of that name", "rows cur=%s"), src);
         N->cur = (int16_t)s;
         return add_prop(e, node, name, src, repr, PK_LIT, s);
     }
@@ -854,11 +854,11 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
                 N->changed = (int16_t)a;
                 return add_prop(e, node, name, src, repr, PK_ACT, a);
             }
-        return uit_fail(e, UIT_E_NAME, "rows changed=%s: no such action", src);
+        return uit_fail(e, UIT_E_NAME, UIT_MSG("rows changed=%s: no such action", "rows changed=%s"), src);
     }
     if (!strcmp(name, "buttons") && kind == UIT_DIALOG)
         return add_prop(e, node, name, src, repr, PK_LIT, 0);
-    return uit_fail(e, UIT_E_KIND, "%s=: a prop this engine does not draw on this kind (%d)", name, kind);
+    return uit_fail(e, UIT_E_KIND, UIT_MSG("%s=: a prop this engine does not draw on this kind (%d)", "%s= %d"), name, kind);
 }
 
 int uit_node_action(uit_t *e, int node, int action)
@@ -921,7 +921,7 @@ int uit_build_end(uit_t *e)
     e->gen++;
     e->fresh = 1;
     gen_of_build(e);
-    return e->nnodes ? 0 : uit_fail(e, UIT_E_ARG, "a build with no page");
+    return e->nnodes ? 0 : uit_fail(e, UIT_E_ARG, UIT_MSG("a build with no page", ""));
 }
 
 void uit_on_draw(uit_t *e, uit_draw_fn fn, void *ud)

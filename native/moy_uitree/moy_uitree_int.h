@@ -11,6 +11,15 @@
 #define UIT_FREE free
 #endif
 
+// A refusal's words: the prose on the host, whose checker prints it; on a
+// board (UIT_TERSE) the names involved alone, the code (the error's number,
+// the spec's `uit_error_code`) saying what kind of mistake it is.
+#ifdef UIT_TERSE
+#define UIT_MSG(prose, terse) terse
+#else
+#define UIT_MSG(prose, terse) prose
+#endif
+
 #define UIT_NONE 0xFFFFu
 #define UIT_ID_MAX 31           // bytes of a node id the toolkit keeps
 #define UIT_FIELDS 16

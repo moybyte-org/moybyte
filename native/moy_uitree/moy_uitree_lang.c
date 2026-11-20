@@ -116,7 +116,7 @@ static int ref_parse(uit_t *e, const char *s, size_t n, int model, ref_t *r)
 {
     trim(&s, &n);
     if (!n)
-        return uit_check_fail(e, "T02", "an empty name");
+        return uit_check_fail(e, "T02", UIT_MSG("an empty name", ""));
     if (s[0] == '@') {
         for (int i = 1; i <= SYS_TOUCH; i++)
             if (is_word(s + 1, n - 1, SYS_NAMES[i])) {
@@ -133,24 +133,24 @@ static int ref_parse(uit_t *e, const char *s, size_t n, int model, ref_t *r)
         }
         for (size_t i = 0; i < sizeof SYS_RETIRED / sizeof *SYS_RETIRED; i++)
             if (is_word(s + 1, n - 1, SYS_RETIRED[i]))
-                return uit_check_fail(e, "N04", "%.*s is retired", (int)n, s);
+                return uit_check_fail(e, "N04", UIT_MSG("%.*s is retired", "%.*s"), (int)n, s);
         if (is_word(s, n, "@current")) {
             if (model < 0 || e->ccur < 0)
-                return uit_check_fail(e, "T05", "@current outside a list with current=");
+                return uit_check_fail(e, "T05", UIT_MSG("@current outside a list with current=", ""));
             *r = (ref_t){RK_CURRENT, UIT_BOOL, (int16_t)e->ccur, -1};
             return 0;
         }
         for (size_t i = 0; i < sizeof SYS_ALL / sizeof *SYS_ALL; i++)
             if (is_word(s + 1, n - 1, SYS_ALL[i]))
-                return uit_fail(e, UIT_E_LANG, "system value %.*s", (int)n, s);
-        return uit_check_fail(e, "T02", "no system value %.*s", (int)n, s);
+                return uit_fail(e, UIT_E_LANG, UIT_MSG("system value %.*s", "%.*s"), (int)n, s);
+        return uit_check_fail(e, "T02", UIT_MSG("no system value %.*s", "%.*s"), (int)n, s);
     }
     if (s[0] == '.') {
         if (model < 0)
-            return uit_check_fail(e, "T05", "{%.*s}: a row's field outside a list", (int)n, s);
+            return uit_check_fail(e, "T05", UIT_MSG("{%.*s}: a row's field outside a list", "{%.*s}"), (int)n, s);
         int f = uit_field_find(e, model, s + 1, n - 1);
         if (f < 0)
-            return uit_check_fail(e, "T02", "rows have no field %.*s", (int)(n - 1), s + 1);
+            return uit_check_fail(e, "T02", UIT_MSG("rows have no field %.*s", "%.*s"), (int)(n - 1), s + 1);
         *r = (ref_t){RK_FIELD, e->slots[model].ftype[f], -1, (int16_t)f};
         return 0;
     }
@@ -158,18 +158,18 @@ static int ref_parse(uit_t *e, const char *s, size_t n, int model, ref_t *r)
     size_t bn = dot ? (size_t)(dot - s) : n;
     int slot = uit_slot_find(e, s, bn);
     if (slot < 0)
-        return uit_check_fail(e, "T02", "{%.*s}: no state %.*s", (int)n, s, (int)bn, s);
+        return uit_check_fail(e, "T02", UIT_MSG("{%.*s}: no state %.*s", "{%.*s} %.*s"), (int)n, s, (int)bn, s);
     const uit_slot_t *S = &e->slots[slot];
     if (!dot) {
         *r = (ref_t){RK_SLOT, S->type, (int16_t)slot, -1};
         return 0;
     }
     if (S->type != UIT_ROWOF || S->model < 0)
-        return uit_check_fail(e, "T03", "{%.*s}: %.*s is a %s; it has no fields", (int)n, s, (int)bn, s,
+        return uit_check_fail(e, "T03", UIT_MSG("{%.*s}: %.*s is a %s; it has no fields", "{%.*s} %.*s %s"), (int)n, s, (int)bn, s,
                               uit_type_name(S->type));
     int f = uit_field_find(e, S->model, dot + 1, n - bn - 1);
     if (f < 0)
-        return uit_check_fail(e, "T02", "rows of %s have no field %.*s", uit_str(e, e->slots[S->model].name),
+        return uit_check_fail(e, "T02", UIT_MSG("rows of %s have no field %.*s", "%s %.*s"), uit_str(e, e->slots[S->model].name),
                               (int)(n - bn - 1), dot + 1);
     *r = (ref_t){RK_ROWOF, e->slots[S->model].ftype[f], (int16_t)slot, (int16_t)f};
     return 0;
@@ -330,18 +330,18 @@ static int term_parse(uit_t *e, const char *s, size_t n, int model, uit_term_t *
     t->f = r.f;
     if (!op) {
         if (r.type == UIT_ENUM)
-            return uit_check_fail(e, "T03", "%.*s is an enum: it has no truth", (int)n, s);
+            return uit_check_fail(e, "T03", UIT_MSG("%.*s is an enum: it has no truth", "%.*s is an enum"), (int)n, s);
         return 0;
     }
     const char *lit = op + opn;
     size_t ln = n - (size_t)(lit - s);
     trim(&lit, &ln);
     if (r.type == UIT_BOOL)
-        return uit_check_fail(e, "T03", "%.*s compares a bool", (int)n, s);
+        return uit_check_fail(e, "T03", UIT_MSG("%.*s compares a bool", "%.*s"), (int)n, s);
     if (r.type == UIT_MODEL)
-        return uit_check_fail(e, "T03", "%.*s: a model is not compared", (int)n, s);
+        return uit_check_fail(e, "T03", UIT_MSG("%.*s: a model is not compared", "%.*s"), (int)n, s);
     if (r.type == UIT_ENUM && !enum_has(e, &r, lit, ln))
-        return uit_check_fail(e, "T03", "%.*s: no such value %.*s", (int)n, s, (int)ln, lit);
+        return uit_check_fail(e, "T03", UIT_MSG("%.*s: no such value %.*s", "%.*s %.*s"), (int)n, s, (int)ln, lit);
     char tmp[64];
     size_t m = ln < sizeof tmp - 1 ? ln : sizeof tmp - 1;
     memcpy(tmp, lit, m);
@@ -353,7 +353,7 @@ static int term_parse(uit_t *e, const char *s, size_t n, int model, uit_term_t *
         t->li = (int32_t)strtol(tmp, NULL, 10);
     t->lf = strtod(tmp, r.type == UIT_NUM ? &stop : NULL);
     if ((r.type == UIT_INT || r.type == UIT_NUM) && (!m || m != ln || *stop))
-        return uit_check_fail(e, "T03", "%.*s: %.*s is not a number", (int)n, s, (int)ln, lit);
+        return uit_check_fail(e, "T03", UIT_MSG("%.*s: %.*s is not a number", "%.*s %.*s"), (int)n, s, (int)ln, lit);
     int at = uit_buf_put(&e->pool, lit, ln);
     if (at < 0 || at >= (int)UIT_NONE)
         return UIT_E_NOMEM;
@@ -368,12 +368,12 @@ int uit_cond_compile(uit_t *e, const char *src, int model)
     size_t tn = n;
     trim(&t0, &tn);
     if (!tn)
-        return uit_check_fail(e, "C01", "a condition is a text, not empty");
+        return uit_check_fail(e, "C01", UIT_MSG("a condition is a text, not empty", ""));
     if (strpbrk(src, "{?"))
-        return uit_check_fail(e, "C01", "condition %s is bare, not a template", src);
+        return uit_check_fail(e, "C01", UIT_MSG("condition %s is bare, not a template", "%s"), src);
     int any = strchr(src, '|') != NULL;
     if (any && strchr(src, '&'))
-        return uit_check_fail(e, "C02", "condition %s mixes & and |", src);
+        return uit_check_fail(e, "C02", UIT_MSG("condition %s mixes & and |", "%s"), src);
     if (uit_grow((void **)&e->conds, &e->cconds, e->nconds + 1, sizeof *e->conds))
         return UIT_E_NOMEM;
     int sat = uit_buf_put(&e->pool, src, n);
@@ -528,21 +528,21 @@ static int map_check(uit_t *e, const ref_t *r, int table, const char *name)
         for (int i = 0; i < n; i++) {
             const char *v = enum_at(e, r, i);
             if (!label_has(e, L, v, strlen(v)))
-                return uit_check_fail(e, "T04", "table %s has no label for %s", name, v);
+                return uit_check_fail(e, "T04", UIT_MSG("table %s has no label for %s", "%s %s"), name, v);
         }
         const char *k = uit_str(e, L->keys);
         for (int i = 0; i < L->n; i++, k += strlen(k) + 1)
             if (!enum_has(e, r, k, strlen(k)))
-                return uit_check_fail(e, "T04", "table %s: %s is no value of the enum", name, k);
+                return uit_check_fail(e, "T04", UIT_MSG("table %s: %s is no value of the enum", "table %s %s"), name, k);
         return 0;
     }
     if (r->type == UIT_BOOL) {
         if (L->n != 2 || !label_has(e, L, "True", 4) || !label_has(e, L, "False", 5))
-            return uit_check_fail(e, "T04", "table %s: a bool's table has True and False", name);
+            return uit_check_fail(e, "T04", UIT_MSG("table %s: a bool's table has True and False", "table %s"), name);
         return 0;
     }
     if (!label_has(e, L, "_", 1))
-        return uit_check_fail(e, "T04", "table %s on a %s needs a default \"_\"", name, uit_type_name(r->type));
+        return uit_check_fail(e, "T04", UIT_MSG("table %s on a %s needs a default \"_\"", "%s %s"), name, uit_type_name(r->type));
     return 0;
 }
 
@@ -559,12 +559,12 @@ static int fmt_check(uit_t *e, const char *a, size_t an, int type, char *conv)
     case 'f': case 'e': case 'g': ok = nums; break;
     case 's': ok = nums || type == UIT_TEXT || type == UIT_ENUM || type == UIT_ROWOF; break;
     default:
-        return uit_check_fail(e, "T01", "fmt takes one printf spec: %.*s", (int)an, a);
+        return uit_check_fail(e, "T01", UIT_MSG("fmt takes one printf spec: %.*s", "fmt takes one printf spec %.*s"), (int)an, a);
     }
     if (a[0] != '%')
-        return uit_check_fail(e, "T01", "fmt takes one printf spec: %.*s", (int)an, a);
+        return uit_check_fail(e, "T01", UIT_MSG("fmt takes one printf spec: %.*s", "fmt takes one printf spec %.*s"), (int)an, a);
     if (!ok)
-        return uit_check_fail(e, "T03", "%.*s does not format a %s", (int)an, a, uit_type_name(type));
+        return uit_check_fail(e, "T03", UIT_MSG("%.*s does not format a %s", "%.*s %s"), (int)an, a, uit_type_name(type));
     size_t i = 1;
     while (i < an && strchr("-+ #0", a[i]))
         i++;
@@ -574,9 +574,9 @@ static int fmt_check(uit_t *e, const char *a, size_t an, int type, char *conv)
         for (i++; i < an && a[i] >= '0' && a[i] <= '9'; i++)
             ;
     if (i < an && strchr("lhL", a[i]))
-        return uit_fail(e, UIT_E_LANG, "fmt %.*s: a length modifier", (int)an, a);
+        return uit_fail(e, UIT_E_LANG, UIT_MSG("fmt %.*s: a length modifier", "fmt %.*s"), (int)an, a);
     if (i >= an || !strchr("dixfegs", a[i]))
-        return uit_check_fail(e, "T01", "fmt %.*s: a bad spec", (int)an, a);
+        return uit_check_fail(e, "T01", UIT_MSG("fmt %.*s: a bad spec", "fmt %.*s"), (int)an, a);
     *conv = a[i];
     int pct = 0;
     for (size_t k = i + 1; k < an; k++)
@@ -587,12 +587,12 @@ static int fmt_check(uit_t *e, const char *a, size_t an, int type, char *conv)
                 pct = 1;
         }
     if (pct)
-        return uit_check_fail(e, "T01", "fmt %.*s: one spec of one value", (int)an, a);
+        return uit_check_fail(e, "T01", UIT_MSG("fmt %.*s: one spec of one value", "fmt %.*s"), (int)an, a);
     if (*conv == 's' && type != UIT_TEXT && type != UIT_ENUM && type != UIT_ROWOF && type != UIT_INT &&
         type != UIT_NUM)
-        return uit_fail(e, UIT_E_LANG, "fmt %%s of a %s", uit_type_name(type));
+        return uit_fail(e, UIT_E_LANG, UIT_MSG("fmt %%s of a %s", "%s %s"), uit_type_name(type));
     if (strchr("dix", *conv) && type != UIT_INT)
-        return uit_fail(e, UIT_E_LANG, "fmt %c of a %s", *conv, uit_type_name(type));
+        return uit_fail(e, UIT_E_LANG, UIT_MSG("fmt %c of a %s", "%c %s"), *conv, uit_type_name(type));
     return 0;
 }
 
@@ -605,7 +605,7 @@ static int piece(uit_t *e, const char *b, size_t n, int model, uit_tmpl_t *T, ui
         char cs[128];
         size_t cn = (size_t)(q - b);
         if (cn >= sizeof cs)
-            return uit_fail(e, UIT_E_LANG, "a long condition");
+            return uit_fail(e, UIT_E_LANG, UIT_MSG("a long condition", ""));
         memcpy(cs, b, cn);
         cs[cn] = 0;
         const char *s = cs;
@@ -620,9 +620,9 @@ static int piece(uit_t *e, const char *b, size_t n, int model, uit_tmpl_t *T, ui
         size_t rn = n - (size_t)(rest - b);
         const char *colon = find_unescaped(rest, rn, ':');
         if (!colon)
-            return uit_check_fail(e, "T01", "{cond?a:b} needs both branches");
+            return uit_check_fail(e, "T01", UIT_MSG("{cond?a:b} needs both branches", ""));
         if (find_unescaped(colon + 1, rn - (size_t)(colon + 1 - rest), ':'))
-            return uit_check_fail(e, "T01", "a second ':' in {cond?a:b}");
+            return uit_check_fail(e, "T01", UIT_MSG("a second ':' in {cond?a:b}", ""));
         char *br = UIT_MALLOC(rn + 1);
         if (!br)
             return UIT_E_NOMEM;
@@ -635,7 +635,7 @@ static int piece(uit_t *e, const char *b, size_t n, int model, uit_tmpl_t *T, ui
             ints &= is_int(br);
             if (holds_choice(br)) {
                 UIT_FREE(br);
-                return uit_check_fail(e, "T01", "a branch holds another choice");
+                return uit_check_fail(e, "T01", UIT_MSG("a branch holds another choice", ""));
             }
         }
         for (int k = 0; k < 2; k++) {
@@ -679,7 +679,7 @@ static int piece(uit_t *e, const char *b, size_t n, int model, uit_tmpl_t *T, ui
     *ty = UIT_TEXT;
     if (is_word(w, wn, "count")) {
         if (r.type != UIT_MODEL)
-            return uit_check_fail(e, "T03", "count counts a model's rows; %.*s is a %s", (int)(bar - b), b,
+            return uit_check_fail(e, "T03", UIT_MSG("count counts a model's rows; %.*s is a %s", "%.*s %s"), (int)(bar - b), b,
                                   uit_type_name(r.type));
         type = UIT_INT;
         counted = 1;
@@ -696,12 +696,12 @@ static int piece(uit_t *e, const char *b, size_t n, int model, uit_tmpl_t *T, ui
     }
     if (is_word(w, wn, "bytes")) {
         if (type != UIT_INT || nx)
-            return uit_check_fail(e, "T03", "bytes formats an int, last");
+            return uit_check_fail(e, "T03", UIT_MSG("bytes formats an int, last", ""));
         uit_op_t o = {OP_BYTES, r.rk, r.ref, r.f, 0, 0};
         return op_add(e, o);
     }
     if (nx)
-        return uit_check_fail(e, "T01", "one transform per name");
+        return uit_check_fail(e, "T01", UIT_MSG("one transform per name", ""));
     const char *sp = memchr(w, ' ', wn);
     size_t on = sp ? (size_t)(sp - w) : wn;
     const char *a = sp ? sp + 1 : w + wn;
@@ -713,7 +713,7 @@ static int piece(uit_t *e, const char *b, size_t n, int model, uit_tmpl_t *T, ui
         if (f < 0)
             return f;
         if (counted && conv == 's')
-            return uit_fail(e, UIT_E_LANG, "count then fmt %%s");
+            return uit_fail(e, UIT_E_LANG, UIT_MSG("count then fmt %%s", "%s"));
         int spec = uit_buf_put(&e->pool, a, an);
         if (spec < 0 || spec >= (int)UIT_NONE)
             return UIT_E_NOMEM;
@@ -725,7 +725,7 @@ static int piece(uit_t *e, const char *b, size_t n, int model, uit_tmpl_t *T, ui
             const char *nm = uit_str(e, e->labels[i].name);
             if (is_word(a, an, nm)) {
                 if (counted)
-                    return uit_fail(e, UIT_E_LANG, "count then map");
+                    return uit_fail(e, UIT_E_LANG, UIT_MSG("count then map", ""));
                 int m = map_check(e, &r, i, nm);
                 if (m < 0)
                     return m;
@@ -733,14 +733,14 @@ static int piece(uit_t *e, const char *b, size_t n, int model, uit_tmpl_t *T, ui
                 return op_add(e, o);
             }
         }
-        return uit_check_fail(e, "T02", "no label table %.*s", (int)an, a);
+        return uit_check_fail(e, "T02", UIT_MSG("no label table %.*s", "%.*s"), (int)an, a);
     }
     if (is_word(w, on, "plural")) {
         if (type != UIT_INT)
-            return uit_check_fail(e, "T03", "plural of a %s", uit_type_name(type));
+            return uit_check_fail(e, "T03", UIT_MSG("plural of a %s", "%s"), uit_type_name(type));
         const char *comma = memchr(a, ',', an);
         if (!comma || comma == a || comma + 1 == a + an)
-            return uit_check_fail(e, "T01", "plural needs both forms");
+            return uit_check_fail(e, "T01", UIT_MSG("plural needs both forms", ""));
         int one = uit_buf_put(&e->pool, a, (size_t)(comma - a));
         int many = uit_buf_put(&e->pool, comma + 1, an - (size_t)(comma + 1 - a));
         if (one < 0 || many < 0 || many >= (int)UIT_NONE)
@@ -748,7 +748,7 @@ static int piece(uit_t *e, const char *b, size_t n, int model, uit_tmpl_t *T, ui
         uit_op_t o = {OP_PLURAL, r.rk, r.ref, r.f, (uint16_t)one, (uint16_t)many};
         return op_add(e, o);
     }
-    return uit_check_fail(e, "T01", "no transform %.*s", (int)on, w);
+    return uit_check_fail(e, "T01", UIT_MSG("no transform %.*s", "%.*s"), (int)on, w);
 }
 
 static int tmpl_body(uit_t *e, const char *src, int model, uit_tmpl_t *T)
@@ -772,7 +772,7 @@ static int tmpl_body(uit_t *e, const char *src, int model, uit_tmpl_t *T)
         }
         if (c == '}') {
             UIT_FREE(lit);
-            return uit_check_fail(e, "T01", "a lone '}'");
+            return uit_check_fail(e, "T01", UIT_MSG("a lone '}'", ""));
         }
         if (c != '{') {
             lit[ln++] = c;
@@ -787,13 +787,13 @@ static int tmpl_body(uit_t *e, const char *src, int model, uit_tmpl_t *T)
         }
         if (k >= n) {
             UIT_FREE(lit);
-            return uit_check_fail(e, "T01", "'{' with no '}'");
+            return uit_check_fail(e, "T01", UIT_MSG("'{' with no '}'", ""));
         }
         if (ln) {
             int o = lit_add(e, lit, ln);
             if (o < 0 || nops >= 63) {
                 UIT_FREE(lit);
-                return o < 0 ? o : uit_fail(e, UIT_E_LANG, "a template of more than 63 pieces");
+                return o < 0 ? o : uit_fail(e, UIT_E_LANG, UIT_MSG("a template of more than 63 pieces", ""));
             }
             ops[nops++] = o;
             ln = 0;
@@ -802,7 +802,7 @@ static int tmpl_body(uit_t *e, const char *src, int model, uit_tmpl_t *T)
         int o = piece(e, src + i + 1, k - i - 1, model, T, &ty);
         if (o < 0 || nops >= 63) {
             UIT_FREE(lit);
-            return o < 0 ? o : uit_fail(e, UIT_E_LANG, "a template of more than 63 pieces");
+            return o < 0 ? o : uit_fail(e, UIT_E_LANG, UIT_MSG("a template of more than 63 pieces", ""));
         }
         ops[nops++] = o;
         pieces++;
@@ -823,7 +823,7 @@ static int tmpl_body(uit_t *e, const char *src, int model, uit_tmpl_t *T)
     if (nops == 1 && pieces == 1)
         T->type = one;
     else if (bad)
-        return uit_check_fail(e, "T03", "a %s in a text", uit_type_name(bad));
+        return uit_check_fail(e, "T03", UIT_MSG("a %s in a text", "%s"), uit_type_name(bad));
     else
         T->type = UIT_TEXT;
     // gather: the template's own ops as one run at the end
@@ -854,8 +854,8 @@ int uit_tmpl_compile(uit_t *e, const char *src, int model)
         memcpy(was, e->err, sizeof was);
         memcpy(code, e->code, sizeof code);
         if (r == UIT_E_CHECK)
-            return uit_check_fail(e, code, "template %s: %s", src, was);
-        return uit_fail(e, r, "template %s: %s", src, was);
+            return uit_check_fail(e, code, UIT_MSG("template %s: %s", "template %s %s"), src, was);
+        return uit_fail(e, r, UIT_MSG("template %s: %s", "template %s %s"), src, was);
     }
     if (uit_grow((void **)&e->tmpls, &e->ctmpls, e->ntmpls + 1, sizeof *e->tmpls))
         return UIT_E_NOMEM;
