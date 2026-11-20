@@ -281,14 +281,42 @@ def _bindings(target, value):
     return []
 
 
+# Calls whose keywords DECLARE rather than ask: a UI tree app's
+# `ui.model(key=..., kind="")`, `ui.record(...)` and `ui.state(...)` declare
+# typed fields (a field named `kind` is the app's state), and uitree.py's
+# SCHEMA gives each node's props their type tags (`button`'s
+# `dict(_C, kind="lit")`: the prop takes a literal, which the app's call then
+# names and this probe reads there).
+_FIELD_DECLS = ("model", "record", "state")
+_PROP_TABLES = ("SCHEMA",)
+
+
+def _declares_fields(call):
+    f = call.func
+    return (isinstance(f, ast.Attribute) and f.attr in _FIELD_DECLS
+            and isinstance(f.value, ast.Name) and f.value.id == "ui")
+
+
+def _prop_table_calls(tree):
+    out = set()
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id in _PROP_TABLES):
+            out.update(id(n) for n in ast.walk(node.value) if isinstance(n, ast.Call))
+    return out
+
+
 def _reaching(tree, argname):
     """Every expression that can reach the keyword `argname` of some call in
     this module, resolving a Name through the assignments that bind it. Deduped
     by source position, so a helper walked twice is one site."""
     via_name = set()
     found = {}
+    tables = _prop_table_calls(tree)
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
+        if (isinstance(node, ast.Call) and not _declares_fields(node)
+                and id(node) not in tables):
             for kw in node.keywords:
                 if kw.arg != argname:
                     continue
