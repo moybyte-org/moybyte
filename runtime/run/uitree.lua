@@ -76,7 +76,8 @@ local function fail(code, at, what, expected, found, fix)
   local msg = "error[" .. code .. "] " .. (at or where()) .. ": " .. what
   fix = fix or FIXES[code]
   if fix then msg = msg .. "; fix: " .. fix end
-  if expected then msg = msg .. " (expected " .. expected .. (found and ", found " .. found or "") .. ")" end
+  if expected then msg = msg .. " (expected " .. expected .. (found and ", found " .. found or "") .. ")"
+  elseif found then msg = msg .. " (found " .. found .. ")" end
   error(msg, 0)
 end
 
@@ -1284,6 +1285,7 @@ function T.action(name, label, fn, o)
                     keys = o.keys, icon = o.icon, hint = o.hint, push = o.push, chars = o.chars, at = at }
 end
 
+local HOOK_OPTS = { takes = 1 }
 function T.hook(name, fn, o)
   local at = where()
   no_build("ui.hook", at)
@@ -1298,7 +1300,7 @@ function T.hook(name, fn, o)
   for k in pairs(o) do
     if k == "label" or k == "icon" or k == "keys" or k == "when" or k == "hint" then
       fail("H03", at, "the hook " .. q(name) .. " has " .. k, "takes alone", q(k), "an action, if a person sees it")
-    elseif k ~= "takes" then fail("N01", at, "ui.hook takes no option " .. q(k), "takes", q(k)) end
+    elseif not HOOK_OPTS[k] then fail("N01", at, "ui.hook takes no option " .. q(k), "takes", q(k)) end
   end
   local takes = o.takes or "none"
   if takes ~= "none" and takes ~= "row" and takes ~= "arg" then
@@ -1378,6 +1380,7 @@ function T.app(title, o)
   APP = { title = title, o = o, at = at }
 end
 
+local PAGE_OPTS = { title = 1, arg = 1 }
 function T.page(name, build, o)
   local at = where()
   no_build("ui.page", at)
@@ -1391,7 +1394,7 @@ function T.page(name, build, o)
   end
   o = o or {}
   for k in pairs(o) do
-    if k ~= "title" and k ~= "arg" then fail("N01", at, "ui.page takes no option " .. q(k), "title, arg", q(k)) end
+    if not PAGE_OPTS[k] then fail("N01", at, "ui.page takes no option " .. q(k), "title, arg", q(k)) end
   end
   if o.title ~= nil and type(o.title) ~= "string" then fail("N01", at, "the page " .. q(name) .. "'s title is " .. describe(o.title), "a template", describe(o.title)) end
   PAGES[name] = { name = name, fn = build, title = o.title or "", arg = o.arg, at = at }
@@ -2778,6 +2781,13 @@ function T._check()
   report.uses, report.actions, report.state_at, report.decl, report.page_order = USES, ACTIONS, STATE_AT, DECL, PAGE_ORDER
   report.labels, report.engine_owned = LABELS, ENGINE_OWNED
   return report
+end
+
+-- the layer's own tables, which tests/test_uitree_contract.py holds against
+-- the contract table both layers obey
+function T._contract()
+  return { props = PROPS, common = COMMON, words = WORDS, action = ACTION_OPTS, hook = HOOK_OPTS,
+           page = PAGE_OPTS, app = APP_FIELDS, takes = TAKES_N, roles = APP_ROLES, shell_roles = SHELL_ROLES }
 end
 
 -- a text snapshot of a built tree: kinds, keys and each prop's binding
