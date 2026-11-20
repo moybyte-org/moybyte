@@ -42,6 +42,7 @@ _SYN = {"python": "python", "lua": "lua", "json": "json", "markdown": "markdown"
 _FILL = ("switch", "panes", "pane", "text_editor", "slot", "panel", "case", "canvas", "legacy")
 # what the hosted phase walks to place the legacy nodes: the regions
 _PLACED = ("case", "switch", "panes", "pane", "panel", "legacy")
+_BARE = {"bare": True}      # a page whose bodies its host drew opens over them
 # The panes' sizes in desk units (runtime/editors/editor_panes.py's, the
 # desk Editor's): the gutter, a pane's header, a divider's handle drawn and
 # the touch it takes, a touch drag's travel before it takes, the
@@ -148,14 +149,9 @@ class Engine(uitree_app.Engine):
         g = self.ground
         if g is not None:
             _v.at(*g)
-        if hosting and self.placed:
-            # the hosted phase drew the ground round the bodies: the page
-            # opens over them drawing nothing
-            self.cv.clip(0, 0, 0, 0)
-            rect = _v.page(n.p["title"](None))
-            self.cv.clip()
-        else:
-            rect = _v.page(n.p["title"](None))
+        # the hosted phase drew the ground round the bodies: the page opens
+        # over them bare
+        rect = _v.page(n.p["title"](None), _BARE if hosting and self.placed else None)
         if g is not None:
             rect = tuple(self.content)
         hint = self._hints()
@@ -282,11 +278,9 @@ class Engine(uitree_app.Engine):
             S._trace("legacy", n.key, "placed at %r, laid out at %r: drawn again" % (
                 next((p[2] for p in self.placed if p[0] is n), None), rect))
             self._damage.all()
-        # one stop over the body; the stop's well is not drawn (the body is)
-        self.cv.clip(0, 0, 0, 0)
+        # one stop over the body, no well: the body is drawn
         _v.at(*rect)
-        _v.part(n.key, 0, 0, {"id": n.key})
-        self.cv.clip()
+        _v.part(n.key, 0, 0, {"id": n.key, "bare": True})
         self.ids[n.key] = (n, None)
         self.legacies[n.key] = (n, rect)
 

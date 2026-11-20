@@ -3882,13 +3882,15 @@ void moy_ui_api_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
     }
     clip_t k;
     mua_band_mark(c, b, stacked, mua_mark_flags(st, o));
-    EACH_ROW(c, k, s, b, stacked, c->page) {
-        mua_band(c, s, b, stacked);
-        int16_t oc[3];
-        colours(s, o, oc);
-        moy_ui_well(s, b, mua_mark_flags(st, o), oc[0] == MOY_UI_FROM_STYLE ? -1 : oc[0], c->fs,
-                    c->cls);
-        mua_clip_out(&k);
+    if (!(o->flags2 & MOY_UI_O2_BARE)) {
+        EACH_ROW(c, k, s, b, stacked, c->page) {
+            mua_band(c, s, b, stacked);
+            int16_t oc[3];
+            colours(s, o, oc);
+            moy_ui_well(s, b, mua_mark_flags(st, o), oc[0] == MOY_UI_FROM_STYLE ? -1 : oc[0],
+                        c->fs, c->cls);
+            mua_clip_out(&k);
+        }
     }
     int none = mua_outside_floor(c, b);
     c->pic_clip = mua_floor_of(c, b);
