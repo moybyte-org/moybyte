@@ -5,8 +5,7 @@
 #  over SDIO, a CH34x UART console) on a 16MB flash and this PCB's pins. Read
 #  `README.md` in this directory before touching the board at all: it holds the
 #  board's identification and sources, every pin and which are unconfirmed,
-#  and the traps (LDO4 powers the I2C pull-ups, the C6's reset is active LOW on
-#  GPIO32, the SD slot is 1-bit, the PCB revisions wire the SDIO lines in
+#  and the traps (LDO4 powers the I2C pull-ups, the C6's EN is GPIO32, the SD slot is 1-bit, the PCB revisions wire the SDIO lines in
 #  different orders). The sdkconfig knobs, the partition table and the patch
 #  ladder are imperative in `build.sh` and `boards/`.
 

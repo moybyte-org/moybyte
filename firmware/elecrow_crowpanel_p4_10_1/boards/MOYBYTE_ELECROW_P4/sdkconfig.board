@@ -262,15 +262,18 @@ CONFIG_I2S_ISR_IRAM_SAFE=y
 
 # --- ESP-Hosted on THIS PCB (schematic V1.2, README "The C6") ---
 # The component's defaults are the ESP32-P4 Function EV board's (data lines
-# D0..D3 on GPIO14..17, the C6's reset on GPIO54, active high); this board
-# wires the lines the other way round and the C6's EN straight to GPIO32, so
-# the reset is active LOW. "No development board" is what makes the component's
-# range checks accept them. PCB V1.0 wires D0..D3 on 14..17 as the EV board does.
-# CLK 18 and CMD 19 are the defaults.
+# D0..D3 on GPIO14..17, the C6's reset on GPIO54); this board wires the data
+# lines the other way round and the C6's EN straight to GPIO32. "No
+# development board" is what makes the component's range checks accept them.
+# PCB V1.0 wires D0..D3 on 14..17 as the EV board does. CLK 18 and CMD 19 are
+# the defaults. The component's "active high" is the EN pin's sense: it drives
+# the pin low, then high, then leaves it HIGH, which is the C6 running; "active
+# low" leaves it low, the C6 held in reset (measured 2026-11-20: the card never
+# answers CMD5 with it).
 CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=n
 CONFIG_ESP_HOSTED_P4_DEV_BOARD_NONE=y
 CONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE=32
-CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_LOW=y
+CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH=y
 CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D0_SLOT_1=17
 CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D1_4BIT_BUS_SLOT_1=16
 CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D2_4BIT_BUS_SLOT_1=15

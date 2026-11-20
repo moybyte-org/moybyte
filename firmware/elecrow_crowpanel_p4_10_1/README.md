@@ -55,7 +55,7 @@ its V1.2 hardware guide, the vendor's examples, the wiki, issue threads.
 | BOOT button (`SPI_BOOT`) | 35 | strap; low = download |
 | C6 SDIO: CLK / CMD | 18 / 19 | SDMMC slot 1 |
 | C6 SDIO: D0 / D1 / D2 / D3 | 17 / 16 / 15 / 14 | V1.1 and V1.2; V1.0 is 14 / 15 / 16 / 17 |
-| C6 EN | 32 | no inverter: the reset is active LOW |
+| C6 EN | 32 | no inverter: EN is driven directly, high = running |
 | UART1 (J2, 3.3 V) | 47 TX / 48 RX | GPIO48 doubles as the vendor LED demo's pin |
 | UART3 (J10, level-shifted 5 V input) | 34 TX / 33 RX | 34 is a strapping pin |
 | J7 header | 2, 3, 4, 5, 25, 49-54 | |
@@ -86,11 +86,16 @@ row waits for the module. GPIOs 6-10 and 28 are in the `gpio` lease row and 27
   acquires LDO3 at 2.5 V and LDO4 at 3.3 V first. `native/p4/moy_dsi` does both
   (`MOY_DSI_IO_LDO_MV`), because the panel comes up before anything probes I2C;
   `moy_sd` pokes no LDO register on this board (the Waveshare's does).
-- **The C6's reset is active LOW on GPIO32 and its data lines are reversed.**
+- **The C6's data lines are reversed and its EN is on GPIO32.**
   The ESP-Hosted component's defaults are the P4 function board's (GPIO54,
-  active high, D0 to D3 on 14 to 17); `boards/MOYBYTE_ELECROW_P4/sdkconfig.board`
+  D0 to D3 on 14 to 17); `boards/MOYBYTE_ELECROW_P4/sdkconfig.board`
   selects "no development board" so the component accepts the board's.
-  The SDIO clock is 20 MHz, the Guition P4's setting (unmeasured here).
+  The component's reset sense for an EN pin is "active HIGH" (it ends with the
+  pin high, the C6 running). The first image set it LOW, which holds the C6 in
+  reset: every CMD5 timed out (0x107) for the whole retry window. The vendor
+  issue thread's advice to use active low is the opposite and is not what the
+  component's reset sequence does. The SDIO clock is 20 MHz, the Guition P4's
+  setting (unmeasured here).
 - **The C6 keeps its factory firmware.** This build never touches it; the
   Waveshare's custom ESP-NOW shim slave is not built for this board, so the
   radio link (`moy_net.Link`, ESP-NOW) reports down against the stock slave.
