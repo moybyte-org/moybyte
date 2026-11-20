@@ -35,7 +35,7 @@
     "settings_achievements": [7, 3],
     "settings_licence": [8, 9],
     "settings_licences": [7, 3],
-    "settings_log": [2, 0],
+    "settings_log": [4, 2],
     "settings_permissions": [25, 12],
     "unlock_banner": [95, 11],
     "web_console": [294, 9]
@@ -76,7 +76,7 @@
     "settings_achievements": [7, 3],
     "settings_licence": [8, 18],
     "settings_licences": [7, 3],
-    "settings_log": [2, 0],
+    "settings_log": [4, 2],
     "settings_permissions": [45, 19],
     "unlock_banner": [63, 16],
     "web_console": [294, 8]
@@ -140,7 +140,7 @@
     "settings_achievements": [58, 62],
     "settings_licence": [39, 55],
     "settings_licences": [40, 67],
-    "settings_log": [3, 11],
+    "settings_log": [4, 13],
     "settings_permissions": [19, 19],
     "unlock_banner": [79, 30],
     "web_console": [295, 7]
@@ -181,7 +181,7 @@
     "settings_achievements": [7, 3],
     "settings_licence": [8, 16],
     "settings_licences": [7, 3],
-    "settings_log": [2, 0],
+    "settings_log": [4, 2],
     "settings_permissions": [38, 16],
     "unlock_banner": [63, 16],
     "web_console": [294, 8]
@@ -226,7 +226,7 @@
     "settings_achievements": [60, 62],
     "settings_licence": [45, 59],
     "settings_licences": [46, 60],
-    "settings_log": [3, 11],
+    "settings_log": [5, 13],
     "settings_permissions": [21, 19],
     "unlock_banner": [86, 30],
     "web_console": [296, 7]
@@ -267,7 +267,7 @@
     "settings_achievements": [58, 62],
     "settings_licence": [40, 59],
     "settings_licences": [41, 60],
-    "settings_log": [3, 11],
+    "settings_log": [4, 13],
     "settings_permissions": [19, 19],
     "unlock_banner": [79, 30],
     "web_console": [295, 7]
@@ -312,7 +312,7 @@
     "settings_achievements": [66, 64],
     "settings_licence": [45, 59],
     "settings_licences": [46, 60],
-    "settings_log": [3, 11],
+    "settings_log": [5, 13],
     "settings_permissions": [21, 19],
     "unlock_banner": [85, 30],
     "web_console": [296, 7]
@@ -357,7 +357,7 @@
     "settings_achievements": [58, 62],
     "settings_licence": [40, 59],
     "settings_licences": [41, 60],
-    "settings_log": [3, 11],
+    "settings_log": [4, 13],
     "settings_permissions": [19, 19],
     "unlock_banner": [79, 30],
     "web_console": [295, 7]
@@ -414,7 +414,7 @@
     "settings_achievements": [60, 53],
     "settings_licence": [45, 58],
     "settings_licences": [46, 59],
-    "settings_log": [3, 11],
+    "settings_log": [5, 13],
     "settings_permissions": [21, 19],
     "unlock_banner": [86, 30],
     "web_console": [296, 7]
@@ -464,7 +464,7 @@
     "settings_achievements": [58, 62],
     "settings_licence": [40, 59],
     "settings_licences": [41, 60],
-    "settings_log": [3, 11],
+    "settings_log": [4, 13],
     "settings_permissions": [19, 19],
     "unlock_banner": [79, 30],
     "web_console": [295, 7]
@@ -539,7 +539,7 @@
     "settings_achievements": [60, 62],
     "settings_licence": [39, 57],
     "settings_licences": [40, 56],
-    "settings_log": [4, 11],
+    "settings_log": [5, 13],
     "settings_permissions": [20, 19],
     "unlock_banner": [79, 28],
     "web_console": [295, 7]
@@ -584,7 +584,7 @@
     "settings_achievements": [58, 62],
     "settings_licence": [40, 59],
     "settings_licences": [41, 59],
-    "settings_log": [3, 11],
+    "settings_log": [4, 13],
     "settings_permissions": [19, 19],
     "unlock_banner": [79, 30],
     "web_console": [295, 7]
@@ -638,7 +638,7 @@
     "settings_achievements": [58, 62],
     "settings_licence": [40, 59],
     "settings_licences": [41, 60],
-    "settings_log": [3, 11],
+    "settings_log": [4, 13],
     "settings_permissions": [19, 19],
     "unlock_banner": [79, 30],
     "web_console": [295, 7]
@@ -693,7 +693,7 @@
     "settings_achievements": [44, 63],
     "settings_licence": [24, 44],
     "settings_licences": [25, 47],
-    "settings_log": [3, 11],
+    "settings_log": [4, 13],
     "settings_permissions": [18, 17],
     "unlock_banner": [82, 26],
     "web_console": [295, 9]
@@ -738,7 +738,7 @@
     "settings_achievements": [46, 58],
     "settings_licence": [29, 44],
     "settings_licences": [30, 47],
-    "settings_log": [3, 11],
+    "settings_log": [5, 13],
     "settings_permissions": [20, 17],
     "unlock_banner": [88, 26],
     "web_console": [296, 9]
@@ -783,7 +783,7 @@
     "settings_achievements": [36, 28],
     "settings_licence": [26, 31],
     "settings_licences": [26, 32],
-    "settings_log": [3, 11],
+    "settings_log": [5, 13],
     "settings_permissions": [20, 17],
     "unlock_banner": [73, 26],
     "web_console": [296, 9]
@@ -824,7 +824,7 @@
     "settings_achievements": [9, 3],
     "settings_licence": [11, 14],
     "settings_licences": [9, 3],
-    "settings_log": [2, 0],
+    "settings_log": [5, 2],
     "settings_permissions": [40, 19],
     "unlock_banner": [67, 14],
     "web_console": [295, 9]
@@ -865,7 +865,7 @@
     "settings_achievements": [6, 3],
     "settings_licence": [8, 14],
     "settings_licences": [6, 3],
-    "settings_log": [2, 0],
+    "settings_log": [3, 2],
     "settings_permissions": [42, 19],
     "unlock_banner": [62, 14],
     "web_console": [294, 8]
@@ -916,7 +916,7 @@
     "settings_achievements": [7, 3],
     "settings_licence": [8, 14],
     "settings_licences": [7, 3],
-    "settings_log": [2, 0],
+    "settings_log": [4, 2],
     "settings_permissions": [42, 19],
     "unlock_banner": [62, 14],
     "web_console": [294, 8]
@@ -979,7 +979,7 @@
     "settings_achievements": [9, 3],
     "settings_licence": [11, 14],
     "settings_licences": [9, 3],
-    "settings_log": [2, 0],
+    "settings_log": [5, 2],
     "settings_permissions": [40, 19],
     "unlock_banner": [67, 14],
     "web_console": [295, 8]
@@ -1020,7 +1020,7 @@
     "settings_achievements": [9, 3],
     "settings_licence": [11, 14],
     "settings_licences": [9, 3],
-    "settings_log": [2, 0],
+    "settings_log": [5, 2],
     "settings_permissions": [40, 19],
     "unlock_banner": [67, 14],
     "web_console": [295, 8]
@@ -1066,7 +1066,7 @@
     "settings_achievements": [7, 3],
     "settings_licence": [8, 14],
     "settings_licences": [7, 3],
-    "settings_log": [2, 0],
+    "settings_log": [4, 2],
     "settings_permissions": [42, 19],
     "unlock_banner": [62, 14],
     "web_console": [294, 8]
