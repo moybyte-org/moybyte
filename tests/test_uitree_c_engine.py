@@ -197,3 +197,67 @@ def test_still_answers_a_frame_that_would_draw_what_the_last_drew(tmp_path, monk
     assert by["k:down"][0] is False and by["k:a"][0] is False, said
     assert by["after k:a"][0] is False, said      # the action's commit moved n
     assert True in by["f:3"], said
+
+
+LONG = '''
+import uitree as ui
+
+s = ui.state(items=ui.model(key="k", k="", name="", size=""), cur=ui.row_of("items"), got="")
+
+
+def opened():
+    s.items = [{"k": "r%d" % i, "name": "Item %d" % i, "size": "%d KB" % (i * 7 % 97)} for i in range(@N@)]
+
+
+def go(row):
+    s.got = row.k
+
+
+ui.hook("opened", opened)
+ui.action("go", "Open", go, takes="row")
+
+
+def build():
+    with ui.page("List"):
+        ui.info("Opened", "{got}")
+        with ui.group("Items"):
+            with ui.rows("items", cur="cur"):
+                ui.link("go", "{.name}")
+'''
+
+
+def _long(tmp_path, engine, n, script, config=None):
+    import uitree_app
+    import uitree_c
+    import uitree_parity as P
+    app_py = tmp_path / ("long_%s_%d" % (engine, n)) / "app.py"
+    app_py.parent.mkdir()
+    app_py.write_text(LONG.replace("@N@", str(n)))
+    mod = C._module(str(app_py))
+    cls = uitree_app.app_layer("long_%s_%d" % (engine, n), "Long", mod.build,
+                               engine=uitree_c.CEngine if engine == "c" else None)
+    seen = {}
+
+    def opened(ws):
+        seen["app"] = P.host(ws, cls)
+
+    def probe(ws):
+        e = seen["app"].engine
+        return "%s %s" % (e.focus_key, e.s._v["got"])
+    return P.frames(config or C.CONFIGS[0], P.Surface(opened, probe=probe), script)
+
+
+@pytest.mark.parametrize("n", (50, 120))
+def test_a_long_list_walks_past_its_fortieth_row_alike_on_both_engines(tmp_path, n):
+    """A rows list of more than the toolkit's 40 stops a frame lays out its
+    rows in view (uitree_app.VROWS_MIN; native/moy_uitree's draw_vrows):
+    the keys walk focus past the 40th row and open it, a swipe scrolls it
+    back, and both engines draw every frame alike."""
+    import uitree_parity as P
+    script = ["k:down"] * 46 + ["k:a", "swipe:200", "f:20", "k:down", "swipe:-300", "f:20", "k:up"]
+    ref = _long(tmp_path, "python", n, script)
+    c = _long(tmp_path, "c", n, script)
+    assert ref[46].state.split()[0] == "r46/go", ref[46].state
+    assert ref[47].state.split() == ["r46/go", "r46"], ref[47].state
+    assert [f.state for f in c] == [f.state for f in ref]
+    P.compare(ref, c, tmp_path, "long%d" % n)

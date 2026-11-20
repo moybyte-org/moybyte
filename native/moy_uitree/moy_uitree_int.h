@@ -199,6 +199,18 @@ typedef struct {
     int16_t slot;
 } uit_order_t;
 
+// A rows list laid out in view only (`draw_vrows`): each row's height as it last drew (-1 never),
+// the unit a row never drawn counts as, kept by the list's key while its row count, the page's
+// width and the font scale hold.
+typedef struct {
+    uint32_t key;               // the list's key, hashed
+    int32_t n;                  // its rows when the heights were made
+    int16_t w, unit;
+    uint8_t fs;
+    int16_t *h;
+    int cap;
+} uit_vrows_t;
+
 struct uit {
     char err[160];
     char code[4];               // the spec's code of a UIT_E_CHECK error
@@ -277,6 +289,8 @@ struct uit {
     uit_buf_t cells;            // a table's columns and cells, made again where its key moved
     uint32_t cells_key;         // what they were made from: the build, the model's and the cols' states' versions
     int16_t cells_node;         // the table they are, + 1 (0 none)
+    uit_vrows_t *vr;            // the rows lists laid out in view only
+    int nvr, cvr;
     // the frame drawn last, for uit_still: the versions it read and its focus
     uint32_t still_ver;
     uit_id_t still_focus;

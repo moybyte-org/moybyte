@@ -109,6 +109,22 @@ def _case(n, v):
 
 # Lists made from a model, apart from the replay's functions: a comprehension
 # naming a function's locals makes their cells at each call of it on a board.
+# A rows list longer than this, stacked on the page itself, lays out only the
+# rows in view, VROWS_MARGIN more each side, widened to whole blocks of
+# VROWS_BLOCK, and the focused row (Engine._vrows; native/moy_uitree's
+# draw_vrows, which must lay out the same rows).
+VROWS_MIN, VROWS_MARGIN, VROWS_BLOCK = 32, 2, 4
+
+
+def _vrows_ok(n):
+    p = n.parent
+    while p is not None:
+        if p.kind not in ("page", "group", "switch", "case"):
+            return False
+        p = p.parent
+    return True
+
+
 def _keys(rows):
     return [r._f[r._m.key] for r in rows]
 
@@ -156,6 +172,7 @@ class Engine(S.Builder):
         self._pass = 0                  # the replay passes so far
         self._n_ids = 0                 # the ids this pass drew
         self._list_at = {}              # a cards list's key -> [the pass that last drew it, the one before]
+        self._vr = {}                   # a long rows list's key -> [its key, unit, row heights] (_vrows)
         self._all_names = None          # every state name, and whether one is a document (no versions)
         self._has_doc = False
         self._live, self._live_at, self._live_cls, self._live_in = None, -2, None, None
@@ -326,6 +343,7 @@ class Engine(S.Builder):
         self.root = None
         self.want_focus = None          # a fresh visit: no focus, cur or row order carried over
         self._sync, self.ids, self.focused, self.drawn = {}, {}, None, {}
+        self._vr = {}
         self._seen = {}
         self.drafts = {}
         self._orders = {}
@@ -339,6 +357,7 @@ class Engine(S.Builder):
         """The visit is over (its host left the page): the built tree is let
         go, built again at the next frame; the next open resets the rest."""
         self.root = None
+        self._vr = {}
 
     def forget(self):
         """Everything the page holds for a visit let go (the C engine's store
@@ -1611,6 +1630,11 @@ class Engine(S.Builder):
         empty = self._t(n, "empty", None) if not model else ""
         if empty:
             _v.label(empty)
+        if len(model) > VROWS_MIN and "group" not in n.l and _vrows_ok(n):
+            v = _v.view()
+            if v is not None:
+                self._vrows(n, model, v, rect)
+                return
         cap = None
         for r in model:
             if "group" in n.l:
@@ -1623,6 +1647,65 @@ class Engine(S.Builder):
             self._kids(n, r, rect)
         if cap is not None:
             _v.group()
+
+    def _vrows(self, n, model, v, rect):
+        """A long list's rows in view (native/moy_uitree's draw_vrows, the
+        same rows): each row's height as it last drew kept by the list's key
+        while its count, the page's width and the font scale hold."""
+        nr = len(model)
+        V = self._vr.get(n.key)
+        if V is None:
+            V = self._vr[n.key] = [None, -1, []]
+        k = (nr, v[3], v[4])
+        if V[0] != k:
+            V[0], V[2] = k, [-1] * nr
+        h = V[2]
+        nxt = 0
+        if V[1] < 0:
+            y0 = _v.view()[0]
+            self._kids(n, model[0], rect)
+            h[0] = _v.view()[0] - y0
+            V[1] = h[0] if h[0] > 0 else 1
+            nxt = 1
+        u, top, bot, pos, first, last = V[1], v[1], v[1] + v[2], v[0], -1, nr
+        for i in range(nr):
+            if pos >= bot:
+                last = i
+                break
+            pos += h[i] if h[i] >= 0 else u
+            if first < 0 and pos > top:
+                first = i
+        if first < 0:
+            first = last
+        first -= VROWS_MARGIN
+        first = 0 if first < 0 else first - first % VROWS_BLOCK
+        last += VROWS_MARGIN + VROWS_BLOCK - 1
+        last = min(nr, last - last % VROWS_BLOCK)
+        f = -1
+        fid = _v.focus()
+        sl = fid.rfind("/") if fid else -1
+        if sl >= 0:
+            rk, kf = fid[:sl], model[0]._m.key
+            for r in range(first, last):
+                if model[r]._f[kf] == rk:
+                    f = r
+                    break
+            else:
+                for r in range(nr):
+                    if model[r]._f[kf] == rk:
+                        f = r
+                        break
+        skip = 0
+        for r in range(nxt, nr):
+            if (r < first or r >= last) and r != f:
+                skip += h[r] if h[r] >= 0 else u
+                continue
+            _v.space(skip)
+            skip = 0
+            y0 = _v.view()[0]
+            self._kids(n, model[r], rect)
+            h[r] = _v.view()[0] - y0
+        _v.space(skip)
 
     def _r_table(self, n, row, rect):
         """`table MODEL cols=[...]`: one `col` child per column, each a

@@ -285,6 +285,11 @@ void uit_close(uit_t *e)
 {
     e->still_ok = 0;
     e->cells_node = 0;
+    for (int i = 0; i < e->nvr; i++)
+        UIT_FREE(e->vr[i].h);
+    UIT_FREE(e->vr);
+    e->vr = NULL;
+    e->nvr = e->cvr = 0;
     free_drew(e);
     for (int i = 0; i < e->nslots; i++) {
         uit_slot_t *S = &e->slots[i];
@@ -359,6 +364,9 @@ void uit_free(uit_t *e)
         UIT_FREE(e->drafts[i].buf);
     }
     free_drew(e);
+    for (int i = 0; i < e->nvr; i++)
+        UIT_FREE(e->vr[i].h);
+    UIT_FREE(e->vr);
     UIT_FREE(e->slots); UIT_FREE(e->acts); UIT_FREE(e->tmpls); UIT_FREE(e->ops);
     UIT_FREE(e->conds); UIT_FREE(e->terms); UIT_FREE(e->nodes); UIT_FREE(e->props);
     UIT_FREE(e->btns); UIT_FREE(e->ids); UIT_FREE(e->prev); UIT_FREE(e->evs);

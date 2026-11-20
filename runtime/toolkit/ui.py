@@ -1496,6 +1496,16 @@ def band(r=None):
     return _C.api_band(_T[0], r)
 
 
+def view():
+    """Where the next stacked row of the open page lies and what shows of
+    the page, for a list that lays out only its rows in view: `(y, scroll,
+    h, w, fs)`, the row cursor in the page's coordinates, its scroll, its
+    view's height, its width and the font scale; None where the next row
+    would not stack on the page itself (a scroll region, a dialog or a
+    popover open, a grid, `at`'s rect)."""
+    return _C.api_view(_T[0])
+
+
 def card_clip(r):
     """`r`, an `array("i")` of x, y, w, h, cut in place to where the picture
     of the card (or part) just answered draws this frame -- on a shift frame

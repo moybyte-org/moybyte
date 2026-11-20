@@ -191,6 +191,11 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
             return None
         return tuple(v) if r is None else r
 
+    def api_view(ctx):
+        p, _k = _ctx(ctx)
+        v = (c.c_int32 * 5)()
+        return tuple(v) if lib.moy_ui_api_view(p, v) else None
+
 
 
     def api_lag_note(ctx, hist, bands, f, kind):
@@ -377,7 +382,7 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
     for f in (api_text_view, api_text_reveal, text_tones, text_words, text_runs, api_native):
         setattr(m, f.__name__, f)
 
-    for f in (api_begin, api_table, api_busy, api_shift_drawn, api_band, api_lag_note, api_lag,
+    for f in (api_begin, api_table, api_busy, api_shift_drawn, api_band, api_view, api_lag_note, api_lag,
               api_host_begin, api_card_clip, api_table_rows, api_split, api_split_frame, api_bar,
               api_bar_lent, api_run_bar_lent, api_focus):
         setattr(m, f.__name__, f)

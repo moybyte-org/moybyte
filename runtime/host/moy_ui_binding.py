@@ -248,6 +248,7 @@ _DRAW_SIGS = (
                           c.c_int32, c.c_void_p, c.c_void_p], None),
     ("moy_ui_api_shift_drawn", [c.c_void_p, c.POINTER(_I)], _I),
     ("moy_ui_api_band", [c.c_void_p, c.c_void_p], _I),
+    ("moy_ui_api_view", [c.c_void_p, c.c_void_p], _I),
     ("moy_ui_api_card_clip", [c.c_void_p, c.c_void_p], _I),
     ("moy_ui_api_lag_note", [c.c_void_p, c.c_void_p, _I, _I, _I, _I], None),
     ("moy_ui_api_lag", [c.c_void_p, _I, _I, _I, _I, c.c_void_p, _I], _I),

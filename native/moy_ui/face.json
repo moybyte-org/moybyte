@@ -102,6 +102,7 @@
       {"api": "shift_break"},
       {"api": "shift_drawn", "hand": true},
       {"api": "band", "hand": true},
+      {"api": "view", "hand": true},
       {"api": "floor_box", "buf": {"out": 4}, "ret": "bool"},
       {"api": "change_box", "buf": {"out": 8}, "ret": "bool"},
       {"api": "lag_note", "hand": true},

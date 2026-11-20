@@ -638,6 +638,19 @@ int moy_ui_api_band(const moy_ui_ctx_t *c, int32_t out[4]) {
     return 1;
 }
 
+int moy_ui_api_view(const moy_ui_ctx_t *c, int32_t out[5]) {
+    if (c->page_stop == NO_PAGE || c->n_nest || c->grid_open || c->has_at || c->tp.open
+        || c->snap.on) {
+        return 0;
+    }
+    out[0] = c->y;
+    out[1] = c->scroll;
+    out[2] = c->page.h;
+    out[3] = c->page.w;
+    out[4] = c->fs;
+    return 1;
+}
+
 int moy_ui_api_keep(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, int h) {
     uint32_t sid = mua_hash(id.p, id.n, 0);
     int i = mua_find(c->prev, c->n_prev, sid);

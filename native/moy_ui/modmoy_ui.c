@@ -3010,6 +3010,21 @@ static mp_obj_t ui_api_band(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_band_obj, 1, 2, ui_api_band);
 
+// api_view(ctx) -> (y, scroll, h, w, fs) of the open page's stack, or None
+// (moy_ui_api_view)
+static mp_obj_t ui_api_view(mp_obj_t ctx) {
+    int32_t v[5];
+    if (!moy_ui_api_view(ctx_of(ctx), v)) {
+        return mp_const_none;
+    }
+    mp_obj_t t[5];
+    for (int i = 0; i < 5; i++) {
+        t[i] = mp_obj_new_int(v[i]);
+    }
+    return ret_tuple(5, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_view_obj, ui_api_view);
+
 // api_lag_note(ctx, hist, bands, f, kind): frame f's slot of the lag history
 // `hist`, writable int32 words in slots of 2 + 2 * bands, from the pass begun
 // last (moy_ui_api_lag_note)
@@ -3209,6 +3224,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_focus), MP_ROM_PTR(&ui_api_focus_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_shift_drawn), MP_ROM_PTR(&ui_api_shift_drawn_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_band), MP_ROM_PTR(&ui_api_band_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_view), MP_ROM_PTR(&ui_api_view_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_lag_note), MP_ROM_PTR(&ui_api_lag_note_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_lag), MP_ROM_PTR(&ui_api_lag_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_host_begin), MP_ROM_PTR(&ui_api_host_begin_obj) },

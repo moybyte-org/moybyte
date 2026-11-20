@@ -1814,6 +1814,133 @@ static void draw_foot(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, 
     }
 }
 
+// -- a long rows list: the rows in view ------------------------------------------------------
+//
+// A rows list of more than UIT_VROWS_MIN rows stacked on the page itself (its ancestors the page,
+// groups and switches; ui.view answers) lays out only the rows the view shows, UIT_VROWS_MARGIN
+// more each side, widened to whole blocks of UIT_VROWS_BLOCK (so a shift frame's stops match the
+// last frame's but where the window crosses a block), and the focused row: every other row is
+// space as tall as it last drew (a row never drawn: the height of the first that drew). The
+// page's rows total is what a whole walk makes where the rows are alike, its stops only the
+// drawn rows'. uitree_app.Engine._r_rows lays out the same rows.
+#define UIT_VROWS_MIN 32
+#define UIT_VROWS_MARGIN 2
+#define UIT_VROWS_BLOCK 4
+
+static int vrows_ok(uit_t *e, int k)
+{
+    for (int p = NODE(k)->parent; p >= 0 && p != (int)UIT_NONE; p = NODE(p)->parent) {
+        int kd = NODE(p)->kind;
+        if (kd != UIT_PAGE && kd != UIT_GROUP && kd != UIT_SWITCH && kd != UIT_CASE)
+            return 0;
+    }
+    return 1;
+}
+
+static uit_vrows_t *vrows_of(uit_t *e, int k, int n, int w, int fs)
+{
+    const char *key = uit_str(e, NODE(k)->key);
+    uint32_t hk = 2166136261u;
+    for (const char *p = key; *p; p++)
+        hk = (hk ^ (uint8_t)*p) * 16777619u;
+    uit_vrows_t *V = NULL;
+    for (int i = 0; i < e->nvr; i++)
+        if (e->vr[i].key == hk)
+            V = &e->vr[i];
+    if (!V) {
+        if (e->nvr == e->cvr) {
+            int cap = e->cvr ? 2 * e->cvr : 2;
+            uit_vrows_t *a = UIT_REALLOC(e->vr, (size_t)cap * sizeof(*a));
+            if (!a)
+                return NULL;
+            e->vr = a, e->cvr = cap;
+        }
+        V = &e->vr[e->nvr++];
+        memset(V, 0, sizeof(*V));
+        V->key = hk;
+        V->unit = -1;
+        V->n = -1;
+    }
+    if (V->n != n || V->w != w || V->fs != fs) {
+        if (V->cap < n) {
+            int16_t *h = UIT_REALLOC(V->h, (size_t)n * sizeof(int16_t));
+            if (!h)
+                return NULL;
+            V->h = h, V->cap = n;
+        }
+        for (int i = 0; i < n; i++)
+            V->h[i] = -1;
+        V->n = n, V->w = (int16_t)w, V->fs = (uint8_t)fs;
+    }
+    return V;
+}
+
+static void walk(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row);
+
+// v: ui.view's answer. 0 where it could not keep its heights (the whole list walks instead).
+static int draw_vrows(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, const int32_t *v)
+{
+    const uit_node_t *N = NODE(k);
+    int nr = e->slots[N->slot].nrows;
+    uit_vrows_t *V = vrows_of(e, k, nr, v[3], v[4]);
+    if (!V)
+        return 0;
+    int16_t *h = V->h;
+    int next = 0;
+    if (V->unit < 0) {
+        int y0 = c->y;
+        walk(e, c, s, k, N->slot, 0);
+        h[0] = (int16_t)(c->y - y0);
+        V->unit = h[0] > 0 ? h[0] : 1;
+        next = 1;
+    }
+    int u = V->unit, top = v[1], bot = v[1] + v[2], pos = v[0], first = -1, last = nr;
+    for (int i = 0; i < nr; i++) {
+        if (pos >= bot) {
+            last = i;
+            break;
+        }
+        pos += h[i] >= 0 ? h[i] : u;
+        if (first < 0 && pos > top)
+            first = i;
+    }
+    if (first < 0)
+        first = last;
+    first -= UIT_VROWS_MARGIN;
+    first = first < 0 ? 0 : first - first % UIT_VROWS_BLOCK;
+    last += UIT_VROWS_MARGIN + UIT_VROWS_BLOCK - 1;
+    last -= last % UIT_VROWS_BLOCK;
+    last = last > nr ? nr : last;
+    // the focused row, where it lies outside them
+    int f = -1;
+    char fid[UIT_ID_MAX + 1];
+    if (moy_ui_api_focus(c, span_of(NULL, 0), fid, sizeof fid) > 0) {
+        const char *sl = strrchr(fid, '/');
+        size_t fn = sl ? (size_t)(sl - fid) : 0;
+        for (int r = first; sl && r < last && f < 0; r++) {
+            const char *rk = row_key(e, N->slot, r);
+            if (strlen(rk) == fn && !memcmp(rk, fid, fn))
+                f = r;
+        }
+        if (sl && f < 0)
+            f = uit_row_find(e, N->slot, fid, fn);
+    }
+    int skip = 0;
+    for (int r = next; r < nr; r++) {
+        if ((r < first || r >= last) && r != f) {
+            skip += h[r] >= 0 ? h[r] : u;
+            continue;
+        }
+        moy_ui_api_space(c, skip);
+        skip = 0;
+        int y0 = c->y;
+        walk(e, c, s, k, N->slot, r);
+        h[r] = (int16_t)(c->y - y0);
+    }
+    moy_ui_api_space(c, skip);
+    return 1;
+}
+
 static void draw(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row)
 {
     const uit_node_t *N = NODE(k);
@@ -1921,6 +2048,10 @@ static void draw(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int m
             if (n)
                 moy_ui_api_label(c, s, sspan(e, at, n), NULL);
         }
+        int32_t vw[5];
+        if (N->t_main < 0 && M->nrows > UIT_VROWS_MIN && vrows_ok(e, k) && moy_ui_api_view(c, vw)
+            && draw_vrows(e, c, s, k, vw))
+            break;
         // group=: a caption where its text changes from the row before, the rows under it on its card
         uint32_t cap_at = 0, cap_n = 0;
         int capped = 0;
