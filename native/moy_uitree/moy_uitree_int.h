@@ -184,6 +184,8 @@ typedef struct {
     char *keys;                 // its rows' keys, NUL-separated
     uint32_t n;                 // bytes of keys
     int has;
+    uint16_t ver;               // its model's (`slot`) version as the keys were taken
+    int16_t slot;
 } uit_order_t;
 
 struct uit {

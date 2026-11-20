@@ -267,6 +267,8 @@ void uit_after_removal(uit_t *e, int node)
     for (int i = 0; i < e->norders; i++)
         if (!strcmp(e->orders[i].key, lkey))
             O = &e->orders[i];
+    if (O && O->has && O->ver == M->ver && O->slot == m)
+        return;                 // its rows as last taken: a frame that pushed no model does no row's work
     // the new order
     uit_buf_t nb = {0};
     for (int r = 0; r < M->nrows; r++) {
@@ -289,6 +291,8 @@ void uit_after_removal(uit_t *e, int node)
     O->keys = nb.p;
     O->n = nb.n;
     O->has = 1;
+    O->ver = M->ver;
+    O->slot = (int16_t)m;
     if (N->cur < 0 || !had) {
         UIT_FREE(old);
         return;
