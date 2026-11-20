@@ -78,6 +78,8 @@ class Engine(S.Builder):
         self.drafts = {}                # a commit field's key -> its text until it is written
         self._page_o = {"gen": 0}       # the page's gen: moves when what its rows show may have
         self._gen_ok = False
+        self._page_names = ()           # the states the page's gen counts: all but its cells' own
+        self._cells = {}                # a split's region (its group) -> [its override block, the states it reads]
         self._edits = 0                 # a commit field's draft edits, which move the gen too
         self._buttons = 0               # the frame's buttons, as keys() handed them to the host
         st = decl.state                 # this engine's own values: two consoles in one process each hold theirs
@@ -234,6 +236,8 @@ class Engine(S.Builder):
             self._walk(self.root)
             self.fresh = True
             self._gen_ok = self._gen_on and self._gen_safe(self.root)
+            if self._gen_ok:
+                self._cell_gens(self.root)
         self.pics.begin_frame()
         _NOW.app, _NOW.frame = self, True
         try:
@@ -255,19 +259,110 @@ class Engine(S.Builder):
         if q or self.timers or self.work_run or self.decl.posts:
             self._damage.all()
 
-    GEN_UNSAFE = ("canvas", "picture", "cards", "text_editor", "text_view")
+    GEN_UNSAFE = ("canvas", "picture", "cards", "text_editor")
 
     def _gen_safe(self, n):
         """Whether every pixel the page's rows draw comes from state, so the
-        page's gen (the sum of the state's versions) moves whenever one may:
-        no canvas, picture, text editor or text view, and no template
-        naming @focus, @input or @touch."""
+        page's gen (the sum of the versions of the states it reads) moves
+        whenever one may: no canvas, picture or text editor, and no template
+        naming @focus, @input or @touch. A text view's lines are its state's
+        and its scroll the toolkit's own region."""
         if n.kind in self.GEN_UNSAFE:
             return False
         for v in n.src.values():
             if isinstance(v, str) and ("@focus" in v or "@input" in v or "@touch" in v):
                 return False
         return all(self._gen_safe(k) for k in n.kids)
+
+    def _names_in(self, v, out):
+        """Add to `out` the state names the prop value `v` reads: each word
+        not led by `.` (a row's field) or `@` (an engine value)."""
+        if isinstance(v, (tuple, list)):
+            for x in v:
+                self._names_in(x, out)
+            return
+        if not isinstance(v, str):
+            return
+        ver = self.s._ver
+        word, lead, prev = "", "", ""
+        for ch in v + " ":
+            if ch.isalpha() or ch.isdigit() or ch == "_":
+                if not word:
+                    lead = prev
+                word += ch
+            else:
+                if word and lead != "." and lead != "@" and word in ver:
+                    out.add(word)
+                word = ""
+            prev = ch
+
+    def _reads(self, n, out, cur):
+        """The state names node `n` and its kids read; `cur` False leaves
+        out a list's cur= (focus the toolkit draws, not a row's pixels)."""
+        for props in (n.src, n.l):
+            for k, v in props.items():
+                if cur or k != "cur":
+                    self._names_in(v, out)
+        if n.key in self.s._ver:
+            out.add(n.key)
+        for k in n.kids:
+            self._reads(k, out, cur)
+
+    def _cell_gens(self, root):
+        """Each region of a split (a group in it) carries a gen of its own,
+        over the states only its rows read; the page's gen counts the rest,
+        so a cell whose state moved leaves the page and its other cells held.
+        A state any action, any node outside a cell or a hint reads stays the
+        page's; one only a list's cur= names is focus, which no gen counts."""
+        cells, rest = [], set()
+
+        def walk(n):
+            if n.kind == "split":
+                for k in n.kids:
+                    if k.kind == "group":
+                        names = set()
+                        self._reads(k, names, False)
+                        cells.append((k, names))
+                    else:
+                        walk(k)
+                self._names_in(list(n.src.values()), rest)
+                return
+            for props in (n.src, n.l):
+                for k, v in props.items():
+                    if k != "cur":
+                        self._names_in(v, rest)
+            if n.key in self.s._ver:
+                rest.add(n.key)
+            for k in n.kids:
+                walk(k)
+
+        def hints(n):
+            for k, v in n.src.items():
+                if k == "hint":
+                    self._names_in(v, rest)
+            for k in n.kids:
+                hints(k)
+        walk(root)
+        hints(root)
+        for a in self.actions.values():
+            for v in (a.label, a.hint, a.when_src):
+                self._names_in(v, rest)
+        mine, seen, focus = set(), set(), set()
+        for _k, names in cells:
+            mine |= names
+        self._reads(root, seen, False)
+        self._reads(root, focus, True)
+        own = (mine - rest) | (focus - seen - rest)    # a cur= alone is focus: the toolkit's to draw
+        self._page_names = tuple(k for k in self.s._ver if k not in own)
+        self._cells = {}
+        for k, names in cells:
+            self._cells[k] = [{"gen": 0}, tuple(names)]
+
+    def _gen_of(self, names):
+        ver, g = self.s._ver, self.builds + self._edits
+        for k in names:
+            g += ver[k]
+        return g & 0x7fffffff
 
     def calls_text(self):
         """The handler runs of each frame since the last ask, run-length."""
@@ -321,7 +416,7 @@ class Engine(S.Builder):
         o = self._page_o
         o["id"] = self._page_id()
         if self._gen_ok:
-            o["gen"] = (sum(self.s._ver.values()) + self.builds + self._edits) & 0x7fffffff
+            o["gen"] = self._gen_of(self._page_names)
         else:
             o.pop("gen", None)
         rect = _v.page(n.p["title"](None), o)
@@ -1066,7 +1161,12 @@ class Engine(S.Builder):
             if k.kind == "group":       # a region of the split: its own scrolled column
                 sid = "split %s %d" % (n.key, i)
                 _v.at(*r)
-                _v.scroll(sid)
+                cg = self._cells.get(k) if self._gen_ok else None
+                if cg is not None:
+                    cg[0]["gen"] = self._gen_of(cg[1])
+                    _v.scroll(sid, cg[0])
+                else:
+                    _v.scroll(sid)
                 was, self.in_cell = getattr(self, "in_cell", False), True
                 if d == "row" and n.l.get("align", "center") == "center":
                     used = self._col_h(k, row)
