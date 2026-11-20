@@ -211,9 +211,8 @@ def _code(tmp_path, text):
 
 
 def _code_xy(ws, ed, row, col):
-    lay = ws.code_layout
-    x0 = ws.code_layer._text_x0(lay, ed)
-    return x0 + col * lay.cell + lay.cell // 2, lay.y0 + (row - ed.top) * lay.lh + lay.lh // 2
+    rect, _top, cell, lh, x0 = ws.code_layer.view()
+    return x0 + col * cell + cell // 2, rect[1] + (row - ed.top) * lh + lh // 2
 
 
 def test_a_mouse_selects_in_the_code_tab_and_a_finger_still_pans(tmp_path):
@@ -353,9 +352,9 @@ def test_the_code_window_autoscrolls_in_its_own_space(tmp_path):
     d = make_drv(ws)
     for _ in range(3):
         d.frame(DT)
-    lay = ws.code_layout
+    rect, _top, _cell, lh, tx0 = ws.code_layer.view()
     cx, cy, _w, _h = ws.wm.windows[ws.wm.focus_key].content_rect()
-    x, y = cx + ws.code_layer._text_x0(lay, ed) + 10, cy + lay.y0 + 4 * lay.lh
+    x, y = cx + tx0 + 10, cy + rect[1] + 4 * lh
     d.hover(x, y)
     d.frame(DT)
     d.middle(x, y, True)
@@ -363,7 +362,7 @@ def test_the_code_window_autoscrolls_in_its_own_space(tmp_path):
     d.middle(x, y, False)
     d.frame(DT)
     assert ws.code_layer.autoscrolling()
-    d.hover(x, y + 8 * lay.lh)
+    d.hover(x, y + 8 * lh)
     for _ in range(30):
         d.frame(DT)
     assert ed.top > 0 and ws.code_layer.autoscrolling()

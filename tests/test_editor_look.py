@@ -105,37 +105,41 @@ def test_the_code_tab_keeps_one_left_inset(tmp_path, theme, mode):
     lay, ox, oy = _editor(ws, "code")
     ed = ws.editor
     fs = lay.fs
-    x0 = lay.x0
-    assert lay.symbols and x0 - lay.cx >= 8 * fs
+    cl = ws.code_layer
+    rect, top, cell, lh, tx0 = cl.view()
+    x0 = lay.cx + 8 * fs                     # the page's text column
+    assert lay.symbols and cl.s.touch
     px = _px(ws)
     # An unindented line that is not the current one: its line number
     # ends a cell before the code, which starts on the text column, each
     # glyph's bearing at most fs in; the widest number starts on x0.
-    other = next(i for i in range(lay.rows) if ed.top + i != ed.row
+    other = next(i for i in range(rect[3] // lh) if ed.top + i != ed.row
                  and ed.lines[ed.top + i][:1].isalpha())
-    y = oy + lay.y0 + other * lay.lh
-    tx0 = ws.code_layer._text_x0(lay, ed)
-    gc = ws.code_layer._gutter_cols(ed)
-    assert gc and tx0 == x0 + gc * lay.cell
-    num = _ink_left(px, ox + lay.cx + 1, ox + lay.cx + lay.cw, y, y + lay.lh)
+    y = oy + rect[1] + other * lh
+    gc = (tx0 - x0) // cell
+    assert gc and tx0 == x0 + gc * cell
+    num = _ink_left(px, ox + lay.cx + 1, ox + lay.cx + lay.cw, y, y + lh)
     digits = len(str(ed.top + other + 1))
-    at = x0 + (gc - 1 - digits) * lay.cell
+    at = x0 + (gc - 1 - digits) * cell
     assert at <= num - ox <= at + fs, ("number", num - ox, at)
-    code = _ink_left(px, ox + tx0 - lay.cell // 2, ox + lay.cx + lay.cw, y, y + lay.lh)
+    code = _ink_left(px, ox + tx0 - cell // 2, ox + lay.cx + lay.cw, y, y + lh)
     assert tx0 <= code - ox <= tx0 + fs, ("code", code - ox, tx0)
-    sx, sy, _sw, sh = lay.status_band
+    sx, sy, _sw, sh = cl.page.anchors["status_row"]
     status = _ink_left(px, ox + sx + 1, ox + sx + 200, oy + sy + 1, oy + sy + sh)
     assert x0 <= status - ox <= x0 + fs, ("status", status - ox, x0)
     # The symbol keys: the first key's edge on x0, the last one's on the
-    # inset from the right.
-    assert lay.sym_key_x(0) + fs == x0
-    n = len(ws.code_layer._symbols())
-    assert lay.sym_key_x(n) - fs == lay.cx + lay.cw - (x0 - lay.cx)
+    # inset from the right; a tap anywhere on a key is that key.
+    kx, ky0, kw, kh = cl.page.canvases["symbols"][1]
+    n = len(cl._symbols())
+    ins = x0 - lay.cx - fs
+    span = kw - 2 * ins
     for i in range(n):
-        assert lay.sym_key_at(lay.sym_key_x(i)) == i
-        assert lay.sym_key_at(lay.sym_key_x(i + 1) - 1) == i
-    ky = oy + lay.sym_y + lay.sym_h // 2
-    key = _ink_left(px, ox + lay.cx + 1, ox + lay.cx + lay.cw, ky, ky + 1)
+        assert cl.symbol_at(ins + i * span // n) == i
+        assert cl.symbol_at(ins + (i + 1) * span // n - 1) == i
+    ky = oy + ky0 + kh // 2
+    # (the strip is a canvas part, its ground a card whose edge a light
+    # look draws: the probe starts inside it)
+    key = _ink_left(px, ox + lay.cx + 3 * fs, ox + lay.cx + lay.cw, ky, ky + 1)
     assert key - ox == x0, ("keys", key - ox, x0)
     # The current line's mark: inside the inset, 3 px or more off the frame.
     assert lay.cx + 3 * fs <= lay.mark_x and lay.mark_x + 2 * fs < x0
@@ -197,8 +201,9 @@ def test_the_caret_stands_a_column_off_the_next_stem(tmp_path, theme, mode):
     cv = ws.glass_canvas
     px = _px(ws)
     caret = _rgb(cv, ws.theme_colors["ink_accent"])     # the text view's caret
-    y = oy + lay.y0 + (ed.row - ed.top) * lay.lh
-    x = ws.code_layer._text_x0(lay, ed) + (ed.col - ed.left) * lay.cell
+    rect, _top, cell, lh, tx0 = ws.code_layer.view()
+    y = oy + rect[1] + (ed.row - ed.top) * lh
+    x = tx0 + (ed.col - ed.left) * cell
     cols = [c for c in range(x - lay.cell, x + lay.cell)
             if all(px[yy][c] == caret for yy in range(y + fs, y + lay.text_h - fs))]
     assert len(cols) == fs, cols

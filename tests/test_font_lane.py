@@ -663,10 +663,11 @@ def test_the_code_tab_hit_tests_at_the_mono_faces_7px_cell(tmp_path):
         assert lay.cols == (lay.w - lay.x0) // 7
         ed.set_text("\n".join("%02d " % i + "abcdefghij" * 4 for i in range(12)))
         drv.frame(1 / 30)
-        tx0 = cl._text_x0(lay, ed)
-        for col, row in ((0, 0), (3, 1), (17, 2), (min(30, lay.cols - 1), 4)):
+        rect, _top, cell, lh, tx0 = cl.view()
+        assert cell == 7 and lh == 14
+        for col, row in ((0, 0), (3, 1), (17, 2), (min(30, ed.COLS - 1), 4)):
             for dx in (0, 6):                         # either edge of the 7 px cell
-                drv.touch(tx0 + (col - ed.left) * 7 + dx, lay.y0 + (row - ed.top) * lay.lh + 1)
+                drv.touch(tx0 + (col - ed.left) * 7 + dx, rect[1] + (row - ed.top) * lh + 1)
                 drv.frame(1 / 30)
                 drv.frame(1 / 30)
                 assert (ed.row, ed.col) == (row, col), (col, row, dx)

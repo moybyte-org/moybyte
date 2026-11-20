@@ -259,6 +259,19 @@ def _open_wifi_popover(ws):
 
 
 # name -> what a run opens
+def _code_probe(ws):
+    """The Code tab's state in a line: its text, caret and selection, the
+    find strip, the open overlay, the error mark, the tab."""
+    import hashlib
+    cl, ed = ws.code_layer, ws.editor
+    over = ("complete" if cl._cmp_open else "goto" if cl._jump_open else "scripts" if cl._files_open
+            else "none")
+    return "%s L%d:%d sel=%r find=%s/%r over=%s err=%r tab=%s" % (
+        hashlib.sha1(ed.text().encode()).hexdigest()[:12], ed.row + 1, ed.col + 1,
+        ed.selection_bounds() if ed.sel is not None else None, cl._find_open, cl._find_q, over,
+        ws.code_err_row, ws.editor_app.tab)
+
+
 def _open_editor(tab):
     def open_(ws):
         import test_shell_goldens as G
@@ -304,7 +317,7 @@ def _open_log(ws):
 
 # name -> what a run opens
 SURFACES = {
-    "editor_code": P.Surface(_open_editor("code")),
+    "editor_code": P.Surface(_open_editor("code"), probe=_code_probe),
     "settings_permissions": P.Surface(_open_settings_page("permissions"), _perms_carts),
     "settings_tz": P.Surface(_open_tz),
     "settings_paired": P.Surface(_open_paired(BROWSERS, True)),
@@ -427,9 +440,9 @@ RUNS = (
       11: WIFI_RING_IN_VIEW}),
     ("wifi_popover-tdeck", "wifi_popover", "tdeck_320x240_fs1_dark",
      ["k:down", "k:a", "f:2", "k:down", "k:a", "t:abc", "enter", "f:2", "back"]),
-    ("editor_code-tdeck", "editor_code", "tdeck_320x240_fs1_dark", CODE_SCRIPT),
-    ("editor_code-desk", "editor_code", "p4_1024x600_fs2_windowed", CODE_DESK_SCRIPT),
-    ("editor_code-big", "editor_code", "big_800x480_fs3_dark", CODE_SCRIPT),
+    ("editor_code-tdeck", "editor_code", "tdeck_320x240_fs1_dark", CODE_SCRIPT, P.BEHAVIOUR),
+    ("editor_code-desk", "editor_code", "p4_1024x600_fs2_windowed", CODE_DESK_SCRIPT, P.BEHAVIOUR),
+    ("editor_code-big", "editor_code", "big_800x480_fs3_dark", CODE_SCRIPT, P.BEHAVIOUR),
 )
 
 

@@ -334,8 +334,9 @@ def _touch(drv):
 
 
 def _row_tap(ws, drv, id):
-    """Tap the overlay row (or field) whose id is `id`, where it last drew."""
-    b = ws.code_layer._ov_host.box(id)
+    """Tap the overlay row ((its list's cur=, its key)) or field (its id),
+    where it last drew."""
+    b = ws.code_layer.row_box(*id) if isinstance(id, tuple) else ws.code_layer.box(id)
     assert b is not None, id
     _tap(drv, b[0] + b[2] // 2, b[1] + b[3] // 2)
     drv.touch_up()
@@ -343,29 +344,31 @@ def _row_tap(ws, drv, id):
     drv.frame(DT)
 
 
+def _tap_box(ws, drv, id):
+    b = ws.code_layer.box(id)
+    assert b is not None, id
+    _tap(drv, b[0] + b[2] // 2, b[1] + b[3] // 2)
+    drv.touch_up()
+    drv.frame(DT)
+    drv.frame(DT)                                  # what the tap opened has drawn
+
+
 def _tap_tool(ws, drv, name):
-    """Open the tool palette (if needed) and tap a named tool button."""
+    """Open the tool row (if needed) and tap a named tool's button."""
+    from runtime import code_layer
     cl = ws.code_layer
     _touch(drv)
-    lay = ws.code_layout
     if not cl._tools_open:
-        b = cl._tls_btn(lay)
-        _tap(drv, b[0] + b[2] // 2, b[1] + b[3] // 2)
-    r = cl._toolbar_rect(lay)
-    n = len(cl._TOOLS)
-    bw = r[2] // n
-    i = cl._TOOLS.index(name)
-    _tap(drv, r[0] + i * bw + bw // 2, r[1] + r[3] // 2)
+        _tap_box(ws, drv, "tools")
+    _tap_box(ws, drv, code_layer._TOOL_ACTION[name])
 
 
 def _cell_xy(ws, col, row):
     """Screen center of a (visible col, visible row) code cell, gutter-aware."""
-    cl = ws.code_layer
-    lay = ws.code_layout
     ed = ws.editor
-    tx0 = cl._text_x0(lay, ed)
-    return (tx0 + (col - ed.left) * lay.cell + 2,
-            lay.y0 + (row - ed.top) * lay.lh + 2)
+    rect, _top, cell, lh, tx0 = ws.code_layer.view()
+    return (tx0 + (col - ed.left) * cell + 2,
+            rect[1] + (row - ed.top) * lh + 2)
 
 
 def test_tools_toggle_and_gutter_button(tmp_path):
@@ -373,21 +376,18 @@ def test_tools_toggle_and_gutter_button(tmp_path):
     drv = _enter_code(ws)
     cl = ws.code_layer
     _touch(drv)
-    lay = ws.code_layout
     assert not cl._tools_open
-    b = cl._tls_btn(lay)                           # a touch glass's TLS toggle
-    _tap(drv, b[0] + b[2] // 2, b[1] + b[3] // 2)
+    _tap_box(ws, drv, "tools")                     # a touch glass's tools toggle
     assert cl._tools_open
     ws.editor.set_text("\n".join("row %d" % i for i in range(30)))
     assert cl._gutter                              # on by default (D-03.1)
     drv.frame(DT)                                  # a draw applies the gutter reflow
-    assert cl._gutter_cols(ws.editor) == 3         # 30 lines -> 2 digits + 1 margin
-    assert cl._text_x0(lay, ws.editor) > lay.x0    # text shifted right of the gutter
+    rect, _top, cell, _lh, with_x0 = cl.view()
     with_cols = ws.editor.COLS
     _tap_tool(ws, drv, "gutter")                   # the tools row's toggle hides it
     assert not cl._gutter
     drv.frame(DT)
-    assert cl._gutter_cols(ws.editor) == 0
+    assert cl.view()[4] == with_x0 - 3 * cell      # 30 lines -> 2 digits + 1 margin, gone
     assert ws.editor.COLS == with_cols + 3         # the columns come back
 
 
@@ -538,9 +538,8 @@ def test_gutter_renders_without_error(tmp_path):
     ws = _ws(tmp_path, sys_size=(960, 600), font_scale=2)
     drv = _enter_code(ws)
     ws.editor.set_text("\n".join("line %d" % i for i in range(50)))
-    ws.code_layer._gutter = True
-    ws.code_layer._tools_open = True
-    ws.code_layer._find_open = True
+    ws.code_layer.run("tools")
+    ws.code_layer.run("find")
     ws.code_layer._find_q = "line"
     drv.frame(DT)
     buf = ws.sys_canvas.to_rgb888()
@@ -654,9 +653,9 @@ def test_autocomplete_popup_pick(tmp_path):
     ws.editor.row, ws.editor.col = 0, 3
     cl = ws.code_layer
     _tap_tool(ws, drv, "auto")                     # open the completion popup
-    assert cl._cmp_open and cl._cmp_items[0] == "circ"
+    assert cl._cmp_open and cl.s.cands[0].word == "circ"
     drv.frame(DT)
-    _row_tap(ws, drv, "circ\tverb")               # tap the first candidate
+    _row_tap(ws, drv, ("cand", "circ"))             # tap the first candidate
     assert not cl._cmp_open
     assert ws.editor.lines == ["circ"]
 
@@ -692,9 +691,9 @@ def test_jump_to_symbol_pick(tmp_path):
     cl = ws.code_layer
     _tap_tool(ws, drv, "goto")
     assert cl._jump_open
-    assert [n for n, _ in cl._jump_items] == ["a", "b", "c"]
+    assert [r.name for r in cl.s.defs] == ["a", "b", "c"]
     drv.frame(DT)
-    _row_tap(ws, drv, "c\tline 5")                # tap "c" (row 4)
+    _row_tap(ws, drv, ("def_at", "5"))                    # tap "c" (row 4)
     assert not cl._jump_open
     assert ws.editor.row == 4
 
@@ -852,10 +851,10 @@ def test_a_line_longer_than_the_view_fades_over_its_last_12_pixels(tmp_path):
     _FADE = 12                                   # the fade's width at the scale (moy_ui_text.c)
     ws, _drv, lay, ed = _look_ws(tmp_path, "moy")
     cv = ws.sys_canvas
-    tx0 = ws.code_layer._text_x0(lay, ed)        # past the line-number gutter
-    x1 = tx0 + ed.COLS * lay.cell
+    rect, _top, cell, lh, tx0 = ws.code_layer.view()   # past the line-number gutter
+    x1 = tx0 + ed.COLS * cell
     x0 = x1 - _FADE * lay.fs
-    long_y, fits_y = lay.y0 + lay.lh, lay.y0 + 2 * lay.lh
+    long_y, fits_y = rect[1] + lh, rect[1] + 2 * lh
     # the same glyphs ("y" and "z" differ, so compare each line with its own
     # left: the fitting line's band holds its ink, the long line's has none)
     ink = cv._col(ws.look.content_colors()["code_text"])
@@ -880,13 +879,13 @@ def test_a_faded_current_line_wears_one_outline(tmp_path):
         ed.row = 1                                   # the line longer than the view
         drv.frame(DT)
         cv = ws.sys_canvas
-        y = lay.y0 + lay.lh
+        rect, _top, cell, lh, tx0 = ws.code_layer.view()
+        y = rect[1] + lh
         x = lay.cx + lay.cw - 20                     # inside the fade
         ring = _w(cv, x, y)                          # the outline's top edge
         assert ring == _w(cv, x, y + lay.lh - 1), variant
-        assert ring != cv._col(ws.code_layer._t["bg"]), variant
-        caret = (ws.code_layer._text_x0(lay, ed) + (ed.col - ed.left) * lay.cell
-                 - lay.fs)                           # fs wide
+        assert ring != cv._col(ws.theme_colors["surface"]), variant
+        caret = (tx0 + (ed.col - ed.left) * cell - lay.fs)   # fs wide
         inner = [x for x in _edges(cv, lay, y, ring)
                  if lay.mark_x + 2 * lay.fs < x < lay.cx + lay.cw - 4 * lay.fs
                  and not caret <= x < caret + lay.fs]
@@ -947,8 +946,7 @@ def test_the_caret_and_a_find_match_read_on_the_code_surface(tmp_path, seed, var
         return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
 
     _ws, _drv, _lay, _ed = _look_ws(tmp_path, seed, variant)
-    t = _ws.code_layer._tones()
-    bg = lum(t["bg"])
+    bg = lum(_ws.theme_colors["surface"])
     for role, v in (("caret", _ws.theme_colors["ink_accent"]),     # the text view's caret
                     ("value", _ws.theme_colors["value"])):
         fg = lum(v)
@@ -1035,16 +1033,16 @@ def test_the_symbol_keys_follow_the_last_input(tmp_path):
     drv = _enter_code(ws)
     ui_draw.input_kind("keys")
     drv.frame(DT)
-    lay = ws.code_layout
-    assert not lay.symbols and lay.sym_h == 0
-    keys_rows = lay.rows
-    t = ws.code_layer._tls_btn(lay)
-    assert t[1] >= lay.status_band[1] and t[1] + t[3] <= lay.status_band[1] + lay.status_band[3]
+    cl = ws.code_layer
+    assert cl.box("tools") is None and not cl.s.touch
+    keys_rows = ws.editor.ROWS
     ui_draw.input_kind("touch")
     drv.frame(DT)
-    lay = ws.code_layout
-    assert lay.symbols and lay.sym_h > 0 and lay.rows < keys_rows
-    assert ws.editor.ROWS == lay.rows
+    drv.frame(DT)
+    t = cl.box("tools")
+    rect = cl.view()[0]
+    assert t is not None and t[1] >= rect[1] + rect[3]   # on the status line, under the code
+    assert cl.s.touch and ws.editor.ROWS < keys_rows     # the symbol keys take rows
     ui_draw.input_kind("keys")
 
 

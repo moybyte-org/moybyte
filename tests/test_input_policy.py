@@ -473,7 +473,7 @@ def test_esc_on_the_code_tab_closes_its_find_strip_then_leaves(tmp_path):
     _frames(drv)
     ws.editor_app.focus_tab("code")
     _frames(drv)
-    ws.code_layer._find_open = True
+    ws.code_layer.run("find")
     _esc(ws, drv)
     assert not ws.code_layer._find_open and ws.wm.top_kind() == "menu"
     _esc(ws, drv)

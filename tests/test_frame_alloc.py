@@ -713,8 +713,9 @@ def code(loop, info):
     """The Editor's Code tab, a `ui.text_view`: typed into (a key every
     fourth frame, the edit the editor's, outside the frame measured), then
     its view sent down the file and back by the wheel, which glides it. What each frame allocates, and what the tab's draw does: its
-    text view's pass (`_rows`) and the rest of it but the status line,
-    which a moved caret makes again."""
+    page's text editor (`_r_text_editor`, the text view's pass) and the
+    rest of the page's paint but the status line, which a moved caret
+    makes again."""
     from gc import mem_alloc
     ws = loop.ws
     ws.spine.exit()
@@ -737,31 +738,33 @@ def code(loop, info):
         loop.step()
     info["code_top"] = ws.wm.top_kind()
     cl = ws.code_layer
+    page = cl.page
     acc = [0, 0, 0, 0, 0]               # rows bytes, rows calls, draw bytes, status bytes, draws
-    rows = cl._rows
-    draw = cl._draw_code
-    status = cl._draw_status
+    rows = page._r_text_editor
+    draw = page.paint
+    status = page._r_status
 
-    def _rows(cv, r, e):
+    def _rows(n, row, rect):
         m = mem_alloc()
-        rows(cv, r, e)
+        rows(n, row, rect)
         acc[0] += mem_alloc() - m
         acc[1] += 1
 
-    def _draw():
+    def _draw(*a, **k):
         m = mem_alloc()
-        draw()
+        got = draw(*a, **k)
         acc[2] += mem_alloc() - m
         acc[4] += 1
+        return got
 
-    def _status(cv, lay, e):
+    def _status(n, row, rect):
         m = mem_alloc()
-        status(cv, lay, e)
+        status(n, row, rect)
         acc[3] += mem_alloc() - m
 
-    cl._rows = _rows
-    cl._draw_code = _draw
-    cl._draw_status = _status
+    page._r_text_editor = _rows
+    page.paint = _draw
+    page._r_status = _status
     keys = b"score = score + 1  "
 
     def typing(ms):
@@ -815,9 +818,9 @@ def code(loop, info):
     info["code_glide"] = out
     info["code_glide_acc"] = take()
     gc.enable()
-    del cl._rows
-    del cl._draw_code
-    del cl._draw_status
+    del page._r_text_editor
+    del page.paint
+    del page._r_status
     ws.spine.exit()
     for _ in range(30):
         loop.step()
@@ -1810,9 +1813,10 @@ def test_a_notes_swipe_shifts_and_allocates_only_the_fingers_answers(result):
 
 def test_the_code_tabs_text_view_allocates_nothing_typed_or_gliding(result):
     """The Code tab draws through `ui.text_view` on every painted frame: its
-    text view's pass allocates nothing, typed into or gliding, and the rest
-    of its draw nothing but the status line a moved caret makes again. (A
-    frame of the Editor also pays its bar's strip, which every tab draws.)"""
+    page's text editor allocates nothing, typed into or gliding, and the
+    rest of its page nothing but the status line a moved caret makes again.
+    (A frame of the Editor also pays its bar's strip, which every tab
+    draws.)"""
     info, text = result
     assert info["code_top"] == "menu", info["code_top"]
     for what in ("typing", "glide"):

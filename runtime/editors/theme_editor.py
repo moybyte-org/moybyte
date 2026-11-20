@@ -688,6 +688,7 @@ class ConfigLayer(CodeLayer):
     ESC_LEAVES = False
 
     id = TAB_CONFIG
+    PAGE = "config_page"
 
     def __init__(self, ws, names):
         CodeLayer.__init__(self, ws, names)
@@ -762,32 +763,15 @@ class ConfigLayer(CodeLayer):
             doc.follow()
         self._with(CodeLayer.draw, self, dt)
 
-    def _draw_status(self, cv, lay, ed):
-        ws = self.ws
-        th = ws.theme_colors
+    def _frame_keys(self):
+        return _hints_for(TAB_CONFIG)
+
+    def _note(self):
+        """The theme's status line."""
         doc = self._doc()
-        fs = lay.fs
-        _ui_draw.status_row(cv, th, lay.status_band, ())
-        cv.rect(lay.status_band[0], lay.status_band[1], lay.status_band[2], fs, th["border"])
-        text = doc.status() if doc is not None else ""
-        tx, ty, tw, tbh = lay.status_text
-        if doc is not None and doc.note is not None:
-            ic = 12 * fs
-            ink = th["value"] if not _contrast(th) else th["ink"]
-            x0 = lay.x0 - 2 * fs
-            if not ws.draw_icon("dup", (x0, ty + (tbh - ic) // 2, ic, ic), ink, cv):
-                _bar_glyph("dup", (x0, ty + (tbh - ic) // 2, ic, ic), ink, cv, fs)
-            was = _ui_draw.print_font(_ui_draw.font("caption")[0])
-            try:
-                cv.print(_ui_draw.print_cut(text, max(0, tx + tw - x0 - ic - 4 * fs), fs),
-                         x0 + ic + 4 * fs, ty + (tbh - _ui_draw.font("caption")[2] * fs) // 2,
-                         ink, 1)
-            finally:
-                _ui_draw.print_font(was)
-        else:
-            _ui_draw.status_row(cv, th, lay.status_text, (_status_line(
-                (text,), tw, fs),))
-        _draw_hints(cv, th, lay.hints, _hints_for(TAB_CONFIG), False)
+        if doc is None:
+            return ("", False)
+        return (doc.status(), doc.note is not None)
 
     def handle_input(self, i):
         doc = self._doc()

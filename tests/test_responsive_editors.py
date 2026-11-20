@@ -205,10 +205,10 @@ def test_code_editor_touch_places_caret_in_system_coords(tmp_path):
     ed = ws.editor
     ed.set_text("\n".join("line %d here" % i for i in range(40)))
     drv.frame(1 / 30)
-    lay = ws.code_layout
+    rect, _top, cell, lh, tx0 = ws.code_layer.view()
     # Tap the cell at visible (col=5, row=3).
-    tx = ws.code_layer._text_x0(lay, ed) + 5 * lay.cell + 1
-    ty = lay.y0 + 3 * lay.lh + 1
+    tx = tx0 + 5 * cell + 1
+    ty = rect[1] + 3 * lh + 1
     drv.touch(tx, ty)
     drv.frame(1 / 30)
     assert ed.row == ed.top + 3
@@ -346,10 +346,12 @@ def test_re_entry_keeps_the_view_with_the_gutter_on(tmp_path):
     """The line-number gutter NARROWS the editor's own window every draw, so a gate
     that compared the editor's live window against the layout would re-widen it on
     entry and scroll after all. The gate compares LAYOUTS."""
+    from runtime import host_app
     ws, ed = _scrolled_code_ws(tmp_path)
-    ws.code_layer._gutter = True
-    ws.code_layer._apply_gutter(ws.code_layout, ed)
-    ed.scroll(40, 0)                        # _apply_gutter re-clamped; pan away again
+    assert ws.code_layer._gutter            # on by default (D-03.1)
+    ws.mark_dirty()
+    host_app.ConsoleDriver(ws).frame(1 / 30)    # the page's draw narrows the window
+    ed.scroll(40, 0)                        # the draw re-clamped; pan away again
     narrowed = ed.COLS
     was = _view(ed)
 

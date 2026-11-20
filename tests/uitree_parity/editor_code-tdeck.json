@@ -1,7 +1,7 @@
 {
  "surface": "editor_code",
  "config": "tdeck_320x240_fs1_dark",
- "commit": "a51b6398c",
+ "commit": "da328c772",
  "script": [
   "k:down",
   "k:down",
@@ -109,5 +109,28 @@
    "k:up",
    "07390af2ccdf2a72e7a96a7aed0cdb1f518c8eaf2854bfafa67a7b5a1974417c"
   ]
+ ],
+ "states": [
+  "9a76021a7296 L1:1 sel=None find=False/'' over=none err=None tab=code",
+  "9a76021a7296 L2:1 sel=None find=False/'' over=none err=None tab=code",
+  "9a76021a7296 L3:1 sel=None find=False/'' over=none err=None tab=code",
+  "9a76021a7296 L3:2 sel=None find=False/'' over=none err=None tab=code",
+  "9a76021a7296 L3:3 sel=None find=False/'' over=none err=None tab=code",
+  "b3e3c492b1e6 L3:4 sel=None find=False/'' over=none err=None tab=code",
+  "87d10c09caca L4:1 sel=None find=False/'' over=none err=None tab=code",
+  "87d10c09caca L4:1 sel=None find=True/'' over=none err=None tab=code",
+  "87d10c09caca L11:25 sel=(10, 24, 10, 27) find=True/'spr' over=none err=None tab=code",
+  "87d10c09caca L12:71 sel=(11, 70, 11, 73) find=True/'spr' over=none err=None tab=code",
+  "87d10c09caca L12:71 sel=(11, 70, 11, 73) find=False/'spr' over=none err=None tab=code",
+  "87d10c09caca L12:71 sel=(11, 70, 11, 73) find=False/'spr' over=goto err=None tab=code",
+  "87d10c09caca L12:71 sel=(11, 70, 11, 73) find=False/'spr' over=goto err=None tab=code",
+  "87d10c09caca L101:1 sel=None find=False/'spr' over=none err=None tab=code",
+  "87d10c09caca L102:1 sel=None find=False/'spr' over=none err=None tab=code",
+  "57e1b7ad9ce4 L102:3 sel=None find=False/'spr' over=none err=None tab=code",
+  "57e1b7ad9ce4 L102:3 sel=None find=False/'spr' over=complete err=None tab=code",
+  "57e1b7ad9ce4 L102:3 sel=None find=False/'spr' over=none err=None tab=code",
+  "87d10c09caca L102:1 sel=None find=False/'spr' over=none err=None tab=code",
+  "9a76021a7296 L3:3 sel=None find=False/'spr' over=none err=None tab=code",
+  "9a76021a7296 L2:3 sel=None find=False/'spr' over=none err=None tab=code"
  ]
 }

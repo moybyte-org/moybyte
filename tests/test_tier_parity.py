@@ -264,12 +264,17 @@ def test_the_read_only_code_tab_draws_its_banner_over_the_code(tmp_path):
     ws.text.set_menu_view("code")
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)
-    lay = ws.code_layout
+    drv.frame(1 / 30)
     cl = ws.code_layer
-    h = cl._banner_h(lay)
-    assert h > 0 and cl._top_rows(lay) * lay.lh >= h
-    assert cl._y0(lay) >= lay.y0 + h
-    assert ws.editor.ROWS == lay.rows - cl._top_rows(lay)
+    assert cl.s.read_only and cl.s.ro_words
+    rect, _top, _cell, lh, _x0 = cl.view()
+    top = cl.page.content[1]
+    assert rect[1] > top                              # the code starts under the banner
+    cv = ws.sys_canvas
+    band = {bytes(cv._buf[2 * (y * cv.w + x):2 * (y * cv.w + x) + 2])
+            for y in range(top, rect[1]) for x in range(rect[0], rect[0] + rect[2])}
+    assert len(band) > 1                              # ...which has its words
+    assert ws.editor.ROWS == rect[3] // lh
 
 
 def test_the_desk_offers_the_workspaces_and_panes_the_cart_has(tmp_path):

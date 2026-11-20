@@ -83,16 +83,20 @@ def test_a_press_on_the_find_strip_released_over_the_code_reaches_the_strip(tmp_
         cl._toggle_find()
         ws.mark_dirty()
         drv.frame(DT)
-        fx, fy, fw, fh = cl._find_rect(ws.code_layout)
+        fx, fy, fw, fh = cl.box("find_q")
         x, y = fx + fw // 3, fy + fh // 2
+        ed = ws.editor
+        view = (ed.row, ed.col, ed.top)
         drv.touch(x, y)
         drv.frame(DT)
-        assert cl._ov_host.hold, "the strip did not take the press"
+        assert cl.page_held, "the strip did not take the press"
         for dy in (20, 60, 100):
             drv.touch_drag(x, y + dy)               # down over the code
             drv.frame(DT)
+            assert cl.page_held and (ed.row, ed.col, ed.top) == view, "the code took the drag"
         drv.touch_up()
         drv.frame(DT)
-        assert not cl._ov_host.hold and cl._ov_host.tap == 0, "the strip never saw the release"
+        assert not cl.page_held, "the strip never saw the release"
+        assert (ed.row, ed.col, ed.top) == view
     finally:
         ui_draw.input_kind(was)

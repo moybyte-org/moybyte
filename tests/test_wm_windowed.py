@@ -882,8 +882,9 @@ def test_keyboard_goes_to_focused_window(tmp_path):
     ws.text.set_menu_view("code")
     drv.frame(1 / 30)
     win = ws.wm.windows["menu"]
-    lay = win.ctx.code_layout                     # less the line-number gutter
-    assert ws.editor.COLS == lay.cols - ws.code_layer._gutter_cols(ws.editor)
+    rect, _top, cell, _lh, tx0 = ws.code_layer.view()   # less the line-number gutter
+    cx, _cy, cw, _ch = win.content_rect()
+    assert rect[2] <= cw and ws.editor.COLS == (rect[0] + rect[2] - tx0) // cell
     ws.editor.set_text("")
     for ch in "ok":
         drv.type_char(ord(ch))

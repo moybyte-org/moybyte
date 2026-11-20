@@ -3234,30 +3234,37 @@ def _code_pairs(ws, img):
     def shows(x, y, w, h):
         return card is None or not _meets(card, (x, y, w, h))
     ed = ws.editor
-    fs, x0 = lay.fs, lay.x0
     cl = ws.code_layer
-    gc = cl._gutter_cols(ed)
-    tx0 = cl._text_x0(lay, ed)
+    v = cl.view()
+    if v is None:
+        return []
+    rect, _top, cell, lh, tx0 = v
+    fs = lay.fs
+    x0 = lay.cx + 8 * fs                    # the page's text column
+    gc = (tx0 - x0) // cell
     px = img.load()
     edges = []
-    for i in range(lay.rows):
+    for i in range(rect[3] // lh):
         n = ed.top + i
-        y = oy + lay.y0 + i * lay.lh
+        y = oy + rect[1] + i * lh
         if n != ed.row and n < len(ed.lines) and ed.lines[n][:1].isalpha() \
-                and shows(ox + lay.cx, y, lay.cw, lay.lh):
+                and shows(ox + lay.cx, y, lay.cw, lh):
             if gc:
-                at = x0 + (gc - 1 - len(str(n + 1))) * lay.cell
-                e = _ink_left(px, ox + lay.cx + 1, ox + lay.cx + lay.cw, y, y + lay.lh)
+                at = x0 + (gc - 1 - len(str(n + 1))) * cell
+                e = _ink_left(px, ox + lay.cx + 1, ox + lay.cx + lay.cw, y, y + lh)
                 edges.append((e, at))
-            e = _ink_left(px, ox + tx0 - lay.cell // 2, ox + lay.cx + lay.cw, y, y + lay.lh)
+            e = _ink_left(px, ox + tx0 - cell // 2, ox + lay.cx + lay.cw, y, y + lh)
             edges.append((e, tx0))
             break
-    sx, sy, _sw, sh = lay.status_band
-    if shows(ox + sx, oy + sy, 200, sh):
+    band = cl.page.anchors.get("status_row")
+    if band is not None and shows(ox + band[0], oy + band[1], 200, band[3]):
+        sx, sy, _sw, sh = band
         edges.append((_ink_left(px, ox + sx + 1, ox + sx + 200, oy + sy + 1, oy + sy + sh), x0))
-    if getattr(lay, "sym_h", 0):
-        ky = oy + lay.sym_y + lay.sym_h // 2
-        edges.append((_ink_left(px, ox + lay.cx + 1, ox + lay.cx + lay.cw, ky, ky + 1), x0))
+    keys = cl.page.canvases.get("symbols") if cl.s.touch else None
+    if keys is not None:
+        kx, ky0, _kw, kh = keys[1]
+        ky = oy + ky0 + kh // 2
+        edges.append((_ink_left(px, ox + lay.cx + 3 * fs, ox + lay.cx + lay.cw, ky, ky + 1), x0))
     off = [abs(e - ox - want) if not (want <= e - ox <= want + fs) else 0
            for e, want in edges if e is not None]
     worst = max(off) if off else 0
@@ -3270,9 +3277,8 @@ def _caret_pairs(ws, probe, img):
     bold stroke (a glyph's foot, an underscore, may meet it). The caret is
     the text view's (native/moy_ui/moy_ui_text.c): one scale wide, in the
     column before its cell, a scale in from its glyph box's top and foot."""
-    t = getattr(ws.code_layer, "_t", None)
     ed = ws.editor
-    if ws.screen != "menu" or t is None or ed is None:
+    if ws.screen != "menu" or ed is None or ws.code_layer.view() is None:
         return []
     px = img.load()
     lay, ox, oy = _editor_origin(ws, "code_layout", ws.code_layout)
@@ -3283,8 +3289,9 @@ def _caret_pairs(ws, probe, img):
     if not (0 <= vcol <= ed.COLS and 0 <= vrow < ed.ROWS):
         return []
     fs = lay.fs
-    x = ox + cl._text_x0(lay, ed) + vcol * lay.cell - fs
-    y = oy + cl._y0(lay) + vrow * lay.lh + fs
+    rect, _top, cell, lh, tx0 = cl.view()
+    x = ox + tx0 + vcol * cell - fs
+    y = oy + rect[1] + vrow * lh + fs
     w, h = fs, lay.text_h - 2 * fs
     if x + w >= img.width:
         return []

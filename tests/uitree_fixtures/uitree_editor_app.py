@@ -112,7 +112,7 @@ def code_body():
 
 def notes_body():
     with ui.panel("notes_area"):
-        ui.text("Played {played}", tone="dim")
+        ui.label("Played {played}", tone="dim", face="result", size="fit", align="center")
 
 
 def build():

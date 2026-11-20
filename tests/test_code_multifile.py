@@ -287,10 +287,10 @@ def test_tapping_the_code_tab_again_opens_the_scripts_and_a_row_switches(tmp_pat
     assert tab is not None
     _tap_box(drv, tab)
     assert cl._files_open
-    assert cl._files_sel == ws.text.code_sources().index("main.lua"), \
+    assert cl.s.script_at == "main.lua", \
         "the menu opens on the file the tab is showing, not on row 0"
-    b = next(cl._ov_host.box(i) for i in [r for r in _rows(ws) if r.startswith("extra.lua")])
-    _tap_box(drv, b)
+    drv.frame(DT)
+    _tap_box(drv, cl.row_box("script_at", "extra.lua"))
     assert not cl._files_open
     assert ws.text.code_file_name() == "extra.lua"
     assert ws.editor.text() == "-- a tab\n"
@@ -301,7 +301,7 @@ def _rows(ws):
     out = []
     for n in ws.text.code_sources():
         size = ws.text.code_source_size(n)
-        out.append(n + "\t" + "%.1f KB" % (size / 1024.0) if size is not None else n)
+        out.append((n, "%.1f KB" % (size / 1024.0) if size is not None else ""))
     return out
 
 
@@ -310,11 +310,15 @@ def test_the_scripts_menu_lists_each_script_and_its_size(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.code_layer.open_scripts()
     drv.frame(DT)
-    for row in _rows(ws):
-        assert ws.code_layer._ov_host.box(row) is not None, row
+    cl = ws.code_layer
+    drv.frame(DT)
+    assert [(r.name, r.size) for r in cl.s.scripts if not r.new] == _rows(ws)
+    for name, _size in _rows(ws):
+        assert cl.row_box("script_at", name) is not None, name
     assert ws.text.code_source_size("extra.lua") == len("-- a tab\n")
-    ws.code_layer.overlay_step(1)                   # the trackball's roll picks the next
-    assert ws.code_layer._files_sel == ws.text.code_sources().index("main.lua") + 1
+    names = ws.text.code_sources()
+    cl.overlay_step(1)                              # the trackball's roll picks the next
+    assert cl.s.script_at == names[names.index("main.lua") + 1]
 
 
 # ---------------------------------------------------------------------------
@@ -459,8 +463,14 @@ def test_new_script_last_in_the_scripts_menu_opens_make_it_mines_dialog(tmp_path
     assert cl.can_add_script()
     cl.open_scripts()
     drv.frame(DT)
-    assert cl._ov_host.box("New script") is not None
+    drv.frame(DT)
+    assert cl.row_box("script_at", "New script") is not None
     for _ in range(len(ws.text.code_sources())):
         cl.overlay_step(1)
-    cl._popup_accept()
+        drv.frame(DT)
+    assert cl.s.script_at == "New script"
+    drv.key_down(13, 0)
+    drv.frame(DT)
+    drv.key_up(13, 0)
+    drv.frame(DT)
     assert ws.editor_app.tab == "cards" and ws.cards_layer.prompt is not None

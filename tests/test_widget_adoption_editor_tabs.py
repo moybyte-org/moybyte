@@ -94,73 +94,72 @@ def test_the_private_panel_button_copy_is_gone(tmp_path):
 
 
 def test_code_chrome_is_drawn_by_the_toolkit(tmp_path, monkeypatch):
-    """Every chrome button on the code tab is a `ui_draw.chip`, and every symbol-
-    palette key is a `ui_draw.button`; the find strip is a `ui.field` of the verbs.
-    Counted with the tool palette AND the find strip open -- the states no golden
-    enters."""
-    from runtime import ui_draw
+    """The Code tab is a page of the spec's kinds (`runtime/editors/code_ui.py`):
+    every symbol key is a `ui_draw.button`, every tool a stop of the page, the
+    find strip a row of a field, its count and Aa, and the status line one
+    `status_row`. Counted with the tool row AND the find strip open -- the
+    states no golden enters."""
+    from runtime import code_layer, ui_draw
     ws = _editor(tmp_path, "code", sys_size=(480, 320))
-    ui_draw.input_kind("touch")              # the palette shows after touch (D-17)
+    ui_draw.input_kind("touch")              # the symbol keys show after touch (D-17)
     cl = ws.code_layer
+    _frame(ws)                               # the touch input reaches the page
     counter = _Counter(monkeypatch)
-
-    cl._tools_open = False
-    cl._find_open = False
+    k = ws.frame_state.frames_drawn
     _frame(ws)
     keys = len(cl._symbols())
-    assert counter.n["button"] == keys        # the symbol palette
-    assert counter.n["chip"] == 1             # the always-visible TLS toggle
+    assert counter.n["button"] == keys * (ws.frame_state.frames_drawn - k)   # the symbol keys
+    assert cl.box("tools") is not None        # the always-visible tools toggle
+    assert all(cl.box(a) is None for a in code_layer._TOOL_ACTION.values() if a != "tools")
 
-    counter.reset()
-    cl._tools_open = True
-    cl._find_open = True
+    cl.run("tools")
+    cl.run("find")
     cl._find_q = "de"
     _frame(ws)
-    # TLS + one per tool; the find strip's field and Aa are the verbs'.
-    assert counter.n["chip"] == 1 + len(cl._TOOLS)
-    assert counter.n["button"] == keys
-    assert cl._ov_host.box("find") is not None and cl._ov_host.box("case") is not None
-    # the responsive "LN n, COL n" band: its ground, then its text on the
-    # code's column
-    assert counter.n["status_row"] == 2
+    counter.reset()
+    k = ws.frame_state.frames_drawn
+    _frame(ws)
+    assert all(cl.box(a) is not None for a in code_layer._TOOL_ACTION.values()), \
+        [a for a in code_layer._TOOL_ACTION.values() if cl.box(a) is None]
+    assert counter.n["button"] == keys * (ws.frame_state.frames_drawn - k)
+    assert cl.box("find_q") is not None and cl.box("case") is not None
+    assert counter.n["status_row"] >= 1       # the status line of fields
+    assert counter.n["dialog"] == 0
 
 
 def test_code_popups_are_menus_of_the_verbs(tmp_path, monkeypatch):
-    """Completion and Go to are `ui.menu`s in a `ui.popover` (docs/history/look_2026-10.md
-    step 33): a row per entry, the picked one focused, and no toolkit row."""
-    from runtime import ui
+    """Completion and Go to are popovers of the page, a row per entry, the
+    picked one focused (docs/history/look_2026-10.md step 33)."""
     ws = _editor(tmp_path, "code", sys_size=(480, 320))
     cl = ws.code_layer
-    counter = _Counter(monkeypatch)
-    menus = []
-    real = ui.menu
-    monkeypatch.setattr(ui, "menu", lambda *a, **k: (menus.append(a[1]), real(*a, **k))[1])
-
-    cl._cmp_open = True
-    cl._cmp_items = ["circfill", "rectfill", "print"]
-    cl._cmp_sel = 1
+    ws.editor.set_text("pr")
+    ws.editor.row, ws.editor.col = 0, 2
+    cl.run("complete_open")
     _frame(ws)
-    assert [len(m) for m in menus] == [3] and counter.n["row"] == 0
-    assert ui.focus() == menus[0][1]
-
-    menus.clear()
-    cl._cmp_open = False
-    cl._jump_open = True
-    cl._jump_items = [("update", 3), ("draw", 11)]
-    cl._jump_sel = 0
     _frame(ws)
-    assert menus == [["update\tline 4", "draw\tline 12"]]
+    assert [p.key for p in cl.page.shown_popovers()] == ["complete"]
+    words = [r.word for r in cl.s.cands]
+    assert words and all(w.startswith("pr") for w in words)
+    assert cl.row_box("cand", words[0]) is not None
+    cl.run("overlay_close")
+    ws.editor.set_text("def update():\n    pass\ndef draw():\n    pass")
+    cl.run("goto_open")
+    _frame(ws)
+    _frame(ws)
+    assert [p.key for p in cl.page.shown_popovers()] == ["goto"]
+    assert [(r.name, r.line) for r in cl.s.defs] == [("update", 1), ("draw", 3)]
+    assert cl.row_box("def_at", "1") is not None and cl.row_box("def_at", "3") is not None
 
 
 def test_the_crash_popup_is_a_popover_of_the_verbs(tmp_path, monkeypatch):
-    """See why's popover (docs/history/look_2026-10.md step 33): `ui.popover`, hung
-    under the stopped line, never the old dialog shell."""
-    from runtime import ui
+    """See why's popover (docs/history/look_2026-10.md step 33): a popover of the
+    page, hung under the stopped line, never the old dialog shell."""
     ws = _editor(tmp_path, "code", sys_size=(480, 320))
     counter = _Counter(monkeypatch)
-    opened = []
-    real = ui.popover
-    monkeypatch.setattr(ui, "popover", lambda *a, **k: (opened.append(a[:1]), real(*a, **k))[1])
     ws.crash_popup = "TypeError: unsupported types for __add__"
     _frame(ws)
-    assert counter.n["dialog"] == 0 and ("Stopped",) in opened
+    _frame(ws)
+    cl = ws.code_layer
+    assert counter.n["dialog"] == 0
+    assert [p.key for p in cl.page.shown_popovers()] == ["stopped"]
+    assert cl.s.stopped == ws.crash_popup

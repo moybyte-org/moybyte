@@ -31,6 +31,7 @@ PORTED = (
     "achievements_ui",
     "wifi_ui",
     "uitree_editor_app",
+    "code_ui",
 )
 
 

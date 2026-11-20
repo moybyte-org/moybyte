@@ -1110,7 +1110,7 @@ def test_the_code_panes_header_finds_jumps_and_opens_its_more_menu(desk):
     assert not cl._find_open
     _press(drv, d, "pane 0 code goto")
     assert cl._jump_open
-    cl._jump_open = False
+    cl.run("overlay_close")
     gutter = cl._gutter
     _press(drv, d, "pane 0 code more")
     assert d.part_state["code more"] is not None

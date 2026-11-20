@@ -112,11 +112,27 @@ def test_base_tier_editors_follow_the_theme(tmp_path):
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("path") and it.get("edit"))
     ws.home.change_selected()
-    assert ws.code_layer._tones()["bg"] == ws.theme_colors["surface"]  # dark
+    from runtime import host_app
+    drv = host_app.ConsoleDriver(ws)
+    ws.text.set_menu_view("code")
+    ws.editor.set_text("")
+
+    def ground():
+        ws.mark_dirty()
+        drv.frame(1 / 30)
+        drv.frame(1 / 30)
+        rect = ws.code_layer.view()[0]
+        cv = ws.sys_canvas
+        return cv._buf[2 * ((rect[1] + rect[3] - 2) * cv.w + rect[0] + rect[2] // 2):][:2]
+
+    def surface():
+        cv = ws.sys_canvas
+        c = cv._col(ws.theme_colors["surface"])
+        return bytes((c & 255, c >> 8))
+    assert ground() == surface()            # dark
     ws.look.set_theme_variant("light")
     # The code editor gets exactly a light-and-dark pair on the base tier.
-    tc = ws.code_layer._tones()
-    assert tc["bg"] == ws.theme_colors["surface"]
+    assert ground() == surface()
     assert ws.look.content_colors()["code_keyword"] is not None   # the light syntax set
 
 

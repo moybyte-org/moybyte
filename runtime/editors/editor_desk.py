@@ -563,10 +563,7 @@ class EditorDesk(Layer):
     def _set_layout(self, tab, lay):
         ws = self.ws
         if tab == "code":
-            ws.code_layout = lay
-            ed = ws.editor
-            if ed is not None and lay is not None and (ed.COLS, ed.ROWS) != (lay.cols, lay.rows):
-                ed.set_view_size(lay.cols, lay.rows)
+            ws.code_layout = lay        # the editor's view size is the page's, set as it draws
             return
         name, attr = _OWNERS[tab]
         setattr(getattr(ws, name), attr, lay)

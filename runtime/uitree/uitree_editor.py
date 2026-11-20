@@ -9,6 +9,7 @@ tab's x -- is the engine's in the shape; the replay computes it the way the
 Code tab and the desk do today."""
 from array import array
 
+from moy_input import SHIFT as _SHIFT
 import ui as _v
 import ui_draw as _ud
 import uitree as S
@@ -17,6 +18,7 @@ import uitree_app
 
 _SYN = {"python": "python", "lua": "lua", "json": "json", "markdown": "markdown", "plain": "plain"}
 _FILL = ("switch", "panes", "pane", "text_editor", "slot", "panel", "case", "canvas")
+STATUS_SEP = " \u00b7 "  # a status template's fields are split at it
 _TEXT_PAD = 8          # moy_ui_api_int.h's TEXT_PAD: the view's text inset at the scale
 
 
@@ -30,69 +32,61 @@ class Engine(uitree_app.Engine):
         self.split_out = array("i", [0] * (4 * 16 + 4))
         self.dividers = {}     # panes node id -> the divider rects this frame drew
         self.edits_traced = None
+        self.host_arrows = False   # the arrows reach the document through the host (the console's nav)
 
     # -- the page: regions stacked, overlays last ---------------------------
 
     def _replay_page(self, n):
         w, h = self.content[2], self.content[3]
-        self.classes = ("desk" if self.desk else "handheld", "wide" if w * 3 > h * 4 else "tall") + (
-            ("symbols",) if _v.has_symbols() else ())
+        self.classes = ("desk" if self.desk else "handheld", "wide" if w * 3 > h * 4 else "tall")
         self.lenders = {}
         S.LIVE = S.live_units(n, self.lenders)
         self.canvases = {}
         rect = _v.page(n.p["title"](None))
+        hint = self._hints()
+        if hint and _v.hints_width(hint) > 0:
+            # the page's band: under everything it stacks
+            band, rect = _v.cut_bottom(rect, self._h_row())
+            _v.at(*band)
+            _v.hints(hint)
+        last = self.focused                     # the last frame's focus
         prev, self.ids = self.ids, {}
         self.anchors = {}
         self.dividers = {}
-        want = [(self.want_focus, None)] if self.want_focus is not None else []
-        if self.fresh and prev:
-            first = [i for i, (node, row) in prev.items() if "focus" in node.p and node.p["focus"](row)]
-            if first and self.want_focus is None:
-                self.want_focus = first[0]
-                want = [(first[0], None)]
-            self.fresh = False
-        for key, _k in want:
-            if key in prev:
-                _v.focus(key)
+        moved, ahead = self._land_focus(prev)
         self.rect = rect
+        self.dups = set()
+        self._lists_before = getattr(self, "_lists_now", set())
+        self._lists_now = set()
         self.late = []
         self._stack(n, None, rect)
         for k, row, r in self.late:
             self._draw(k, row, r)
-        if self.want_focus is not None and self.want_focus in self.ids:
-            _v.focus(self.want_focus)
-        f = _v.focus()
-        if f == self.want_focus or self.want_focus not in self.ids:
-            self.want_focus = None      # it took (a popover closing hands focus back a frame late)
-        self.focused = self.ids.get(f)
-        self.focus_key = f or ""
-        for k, lst in self.curs:
-            self._cur_follow(k, lst)
-
-    def _cur_follow(self, ck, lst):
-        """A list's cur= follows focus onto its rows (uitree_app's rule)."""
-        if self.focused is None:
-            return
-        node, row = self.focused
-        if row is None or uitree_app._list_of(node) is not lst:
-            return
-        v = row._f[row._m.key]
-        if self.s._v[ck] != v:
-            old = self.s._v[ck]
-            self.s._v[ck] = self._sync[ck] = v
-            self.s._ver[ck] += 1
-            S._trace("state", ck, "%r -> %r   (focus)" % (old, v))
+        self._focus_after(moved, ahead, hint, last)
 
     def _h_row(self):
-        return 36 if self.desk else 22 * self.fs
+        return 48 if self.desk else 22 * self.fs
 
     def _height(self, k):
+        if k.kind == "canvas" and k.l.get("h"):
+            return k.l["h"] * (1 if self.desk else self.fs)
         if k.kind in _FILL:
             return None
         if k.kind == "status":
-            return 22 if self.desk else 14 * self.fs
+            # one band height in every theme under a version 2 `ui` face,
+            # 12 under petme128, never under the face's line and a pixel
+            # above and below
+            fid, _w, line, _a = _ud.font("ui")
+            return max(20 if _ud.font_v2(fid) else 12, line + 2) * self.fs
         if k.kind == "tools" and (self._in_pane_head(k) or k.l.get("lend")):
             return 0
+        if k.kind == "label" and ("lines" in k.l or k.l.get("wrap") == "word"):
+            # a wrapped label: its lines of the ui face, a pad above and below
+            line = _ud.font("ui")[2]
+            return (k.l.get("lines", 2) * (line + 2) + 6) * self.fs
+        if k.kind == "row" and any(c.kind == "status" for c in k.kids) and \
+                not any(c.kind == "field" for c in k.kids):
+            return self._height(next(c for c in k.kids if c.kind == "status"))   # a status line's
         return self._h_row()
 
     def _in_pane_head(self, k):
@@ -106,6 +100,8 @@ class Engine(uitree_app.Engine):
         o = uitree_app.Engine._o(self, n, row, **o)
         if n.act is not None and not n.act.can(row):
             o["disabled"] = True
+        if "marked" in n.p:
+            o["current"] = bool(n.p["marked"](row))
         return o
 
     def _stack(self, n, row, rect):
@@ -118,10 +114,16 @@ class Engine(uitree_app.Engine):
         fills = sum(1 for h in hs if h is None) or 1
         x, y, w, h = rect
         room = max(0, h - fixed)
-        for k, kh in zip(flow, hs):
+        spare = 0
+        for i, (k, kh) in enumerate(zip(flow, hs)):
             if kh == 0:
                 continue
-            kh = room // fills if kh is None else kh
+            kh = (room // fills if kh is None else kh) + spare
+            spare = 0
+            if k.kind == "text_editor" and any(flow[i + 1:]):
+                # a text editor takes whole lines; the node under it the rest
+                spare = kh % self._pitch()
+                kh -= spare
             self._draw(k, row, (x, y, w, kh))
             y += kh
         for k in kids:
@@ -150,11 +152,9 @@ class Engine(uitree_app.Engine):
         self.cv.rect(x + g, y + g, w - 2 * g, h - 2 * g, self.th["panel"])
         ty = y + h // 2 - 4
         for k in n.kids:
-            if k.kind == "text" and self._shown(k, row):
-                t = self._t(k, "text", row)
-                tw = _v.text_size(t)[0]
-                _v.at(x + (w - tw) // 2 - 20, ty, tw + 40, 16)
-                _v.label(t, {"ink": "ink_dim"})
+            if k.kind == "label" and self._shown(k, row):
+                # a panel's words: its labels down its middle
+                self._r_label(k, row, (x + g, ty, w - 2 * g, 16))
                 ty += 18
 
     # -- a row ----------------------------------------------------------------
@@ -164,6 +164,15 @@ class Engine(uitree_app.Engine):
             if "icon" in k.p and k.l.get("alone"):
                 return h
             return _v.text_size(self._t(k, "label", row))[0] + 28
+        if k.kind == "status" and STATUS_SEP not in self._t(k, "text", row):
+            # a one-field status beside a control ("2 of 5" by a find
+            # field) takes its words' width; a line of fields grows
+            pad = _ud.metrics("status")[_ud.ST_PAD] * self.fs
+            was = _ud.print_font(_ud.font("ui")[0])
+            try:
+                return _ud.print_width(self._t(k, "text", row), self.fs) + 2 * pad + 2
+            finally:
+                _ud.print_font(was)
         if k.kind == "tabs":
             st = self.s._t[k.key]
             tab = self.decl.labels[k.l["labels"]]
@@ -173,6 +182,8 @@ class Engine(uitree_app.Engine):
 
     def _r_row(self, n, row, rect):
         x, y, w, h = rect
+        if n.key:
+            self.anchors[n.key] = rect
         kids = []
         for k in n.kids:                # a lent site: the shown lender's buttons, in its place
             if k.kind == "lent":
@@ -180,6 +191,8 @@ class Engine(uitree_app.Engine):
                 kids += [b for b in t.kids if self._shown(b, row)] if t is not None else []
             elif self._shown(k, row):
                 kids.append(k)
+        if any(k.kind == "status" for k in n.kids) and not any(k.kind == "status" for k in kids):
+            _ud.status_row(self.cv, self.th, rect, ())     # a status row's band, its line hidden
         nat = [self._natural(k, row, h) for k in kids]
         grow = [i for i, v in enumerate(nat) if v is None]
         if not grow:
@@ -190,7 +203,7 @@ class Engine(uitree_app.Engine):
         rest = w - sum(v for v in nat if v) - gap * max(0, len(kids) - 1)
         for i, k in enumerate(kids):
             kw = nat[i] if nat[i] is not None else max(0, rest // max(1, len(grow)))
-            r = (x, y + 2, kw, h - 4)
+            r = (x, y, kw, h) if k.kind == "status" else (x, y + 2, kw, h - 4)   # a band: the row's height
             if k.kind == "button":
                 self._r_button(k, row, rect, at=r)
             else:
@@ -201,7 +214,27 @@ class Engine(uitree_app.Engine):
     def _r_tools(self, n, row, rect):
         if n.l.get("lend"):
             return                      # drawn at the frame's lent site
-        self._r_row(n, row, rect)
+        if self.desk:
+            self._r_row(n, row, rect)
+            return
+        # a handheld's tool row: a cell each across the width, a word's
+        # its width (two cells at most), the icons sharing the rest
+        x, y, w, h = rect
+        kids = [k for k in n.kids if self._shown(k, row)]
+        n_k = max(1, len(kids))
+        words = {i: min(self._natural(k, row, h), 2 * w // n_k)
+                 for i, k in enumerate(kids) if not k.l.get("alone")}
+        icons = n_k - len(words)
+        rest = w - sum(words.values())
+        j = 0
+        for i, k in enumerate(kids):
+            if i in words:
+                kw = words[i]
+            else:
+                kw = rest * (j + 1) // max(1, icons) - rest * j // max(1, icons)
+                j += 1
+            self._r_button(k, row, rect, at=(x, y + 1, kw - 1, h - 2))
+            x += kw
 
     def _r_canvas(self, n, row, rect):
         _v.at(*rect)
@@ -215,8 +248,7 @@ class Engine(uitree_app.Engine):
     def point(self, px, py, click):
         """A canvas with pointer= is handed down, drag and up in its own
         coordinates; the press that starts on it holds it until release."""
-        p = self._surf.pointer()
-        down = bool(p is not None and p.down)
+        down = self.pointer_down()
         held = getattr(self, "held", None)
         if held is not None:
             n, r = held
@@ -241,8 +273,32 @@ class Engine(uitree_app.Engine):
         return uitree_app.Engine.point(self, px, py, click)
 
     def _r_status(self, n, row, rect):
-        _v.at(*rect)
-        _v.label(self._t(n, "text", row), {"ink": "ink_dim"})
+        """A status line: its first field always, the others while they fit,
+        joined by the `ui` face's separator, on the status band's look."""
+        fields = self._t(n, "text", row).split(STATUS_SEP)
+        line = fields[0]
+        if len(fields) > 1:
+            fid = _ud.font("ui")[0]
+            info = _ud.font_info(fid) if fid else None
+            sep = "  \u00b7  " if info is not None and info[4] == 0 else " - "
+            room = rect[2] - 2 * _ud.metrics("status")[_ud.ST_PAD] * self.fs
+            was = _ud.print_font(fid)
+            try:
+                for f in fields[1:]:
+                    more = line + sep + f
+                    if _ud.print_width(more, self.fs) > room:
+                        break
+                    line = more
+            finally:
+                _ud.print_font(was)
+        # its words on the page's text column (the text view's inset), the
+        # band's ground before them
+        x, y, w, h = rect
+        tx = x + _TEXT_PAD * self.fs - _ud.metrics("status")[_ud.ST_PAD] * self.fs
+        if tx > x:
+            _ud.status_row(self.cv, self.th, (x, y, tx - x, h), ())
+            rect = (tx, y, w - (tx - x), h)
+        _ud.status_row(self.cv, self.th, rect, (line,))
 
     def _r_label(self, n, row, rect):
         _v.at(*rect)
@@ -290,7 +346,15 @@ class Engine(uitree_app.Engine):
             if "changed" in n.l:
                 self.fire(n.l["changed"], (), n, None)
         if done and "on" in n.l:
-            self.fire(n.l["on"], (), n, None)
+            back = self._shift_enter() if getattr(self, "shift", False) else None
+            if back is not None and back.can():
+                self.fire(back, self.args_for(back), n, None)
+            else:
+                self.fire(n.l["on"], (), n, None)
+
+    def _shift_enter(self):
+        """The action Shift+Enter answers in a field, or None."""
+        return next((a for a in self.actions.values() if S.SHIFT_ENTER in a.keys), None)
 
     # -- panes and their dividers --------------------------------------------
 
@@ -409,19 +473,29 @@ class Engine(uitree_app.Engine):
 
     # -- the text editor --------------------------------------------------------
 
+    def _pitch(self):
+        """A text editor's line pitch: a version 2 face's glyph box,
+        petme128's line and its lead."""
+        fid, _fw, line, _asc = _ud.font("mono")
+        info = _ud.font_info(fid) if fid else None
+        return (info[1] if info is not None and info[4] == 0 else line + 2) * self.fs
+
     def _r_text_editor(self, n, row, rect):
         key = n.key
         doc = self.s._v[key]
         ed = doc.ed
         fs = self.fs
-        _fid, fw, line, _asc = _ud.font("mono")
-        cell = fw * fs
-        lh = (line + 3) * fs if not self.desk else line + 4
+        cell = _ud.font("mono")[1] * fs
+        lh = self._pitch()
         x, y, w, h = rect
+        lines = max(1, h // lh)
+        if lines * lh < h:
+            self.cv.rect(x, y + lines * lh, w, h - lines * lh, self.th["surface"])
+            rect = (x, y, w, lines * lh)
+            h = lines * lh
         v = self.views.get(key)
-        lines = v[5] if v is not None and v[0] == rect else max(1, h // lh)
         gutter = bool(n.p["gutter"](row)) if "gutter" in n.p else False
-        gcols = (len(str(len(ed.lines))) + 2) if gutter else 0
+        gcols = (len(str(len(ed.lines))) + 1) if gutter else 0
         x0 = x + _TEXT_PAD * fs + gcols * cell
         ed.set_view_size(max(1, (w - (x0 - x)) // cell), lines)
         q = ""
@@ -439,7 +513,7 @@ class Engine(uitree_app.Engine):
         if ed.sel is not None:
             o["sel"] = ed.selection_bounds()
         if q:
-            o["find"] = (q, True)
+            o["find"] = (q, doc.find_ci)
         if err is not None:
             o["err"] = err
         if v is None or v[1] != ed.top:
@@ -462,7 +536,13 @@ class Engine(uitree_app.Engine):
 
     def _r_popover(self, n, row, rect):
         w = n.p["w"](row) if "w" in n.p else 200
-        a = self.anchors.get(n.p["anchor"](row)) if "anchor" in n.p else None
+        name = n.p["anchor"](row) if "anchor" in n.p else None
+        a = self.anchors.get(name) if name else None
+        if a is not None and "." not in name and n.kids and n.kids[0].kind == "field":
+            # hung from a whole node, a popover that opens on its field
+            # (Go to) stands centred over that node's top
+            w = min(w, a[2] - 16 * self.fs)
+            a = (a[0] + (a[2] - w) // 2, a[1] + 4 * self.fs, w, 0)
         if a is not None:
             _v.at(*a)
         if not _v.popover(n.key, w) and "close" in n.l:
@@ -471,17 +551,162 @@ class Engine(uitree_app.Engine):
             if self._shown(k, row):
                 if k.kind == "field":
                     self._r_field(k, row, self.rect)
+                elif k.kind == "label":
+                    uitree_app.Engine._r_label(self, k, row, rect)   # down the card, as it flows
                 else:
                     self._draw(k, row, rect)
+        if self._a_note(n) and "close" in n.l and n.l["close"].hint_now():
+            _v.hints(("cancel", n.l["close"].hint_now()))     # a note's card names its own close
         _v.popover()
 
+    @staticmethod
+    def _a_note(p):
+        """A popover of words alone (See why): nothing in it takes the keys."""
+        return not any(k.kind in ("field", "rows", "link", "button", "menu") for k in p.kids)
+
+    def _menu_rows(self, n):
+        """A popover's list of one link a row is a menu: a choice row each,
+        its value at the row's right (no link's mark)."""
+        return (n.parent is not None and n.parent.kind == "popover" and len(n.kids) == 1
+                and n.kids[0].kind == "link")
+
+    def _menu_text(self, link, r):
+        t = self._t(link, "label", r)
+        v = self._t(link, "value", r) if "value" in link.p else ""
+        return (t + "\t" + v if v else t)[:uitree_app.ID_MAX]
+
+    def _row_stop_id(self, lst, rowkey):
+        if not self._menu_rows(lst):
+            return uitree_app.Engine._row_stop_id(self, lst, rowkey)
+        r = next((r for r in self.s._v[lst.l["model"]] if r._f[r._m.key] == rowkey), None)
+        return self._menu_text(lst.kids[0], r) if r is not None else None
+
     def _r_rows(self, n, row, rect):
-        uitree_app.Engine._r_rows(self, n, row, rect)
+        if not self._menu_rows(n):
+            uitree_app.Engine._r_rows(self, n, row, rect)
+            return
+        link = n.kids[0]
+        model = list(self.s._v[n.l["model"]])
+        if not model:
+            empty = self._t(n, "empty", None)
+            if empty:
+                _v.label(empty, {"tone": "dim"})
+            return
+        texts = []
+        for r in model:
+            t = self._menu_text(link, r)
+            texts.append(t)
+            self.ids[t] = (link, r)
+        got = _v.menu("", texts)
+        if got >= 0:
+            self._activate(link, model[got])
 
     def _r_link(self, n, row, rect):
         uitree_app.Engine._r_link(self, n, row, rect)
 
+    def _hints(self):
+        """A text surface keeps its keys: no band while it (or nothing) holds
+        focus. A popover or a closer row (a find strip) names what Enter
+        does there and what Back closes."""
+        if self.dialog_shown():
+            return uitree_app.Engine._hints(self)
+        pops = self.shown_popovers()
+        if pops and self._a_note(pops[0]):
+            return ()                   # the card names its close itself
+        closer = pops[0] if pops else (self._closer(self.root) if self.root is not None else None)
+        f = self.focused
+        if closer is None:
+            if f is None or f[0].kind == "text_editor":
+                return tuple(getattr(self, "text_keys", ()))   # the host's keys, if it names any
+            return uitree_app.Engine._hints(self)
+        out = []
+        if self._shown_list() is not None:
+            out += ["scroll", "Pick"]           # the arrows walk the popover's list
+        if f is not None:
+            node, row = f
+            act = node.l.get("on") if node.kind == "field" else node.act
+            if act is not None and act.can(row) and act.hint_now():
+                out += ["confirm", act.hint_now()]
+            back = self._shift_enter() if node.kind == "field" else None
+            if back is not None and back.can() and back.hint_now():
+                out += ["Shift+enter", back.hint_now()]
+        close = closer.l.get("close")
+        if close is not None and close.hint_now():
+            out += ["back", close.hint_now()]
+        return tuple(out)
+
+    def pointer_down(self):
+        """Whether the pointer is held: the surface's; a hosted page's host
+        replaces it with its own."""
+        p = self._surf.pointer() if self._surf is not None else None
+        return bool(p is not None and p.down)
+
     # -- keys ------------------------------------------------------------------
+
+    def _shown_list(self):
+        """The list (rows with cur=) of the popover shown, or None."""
+        for p in self.shown_popovers():
+            for k in p.kids:
+                if k.kind == "rows" and k.src.get("cur"):
+                    return k
+        return None
+
+    def step_rows(self, d):
+        """Up or down `d` rows in the shown popover's list (the arrows and a
+        trackball, which the console routes past the page): its cur= moves
+        and focus follows. False where no popover list is shown."""
+        was, _NOW.app = _NOW.app, self
+        try:
+            lst = self._shown_list()
+            if lst is None:
+                return False
+            rows = list(self.s._v[lst.l["model"]] if "model" in lst.l else ())
+            if not rows:
+                return True
+            ck = lst.src["cur"]
+            keyf = rows[0]._m.key
+            keys = [r._f[keyf] for r in rows]
+            cur = self.s._v[ck]
+            i = keys.index(cur) if cur in keys else -1
+            j = max(0, min(len(keys) - 1, i + d))
+            if keys[j] != cur:
+                self.s._v[ck] = keys[j]
+                self.s._ver[ck] += 1
+                S._trace("state", ck, "%r -> %r   (step %+d)" % (cur, keys[j], d))
+            self.want_focus = self._row_stop_id(lst, keys[j])
+            self._damage.all()
+            return True
+        finally:
+            _NOW.app = was
+
+    def type_byte(self, ch, shift=False):
+        """One typed byte into the shown text editor, outside a frame's input
+        (a held key's repeat, a symbol key): what `keys` does with it."""
+        was, _NOW.app = _NOW.app, self
+        try:
+            ek = self.editor_keys()
+            if ek is None:
+                return False
+            return self._into_doc(ek, ch, shift)
+        finally:
+            _NOW.app = was
+
+    def _into_doc(self, ek, ch, shift):
+        doc = self.s._v[ek]
+        before = doc.summary()
+        if ch == 9 and shift:
+            got = doc.outdent()
+        else:
+            got = doc.key(ch)
+        if got:
+            self.s._ver[ek] += 1
+            tag = "(typed in text_editor %r)" % ek
+            if self.trace and self.trace[-1].endswith(tag):
+                first = self.trace.pop().split(" -> ")[0].split("state   %s " % ek)[-1].strip()
+                before = first
+            S._trace("state", ek, "%s -> %s   %s" % (before, doc.summary(), tag))
+        self._damage.all()
+        return True
 
     def shown_popovers(self):
         """The popovers in the shown tree: a switch's current case only."""
@@ -528,6 +753,7 @@ class Engine(uitree_app.Engine):
 
     def _keys(self, i):
         ch = getattr(i, "typed", 0) & 0xFF
+        self.shift = bool(getattr(i, "mods", 0) & _SHIFT)
         answer = [a for a in self.actions.values() if ch and any(S._chord_byte(k) == ch for k in a.keys)]
         live = [a for a in answer if a.live()]
         if len(live) > 1:               # the checker proves this cannot happen; the engine says so if it does
@@ -544,25 +770,35 @@ class Engine(uitree_app.Engine):
                 _NOW.app = was
             self._damage.all()
             return True
+        text = ch and (ch in (8, 9, 13, 127) or 32 <= ch < 127)
+        f = self.focused
+        if ch == 13 and f is not None and f[0].kind == "link" and self.popover_shown():
+            self._activate(f[0], f[1])      # Enter takes a popover's row, as A does
+            self._damage.all()
+            return True
+        if text and ch != 13 and self.views:
+            # a popover with no field of its own (completion, the scripts) is
+            # left by a typed key, which then edits as though it was never open
+            for p in self.shown_popovers():
+                if "close" in p.l and not any(k.kind == "field" for k in p.kids):
+                    self.run_action(p.l["close"], self.args_for(p.l["close"]),
+                                    "typed %r on popover %r" % (chr(ch), p.key))
+                    if not self.popover_shown():
+                        self.focused = None
+                        return self._into_doc(next(iter(self.views)), ch,
+                                              bool(getattr(i, "mods", 0) & _SHIFT))
+                    break
         ek = self.editor_keys()
         if ek is not None:
             doc = self.s._v[ek]
             moved = False
-            for name, dy, dx in (("up", -1, 0), ("down", 1, 0), ("left", 0, -1), ("right", 0, 1)):
-                if i.pressed(name):
-                    doc.move(dy, dx, True if getattr(i, "mods", 0) & 1 else None)
-                    moved = True
-            if ch and (ch in (8, 9, 13, 127) or 32 <= ch < 127):
-                before = doc.summary()
-                if doc.key(ch):
-                    self.s._ver[ek] += 1
-                    tag = "(typed in text_editor %r)" % ek
-                    if self.trace and self.trace[-1].endswith(tag):
-                        first = self.trace.pop().split(" -> ")[0].split("state   %s " % ek)[-1].strip()
-                        before = first
-                    was, _NOW.app = _NOW.app, self
-                    S._trace("state", ek, "%s -> %s   %s" % (before, doc.summary(), tag))
-                    _NOW.app = was
+            if not self.host_arrows:
+                for name, dy, dx in (("up", -1, 0), ("down", 1, 0), ("left", 0, -1), ("right", 0, 1)):
+                    if i.pressed(name):
+                        doc.move(dy, dx, True if getattr(i, "mods", 0) & _SHIFT else None)
+                        moved = True
+            if text:
+                self._into_doc(ek, ch, bool(getattr(i, "mods", 0) & _SHIFT))
                 moved = True
             if moved:
                 self._damage.all()
@@ -591,3 +827,13 @@ class Engine(uitree_app.Engine):
         allv = [r for _k, v in items for r in v]
         r = allv[nth]
         return r[0] + r[2] // 2, r[1] + r[3] // 2
+
+
+class Page(Engine):
+    """A page on the Editor's kinds hosted by a surface still on today's
+    verbs (`uitree_app.Page`'s bridge): the host begins the frame, routes
+    the keys and the pointer, and `paint` replays the page into its rect."""
+
+    def __init__(self, build, host, damage, files=None, close=None):
+        Engine.__init__(self, S.decl_of(build.__module__), build, host, None, damage, files)
+        self.close_root = close

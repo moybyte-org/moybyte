@@ -116,7 +116,6 @@ def test_open_and_a_single_candidate_open_with_land_in_one_app(tmp_path, kind, p
 # The surfaces that keep their own scroll, and why.
 OWN_SCROLL = {
     "editors_code.py": "the code editor's buffer, caret and scroll (refactor §8)",
-    "code_layer.py": "the code editor's view of that buffer",
     "editor_handle.py": "the cart editor handle's view of a CodeEditor buffer",
 }
 
