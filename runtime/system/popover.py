@@ -204,7 +204,7 @@ class WifiPanel:
         before = self._radio()
         _fit(ws, self)
         self.host.begin(cv, ws.theme_colors, _inner(ws, rect), _desk(), "panel")
-        self.page.scroll = rect[3] < self.need
+        self.page.overflows = rect[3] < self.need
         self.page.draw(cv, ws.theme_colors, _inner(ws, rect), _desk(), 0.0)
         if self._radio() != before:
             ws.mark_dirty()          # the radio's state shows outside the panel

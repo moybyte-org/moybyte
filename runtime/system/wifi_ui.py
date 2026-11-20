@@ -55,7 +55,7 @@ def poll(page):
     if not c:
         ssid = ip = None
     s.pop = page.popover
-    s.scroll = page.scroll
+    s.scroll = page.overflows
     s.connected = c
     if ssid is not page.ssid or ip is not page.ip:
         page.ssid, page.ip = ssid, ip
@@ -185,7 +185,7 @@ class WifiPage:
 
     def __init__(self, sl, host, damage, popover=False):
         self.sl, self.popover = sl, popover
-        self.scroll = False             # the popover's card is shorter than its rows (its host says)
+        self.overflows = False          # the popover's card is shorter than its rows (its host says)
         self.engine = uitree_app.Page(popover_page if popover else wifi_page, host, damage, env=sl)
         self.engine.bare = popover      # the popover's card is its ground
         self.nets = self.known = self.pick = self.ssid = self.ip = None
