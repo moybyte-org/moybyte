@@ -1741,8 +1741,7 @@ def _tasks_plan(ws, cfg):
         S.SCHED.start({"id": "moybyte.weather", "title": "Weather", "permissions": [],
                        "src": "raise ValueError('no network')\n"})
         ws.procs.gen += 1
-        ws.tasks_layer.cur = 2
-        ws.tasks_layer.host.reset()
+        ws.tasks_layer.select(2)
 
     def banner():
         # A service's notification over the game in front, its banner held

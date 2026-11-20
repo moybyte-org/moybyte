@@ -19,6 +19,9 @@ _DT = 1 / 30
 def _night(monkeypatch):
     boot_on_fixture(monkeypatch)
     N.NOTES.reset()
+    yield
+    N.NOTES.reset()
+    S.SCHED.reset()
 
 
 def _hand(tmp_path):
@@ -45,22 +48,11 @@ def _two_games(ws, drv):
     assert ws.screen == "tasks"
 
 
-_SHOT = [0]
-
-
 def _keys(ws, drv, *names):
-    import os
     for k in names:
         drv.press(k)
         drv.frame(_DT)
         drv.frame(_DT)
-        if os.environ.get("TASKS_SHOTS"):
-            import pngwrite
-            from pixel_goldens import rgb565_rows
-            cv = ws.glass_canvas
-            _SHOT[0] += 1
-            pngwrite.write_png("%s/%02d_%s.png" % (os.environ["TASKS_SHOTS"], _SHOT[0], k),
-                               rgb565_rows(cv._buf, cv.w, cv.h), cv.w, cv.h)
 
 
 def test_down_and_enter_switch_to_the_second_row(tmp_path):

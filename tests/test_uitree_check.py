@@ -27,6 +27,7 @@ PORTED = (
     "log_ui",
     "web_console_ui",
     "about_ui",
+    "tasks_ui",
 )
 
 

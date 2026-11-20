@@ -138,14 +138,26 @@ def pages(loop):
     shown["web"] = ws.web.serving()
     ws.web.toggle()
     _steps(loop, 4)
+    import notifications
+    notifications.NOTES.post(moy_log.SHELL, "Ana", "We start at eight.", None,
+                             ("default", "Open", "reply", "Reply"), notifications.LOW)
+    ws.open_tasks()
+    _steps(loop)
+    shown["tasks"] = ws.tasks_layer.current()[0]
+    ws.tasks_layer.open(notifications.NOTES.list[0])
+    _steps(loop)
+    shown["tasks_notes"] = ws.tasks_layer.current()[1].summary
+    ws.close_tasks()
+    _steps(loop, 4)
     print("RESULT " + json.dumps({"painted": painted, "shown": shown, "errors": errors}))
 '''
 
 # each ported page's build function, by name: Settings' rows, its tz, paired,
 # System log and App permissions pages, the update screen, the web console, and
-# Licences' list (a licence's text is a page pushed over it: shown["licence"])
+# Licences' list (a licence's text is a page pushed over it: shown["licence"]),
+# and the task manager on each of its tabs
 BUILDS = ("rows_page", "tz_page", "paired_page", "log_page", "build", "page", "web_page",
-          "list_page")
+          "list_page", "tasks_page")
 
 
 def test_every_ported_page_builds_and_draws_on_the_boards_micropython(tmp_path):
@@ -166,5 +178,6 @@ def test_every_ported_page_builds_and_draws_on_the_boards_micropython(tmp_path):
     for how in ("open_update", "open_update_online", "open_update_c6", "open_update_none"):
         assert shown[how] == "update", (how, shown)
     assert shown["web"] is True, shown
+    assert shown["tasks"] == "running" and shown["tasks_notes"] == "Ana", shown
     missing = [b for b in BUILDS if not painted.get(b)]
     assert not missing, ("pages that never painted", missing, painted, text[-3000:])

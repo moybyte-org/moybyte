@@ -273,8 +273,8 @@ def test_the_task_manager_lists_them_and_opens_one(tmp_path):
     drv.frame(_DT)
     layer = ws.tasks_layer
     assert ws.screen == "tasks" and N.NOTES.up() is None
-    assert layer.tab == tasks_ui.NOTES_TAB and layer.notes[layer.note_cur].id == nid
-    n = layer.notes[layer.note_cur]
+    tab, n = layer.current()
+    assert tab == "notes" and n.id == nid
     assert tasks_ui.note_verbs(n) == ["Open", "Reply", "Clear"]
     layer._do("Reply", n)
     drv.frame(_DT)
@@ -290,7 +290,6 @@ def test_clear_takes_one_from_the_list(tmp_path):
     b = _post_as(pid, "two", urgency=N.LOW)
     ws.open_tasks()
     layer = ws.tasks_layer
-    layer.tab = tasks_ui.NOTES_TAB
     drv.frame(_DT)
     assert [n.id for n in layer.notes] == [b, a]
     layer._do("Clear", layer.notes[0])
@@ -361,6 +360,7 @@ def test_the_keys_start_on_the_list(tmp_path):
     ws.open_tasks()
     drv.frame(_DT)
     layer = ws.tasks_layer
-    assert layer.tab == tasks_ui.NOTES_TAB and layer.notes[layer.note_cur].id == b
+    tab, n = layer.current()
+    assert tab == "notes" and n.id == b
     _key(drv, "down")
-    assert layer.notes[layer.note_cur].id == a
+    assert layer.current()[1].id == a
