@@ -283,19 +283,20 @@ def pages(loop):
 # each ported page's build function, by name: Settings' rows, its tz, paired,
 # System log and App permissions pages, the update screen, the web console,
 # Licences' list (a licence's text is a page pushed over it: shown["licence"]),
-# Settings and in the bar's popover,
-# and the task manager on each of its tabs
-# Achievements (a badge's popover: shown["badge"]), the task manager on each
-# of its tabs, and the Editor's Code tab and theme mode's Config (the Editor's
-# head row draws in the bar's zone, never a page frame: shown["head"], and its
-# desk case shown["desk_head"])
+# Achievements (a badge's popover: shown["badge"]), the Wi-Fi panel in
+# Settings and in the bar's popover, the task manager on each of its tabs,
+# and the Editor's Code tab and theme mode's Config (the Editor's head row
+# draws in the bar's zone, never a page frame: shown["head"], and its desk
+# case shown["desk_head"]; the desk's workspaces place: shown["spaces"])
 BUILDS = ("rows_page", "tz_page", "paired_page", "log_page", "build", "page", "web_page",
-          "list_page", "tasks_page", "achievements_page", "code_page", "config_page")
+          "list_page", "tasks_page", "achievements_page", "wifi_page", "popover_page",
+          "code_page", "config_page")
 
 
 def test_every_ported_page_builds_and_draws_on_the_boards_micropython(tmp_path):
     PORTS._perms_carts(tmp_path / "carts")
-    sources = "\n\n".join(inspect.getsource(c) for c in (PORTS.Updater, PORTS.C6Updater, Webhost))
+    sources = "\n\n".join(inspect.getsource(c) for c in (PORTS.Updater, PORTS.C6Updater, Webhost,
+                                                                 PORTS._Station))
     legacy = (Path(__file__).resolve().parent / "uitree_fixtures" / "uitree_legacy_app.py").read_text()
     more = (PAGES.replace("@SOURCES@", sources).replace("@LEGACY@", repr(legacy))
             .replace("@BROWSERS@", repr(PORTS.BROWSERS))
