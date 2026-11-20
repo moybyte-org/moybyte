@@ -1548,6 +1548,11 @@ def _chord_byte(k):
     return None
 
 
+# Enter with Shift: a field's confirm the other way (a find's previous
+# match), which the field's on= is not
+SHIFT_ENTER = "shift+enter"
+
+
 # What a handler is handed (`takes=`), and its parameter count.
 TAKES = {"none": 0, "row": 1, "arg": 1, "char": 1}
 _HANDED = {"none": "nothing", "row": "the row", "arg": "the site's arg=", "char": "the typed character"}
@@ -1630,9 +1635,11 @@ def action(name, label, fn, *, takes="none", when=None, off=None, hint=None, row
         raise UIError("K03", "action %r: keys=%r is one text, not a list" % (name, keys), where=where,
                       fix="keys=(%r,)" % keys)
     for k in keys:
-        if not isinstance(k, str) or not (_chord_byte(k) or _letter(k) or k.startswith("role:") and k[5:] in ROLES):
+        if not isinstance(k, str) or not (_chord_byte(k) or _letter(k) or k == SHIFT_ENTER
+                                          or k.startswith("role:") and k[5:] in ROLES):
             raise UIError("K03", "action %r: keys=%r" % (name, k), where=where,
-                          expected='a letter, "ctrl+<letter>" or "role:<name>", a role one of ' + ", ".join(ROLES),
+                          expected='a letter, "ctrl+<letter>", "shift+enter" or "role:<name>", a role one of '
+                          + ", ".join(ROLES),
                           fix='keys=("m", "ctrl+f", "role:search")')
     if icon is not None and (not isinstance(icon, str) or "{" in icon):
         raise UIError("I02", "action %r: icon=%r" % (name, icon), where=where,
