@@ -155,7 +155,7 @@ class LicencesPage:
         desk = _lb.metric_class() == _lb.DESK
         if self.page is None or self.page.desk_build != desk:
             self.page = uitree_app.Page(desk_page if desk else list_page, self._host,
-                                        self._ctx.damage, env=self._ctx)
+                                        self._ctx.damage, gen=True, env=self._ctx)
             self.page.desk_build = desk
         return self.page
 

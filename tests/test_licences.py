@@ -106,6 +106,31 @@ def test_the_texts_arrows_scroll_it_once_it_has_focus(tmp_path):
     assert off() > 0
 
 
+def test_the_desk_text_moves_its_own_cells_gen_not_the_pages(tmp_path):
+    """The desk's list and text are a split's two cells, each a region with
+    its own gen over the states only its rows read: a row focused writes the
+    text, which moves the text cell's gen and leaves the page's and the
+    list's, so the list's step stays a frame of rows (test_wm_records)."""
+    from ws_helpers import build_desktop_ws
+    ws = build_desktop_ws(tmp_path, panel_diagonal_in=7.0, font_scale=1)
+    ws.home.open_desk()
+    ws.open_settings()
+    sl = ws.settings_layer
+    sl.open_page("licences")
+    for _ in range(2):
+        ws.mark_dirty()
+        ws.frame(1 / 30)
+    eng = sl.licences.page
+    gens = lambda: (eng._page_o["gen"],) + tuple(c[0]["gen"] for c in eng._cells.values())  # noqa: E731
+    assert eng._gen_ok and len(eng._cells) == 2
+    before = gens()
+    sl.licences.read(eng.s._v["parts"][1]._f["id"])
+    ws.mark_dirty()
+    ws.frame(1 / 30)
+    after = gens()
+    assert after[0] == before[0] and after[1] == before[1] and after[2] != before[2], (before, after)
+
+
 def test_every_body_inflates_on_micropython(tmp_path):
     """The boards and the browser inflate through `deflate.DeflateIO`, whose
     raw window defaults to 256 bytes: a body deflated with a wider one must
