@@ -198,13 +198,17 @@ def test_the_settings_row_opens_the_picker_and_a_pick_sets_the_zone(tmp_path):
     assert sl.has_page() and sl.page == "tz"
     sl._draw_page()
     pick = [k for k, (p, _tz) in enumerate(wc.ZONES) if p == "Tokyo"][0]
-    real = settings_layer._ui.link
+    # focus on Tokyo's row (a long list lays out the rows in view and the
+    # focused one, uitree_app.VROWS_MIN) and its link activated
+    real, real_focus = settings_layer._ui.link, settings_layer._ui.focus
+    want = wc.ZONES[pick][1] + "/use"
     settings_layer._ui.link = lambda label, value=None, o=None: \
-        (o or {}).get("id") == wc.ZONES[pick][1] + "/use" or real(label, value, o)
+        (o or {}).get("id") == want or real(label, value, o)
+    settings_layer._ui.focus = lambda id=None: want if id is None else real_focus(id)
     try:
         sl._draw_page()
     finally:
-        settings_layer._ui.link = real
+        settings_layer._ui.link, settings_layer._ui.focus = real, real_focus
     assert not sl.has_page()
     assert wc.zone() == "JST-9" and ws.system.get("tz") == "JST-9"
     assert wc.place(wc.zone()) == "Tokyo"

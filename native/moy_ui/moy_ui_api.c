@@ -4018,6 +4018,19 @@ void moy_ui_api_space(moy_ui_ctx_t *c, int h) {
     }
 }
 
+int moy_ui_api_view(const moy_ui_ctx_t *c, int32_t out[5]) {
+    if (c->page_stop == NO_PAGE || c->n_nest || c->grid_open || c->has_at || c->tp.open
+        || c->snap.on) {
+        return 0;
+    }
+    out[0] = c->y;
+    out[1] = c->scroll;
+    out[2] = c->page.h;
+    out[3] = c->page.w;
+    out[4] = c->fs;
+    return 1;
+}
+
 // -- ui.split ------------------------------------------------------------------------
 //
 // A split's kept state (its keep slot, by its id): `a` the divider held + 1
