@@ -65,7 +65,7 @@ ui.hook("turn", turn, takes="row")
 
 def build():
     with ui.page(""):
-        ui.empty(TITLE, icon="check", line=EMPTY, shown="!grants")
+        ui.empty(TITLE, icon="check", lines=[EMPTY], shown="!grants")
         with ui.rows("grants", group="{.app}"):
             ui.toggle("{.line}", ".on", on="turn", hint="{.on?Turn off:Turn on}")
 

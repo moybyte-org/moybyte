@@ -132,3 +132,27 @@ def test_two_engines_over_one_module_each_hold_their_own_state():
     a.run(lambda: got.append(F.s.seen), action="t")
     b.run(lambda: got.append(F.s.seen), action="t")
     assert got == [3, 5]
+
+
+def test_the_display_kinds_draw_and_letters_and_arrows_fire_their_actions(tmp_path):
+    """§7.2's kinds draw through the toolkit (a face, word wrap, a divider, a
+    note, a lines view, a count, a grid's pads); a letter in `keys=` fires its
+    action, and an arrow whose role an action answers fires it, focus staying
+    where it is (§13)."""
+    import uitree_kinds as K
+    cls = K.layer()
+    seen = {}
+
+    def opened(ws):
+        seen["app"] = P.host(ws, cls)
+
+    fs = P.frames("tdeck_320x240_fs1_dark", opened, ["t:m", "k:right", "k:right", "k:left", "k:down", "k:a"],
+                  str(tmp_path / "carts"))
+    eng = seen["app"].engine
+    trace = eng.trace_text()
+    assert K.s.said == "marked" and K.s.steps == 1, trace
+    assert "from key 'm'" in trace and "from role right" in trace and "from role left" in trace, trace
+    assert len(K.s.log) == 2, trace                     # down to the grid's second button, A
+    assert "from button 'grow'" in trace, trace
+    assert fs[1].buf != fs[0].buf and fs[2].buf != fs[1].buf, "the letter and the arrow drew"
+    assert eng._page_id() == "1 build"

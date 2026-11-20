@@ -102,17 +102,9 @@ def source_pass(path, tree, mod, decl, pages):
     names = {k for k, v in vars(mod).items() if v is st}
     out = []
     builds = set()
-    scoped = set()
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name in pages:
             builds.update(id(x) for x in ast.walk(node))
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "scope" and len(node.args) > 2:
-            scoped.update(id(x) for x in ast.walk(node.args[2]))
-            if isinstance(node.args[2], ast.Name):
-                for f in ast.walk(tree):
-                    if isinstance(f, ast.FunctionDef) and f.name == node.args[2].id:
-                        scoped.update(id(x) for x in ast.walk(f))
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "after" and \
                 len(node.args) == 2 and isinstance(node.args[1], ast.Constant):
@@ -152,7 +144,7 @@ def source_pass(path, tree, mod, decl, pages):
                 out.append(_err("S01", "no state named %r" % node.attr, path, node.lineno,
                                 fix=("did you mean %s?" % near) if near else
                                 "declare it: ui.state(..., %s=<initial value>)" % node.attr))
-            elif isinstance(node.ctx, ast.Load) and id(node) in builds and id(node) not in scoped:
+            elif isinstance(node.ctx, ast.Load) and id(node) in builds:
                 out.append(_err("B01", "s.%s read inside a page function" % node.attr, path, node.lineno,
                                 fix='"{%s}" in a text, "%s" in a condition' % (node.attr, node.attr)))
     return out

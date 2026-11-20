@@ -39,9 +39,9 @@ PY = {
     "E02": (H + "s = ui.state(e=ui.enum(\"a\", \"b\", init=\"c\"))\n", 2),
     "E03": (H + "s = ui.state(e=ui.enum(\"a\", init=\"a\"))\n", 2),
     "H01": (H + NOTHING + "s = ui.state(n=0)\nui.hook(\"tick\", nothing)\n" + PAGE + "        ui.link(\"tick\")\n", 8),
-    # Lua's pair names the letter "s"; Python refuses a letter (K03), so its pair names a role
-    "K02": (H + NOTHING + "s = ui.state(n=0)\nui.action(\"go\", \"Go\", nothing, keys=[\"role:more\"])\n"
-            "ui.action(\"stop\", \"Stop\", nothing, keys=[\"role:more\"])\n", 6),
+    "K02": (H + NOTHING + "s = ui.state(n=0)\nui.action(\"go\", \"Go\", nothing, keys=[\"s\"])\n"
+            "ui.action(\"stop\", \"Stop\", nothing, keys=[\"s\"])\n", 6),
+    "I02": (H + NOTHING + "s = ui.state(n=0)\nui.action(\"go\", \"Go\", nothing, icon=3)\n", 5),
     "K03": (H + NOTHING + "s = ui.state(n=0)\nui.action(\"go\", \"Go\", nothing, keys=[\"ctrl+shift+x\"])\n", 5),
     "N01": (H + "s = ui.state(n=0)\n" + PAGE + "        ui.label(\"x\", nope=1)\n", 5),
     "N02": (H + NOTHING + "s = ui.state(n=0)\nui.action(\"go\", \"Go\", nothing)\n" + PAGE
@@ -60,9 +60,7 @@ PY = {
     "T04": (H + "s = ui.state(e=ui.enum(\"a\", \"b\", init=\"a\"))\nui.labels(\"L\", {\"a\": \"A\"})\n" + PAGE
             + "        ui.label(\"{e|map L}\")\n", 6),
     "T05": (H + "s = ui.state(n=0)\n" + PAGE + "        ui.label(\"{.x}\")\n", 5),
-    # Lua's pair is a state and an action of one name, which Python does not refuse (its ported
-    # update_ui.py and uitree_roles.py fixture hold such pairs); Python's pair is an action declared twice
-    "U02": (H + NOTHING + "s = ui.state(n=0)\nui.action(\"go\", \"Go\", nothing)\nui.action(\"go\", \"Go\", nothing)\n", 6),
+    "U02": (H + NOTHING + "s = ui.state(go=0)\nui.action(\"go\", \"Go\", nothing)\n", 5),
     "A09": (H + NOTHING + "s = ui.state(n=0)\nui.action(\"go\", \"Go\", nothing, takes=\"all\")\n", 5),
 }
 

@@ -84,8 +84,7 @@ def _pyt(v):
 # -- the build in progress, the app replaying, the action running -------------
 
 class _Now:
-    building = False        # a build (or a scope's rebuild) is running
-    allowed = frozenset()   # state names a scope may read
+    building = False        # a build is running
     frame = False           # a replay is running (canvas draws read, never write)
     app = None              # the app building, replaying or running a handler
     action = None           # the action whose handler runs
@@ -564,16 +563,16 @@ class State:
             raise AttributeError(k)
         if k not in self._t:
             raise _undeclared(k, self._t)
-        if _NOW.building and k not in _NOW.allowed and isinstance(self._t[k], Doc):
+        if _NOW.building and isinstance(self._t[k], Doc):
             raise UIError("B01", "s.%s read inside a build" % k, found="s.%s" % k,
                           fix='"{%s.line}" or another field (%s) in a text; '
                               'ui.text_editor(%r) shows it' % (k, ", ".join(DOC_FIELDS), k))
-        if _NOW.building and k not in _NOW.allowed:
+        if _NOW.building:
             e = UIError("B01", "s.%s read inside a build" % k,
                         expected="a build names state; it does not read it",
                         found="s.%s" % k,
                         fix='"{%s}" in a text, "%s" in a condition or for a two-way control; '
-                            'ui.scope(key, ["%s"], body) if the structure itself depends on it'
+                            'ui.switch(%r, cases) or rows by kind if the structure depends on it'
                             % (k, k, k))
             if _NOW.collect is None:
                 raise e
@@ -841,7 +840,10 @@ DOC_FIELDS = {"line": INT, "col": INT, "lines": INT, "sel": INT, "match": INT, "
 # the spelling open, F-23): keys (a keyboard), tdeck (the T-Deck's), pad, touch
 INPUTS = ("keys", "tdeck", "pad", "touch")
 SYS = {"desk": BOOL, "handheld": BOOL, "wide": BOOL, "tall": BOOL, "current": BOOL,
-       "focus": TEXT, "touch": BOOL, "symbols": BOOL, "input": Enum(INPUTS, "keys")}
+       "focus": TEXT, "touch": BOOL, "input": Enum(INPUTS, "keys")}
+# §7.9: retired system values, each with its replacement (N04)
+SYS_RETIRED = {"symbols": "the engine's glyph fallback: write the symbol", "w": "a size class: @wide, @desk",
+               "h": "a size class: @tall, @handheld", "fs": "a size class: @desk, @handheld"}
 
 
 class Ctx:
@@ -857,6 +859,8 @@ def _ref(name, ctx, where):
     st = _st()
     if name.startswith("@"):
         n = name[1:]
+        if n in SYS_RETIRED:
+            raise UIError("N04", "%s is retired" % name, where=where, fix=SYS_RETIRED[n])
         if n not in SYS:
             raise UIError("T02", "no system value %r" % name, expected=", ".join("@" + x for x in SYS),
                           where=where, fix='one of ' + ', '.join('@' + x for x in SYS))
@@ -1304,8 +1308,9 @@ def _isint(x):
 # -- actions ------------------------------------------------------------------
 
 class Action:
-    def __init__(self, name, label, fn, key, when, hint, row, where):
-        self.name, self.label, self.fn, self.key = name, label, fn, key
+    def __init__(self, name, label, fn, when, hint, row, where):
+        self.name, self.label, self.fn = name, label, fn
+        self.letters = self.icon = ""
         self.hint = label if hint is None else hint
         self.when_src, self.where = when, where
         self.when = cond(when, Ctx(), where) if when is not None else None
@@ -1386,12 +1391,21 @@ def _params(fn):
     return len(ps)
 
 
-# EXT-3. The chords and roles an action answers to besides its letter: a
+# EXT-3. The letters, chords and roles an action answers to (§13): a
 # chord is "ctrl+<letter>" (a desk keyboard's), a role is one of ROLES,
 # which the engine maps to each board's key (the T-Deck's has no Ctrl).
 # `confirm` is a confirm that no focused node takes; `back` is the page's
 # back once no overlay or pushed page takes it (spec §13.3, an app's back=).
-ROLES = ("search", "goto", "complete", "undo", "redo", "play", "more", "tools", "confirm", "back")
+ROLES = ("search", "goto", "complete", "undo", "redo", "play", "more", "tools", "confirm", "back",
+         "left", "right", "up", "down")
+ARROWS = ("left", "right", "up", "down")
+# §7.9: an action's retired props, each with its replacement
+RETIRED_ACTION = {"key": "keys=(%(v)r,)", "does": "hint=%(v)r"}
+
+
+def _letter(k):
+    """A single letter: an accelerator where a board has letters (§13.2)."""
+    return len(k) == 1 and k.isalpha()
 
 
 def _chord_byte(k):
@@ -1429,6 +1443,11 @@ def _declare(name, label, fn, takes, where, what):
         first = d.actions[name].where if name in d.actions else d.works[name].where
         raise UIError("U02", "%r declared twice" % name, where=where,
                       found="first at %s:%s" % first, fix="one name, one action or hook")
+    if name in d.state._t:
+        raise UIError("U02", "%s %r has the name of a state" % (what, name), where=where,
+                      expected="one name in one key space: a state, an action or a hook",
+                      fix="rename one: the state for what it holds (%s_word, %s_on), the %s for what it does"
+                          % (name, name, what))
     got, want = _params(fn), TAKES[takes]
     if got is not None and got != want:
         f = getattr(fn, "__name__", "handler")
@@ -1442,8 +1461,8 @@ def _declare(name, label, fn, takes, where, what):
     return d
 
 
-def action(name, label, fn, *, takes="none", key=None, when=None, off=None, hint=None, row=None,
-           chars=None, keys=(), unit=None, push=None):
+def action(name, label, fn, *, takes="none", when=None, off=None, hint=None, row=None,
+           chars=None, keys=(), icon=None, unit=None, push=None):
     """An action a person sees: its label names it on every node and in the
     hints band. `takes=` is what every site hands its handler; `when=` makes
     it unavailable, and `off=` (required with `when=` or `row=`) says how its
@@ -1473,11 +1492,17 @@ def action(name, label, fn, *, takes="none", key=None, when=None, off=None, hint
     if off is not None and off not in OFFS:
         raise UIError("A09", "action %r: off=%r" % (name, off), where=where,
                       expected="hide (its nodes go) or grey (they stay, dimmed)", fix='off="hide"')
+    if isinstance(keys, str):
+        raise UIError("K03", "action %r: keys=%r is one text, not a list" % (name, keys), where=where,
+                      fix="keys=(%r,)" % keys)
     for k in keys:
-        if not isinstance(k, str) or not (_chord_byte(k) or k.startswith("role:") and k[5:] in ROLES):
+        if not isinstance(k, str) or not (_chord_byte(k) or _letter(k) or k.startswith("role:") and k[5:] in ROLES):
             raise UIError("K03", "action %r: keys=%r" % (name, k), where=where,
-                          expected='"ctrl+<letter>" or "role:<name>", a role one of ' + ", ".join(ROLES),
-                          fix='keys=("ctrl+f", "role:search")')
+                          expected='a letter, "ctrl+<letter>" or "role:<name>", a role one of ' + ", ".join(ROLES),
+                          fix='keys=("m", "ctrl+f", "role:search")')
+    if icon is not None and (not isinstance(icon, str) or "{" in icon):
+        raise UIError("I02", "action %r: icon=%r" % (name, icon), where=where,
+                      expected="an icon's name; a site's icon= may be a template", fix='icon="play"')
     d = _declare(name, label, fn, takes, where, "action")
     for other in d.actions.values():
         both = set(keys) & set(getattr(other, "keys", ()))
@@ -1487,10 +1512,7 @@ def action(name, label, fn, *, takes="none", key=None, when=None, off=None, hint
                           "an app's key is live beside every unit: give the key to one of them")
     if row is not None:
         _state_name(row, (RowOf,), "ui.action(%r) row=" % name, where)
-    if key is not None and (not isinstance(key, str) or len(key) != 1 or not key.isalpha()):
-        raise UIError("K03", "action %r: key= is one letter" % name, where=where, found=repr(key),
-                      fix='key="m"; a role or a chord goes in keys=')
-    a = Action(name, label, fn, key, when, hint, row, where)
+    a = Action(name, label, fn, when, hint, row, where)
     if "{" in a.hint:
         a.hint_g = tmpl(a.hint, Ctx(), where, "hint").g
     a.takes = takes
@@ -1498,11 +1520,11 @@ def action(name, label, fn, *, takes="none", key=None, when=None, off=None, hint
     a.push = push
     a.chars = chars or ""
     a.keys = tuple(keys)
+    a.letters = "".join(k.lower() for k in keys if _letter(k))
+    a.icon = icon or ""
     a.off = off or "hide"
     if keys:
         _arity(a, "row" if row else "none", "its keys %r" % (keys,), where)
-    if key is not None:
-        _arity(a, "row" if row else "none", "its key %r" % key, where)
     if chars:
         _arity(a, "char", "its chars %r" % chars, where)
     d.actions[name] = a
@@ -1514,8 +1536,8 @@ def hook(name, fn, *, takes="none", unit=None):
     and the engine's `opened`. It has no label, keys or condition."""
     where = _caller()
     d = _declare(name, "", fn, takes, where, "hook")
-    a = Action(name, "", fn, None, None, "", None, where)
-    a.takes, a.unit, a.push, a.chars, a.keys, a.off = takes, unit, None, "", (), "hide"
+    a = Action(name, "", fn, None, "", None, where)
+    a.takes, a.unit, a.push, a.chars, a.keys, a.letters, a.icon, a.off = takes, unit, None, "", (), "", "", "hide"
     a.hook = True
     d.actions[name] = a
     return name
@@ -1610,12 +1632,14 @@ _C = {"shown": "cond"}
 SCHEMA = {
     "page": {"title": "text"},
     "group": dict(_C, caption="text", close="action0"),
-    "label": dict(_C, text="text", tone="lit", wrap="lit"),
+    "label": dict(_C, text="text", tone="lit", wrap="lit", face="lit", size="lit", icon="text",
+                  lines="lit", align="lit"),
+    "rule": dict(_C),
+    "note": dict(_C, icon="text", lines="texts"),
     "info": dict(_C, label="text", value="text", icon="text", signal="int"),
-    "link": dict(_C, value="text", label="text", icon="text", signal="int", disabled="cond",
-                 focus="cond"),
-    "button": dict(_C, kind="lit", label="text", icon="text", alone="lit", disabled="cond",
-                   span="lit", arg="lit", focus="cond"),
+    "link": dict(_C, value="text", label="text", icon="text", signal="int", focus="cond"),
+    "button": dict(_C, kind="lit", label="text", icon="text", alone="lit", span="lit", arg="lit",
+                   focus="cond"),
     "toggle": dict(_C, label="text", on="action0", focus="cond", hint="text"),
     "slider": dict(_C, label="text", lo="int", hi="int", on="action0", focus="cond", look="lit",
                    icon="text"),
@@ -1631,20 +1655,19 @@ SCHEMA = {
     # G9, G13: a picture of its own (an image state, its fallback icon), a
     # progress bar (max= is required), a page that says why there is nothing
     "picture": dict(_C, image="image", icon="text", side="int", tone="text"),
-    "progress": dict(_C, label="text", value="int", max="int"),
-    "empty": dict(_C, icon="text", title="text", line="text"),
+    "progress": dict(_C, label="text", value="int", max="int", look="lit"),
+    "empty": dict(_C, icon="text", title="text", lines="texts"),
+    "text_view": dict(_C, wrap="lit", follow="lit", syntax="lit"),
     "dialog": dict(_C, title="text", buttons="lit"),
     "popover": dict(_C, anchor="text", w="int", close="action0"),
     "menu": dict(_C, caption="text"),
-    "item": dict(_C, label="text", icon="text", keyname="lit", mkind="lit"),
+    "item": dict(_C, label="text", icon="text", mkind="lit"),
     "split": dict(_C, dir="choice", sizes="ints", pad="lit", gap="lit"),
-    "grid": dict(_C, cols="lit", rows="lit", gap="lit"),
+    "grid": dict(_C, cols="lit", rows="lit", gap="lit", pad="lit"),
     "panel": dict(_C),
-    "text": dict(_C, text="text", size="lit", face="lit", tone="lit"),
     "canvas": dict(_C, draw="fn", h="lit", pointer="action1", focus="cond"),
     "foot": dict(_C),
     "scroll": dict(_C),
-    "scope": dict(_C),
     "switch": dict(_C),
     "case": {},
     # EXT-4. The Editor's kinds (see the calls below)
@@ -1660,7 +1683,14 @@ SCHEMA = {
     "status": dict(_C, text="text"),
 }
 TWO_WAY = ("toggle", "slider", "field", "tabs", "seg")
-CHOICES = {"dir": ("row", "col"), "kind": ("normal", "primary", "danger", "tonal"), "wrap": ("char",)}
+CHOICES = {"dir": ("row", "col"), "kind": ("normal", "primary", "danger", "tonal"),
+           "wrap": ("cut", "word", "char"), "align": ("start", "center", "end"),
+           "face": ("ui", "title", "mono", "caption", "result"), "follow": (True, False),
+           "syntax": ("plain", "sgr", "python", "lua", "json", "markdown")}
+# §7.9: a node's retired props, each with its replacement (N04)
+RETIRED_PROPS = {"disabled": 'when= on the action, with off="grey"', "keyname": "the action's keys=",
+                 "ink": "tone=", "does": "hint= on the action", "fixed": 'weights in sizes ("1*")',
+                 "paint": "an image field: image=.cover", "below": "scroll new=", "lit": "marked="}
 
 
 def _b():
@@ -1684,6 +1714,8 @@ def _node(kind, key, props, where, act=None):
         if v is None and schema.get(k, "").startswith("action") is False:
             continue                        # an optional prop given None is not given
         pt = schema.get(k)
+        if pt is None and k in RETIRED_PROPS:
+            raise UIError("N04", "ui.%s %s= is retired" % (kind, k), where=where, fix=RETIRED_PROPS[k])
         if pt is None:
             near = _near(k, schema)
             raise UIError("N01", "ui.%s has no prop %r" % (kind, k), where=where,
@@ -1705,6 +1737,11 @@ def _node(kind, key, props, where, act=None):
         elif pt in ("action0", "action1"):
             want = "row" if pt == "action1" else "none"
             n.l[k] = _action(v, want, "ui.%s %s=" % (kind, k), where, seen=False)
+        elif pt == "texts":
+            if isinstance(v, str) or not isinstance(v, (list, tuple)):
+                raise UIError("N01", "ui.%s %s= is a list of texts" % (kind, k), where=where,
+                              found=repr(v), fix="%s=[%r]" % (k, v))
+            n.p[k] = _texts([_prop("text", k, x, b.ctx, where, kind) for x in v])
         else:
             n.p[k] = _prop(pt, k, v, b.ctx, where, kind)
     if kind == "page":
@@ -1722,6 +1759,10 @@ def _node(kind, key, props, where, act=None):
     n.parent = parent
     parent.kids.append(n)
     return n
+
+
+def _texts(gs):
+    return lambda row: [x for x in (g(row) for g in gs) if x]
 
 
 def _prop(pt, k, v, ctx, where, kind):
@@ -1813,7 +1854,46 @@ def group(caption="", **p):
 
 
 def label(text, **p):
-    return _node("label", None, dict(p, text=text), _caller())
+    """A row of text (§7.2): `face=` a type role, `size="fit"` shrinks it to
+    its width, `wrap="word"` breaks it at word breaks (at most `lines=`
+    lines, then an ellipsis), `align=`, `tone=`, `icon=` before it."""
+    where = _caller()
+    if p.get("size", "fit") != "fit":
+        raise UIError("N01", "ui.label size=%r" % (p["size"],), where=where, expected="fit",
+                      fix='size="fit", or drop it')
+    if "lines" in p and (type(p["lines"]) is not int or p["lines"] < 1):
+        raise UIError("N01", "ui.label lines=%r" % (p["lines"],), where=where,
+                      expected="an int, at least 1", fix="lines=2")
+    return _node("label", None, dict(p, text=text), where)
+
+
+def rule(**p):
+    """A divider across the page (§7.2)."""
+    return _node("rule", None, p, _caller())
+
+
+def note(lines, icon="", **p):
+    """A note on the page, no stop: `icon` and `lines`' paragraphs (§7.2)."""
+    return _node("note", None, dict(p, lines=lines, icon=icon), _caller())
+
+
+def text_view(name, **p):
+    """A read-only lines view (§7.2) of a text state (its lines) or a model
+    of lines (each row's first text field that is not its key): `wrap=`
+    "cut" or "word", `follow=True` keeps a view at its foot there as lines
+    arrive, `syntax=` a terminal's colours ("sgr") or a source's."""
+    where = _caller()
+    _state_name(name, (TEXT, Model), "ui.text_view", where)
+    t = _st()._t[name]
+    n = _node("text_view", name, p, where)
+    n.l["name"] = name
+    if isinstance(t, Model):
+        f = [k for k, v in t.fields.items() if k != t.key and v is TEXT]
+        if not f:
+            raise UIError("T03", "ui.text_view %s: its model has no text field" % name, where=where,
+                          fix='ui.model(key="n", n=0, line="")')
+        n.l["field"] = f[0]
+    return n
 
 
 def info(label, value="", **p):
@@ -2008,6 +2088,9 @@ def progress(value, **p):
     if "max" not in p:
         raise UIError("N01", "progress %s has no max=" % value, where=where,
                       fix="max=\"{NAME}\" (an int), or max=0 for work whose size is not known")
+    if p.get("look", "count") != "count":
+        raise UIError("N01", "progress look=%r" % (p["look"],), where=where, expected="count",
+                      fix='look="count" ("3 of 5"), or drop it (a bar)')
     return _node("progress", None, dict(p, value="{%s}" % value if not str(value).startswith("{") else value),
                  where)
 
@@ -2046,10 +2129,6 @@ def panel(key, **p):
     return _node("panel", key, p, _caller())
 
 
-def text(t, **p):
-    return _node("text", None, dict(p, text=t), _caller())
-
-
 def canvas(key, draw, **p):
     return _node("canvas", key, dict(p, draw=draw), _caller())
 
@@ -2060,18 +2139,6 @@ def foot(**p):
 
 def scroll(key, **p):
     return _node("scroll", key, p, _caller())
-
-
-def scope(key, deps, body, **p):
-    """The one rebuild: `body` may read `deps`, and is built again when one
-    of them changes."""
-    where = _caller()
-    for d in deps:
-        _state_name(d, (BOOL, INT, NUM, TEXT, Enum, Record, Model, RowOf), "ui.scope deps", where)
-    n = _node("scope", key, p, where)
-    n.l["deps"], n.l["body"] = tuple(deps), body
-    _NOW.app.build_scope(n)
-    return n
 
 
 def switch(name, cases, **p):
@@ -2301,10 +2368,6 @@ def pop():
 
 
 # the theme and font, asked of the engine (the checker answers for one look)
-def has_symbols():
-    return _q("has_symbols")
-
-
 def text_size(t, scale=1):
     return _q("text_size", t, scale)
 
@@ -2337,9 +2400,12 @@ cell = _removed("cell", "declare it in ui.state(...) and name it")
 per = _removed("per", '"{@desk?a:b}" in a template, shown="@desk" for structure')
 fmt = _removed("fmt", '"{x|fmt %.1f}" in a template')
 ref = _removed("ref", 'declare name=ui.row_of("model") in the state')
-key = _removed("key", 'ui.action(name, label, handler, key="m")')
-rebuild = _removed("rebuild", 'ui.scope(key, ["name"], body)')
+key = _removed("key", 'ui.action(name, label, handler, keys=("m",))')
+rebuild = _removed("rebuild", "rows by kind, or ui.switch(name, cases)")
 at = _removed("at", "placement is ui.split, ui.grid, ui.foot")
+scope = _removed("scope", "rows by kind, or ui.switch(name, cases)")
+text = _removed("text", 'ui.label(text, face="result", size="fit")')
+has_symbols = _removed("has_symbols", "the engine's glyph fallback: write the symbol")
 
 
 # -- the build, shared by the app and the checker -----------------------------
@@ -2354,7 +2420,7 @@ class _AnyColour(dict):
 class Builder:
     """Runs a page's build: typed, keyed, every name resolved."""
 
-    QUERIES = {"has_symbols": lambda: True, "text_size": lambda t, sc=1: (6 * sc * len(t), 8 * sc),
+    QUERIES = {"text_size": lambda t, sc=1: (6 * sc * len(t), 8 * sc),
                "colors": lambda: _AnyColour(), "fade": lambda r, top: None}
 
     def query(self, name, *a):
@@ -2364,7 +2430,7 @@ class Builder:
         self.s = s
         self.pages = [build]
         self.root = None
-        self.builds = self.scope_builds = 0
+        self.builds = 0
         self.clock = 0
         self.timers = []
         self.classes = ()
@@ -2377,7 +2443,7 @@ class Builder:
         was = _NOW.app
         _NOW.app = self
         self.stack, self.ctx, self.root = [], Ctx(), None
-        _NOW.building, _NOW.allowed = True, frozenset()
+        _NOW.building = True
         try:
             r = self.pages[-1]()
             if r is not None:
@@ -2392,19 +2458,11 @@ class Builder:
                               self.pages[-1].__code__.co_firstlineno)) or ("?", 0))
         _anchors(self.root)
         self.builds += 1
-
-    def build_scope(self, n):
-        n.kids = []
-        n.aux = {d: self.s._ver[d] for d in n.l["deps"]}
-        was_b, was_a, was_app = _NOW.building, _NOW.allowed, _NOW.app
-        _NOW.app, _NOW.building, _NOW.allowed = self, True, frozenset(n.l["deps"])
-        self.stack.append(n)
+        _NOW.app = self
         try:
-            n.l["body"]()
+            _trace("build", getattr(self.pages[-1], "__name__", "page"), "page (builds %d)" % self.builds)
         finally:
-            self.stack.pop()
-            _NOW.building, _NOW.allowed, _NOW.app = was_b, was_a, was_app
-        self.scope_builds += 1
+            _NOW.app = was
 
     def run(self, fn, *args, action=None):
         was, was_act = _NOW.app, _NOW.action
@@ -2656,11 +2714,35 @@ class _Refused(Node):
             b.stack.pop()
 
 
+# the props a declaration takes, checked before the call (§5.1); a node
+# kind's are its SCHEMA's
+DECL_PROPS = {"action": ("takes", "when", "off", "hint", "row", "chars", "keys", "icon", "unit", "push")}
+
+
+def _strict(fn, k, props):
+    """A prop the call does not take: N04 with its replacement where §7.9
+    retired it (an action's `key=`), else N01 naming the ones it takes."""
+    for x in k:
+        if x not in props:
+            if fn.__name__ == "action" and x in RETIRED_ACTION:
+                raise UIError("N04", "ui.action %s= is retired" % x, where=_caller(),
+                              fix=RETIRED_ACTION[x] % {"v": k[x]})
+            near = _near(x, props)
+            raise UIError("N01", "ui.%s has no prop %r" % (fn.__name__, x), where=_caller(),
+                          expected=", ".join(props), fix="did you mean %s?" % near if near else "drop it")
+
+
 def _collecting(fn, returns_node):
+    props = DECL_PROPS.get(fn.__name__)
+
     def call(*a, **k):
         if _NOW.collect is None:
+            if props is not None:
+                _strict(fn, k, props)
             return fn(*a, **k)
         try:
+            if props is not None:
+                _strict(fn, k, props)
             return fn(*a, **k)
         except UIError as e:
             _NOW.collect.append(e)
@@ -2671,8 +2753,8 @@ def _collecting(fn, returns_node):
 
 NODE_CALLS = ("page", "group", "label", "info", "link", "button", "item", "card", "toggle", "slider",
               "field", "seg", "table", "col", "rows", "cards", "picture", "progress", "empty", "dialog",
-              "popover", "menu", "split", "grid", "panel", "text", "canvas", "foot", "scroll", "scope",
-              "switch", "tabs", "panes", "pane", "text_editor", "slot", "row", "tools", "lent", "status")
+              "popover", "menu", "split", "grid", "panel", "canvas", "foot", "scroll", "rule", "note",
+              "text_view", "switch", "tabs", "panes", "pane", "text_editor", "slot", "row", "tools", "lent", "status")
 DECL_CALLS = ("action", "hook", "labels", "work", "derive")
 COMMAND_CALLS = ("push", "pop", "focus", "after", "post")
 for _n in NODE_CALLS:

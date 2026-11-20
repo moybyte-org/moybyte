@@ -17,6 +17,7 @@ import uitree_check  # noqa: E402
 PORTED = (
     "uitree_counter",
     "uitree_roles",
+    "uitree_kinds",
     "perms_ui",
     "settings_ui",
     "uitree_focus",

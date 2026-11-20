@@ -134,3 +134,52 @@ def test_input_is_a_system_value_of_four_words():
     finally:
         ui._NOW.app = None
     del s
+
+
+def test_the_retired_names_are_n04_with_their_replacement():
+    """§7.9: each retired verb, prop and system value names what replaced it."""
+    ui.state(on=False)
+    ui.action("go", "Go", nothing)
+    assert _code(lambda: ui.text("x")) == "N04"
+    assert _code(lambda: ui.scope("k", ["on"], nothing)) == "N04"
+    assert _code(ui.has_symbols) == "N04"
+    with pytest.raises(ui.UIError) as e:
+        ui.action("stop", "Stop", nothing, key="s")
+    assert e.value.code == "N04" and "keys=('s',)" in e.value.fix
+    for page in (lambda: ui.button("go", disabled="on"), lambda: ui.link("go", ink="dim"),
+                 lambda: ui.label("{@symbols?×:x}")):
+        def build(page=page):
+            with ui.page("P"):
+                page()
+        assert _code(lambda: _build(build)) == "N04"
+
+
+def test_keys_take_letters_chords_and_roles_and_one_name_is_one_thing():
+    """§13.2: a letter is a key; §5.1: a state and an action of one name is
+    U02; an action's icon is a name, never a template (I02)."""
+    ui.state(go_word="", n=0)
+    ui.action("mark", "Mark", nothing, keys=("m", "ctrl+m", "role:left"), icon="check")
+    assert ui._d().actions["mark"].letters == "m"
+    assert _code(lambda: ui.action("other", "Other", nothing, keys="m")) == "K03"
+    assert _code(lambda: ui.action("other", "Other", nothing, keys=("mm",))) == "K03"
+    assert _code(lambda: ui.action("n", "N", nothing)) == "U02"
+    assert _code(lambda: ui.action("other", "Other", nothing, icon="{n}")) == "I02"
+    assert _code(lambda: ui.action("other", "Other", nothing, nope=1)) == "N01"
+
+
+def test_the_display_kinds_check_their_props():
+    ui.state(n=0, log=ui.model(key="n", n=0), text="")
+
+    def bad(call):
+        def build():
+            with ui.page("P"):
+                call()
+        return _code(lambda: _build(build))
+    assert bad(lambda: ui.label("x", size="big")) == "N01"
+    assert bad(lambda: ui.label("x", lines=0)) == "N01"
+    assert bad(lambda: ui.label("x", align="left")) == "N01"
+    assert bad(lambda: ui.label("x", face="huge")) == "N01"
+    assert bad(lambda: ui.progress("n", max=5, look="bar")) == "N01"
+    assert bad(lambda: ui.note("one line")) == "N01"
+    assert bad(lambda: ui.text_view("log")) == "T03"
+    assert bad(lambda: ui.text_view("n")) == "T03"

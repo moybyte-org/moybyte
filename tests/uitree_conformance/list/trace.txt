@@ -1,4 +1,5 @@
 state items [3 rows] +3 -0 ~0 moved 0 (in opened)
+build build page (builds 1)
 state sel '' -> 'a' (focus)
 action pick from link 'a/pick' on 'Shopping'
 state msg '' -> 'Picked Apples' (in pick)

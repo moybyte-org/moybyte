@@ -2,7 +2,7 @@
 are templates over the state, "" where a key names nothing."""
 import uitree as ui
 
-s = ui.state(said="", go="Send", leave="Cancel", sent=0, left=0)
+s = ui.state(said="", go_word="Send", leave_word="Cancel", sent=0, left=0)
 
 
 def go():
@@ -14,11 +14,11 @@ def leave():
 
 
 def quiet():
-    s.go = s.leave = ""
+    s.go_word = s.leave_word = ""
 
 
-ui.action("go", "Go", go, keys=("role:confirm",), hint="{go}")
-ui.action("leave", "Back", leave, keys=("role:back",), hint="{leave}")
+ui.action("go", "Go", go, keys=("role:confirm",), hint="{go_word}")
+ui.action("leave", "Back", leave, keys=("role:back",), hint="{leave_word}")
 ui.hook("quiet", quiet)
 
 

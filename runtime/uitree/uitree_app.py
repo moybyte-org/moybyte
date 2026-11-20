@@ -17,6 +17,7 @@ import uitree as S
 from uitree import _NOW
 
 _UP, _DOWN = 1 << 2, 1 << 3     # the up and down bits of a host's frame buttons (ui_draw._HOST_BUTTONS)
+_IN_REP = 10                    # the frame input's repeat word, a byte a direction (ui_draw._IN_REP)
 ID_MAX = 31            # bytes of a node id the host engine keeps (seen: a longer focus id comes back cut)
 _GAP = {"s": (6, 10), "m": (8, 16), "l": (16, 24), "0": (0, 0)}
 
@@ -233,17 +234,17 @@ class Engine(S.Builder):
         if q or self.timers or self.work_run or self.decl.posts:
             self._damage.all()
 
-    GEN_UNSAFE = ("canvas", "picture", "cards", "text_editor", "scope")
+    GEN_UNSAFE = ("canvas", "picture", "cards", "text_editor", "text_view")
 
     def _gen_safe(self, n):
         """Whether every pixel the page's rows draw comes from state, so the
         page's gen (the sum of the state's versions) moves whenever one may:
-        no canvas, picture, text editor or scope, and no template naming
-        @focus or @input."""
+        no canvas, picture, text editor or text view, and no template
+        naming @focus, @input or @touch."""
         if n.kind in self.GEN_UNSAFE:
             return False
         for v in n.src.values():
-            if isinstance(v, str) and ("@focus" in v or "@input" in v):
+            if isinstance(v, str) and ("@focus" in v or "@input" in v or "@touch" in v):
                 return False
         return all(self._gen_safe(k) for k in n.kids)
 
@@ -266,6 +267,13 @@ class Engine(S.Builder):
         for k in n.kids:
             self._walk(k)
 
+    def _page_id(self):
+        """The toolkit's id of the page on top: its build's name and its
+        level in the stack, so a title that moves keeps the page's focus and
+        scroll, and two levels sharing a title keep their own."""
+        b = self.pages[-1]
+        return ("%d %s" % (len(self.pages), getattr(b, "__name__", "page")))[:ID_MAX]
+
     def _gap(self, name):
         g = _GAP.get(str(name), (0, 0))
         return g[1] if self.desk else g[0] * self.fs
@@ -275,18 +283,19 @@ class Engine(S.Builder):
         kind = _v.input_kind()
         self.input = kind if kind in S.INPUTS else "keys"
         self.classes = ("desk" if self.desk else "handheld", "wide" if w * 3 > h * 4 else "tall") + (
-            ("symbols",) if _v.has_symbols() else ())
+            ("touch",) if self.input == "touch" else ())
         S.LIVE = S.live_units(n)
         shown = [k for k in n.kids if _shown(k, None)]
         if any(k.kind == "foot" for k in shown) or self._foot_in_case(n):
             self.foot_r, body = _v.cut_bottom(self.content, 44 if self.desk else 22 * self.fs)
             _v.at(*body)
+        o = self._page_o
+        o["id"] = self._page_id()
         if self._gen_ok:
-            o = self._page_o
-            o["gen"] = (sum(self.s._ver.values()) + self.builds + self.scope_builds + self._edits) & 0x7fffffff
-            rect = _v.page(n.p["title"](None), o)
+            o["gen"] = (sum(self.s._ver.values()) + self.builds + self._edits) & 0x7fffffff
         else:
-            rect = _v.page(n.p["title"](None))
+            o.pop("gen", None)
+        rect = _v.page(n.p["title"](None), o)
         f = _v.focus()
         last = self.focused                     # the last frame's focus
         now = self.ids.get(f)
@@ -587,8 +596,8 @@ class Engine(S.Builder):
             if h:
                 out += ["confirm", h]
         for a in self.actions.values():
-            if a.key and a.key.isalpha() and a.can():
-                out += [a.key.upper(), a.hint_now()]
+            if a.letters and a.can():
+                out += [a.letters[0].upper(), a.hint_now()]
         a = self.role_action("back") if len(self.pages) == 1 else None
         if a is None:
             return tuple(out + ["back", "Back"])
@@ -629,8 +638,6 @@ class Engine(S.Builder):
             self.dups.add(nid)          # two shown nodes, one id: a fragment used twice
         self.ids[nid] = (n, row)
         o["id"] = nid
-        if "disabled" in n.p:
-            o["disabled"] = bool(n.p["disabled"](row))
         if n.act is not None and n.act.off == "grey" and not n.act.can(row):
             o["disabled"] = True
         lst = _list_of(n)
@@ -638,27 +645,12 @@ class Engine(S.Builder):
             o["current"] = row._f[row._m.key] == self.s._v[lst.src["current"]]
         if "signal" in n.p:
             o["signal"] = n.p["signal"](row)
-        if "icon" in n.p:
-            name = n.p["icon"](row)
-            if name:
-                _v.icon(name)
+        name = n.p["icon"](row) if "icon" in n.p else n.act.icon if n.act is not None else ""
+        if name:
+            _v.icon(name)
         if n.l.get("look") == "steps":
             o["steps"] = True
         return o
-
-    def _r_scope(self, n, row, rect):
-        if any(self.s._ver[d] != v for d, v in n.aux.items()):
-            S._trace("rebuilt", n.key, "scope (%s changed)" % ", ".join(
-                d for d, v in n.aux.items() if self.s._ver[d] != v))
-            _NOW.frame = False
-            self.stack, self.ctx = [], S.Ctx()
-            try:
-                self.build_scope(n)
-            finally:
-                _NOW.frame, _NOW.app = True, self
-            self.curs = []
-            self._walk(self.root)
-        self._kids(n, row, rect)
 
     def _r_switch(self, n, row, rect):
         v = self.s._v[n.l["name"]]
@@ -676,13 +668,58 @@ class Engine(S.Builder):
         tone = n.l.get("tone")
         text = self._t(n, "text", row)
         o = {"ink": tone} if tone else None
-        if n.l.get("wrap") == "char":   # lines of what fits a group's card, cut anywhere
+        if "icon" in n.p:
+            name = n.p["icon"](row)
+            if name:
+                _v.icon(name)
+        face, wrap, align = n.l.get("face"), n.l.get("wrap"), n.l.get("align")
+        if face or wrap == "word" or align == "center" or "lines" in n.l:
+            o = {"tone": tone} if tone in ("dim", "value", "danger") else dict(o or {})
+            if face and not (n.l.get("size") == "fit" and not self._fits(face, text)):
+                o["face"] = face
+            if wrap == "word" or "lines" in n.l:
+                o["wrap"] = True
+                o["lines"] = n.l.get("lines", 16)
+            if align == "center":
+                o["align"] = "center"
+            _v.label(text, o)
+            return
+        if wrap == "char":   # lines of what fits a group's card, cut anywhere
             import ui_draw as _ud
             per = max(8, (self.rect[2] - 32) // max(1, _ud.font("ui")[1] * self.fs))
             for at in range(0, len(text), per):
                 _v.label(text[at:at + per], o)
             return
         _v.label(text, o)
+
+    def _fits(self, face, text):
+        """A label's `size="fit"`: its face where the text fits the page's
+        width in it, else the page's own face (the engine's ellipsis after)."""
+        if not _v.face(face, text):
+            return False
+        w = _v.text_size(text)[0]
+        _v.face()
+        return w <= self.rect[2] - 32
+
+    def _r_rule(self, n, row, rect):
+        _v.rule()
+
+    def _r_note(self, n, row, rect):
+        _v.note(self._t(n, "icon", row) or "info", n.p["lines"](row))
+
+    def _r_text_view(self, n, row, rect):
+        v = self.s._v[n.l["name"]]
+        if "field" in n.l:
+            f = n.l["field"]
+            lines = [r._f[f] for r in v]
+        else:
+            lines = v.split("\n") if v else []
+        o = {"syntax": n.l.get("syntax", "plain")}
+        if n.l.get("wrap") == "word":
+            o["wrap"] = True
+        if n.l.get("follow"):
+            o["follow"] = True
+        _v.text_view(n.key, lines, o)
 
     def _r_info(self, n, row, rect):
         _v.info(self._t(n, "label", row), self._t(n, "value", row), self._o(n, row))
@@ -700,7 +737,7 @@ class Engine(S.Builder):
             _v.at(*at)
         text = self._t(n, "label", row)
         o = self._o(n, row)
-        if "icon" in n.p and n.l.get("alone"):
+        if n.l.get("alone") and ("icon" in n.p or n.act.icon):
             text = ""
         if _v.button(text, n.l.get("kind", "normal"), o):
             self._activate(n, row)
@@ -917,10 +954,10 @@ class Engine(S.Builder):
         items = [k for k in n.kids if _shown(k, row) and k.act.can(row)]
         labels = []
         for k in items:
-            hot = k.l.get("keyname") or (k.act.key or "").upper()[:1]
+            hot = k.act.letters.upper()[:1]
             labels.append(self._t(k, "label", row) + ("\t" + hot if hot and self._keys_shown() else ""))
         got = _v.menu(self._t(n, "caption", row), labels,
-                      [k.p["icon"](row) if "icon" in k.p else "" for k in items],
+                      [k.p["icon"](row) if "icon" in k.p else k.act.icon for k in items],
                       kinds=[k.l.get("mkind", "") for k in items])
         if got >= 0:
             self._activate(items[got], None)
@@ -957,6 +994,9 @@ class Engine(S.Builder):
     def _r_grid(self, n, row, rect):
         cols, rows_ = n.l["cols"], n.l["rows"]
         gap = self._gap(n.l.get("gap", "s"))
+        if "pad" in n.l:
+            p = self._gap(n.l["pad"])
+            rect = (rect[0] + p, rect[1] + p, max(0, rect[2] - 2 * p), max(0, rect[3] - 2 * p))
         cells = [_v.hsplit(r, cols, gap=gap) for r in _v.vsplit(rect, rows_, gap=gap)]
         i = 0
         for k in n.kids:
@@ -1067,11 +1107,16 @@ class Engine(S.Builder):
         _v.grid()
 
     def _r_progress(self, n, row, rect):
-        _v.progress(self._t(n, "label", row), n.p["value"](row), n.p["max"](row))
+        v, hi = n.p["value"](row), n.p["max"](row)
+        if n.l.get("look") == "count":
+            label = self._t(n, "label", row)
+            _v.progress(("%s %d of %d" % (label, v, hi)).strip() if hi else label, v, hi, {"count": True})
+            return
+        _v.progress(self._t(n, "label", row), v, hi)
 
     def _r_empty(self, n, row, rect):
-        lines = [self._t(n, "line", row)] if "line" in n.p else []
-        _v.empty(self._t(n, "icon", row) or "warn", self._t(n, "title", row), [x for x in lines if x])
+        _v.empty(self._t(n, "icon", row) or "warn", self._t(n, "title", row),
+                 n.p["lines"](row) if "lines" in n.p else [])
 
     def _r_foot(self, n, row, rect):
         x, y, w, h = self.foot_r
@@ -1109,13 +1154,15 @@ class Engine(S.Builder):
         if ch and not self.dialog_shown():
             c = chr(ch)
             for a in self.actions.values():
-                if a.key == c and a.can():
+                if c.lower() in a.letters and a.can():
                     self.q.append((a, self.args_for(a), "key %r" % c))
                     break
                 if c in a.chars and a.can():
                     self.q.append((a, (c,), "typed %r" % c))
                     break
         took = self._ui.keys(i)
+        if not self.dialog_shown() and hasattr(self._ui, "inp"):
+            took = self._arrow_roles(i) or took
         self._buttons = self._ui.inp[0] if hasattr(self._ui, "inp") else 0     # the host's begin consumes them
         if self.focused is None and not self.dialog_shown() and (i.pressed("a") or i.pressed("run")):
             a = self.role_action("confirm")
@@ -1124,6 +1171,26 @@ class Engine(S.Builder):
         if damage and (took or self.q) or self.q:
             self._damage.all()
         return True
+
+    def _arrow_roles(self, i):
+        """An arrow whose role an action answers (§13.1: left, right, up,
+        down) fires that action on its press and on each repeat, and the
+        toolkit never sees it: the app owns the arrow, focus stays."""
+        inp, fired = self._ui.inp, False
+        for bit, role in enumerate(S.ARROWS):
+            a = self.role_action(role)
+            if a is None:
+                continue
+            down = inp[0] & (1 << bit)
+            reps = (inp[_IN_REP] >> (8 * bit)) & 0xFF
+            if (down or reps) and a.can():
+                self.q.append((a, self.args_for(a), "role %s" % role))
+                fired = True
+            if down or reps:
+                inp[0] &= ~(1 << bit)
+                inp[1] &= ~(1 << bit)
+                inp[_IN_REP] &= ~(0xFF << (8 * bit))
+        return fired
 
     def point(self, px, py, click):
         self._bind()

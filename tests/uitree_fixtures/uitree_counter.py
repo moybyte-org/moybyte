@@ -31,7 +31,7 @@ def opened():
     s.asking = False
 
 
-ui.action("add", "Add one", add, key="a")
+ui.action("add", "Add one", add, keys=("a",))
 ui.action("reset_ask", "Reset", reset_ask, when="count", off="grey")
 ui.action("keep", "Keep", keep)
 ui.action("reset", "Reset", reset)

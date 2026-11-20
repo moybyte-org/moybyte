@@ -43,8 +43,7 @@ BAR_AND_BAND = ("the bar's title (the Python app's is empty, the Lua cart's is i
 LUA_TRACE = ("Lua's trace names a node by its path and the page by its name, not by its key and title "
              "(§24.1: `from link 'Home/connect' on 'Wi-Fi'`); its drew line for an info prints the "
              "label, not the template; it writes `(in toggle ...)` where Python writes `(from toggle ...)`; "
-             "it traces no engine write of a list's cur (§24.1 engine) and its model line lacks `moved N`; "
-             "Python traces no `build` line (§24.1: host py+lua)")
+             "it traces no engine write of a list's cur (§24.1 engine) and its model line lacks `moved N`")
 LUA_DUMP = ("the dump's grammar is open (F-30); Lua keys nodes by kind (`info`), Python by kind and "
             "number (`info#0`, §7); Lua prints the head and the props' sources, Python each bound "
             "prop's value now (§24.2's example is Python's)")

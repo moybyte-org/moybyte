@@ -674,7 +674,7 @@ class _Damage:
 BAR = None                      # in a screen's lines: the progress bar, its fraction next
 
 s = ui.state(cap="", head=ui.model(key="n", n="", text=""), bar=False, frac=0,
-             tail=ui.model(key="n", n="", text=""), go="", leave="")
+             tail=ui.model(key="n", n="", text=""), go_word="", leave_word="")
 
 _owner = [None]                 # the UpdateUI whose screen the page is
 
@@ -686,7 +686,7 @@ _LEAVES = ("confirm", "confirm_online", "c6_confirm", "install", "downloading", 
 
 def show(screen):
     cap, lines, go_, leave_ = screen
-    s.cap, s.go, s.leave = cap, go_, leave_
+    s.cap, s.go_word, s.leave_word = cap, go_, leave_
     at = lines.index(BAR) if BAR in lines else len(lines)
     s.bar = at < len(lines)
     s.frac = int(max(0.0, min(1.0, lines[at + 1])) * 1000) if s.bar else 0
@@ -718,8 +718,8 @@ def leave():
 
 
 ui.hook("show", show, takes="arg")
-ui.action("go", "Go", go, keys=("role:confirm",), hint="{go}")
-ui.action("leave", "Back", leave, keys=("role:back",), hint="{leave}")
+ui.action("go", "Go", go, keys=("role:confirm",), hint="{go_word}")
+ui.action("leave", "Back", leave, keys=("role:back",), hint="{leave_word}")
 
 
 def page():

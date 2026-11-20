@@ -1,3 +1,4 @@
+build build page (builds 1)
 action add from link 'add' on 'Pages'
 state count 0 -> 1 (in add)
 drew info '{count}' -> '1'
@@ -14,4 +15,6 @@ action keep from button 'keep' of dialog 'Reset the count?'
 state asking True -> False (in keep)
 action more from link 'more' on 'Pages'
 page push page 2, opened from 'more'
+build details page (builds 2)
 page back page 1, focus back to 'more'
+build build page (builds 3)
