@@ -1,0 +1,38 @@
+{
+ "surface": "settings_rows",
+ "config": "tdeck_320x240_fs1_dark",
+ "commit": "4de0cd805",
+ "script": [
+  "swipe:-100",
+  "f:20",
+  "swipe:-60",
+  "swipe:80",
+  "f:10"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "199f162bcefcf9c604056cf092ea09452451920c2f022194350e08172e606c70"
+  ],
+  [
+   "swipe:-100",
+   "b76fc89f64e0649493bae35ceba92c78f9c17a9eb3e15cc81cb78346034f6d04"
+  ],
+  [
+   "f:20",
+   "076cff3207bd7403eee9255827e04df0c5f1edd32520766b404238784c57d11e"
+  ],
+  [
+   "swipe:-60",
+   "eef3495d0b611e2f45d6f91e1978392c70806aa332090d3c7333e389baa189e2"
+  ],
+  [
+   "swipe:80",
+   "d851145621743f3ab659a145653392f371e0e13dc590eaf01b018f4a5432d454"
+  ],
+  [
+   "f:10",
+   "fffd5205bb99d75cb98c2992577d0e73e2aa66f267ed33c4a842403fba2305d9"
+  ]
+ ]
+}

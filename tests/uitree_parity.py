@@ -26,6 +26,9 @@ A step of a script, one string each:
     div:N:D    the desk Editor's divider N (in reading order) dragged D px
                along its axis by touch, and let go
     pane:N     a tap at the centre of the desk Editor's pane N's body
+    swipe:D    a touch at the centre of the content rect dragged D px down (up
+               when negative) in SWIPE_MOVES moves, a frame each, and let go:
+               the drag and the fling a finger gives the page
 
 `compare` reports the FIRST step whose frame differs: its index and step,
 the bounding box of the difference, the count of pixels, and a PNG of the
@@ -55,6 +58,7 @@ RECORDS = ROOT / "tests" / "uitree_parity"
 OUT = ROOT / ".build" / "uitree_parity"
 DT = 1.0 / 30.0
 SETTLE = 8                  # frames a step may take to settle
+SWIPE_MOVES = 12
 
 
 class Surface:
@@ -131,9 +135,11 @@ def _step(ws, driver, step):
         _div_drag(ws, driver, int(n), int(d))
     elif op == "pane":
         _pane_tap(ws, driver, int(arg))
+    elif op == "swipe":
+        _swipe(ws, driver, int(arg))
     else:
         raise ValueError("parity step %r: one of k:NAME t:TEXT enter del back f:N zone:N cell:NAME "
-                         "key:SPEC div:N:D pane:N" % step)
+                         "key:SPEC div:N:D pane:N swipe:D" % step)
 
 
 _KEYS = {"Left": 0x110, "Right": 0x111, "Up": 0x112, "Down": 0x113, "Tab": 9, "Enter": 13,
@@ -179,6 +185,20 @@ def _div_drag(ws, driver, n, d):
     driver.frame(DT)
     for k in range(1, 5):
         driver.touch_drag(gx + dx * k // 4, gy + dy * k // 4)
+        driver.frame(DT)
+    driver.touch_up()
+    driver.frame(DT)
+
+
+def _swipe(ws, driver, d):
+    """A finger down at the centre of the content rect, moved `d` px along y
+    in SWIPE_MOVES even moves, a frame each, and lifted."""
+    lay = ws.layout
+    x, y = lay.cx + lay.cw // 2, lay.cy + lay.ch // 2
+    driver.touch(x, y)
+    driver.frame(DT)
+    for k in range(1, SWIPE_MOVES + 1):
+        driver.touch_drag(x, y + d * k // SWIPE_MOVES)
         driver.frame(DT)
     driver.touch_up()
     driver.frame(DT)

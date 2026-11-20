@@ -615,6 +615,12 @@ RUNS = (
     ("settings_paired-p4", "settings_paired", "p4_1024x600_cs2_fs1_windowed", ["k:down", "k:down"]),
     ("tasks-p4", "tasks", "p4_1024x600_cs2_fs1_windowed", ["k:down", "k:up", "k:up", "k:right"]),
     ("update_sd-p4", "update_sd", "p4_1024x600_cs2_fs1_windowed", ["k:a", "f:3"]),
+    # a finger's swipes, a frame a move at the parity's fixed dt: the drag and
+    # the fling the page takes from them, and the cards' fade at the offset
+    ("settings_rows_swipe-tdeck", "settings_rows", "tdeck_320x240_fs1_dark",
+     ["swipe:-100", "f:20", "swipe:-60", "swipe:80", "f:10"]),
+    ("achievements_swipe-p4", "achievements", "p4_1024x600_cs2_fs1_windowed",
+     ["swipe:-80", "f:20", "swipe:-40", "swipe:60"]),
     # the seed carts a board holds, whose ids are longer than the fixtures'
     ("settings_permissions_seed-tdeck", "settings_permissions_seed", "tdeck_320x240_fs1_dark",
      ["k:down", "k:down", "k:down"]),
@@ -659,7 +665,7 @@ C_RUNS = ("settings_rows-tdeck", "settings_rows-desk", "settings_rows_layout-tde
           "settings_rows-p4", "settings_wifi-p4", "settings_tz-p4", "settings_paired-p4", "tasks-p4",
           "update_sd-p4", "web_console-p4", "settings_permissions_seed-tdeck",
           "settings_permissions_seed-p4", "web_console_none-tdeck", "web_console_none-p4",
-          "settings_licences-p4")
+          "settings_licences-p4", "settings_rows_swipe-tdeck", "achievements_swipe-p4")
 
 
 @pytest.mark.parametrize("name", C_RUNS)

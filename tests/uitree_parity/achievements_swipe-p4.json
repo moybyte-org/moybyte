@@ -1,0 +1,33 @@
+{
+ "surface": "achievements",
+ "config": "p4_1024x600_cs2_fs1_windowed",
+ "commit": "4de0cd805",
+ "script": [
+  "swipe:-80",
+  "f:20",
+  "swipe:-40",
+  "swipe:60"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "b48e0a2c40e6a0187049e1a0f233d6f7cb9275157f1fd4ebe7b33a54a403731e"
+  ],
+  [
+   "swipe:-80",
+   "03cfdb134a5ee232a2ef561925eff5bf5b78c0a6d05b79edfdcb77cb538f1931"
+  ],
+  [
+   "f:20",
+   "f1d0173409d172be1ef61a511fad0a5ae9e2d35b22d1d79572ad97b23b3e0aef"
+  ],
+  [
+   "swipe:-40",
+   "452a1d04cf620e324f9a6fdf74a34a0c179cb30d5e76bb486af41e45bdd7e6e8"
+  ],
+  [
+   "swipe:60",
+   "de6f836c29d55270ca775c41f1139206e2d14dd2ad3d3e1ec3556ff24f1a6293"
+  ]
+ ]
+}
