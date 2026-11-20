@@ -21,6 +21,18 @@ ID_MAX = 31            # bytes of a node id the host engine keeps (seen: a longe
 _GAP = {"s": (6, 10), "m": (8, 16), "l": (16, 24), "0": (0, 0)}
 
 
+_RNAMES = {}
+
+
+def _rname(kind):
+    """A node kind's replay method's name, made once: a name built each
+    frame is a string a kid a frame."""
+    r = _RNAMES.get(kind)
+    if r is None:
+        r = _RNAMES[kind] = "_r_" + kind
+    return r
+
+
 def _shown(n, row):
     g = n.p.get("shown")
     return g is None or g(row)
@@ -50,6 +62,7 @@ class Engine(S.Builder):
         self._sync = {}
         self._orders = {}               # a list's key -> the order of its rows (_after_removal)
         self.cell_used = {}             # a centred column's height this frame, by its id
+        self._pid = (None, 0, "")       # (build, level, the id _page_id made for them)
         self.curs = []
         self.fresh = False
         self.focused = None
@@ -108,6 +121,8 @@ class Engine(S.Builder):
             self._damage.all()
 
     def _posts(self):
+        if not self.decl.posts:
+            return
         q, self.decl.posts[:] = list(self.decl.posts), []
         tk = self.s._tickets
         for act, arg, ticket in q:
@@ -202,9 +217,10 @@ class Engine(S.Builder):
         self.calls = 0
         self._posts()
         self.clock += int(dt * 1000)
-        for t in [t for t in self.timers if t[0] <= self.clock]:
-            self.timers.remove(t)
-            self.run_action(t[1], (), "timer")
+        if self.timers:
+            for t in [t for t in self.timers if t[0] <= self.clock]:
+                self.timers.remove(t)
+                self.run_action(t[1], (), "timer")
         self.cv, self.th = cv, th
         if self.pics is None:
             import uitree_pics
@@ -227,12 +243,15 @@ class Engine(S.Builder):
         finally:
             _NOW.app, _NOW.frame = None, False
         self._buttons = 0
-        q, self.q = self.q, []
-        for act, args, src in q:
-            self.run_action(act, args, src)
+        q = self.q
+        if q:
+            self.q = []
+            for act, args, src in q:
+                self.run_action(act, args, src)
         S.commit(self)              # a two-way control's write with no hook moves a derive too
         self._works()
-        self.frame_calls.append(self.calls)
+        if S.TRACING:
+            self.frame_calls.append(self.calls)
         if q or self.timers or self.work_run or self.decl.posts:
             self._damage.all()
 
@@ -273,8 +292,11 @@ class Engine(S.Builder):
         """The toolkit's id of the page on top: its build's name and its
         level in the stack, so a title that moves keeps the page's focus and
         scroll, and two levels sharing a title keep their own."""
-        b = self.pages[-1]
-        return ("%d %s" % (len(self.pages), getattr(b, "__name__", "page")))[:ID_MAX]
+        b, n = self.pages[-1], len(self.pages)
+        m = self._pid
+        if m[0] is not b or m[1] != n:
+            m = self._pid = (b, n, ("%d %s" % (n, getattr(b, "__name__", "page")))[:ID_MAX])
+        return m[2]
 
     def _gap(self, name):
         g = _GAP.get(str(name), (0, 0))
@@ -619,7 +641,7 @@ class Engine(S.Builder):
     def _kids(self, n, row, rect):
         for k in n.kids:
             if _shown(k, row) and (k.act is None or k.act.can(row) or k.act.off == "grey"):
-                getattr(self, "_r_" + k.kind)(k, row, rect)
+                getattr(self, _rname(k.kind))(k, row, rect)
 
     def _t(self, n, k, row, default=""):
         """A text prop's value now; a change after the first frame is traced."""
@@ -628,7 +650,7 @@ class Engine(S.Builder):
             return n.act.label if (k == "label" and n.act is not None) else default
         v = g(row)
         src = n.src[k]
-        if "{" in src:
+        if S.TRACING and "{" in src:            # what the trace's "drew" line compares
             nid = (id(n), None if row is None else row._f[row._m.key], k)
             old = self.drawn.get(nid)
             if old is not None and old != v:
@@ -1020,7 +1042,7 @@ class Engine(S.Builder):
                 self._r_canvas(k, row, r)
                 _v.at(*self.rect)
                 continue
-            getattr(self, "_r_" + k.kind)(k, row, r)
+            getattr(self, _rname(k.kind))(k, row, r)
 
     def _cell_off(self, sid, n, r, d):
         """How far down a row split's column starts: centred on the cross
@@ -1242,7 +1264,8 @@ class Engine(S.Builder):
         down) fires that action on its press and on each repeat, and the
         toolkit never sees it: the app owns the arrow, focus stays."""
         inp, fired = self._ui.inp, False
-        for bit, role in enumerate(S.ARROWS):
+        for bit in range(4):
+            role = S.ARROWS[bit]
             a = self.role_action(role)
             if a is None:
                 continue

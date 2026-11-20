@@ -29,6 +29,10 @@ try:
 except (ImportError, AttributeError):
     difflib = inspect = _frame = None
 
+# Whether the engine keeps a trace (`_trace`) and what feeds it: the host's
+# only. A board keeps none, so its frames allocate nothing for one.
+TRACING = _frame is not None
+
 # What else a board's MicroPython lacks, met here and nowhere else: `re` has
 # no fullmatch (a pattern anchored with `$` matches the same names), a
 # function takes no attributes (a wrapper keeps its own __name__ there) and
@@ -1305,7 +1309,7 @@ def tmpl(src, ctx, where, prop=None):
     gs = [p if isinstance(p, str) else p[1] for p in parts]
 
     def g(row):
-        return "".join(x if isinstance(x, str) else _text(x(row)) for x in gs)
+        return "".join([x if isinstance(x, str) else _text(x(row)) for x in gs])   # a list: no generator a frame
     return _keep(key, Tmpl(src, TEXT, g))
 
 
@@ -1892,7 +1896,14 @@ def _node(kind, key, props, where, act=None):
 
 
 def _texts(gs):
-    return lambda row: [x for x in (g(row) for g in gs) if x]
+    def texts(row):             # one list a call, no generator
+        out = []
+        for g in gs:
+            x = g(row)
+            if x:
+                out.append(x)
+        return out
+    return texts
 
 
 def _prop(pt, k, v, ctx, where, kind):
@@ -2640,7 +2651,7 @@ def _trace(kind, name, text):
     host only (a board, which has no frames, keeps none: a line a write is
     an allocation a frame)."""
     a = _NOW.app
-    if a is None or _frame is None or (_TRACE_OFF[0] and kind in ("state", "derive")):
+    if a is None or not TRACING or (_TRACE_OFF[0] and kind in ("state", "derive")):
         return
     ms = a.clock
     a.trace.append("%02d:%02d:%02d.%03d  %-7s %-8s %s" % (
