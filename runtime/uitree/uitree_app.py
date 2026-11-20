@@ -1190,7 +1190,8 @@ class Engine(S.Builder):
             if down or reps:
                 inp[0] &= ~(1 << bit)
                 inp[1] &= ~(1 << bit)
-                inp[_IN_REP] &= ~(0xFF << (8 * bit))
+                u = inp[_IN_REP] & 0xFFFFFFFF & ~(0xFF << (8 * bit))
+                inp[_IN_REP] = u - 0x100000000 if u >> 31 else u     # the word is signed: no bigint
         return fired
 
     def point(self, px, py, click):
