@@ -1825,7 +1825,7 @@ SCHEMA = {
     "switch": dict(_C),
     "case": {},
     # EXT-4. The Editor's kinds (see the calls below)
-    "tabs": dict(_C, labels="lit", icons="lit", focus="cond", on="action0"),
+    "tabs": dict(_C, labels="lit", icons="lit", focus="cond", on="action0", offered="conds"),
     "panes": dict(_C, dir="choice", gap="lit", size="lit", start="lit", min="lit", grow="lit"),
     "pane": dict(_C, title="text", icon="text", size="lit", start="lit", min="lit", grow="lit",
                  tabs="lit", labels="lit"),
@@ -1888,6 +1888,12 @@ def _node(kind, key, props, where, act=None):
             n.l[k] = v
         elif pt == "cond":
             n.p[k] = cond(v, b.ctx, where)
+        elif pt == "conds":
+            # a condition a value (a tabs' offered=): the value shows where it holds
+            if not isinstance(v, dict):
+                raise UIError("N01", "ui.%s %s= is a dict of a condition a value" % (kind, k),
+                              where=where, found=repr(v), fix='%s={"blocks": "has_blocks"}' % k)
+            n.l[k] = {x: cond(c, b.ctx, where) for x, c in v.items()}
         elif pt in ("action0", "action1"):
             want = "row" if pt == "action1" else "none"
             n.l[k] = _action(v, want, "ui.%s %s=" % (kind, k), where, seen=False)
@@ -2390,6 +2396,10 @@ def tabs(name, labels, **p):
     if tab is None:
         raise UIError("T02", "ui.tabs(%r): no label table %r" % (name, labels), where=where,
                       fix='ui.labels(%r, {value: "Label", ...})' % labels)
+    extra = [v for v in p.get("offered") or () if v not in t.values]
+    if extra:
+        raise UIError("N01", "ui.tabs(%r) offered= names %s, not a value" % (name, ", ".join(extra)),
+                      where=where, expected=", ".join(t.values), fix="a condition for a value of %r" % name)
     miss = [v for v in t.values if v not in tab]
     if miss:
         raise UIError("T04", "ui.tabs(%r): table %s has no label for %s" % (name, labels, ", ".join(miss)),

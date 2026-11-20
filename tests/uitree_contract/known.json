@@ -82,6 +82,7 @@
   "prop missing: L1 slider.when",
   "prop not in the table: split.align",
   "prop not in the table: table.hint",
+  "prop not in the table: tabs.offered",
   "prop not in the table: text_view.face",
   "prop missing: L1 toggle.off",
   "prop missing: L1 toggle.when",

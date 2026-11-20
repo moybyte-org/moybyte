@@ -429,8 +429,16 @@ class BarLayer:
     # SAME bar.
 
     def _zone_owner(self, where):
-        """The app that owns `where`'s lent left zone, or None (a running
-        tool's strip lends none, see _render_cart_bar)."""
+        """What answers for `where`'s lent left zone, or None (a running
+        tool's strip lends none, see _render_cart_bar): the owning app, or,
+        for an app on `uitree` whose page lends the bar a row, that row's
+        zone (its `bar_zone`, `uitree_editor.BarZone`), which replays it
+        and takes its taps through the app's engine."""
+        o = self._zone_app(where)
+        z = getattr(o, "bar_zone", None)
+        return o if z is None else z
+
+    def _zone_app(self, where):
         ws = self.ws
         if where == "home":
             return ws.launcher_layer
