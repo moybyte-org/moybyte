@@ -202,6 +202,7 @@ class AchievementsPage:
         self._card = (0, 0)           # the pictures' size
         self._foot_of = None          # the desk foot's status, by the card it names
         self._foot_status = ""
+        self._seen = None             # the focus the last frame drew
 
     def open(self):
         self.pop = None
@@ -217,6 +218,20 @@ class AchievementsPage:
         self.pop = None
         self._damage.all()
         return True
+
+    def focused(self):
+        """The badge the last frame focused, "APP ID", or None."""
+        f = self._seen
+        for c in self._by_id.values():
+            if f and c.id[:len(f)] == f and len(f) >= min(31, len(c.id)):
+                return c.id[6:]
+        return None
+
+    def popover(self):
+        """The open popover: (badge "APP ID", its title, how, its state), or
+        None."""
+        c = self.pop
+        return None if c is None else (c.id[6:], c.title) + self._pop_lines
 
     # -- the rows ------------------------------------------------------------
 
@@ -335,6 +350,7 @@ class AchievementsPage:
                         self._open(c)
                 _ui.grid()
             _ui.group()
+        self._seen = _ui.focus()
         if desk:
             _ui.scroll()
             self._foot(rect)
