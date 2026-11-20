@@ -1569,6 +1569,8 @@ class Engine(S.Builder):
         if self._draws_only(n):
             o["disabled"] = True        # a canvas that only draws: no stop, no ring
         x, y, w, h, _st = _v.part(n.key, 0, n.l.get("h", 0), o)
+        if "ground" in n.l:
+            self.cv.rect(x, y, w, h, self.th[n.l["ground"]])
         n.l["draw"](self.cv, x, y, w, h)
 
     # -- input --------------------------------------------------------------

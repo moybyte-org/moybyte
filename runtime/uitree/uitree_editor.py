@@ -131,7 +131,7 @@ class Engine(uitree_app.Engine):
                 self.late.append((k, row, rect))     # over every pane, after the page
 
     def _draw(self, k, row, rect):
-        getattr(self, "_r_" + k.kind)(k, row, rect)
+        getattr(self, uitree_app._rname(k.kind))(k, row, rect)
 
     def _r_case(self, n, row, rect):
         self._stack(n, row, rect)
@@ -242,6 +242,8 @@ class Engine(uitree_app.Engine):
         self.ids[n.key] = (n, None)
         self.canvases[n.key] = (n, (x, y, w, h))
         self.cv.clip(x, y, w, h)
+        if "ground" in n.l:
+            self.cv.rect(x, y, w, h, self.th[n.l["ground"]])
         n.l["draw"](self.cv, x, y, w, h)
         self.cv.clip()
 
@@ -835,5 +837,5 @@ class Page(Engine):
     the keys and the pointer, and `paint` replays the page into its rect."""
 
     def __init__(self, build, host, damage, files=None, close=None):
-        Engine.__init__(self, S.decl_of(build.__module__), build, host, None, damage, files)
+        Engine.__init__(self, S.decl_of(S.module_of(build)), build, host, None, damage, files)
         self.close_root = close

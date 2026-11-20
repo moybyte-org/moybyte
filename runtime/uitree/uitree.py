@@ -1806,7 +1806,7 @@ SCHEMA = {
     "split": dict(_C, dir="choice", sizes="ints", pad="lit", gap="lit", align="lit"),
     "grid": dict(_C, cols="lit", rows="lit", gap="lit", pad="lit"),
     "panel": dict(_C),
-    "canvas": dict(_C, draw="fn", h="lit", pointer="action1", focus="cond"),
+    "canvas": dict(_C, draw="fn", h="lit", pointer="action1", focus="cond", ground="lit"),
     "foot": dict(_C, look="lit"),
     "scroll": dict(_C),
     "switch": dict(_C),
@@ -2296,8 +2296,19 @@ def panel(key, **p):
     return _node("panel", key, p, _caller())
 
 
+# the theme's roles a canvas's ground= may name: what the engine paints its
+# rect with before its draw
+GROUNDS = ("surface", "surface_alt", "surface_light", "panel", "lcd", "desktop")
+
+
 def canvas(key, draw, **p):
-    return _node("canvas", key, dict(p, draw=draw), _caller())
+    where = _caller()
+    g = p.get("ground")
+    if g is not None and g not in GROUNDS:
+        raise UIError("N01", "canvas %r: ground=%r" % (key, g), where=where,
+                      expected="one of the theme's grounds: " + ", ".join(GROUNDS),
+                      fix='ground="surface"')
+    return _node("canvas", key, dict(p, draw=draw), where)
 
 
 def foot(look="end", **p):
