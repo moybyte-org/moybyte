@@ -1,0 +1,7 @@
+page 'page'  title='Counter'
+  group 'group#0'  caption='Count'
+    info 'info#0'  label='Count'  value='{count}' = '0'
+    toggle 'loud'  bind=loud:bool = False  label='Loud'
+    link 'add'  action=add  value=''
+    link 'reset'  action=reset(off: count)  value=''
+    label 'label#4'  text='{count|plural press,presses} so far, {loud?loud:quiet}' = '0 presses so far, quiet'

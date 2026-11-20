@@ -1,0 +1,5 @@
+page 'page'  title='Shopping'
+  group 'group#0'  caption='Things'
+    rows 'items'  cur='sel'
+      [0 rows of items]
+    label 'label#1'  text='{msg}' = ''

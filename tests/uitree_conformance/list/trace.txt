@@ -1,0 +1,17 @@
+state items [3 rows] +3 -0 ~0 moved 0 (in opened)
+state sel '' -> 'a' (focus)
+action pick from link 'a/pick' on 'Shopping'
+state msg '' -> 'Picked Apples' (in pick)
+drew label '{msg}' -> 'Picked Apples'
+state sel 'a' -> 'b' (focus)
+action pick from link 'b/pick' on 'Shopping'
+state msg 'Picked Apples' -> 'Picked Bread' (in pick)
+drew label '{msg}' -> 'Picked Bread'
+state sel 'b' -> 'c' (focus)
+action pick from link 'c/pick' on 'Shopping'
+state msg 'Picked Bread' -> 'Picked Cheese' (in pick)
+drew label '{msg}' -> 'Picked Cheese'
+state sel 'c' -> 'b' (focus)
+action pick from link 'b/pick' on 'Shopping'
+state msg 'Picked Cheese' -> 'Picked Bread' (in pick)
+drew label '{msg}' -> 'Picked Bread'

@@ -1,0 +1,14 @@
+state loud False -> True (from toggle 'loud')
+drew label '{count|plural press,presses} so far, {loud?loud:quiet}' -> '0 presses so far, loud'
+state loud True -> False (from toggle 'loud')
+drew label '{count|plural press,presses} so far, {loud?loud:quiet}' -> '0 presses so far, quiet'
+action add from link 'add' on 'Counter'
+state count 0 -> 1 (in add)
+drew info '{count}' -> '1'
+drew label '{count|plural press,presses} so far, {loud?loud:quiet}' -> '1 press so far, quiet'
+action reset from link 'reset' on 'Counter'
+state count 1 -> 0 (in reset)
+drew info '{count}' -> '0'
+drew label '{count|plural press,presses} so far, {loud?loud:quiet}' -> '0 presses so far, quiet'
+state loud False -> True (from toggle 'loud')
+drew label '{count|plural press,presses} so far, {loud?loud:quiet}' -> '0 presses so far, loud'

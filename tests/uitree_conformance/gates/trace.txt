@@ -1,0 +1,11 @@
+state open False -> True (from toggle 'open')
+action add from link 'add' on 'Gates'
+state n 0 -> 1 (in add)
+drew label '{n} inside' -> '1 inside'
+action add from link 'add' on 'Gates'
+state n 1 -> 2 (in add)
+drew label '{n} inside' -> '2 inside'
+action take from link 'take' on 'Gates'
+state n 2 -> 1 (in take)
+drew label '{n} inside' -> '1 inside'
+state open True -> False (from toggle 'open')

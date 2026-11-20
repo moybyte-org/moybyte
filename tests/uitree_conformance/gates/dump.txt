@@ -1,0 +1,6 @@
+page 'page'  title='Gates'
+  group 'group#0'  caption='Gate'
+    toggle 'open'  bind=open:bool = False  label='Open'
+    link 'add'  action=add(off: open)  value=''
+    link 'take'  action=take(off: n)  value=''
+    label 'label#3'  shown='open' = False  text='{n} inside' = '0 inside'

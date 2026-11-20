@@ -1,0 +1,11 @@
+page 'page'  title='Pages'
+  group 'group#0'  caption='Count'
+    info 'info#0'  label='Count'  value='{count}' = '0'
+    link 'add'  action=add  value=''
+    link 'ask'  action=ask  value=''
+    link 'more'  action=more  value=''
+  dialog 'dialog#1'  shown='asking' = False  title='Reset the count?'  buttons=keep,reset
+    label 'label#0'  text='It goes back to 0.'
+page 'page'  title='Details'
+  group 'group#0'  caption='Now'
+    info 'info#0'  label='Count'  value='{count}' = '0'

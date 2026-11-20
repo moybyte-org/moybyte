@@ -1,0 +1,17 @@
+action add from link 'add' on 'Pages'
+state count 0 -> 1 (in add)
+drew info '{count}' -> '1'
+action add from link 'add' on 'Pages'
+state count 1 -> 2 (in add)
+drew info '{count}' -> '2'
+action ask from link 'ask' on 'Pages'
+state asking False -> True (in ask)
+action keep from back on dialog 'dialog#1'
+state asking True -> False (in keep)
+action ask from link 'ask' on 'Pages'
+state asking False -> True (in ask)
+action keep from button 'keep' of dialog 'Reset the count?'
+state asking True -> False (in keep)
+action more from link 'more' on 'Pages'
+page push page 2, opened from 'more'
+page back page 1, focus back to 'more'
