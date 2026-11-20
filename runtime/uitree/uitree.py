@@ -2439,8 +2439,11 @@ _TRACE_OFF = [False]
 
 
 def _trace(kind, name, text):
+    """A line of the engine's trace: its last 200 lines (a deque), on the
+    host only (a board, which has no frames, keeps none: a line a write is
+    an allocation a frame)."""
     a = _NOW.app
-    if a is None or (_TRACE_OFF[0] and kind in ("state", "derive")):
+    if a is None or _frame is None or (_TRACE_OFF[0] and kind in ("state", "derive")):
         return
     ms = a.clock
     a.trace.append("%02d:%02d:%02d.%03d  %-7s %-8s %s" % (
