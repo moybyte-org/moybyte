@@ -3,7 +3,7 @@
 #   ThemeDoc.commit       what either tab holds, written through the look
 #   ThemeDoc.begin_edit   an edit of the open slot: a smooth one turns to pixels first
 #   ThemeDoc.step         undo and redo, the session's alone
-#   draw_zone             the bar's theme mode: ‹, the two tabs, the theme's name, undo, redo
+#   draw_row              the desk row's theme mode: the two tabs, undo, redo (a handheld's is editor_ui's head row)
 #   ConfigLayout          the Config tab's geometry: the code view, its status line, the hints
 #   ConfigLayer           the Config tab: theme.json in the Code tab's view, json mode
 #   SpritesLayout         the Sprites tab's geometry, a handheld's and a desk pane's

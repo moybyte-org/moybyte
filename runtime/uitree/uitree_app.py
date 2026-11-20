@@ -1,3 +1,21 @@
+# Map (grep -n a name to jump there):
+#   Engine                the replay: a built tree drawn each frame through the toolkit's verbs
+#   Engine.run            a handler run, counted (G12)
+#   Engine.open           the page built at open, its hook fired
+#   Engine.fire           an action queued for after the frame
+#   Engine.paint          one frame of the page into its content rect
+#   Engine.settle         each list's cursor kept on a row after its model changed
+#   Engine.leave          every way out of the page: a commit field's draft is written
+#   Engine.keys           a key routed through the tree
+#   Engine.point          a pointer routed through the tree
+#   Engine.back           back: the closer's action, else a shown dialog's or popover's
+#   -- the frame          the paint pass and what it draws
+#   -- placed layout      rows, lists and cells placed by arithmetic
+#   -- input              keys and the pointer
+#   App                   a registered app whose screen is a build
+#   env                   what the host handed the engine running this handler
+#   app_layer             the class a manifest names, made from a build
+#   Page                  a build hosted by a surface still drawn with today's verbs
 """The UI tree's replay: a built tree drawn each frame through the
 toolkit's `ui` verbs, call for call as a hand-written page makes them, so a
 page of standard rows draws today's pixels. No app code runs here but a

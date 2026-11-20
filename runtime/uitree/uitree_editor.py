@@ -1,3 +1,19 @@
+# Map (grep -n a name to jump there):
+#   Engine                the replay of the Editor's kinds over uitree_app.Engine
+#   -- the page: regions stacked  regions down the page, overlays last
+#   -- a row              a row's widths and cells
+#   Engine.point          a pointer routed to rows, panes, dividers, the text editor
+#   -- panes and their dividers  ui.split's panes, their cards and headers
+#   -- the text editor    ui.text_editor over ui.text_view and the document's keys
+#   -- popovers hang      popovers hung from a node's part
+#   Engine.keys           keys: popovers, the text editor, then rows
+#   Engine.type_byte      a typed byte into the focused document
+#   Engine.divider_at     a divider's position, for the scripts
+#   Page                  a page on the Editor's kinds hosted by a surface on today's verbs
+#   BarZone               the page's row lent to the shell's bar (lend="bar")
+#   BarZone.draw_zone     the lent row drawn into the bar's zone
+#   BarZone.zone_tap      a tap on the lent row
+#   BarZone.activate      a lent cell's action run
 """The replay of the Editor's kinds (uitree.py EXT-4) through today's `ui`
 verbs: regions stacked down the page, rows, tabs, panes over `ui.split`
 with its dividers, a pane's card and header, the text editor over

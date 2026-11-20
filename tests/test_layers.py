@@ -96,7 +96,7 @@ CROSSINGS = {
     "artwork": ("an `image` value of a drawing decodes through My Art's cover reader",
                 ("uitree_pics",)),
     "bar_layer": ("the bar a surface lays its verbs on",
-                  ("cards_layer", "editor_app", "theme_editor", "update_ui")),
+                  ("cards_layer", "editor_app", "update_ui")),
     "chrome": ("the console's stateless base: the palette and the responsive layout",
                ("theme_editor", "cart_api", "web_console")),
     "chrome_ops": ("the kernel's chrome as the shell draws it, over a cart too",

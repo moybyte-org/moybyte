@@ -1,3 +1,34 @@
+# Map (grep -n a name to jump there):
+#   UIError               every mistake: a code, the app's file and line, what was expected, the fix
+#   T                     a declared type, the base of every kind of state
+#   ImageT                a picture the engine decodes, caches and veils (G9)
+#   Pic                   an image value: where the engine finds the picture
+#   image                 the Python spelling of an image value
+#   Enum                  one of named values
+#   Load                  a load's state: never, loading, failed, loaded (M2)
+#   Record                a fixed set of typed fields
+#   Model                 rows keyed by one field
+#   RowOf                 one row of a model, as a value
+#   Opt                   a value that may be absent (ui.opt)
+#   Doc                   a text document the engine owns (ui.doc)
+#   Row                   a model's row, read by field
+#   ModelView             a model read in a handler
+#   RecView               a record read in a handler
+#   DocView               a document read and changed in a handler
+#   State                 the app's declared, typed state; a read inside a build is an error
+#   Decl                  what one app module declares: state, actions, hooks, labels, work
+#   AppDecl               an app's ui.app(...): its title and what it declares
+#   Ctx                   what a template may name where it is compiled
+#   Tmpl                  a compiled template: its type, its getter, its source
+#   Action                a named action: its label, handler, condition and hint
+#   Node                  one node of a built tree
+#   Ev                    the event a canvas's pointer hook is handed
+#   Builder               runs a page's build: typed, keyed, every name resolved
+#   Ticket                a load's handle from start()
+#   LoadView              a load's state in a handler
+#   Work                  a named job the engine runs in slices
+#   Pictures              the app's own pictures, decoded by the engine
+#   -- the calls an app makes  the page verbs (ui.row, ui.list, ...)
 """The UI tree API, `import uitree as ui`: an app module declares typed
 state (`ui.state`), named actions and hooks with what they take
 (`ui.action`, `ui.hook`), label tables and derives; a page is a function
