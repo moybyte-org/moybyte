@@ -18,6 +18,7 @@ PORTED = (
     "uitree_counter",
     "uitree_roles",
     "uitree_kinds",
+    "uitree_foot",
     "perms_ui",
     "settings_ui",
     "uitree_focus",

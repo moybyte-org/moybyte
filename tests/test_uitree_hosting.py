@@ -254,3 +254,41 @@ def test_a_placed_page_on_the_desk_names_its_keys(tmp_path, monkeypatch):
     monkeypatch.setattr(ui, "hints", lambda h, *a: (said.append(h), real(h, *a))[1])
     _split(tmp_path, "p4_1024x600_fs2_windowed")
     assert said and "back" in said[-1], said
+
+
+def _foot(tmp_path, config, script=("f:2",)):
+    import uitree_app
+    import uitree_foot as F
+    cls = uitree_app.app_layer("uitree_foot", "Foot", F.foot_page)
+    seen = {}
+
+    def opened(ws):
+        seen["app"] = P.host(ws, cls)
+    fs = P.frames(config, opened, list(script), str(tmp_path / "carts"))
+    return fs, seen["app"].engine
+
+
+@pytest.mark.parametrize("config", ("tdeck_320x240_fs1_dark", "p4_1024x600_fs2_windowed"))
+def test_a_shared_foot_splits_its_width_under_its_line(tmp_path, config):
+    """F-13 `foot look="share"`: its buttons are equally wide across the
+    foot, its label on a line of its own above them; on a handheld the keys
+    band stays the content's last line, under the foot."""
+    fs, eng = _foot(tmp_path, config)
+    a, b = eng._ui.box("mark"), eng._ui.box("drop")
+    assert a and b and a[1] == b[1] and abs(a[2] - b[2]) <= 1, (a, b)
+    x, y, w, h = eng.foot_r
+    assert a[0] - x == x + w - (b[0] + b[2]) and b[0] + b[2] - a[0] > w * 3 // 4, (a, b, eng.foot_r)
+    assert a[1] > y + h // 3, (a, eng.foot_r)          # the label's line above them
+    if config.startswith("tdeck"):
+        assert y + h <= eng.content[1] + eng.content[3] - 20, (eng.foot_r, eng.content)
+
+
+def test_a_table_is_named_by_its_key_before_it_draws(tmp_path):
+    """A table is one stop, its key its id: `ui.focus(TABLE)` and a cur=
+    the opening writes resolve to it before its first frame, so the key
+    pressed next lands on it (the task manager's Enter after it opens)."""
+    fs, eng = _foot(tmp_path, "tdeck_320x240_fs1_dark", ("f:1",))
+    assert eng.focus_key == "log", eng.focus_key
+    lst = next(l for _k, l in eng.curs if l.key == "log")
+    assert eng._drawn_id("log") == "log"
+    assert eng._row_stop_id(lst, "r1") == "log" and eng._row_stop_id(lst, "nope") is None

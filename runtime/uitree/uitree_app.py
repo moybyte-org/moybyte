@@ -310,8 +310,13 @@ class Engine(S.Builder):
             ("touch",) if self.input == "touch" else ())
         S.LIVE = S.live_units(n)
         shown = [k for k in n.kids if _shown(k, None)]
-        if any(k.kind == "foot" for k in shown) or self._foot_in_case(n):
-            self.foot_r, body = _v.cut_bottom(self.content, 44 if self.desk else 22 * self.fs)
+        foot = self._foot_of(n)
+        band = None
+        if foot is not None:
+            rest = self.content
+            if not self.desk and self._keys_shown():    # a handheld's band is the content's last line
+                band, rest = _v.cut_bottom(rest, 20 * self.fs)
+            self.foot_r, body = _v.cut_bottom(rest, (44 if self.desk else 22 * self.fs) + self._foot_line(foot))
             _v.at(*body)
         o = self._page_o
         o["id"] = self._page_id()
@@ -330,11 +335,16 @@ class Engine(S.Builder):
         if self.focused is None and self.want_focus is None:
             self.focused = next(self._stops(n), None)   # where focus starts: the first stop
         hint = self._hints()
-        placed = any(k.kind in ("split", "grid", "foot") for k in shown)
+        placed = foot is not None or any(k.kind in ("split", "grid") for k in shown)
         if not hint:
             pass                        # nothing on offer: no band, as a page with no keys draws none
         elif not placed:
             _v.hints(hint)
+        elif band is not None:          # under the foot, outside the page's ground
+            self.cv.rect(band[0], band[1], band[2], band[3], self.th["panel"])
+            _v.at(*band)
+            _v.hints(hint)
+            _v.at(*rect)
         elif not self.desk and _v.hints_width(hint) > 0:
             band, rect = _v.cut_bottom(rect, 20 * self.fs)
             _v.at(*band)
@@ -413,6 +423,8 @@ class Engine(S.Builder):
                     case = next((c for c in k.kids if c.l["v"] == v), None) or next(
                         (c for c in k.kids if c.l["v"] == "_"), None)
                     got = walk(case) if case is not None else None
+                elif k.kind == "table" and not rowkey and k.key == nodekey:
+                    return k.key[:ID_MAX]       # a table is one stop, its key the id
                 elif k.kind in ("rows", "cards", "table"):
                     got = rowkey and self._row_node_id(k, rowkey, nodekey)
                 elif k.act is not None and not k.act.can(None):
@@ -485,6 +497,8 @@ class Engine(S.Builder):
         """The id the first focus stop of row `rowkey` of `lst` will draw under."""
         if not any(r._f[r._m.key] == rowkey for r in self.s._v[lst.l["model"]]):
             return None
+        if lst.kind == "table":
+            return lst.key[:ID_MAX]         # a table is one stop: its current row is drawn at= it
         for k in lst.kids:
             if k.kind in ("link", "button", "toggle", "slider", "field", "item", "card"):
                 return ("%s/%s" % (rowkey, k.key))[:ID_MAX]
@@ -527,15 +541,38 @@ class Engine(S.Builder):
         self._sync[ck] = None           # focus follows cur onto that row
         return nxt
 
-    def _foot_in_case(self, n):
-        """A foot in the shown case of a switch at the page's root."""
+    def _foot_of(self, n):
+        """The page's shown foot: at its root, or in the shown case of a
+        switch at its root."""
         for k in n.kids:
-            if k.kind == "switch" and _shown(k, None):
+            if not _shown(k, None):
+                continue
+            if k.kind == "foot":
+                return k
+            if k.kind == "switch":
                 v = self.s._v[k.l["name"]]
-                case = next((c for c in k.kids if c.l["v"] in (v, "_")), None)
-                if case is not None and any(c.kind == "foot" and _shown(c, None) for c in case.kids):
-                    return True
-        return False
+                case = next((c for c in k.kids if c.l["v"] == v), None) or next(
+                    (c for c in k.kids if c.l["v"] == "_"), None)
+                for c in case.kids if case is not None else ():
+                    if c.kind == "foot" and _shown(c, None):
+                        return c
+        return None
+
+    def _foot_label(self, n):
+        """A shared foot's label, shown and not empty: its line over the
+        buttons (None where it has none)."""
+        if n.l.get("look") != "share":
+            return None
+        for k in n.kids:
+            if k.kind == "label" and _shown(k, None) and self._t(k, "text", None):
+                return k
+        return None
+
+    def _foot_line(self, n):
+        k = self._foot_label(n)
+        if k is None:
+            return 0
+        return _v.text_size("Ag")[1] + (8 if self.desk else 4 * self.fs)
 
     def _r_tabs(self, n, row, rect):
         """An enum's tab strip across the page's top: a band cut from the page."""
@@ -1198,15 +1235,29 @@ class Engine(S.Builder):
                  n.p["lines"](row) if "lines" in n.p else [])
 
     def _r_foot(self, n, row, rect):
+        """The page's docked foot: its ground, a rule along its top, its
+        buttons at their natural widths at its end and a label before them;
+        `look="share"`: its buttons share its width, its label a line of
+        its own over them."""
         x, y, w, h = self.foot_r
-        fh = 30
-        by = y + h - fh - 7
+        desk, fs = self.desk, self.fs
+        fh, pad, m = (30, 7, 16) if desk else (20 * fs, fs, 4 * fs)
+        by = y + h - fh - pad
         cv = self.cv
         cv.rect(x, y, w, h, self.th["panel"])
-        cv.rect(x + 16, by - 7, w - 32, 1, self.th["border"])
-        bx = x + w - 16
-        for k in reversed([k for k in n.kids if k.kind == "button" and _shown(k, row)
-                           and k.act.can(row)]):
+        cv.rect(x + m, y, w - 2 * m, 1, self.th["border"])
+        btns = [k for k in n.kids if k.kind == "button" and _shown(k, row) and k.act.can(row)]
+        if n.l.get("look") == "share":
+            lab = self._foot_label(n)
+            if lab is not None:
+                _v.at(x + m, y + pad, w - 2 * m, by - y - pad)
+                self._r_label(lab, row, rect)
+            cells = _v.hsplit((x + m, by, w - 2 * m, fh), len(btns), 8 if desk else 4 * fs) if btns else ()
+            for k, c in zip(btns, cells):
+                self._r_button(k, row, rect, at=c)
+            return
+        bx = x + w - m
+        for k in reversed(btns):
             _v.face("caption")
             bw = _v.text_size(self._t(k, "label", row))[0] + 48
             _v.face()

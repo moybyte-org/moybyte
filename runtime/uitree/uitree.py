@@ -1800,7 +1800,7 @@ SCHEMA = {
     "grid": dict(_C, cols="lit", rows="lit", gap="lit", pad="lit"),
     "panel": dict(_C),
     "canvas": dict(_C, draw="fn", h="lit", pointer="action1", focus="cond"),
-    "foot": dict(_C),
+    "foot": dict(_C, look="lit"),
     "scroll": dict(_C),
     "switch": dict(_C),
     "case": {},
@@ -2283,8 +2283,15 @@ def canvas(key, draw, **p):
     return _node("canvas", key, dict(p, draw=draw), _caller())
 
 
-def foot(**p):
-    return _node("foot", "foot", p, _caller())
+def foot(look="end", **p):
+    """The page's docked foot: its buttons at their natural widths at its
+    end, a label before them; `look="share"` (F-13): its buttons share its
+    width, a label a line of its own over them."""
+    where = _caller()
+    _look("foot", look, ("end", "share"), where)
+    if look != "end":
+        p["look"] = look
+    return _node("foot", "foot", p, where)
 
 
 def scroll(key, **p):
