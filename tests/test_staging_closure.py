@@ -117,7 +117,7 @@ NATIVE = {
                        "moycore", "moy_web", "moy_flush", "moy_lcd", "moy_prof",
                        "moy_wasm", "moy_elf", "moy_serial", "moy_png", "moy_index", "moy_store",
                        "moy_spine", "moy_kernel", "moy_play", "moy_glass", "moy_input",
-                       "moy_net", "moy_app", "moy_ui", "moy_media", "moy_sh", "moy_ssh", "moy_tty",
+                       "moy_net", "moy_app", "moy_ui", "moy_uitree", "moy_media", "moy_sh", "moy_ssh", "moy_tty",
                        "moy_usbdisk"},
     # The P4 has no banded flush to feed -- DPI scans PSRAM continuously -- so
     # it denies moy_flush; moy_audio drives its ES8311 (#82). moy_sd brings its TF card up on
@@ -129,7 +129,7 @@ NATIVE = {
     "p4": {"moy_gfx", "moy_alloc", "moy_audio", "moy_lua", "moycore", "moy_web", "moy_dsi",
            "moy_ppa", "moy_c6", "moy_usb", "moy_prof", "moy_wasm", "moy_elf",
            "moy_serial", "moy_png", "moy_index", "moy_store", "moy_spine", "moy_kernel", "moy_play",
-           "moy_sd", "moy_glass", "moy_input", "moy_net", "moy_app", "moy_ui", "moy_media",
+           "moy_sd", "moy_glass", "moy_input", "moy_net", "moy_app", "moy_ui", "moy_uitree", "moy_media",
            "moy_sh", "moy_ssh", "moy_tty", "moy_usbdisk"},
     # The Guition P4 (2026-09-06): the Waveshare's set less moy_usbdisk, because the
     # P4 modules are the SILICON tier (native/p4, a second board.toml
@@ -140,14 +140,14 @@ NATIVE = {
                    "moy_dsi", "moy_ppa", "moy_c6", "moy_usb", "moy_prof",
                    "moy_wasm", "moy_elf", "moy_serial", "moy_png", "moy_index", "moy_store",
                    "moy_spine", "moy_kernel", "moy_play", "moy_sd", "moy_glass", "moy_input",
-                   "moy_net", "moy_app", "moy_ui", "moy_media", "moy_sh", "moy_ssh", "moy_tty"},
+                   "moy_net", "moy_app", "moy_ui", "moy_uitree", "moy_media", "moy_sh", "moy_ssh", "moy_tty"},
     # The Guition denies moy_audio for now (stage 5 of its bring-up, see its
     # board.toml), and with it moy_media; moy_sd opens its TF card on SPI3; moy_axs is its board-authored QSPI panel backend,
     # and moy_flush is the engine under it.
     "guition-s3": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web",
                    "moy_flush", "moy_axs", "moy_prof", "moy_wasm", "moy_elf", "moy_serial",
                    "moy_png", "moy_index", "moy_store", "moy_spine", "moy_kernel", "moy_play",
-                   "moy_sd", "moy_glass", "moy_input", "moy_net", "moy_app", "moy_ui",
+                   "moy_sd", "moy_glass", "moy_input", "moy_net", "moy_app", "moy_ui", "moy_uitree",
                    "moy_sh", "moy_ssh", "moy_tty"},
     # The Zero is HEADLESS (#41): no panel, no touch, no frame loop, no carts
     # running on it. Besides the store, the kernel's entry (a serial-only

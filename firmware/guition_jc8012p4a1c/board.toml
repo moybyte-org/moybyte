@@ -439,6 +439,13 @@ The widget toolkit's bodies in C with style and strings as data
 calls. Every console takes it."""
 
 [[native.shared.take]]
+module = "moy_uitree"
+why = """
+The UI engine (native/moy_uitree/moy_uitree.h): a page an app's build function
+describes, drawn from C through moy_ui's verbs. Every console takes it beside
+moy_ui."""
+
+[[native.shared.take]]
 module = "moy_kernel"
 why = """
 The kernel's entry, crash record and recovery floor

@@ -489,6 +489,12 @@ The widget toolkit (docs/history/kernel_toolkit_2026-10.md). This board runs no 
 the browser it serves draws them."""
 
 [[native.shared.deny]]
+module = "moy_uitree"
+why = """
+The UI engine, which draws through the widget toolkit this board denies: it
+runs no apps."""
+
+[[native.shared.deny]]
 module = "moy_gfx"
 why = """
 The RGB565 draw kernel (fill/fill_rect/blit565/spr_batch and the #167 tri/sspr/

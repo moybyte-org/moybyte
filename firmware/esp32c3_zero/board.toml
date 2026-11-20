@@ -244,6 +244,10 @@ module = "moy_ui"
 why = "Nothing draws here (the XIAO's reason)."
 
 [[native.shared.deny]]
+module = "moy_uitree"
+why = "Nothing draws here (the XIAO's reason)."
+
+[[native.shared.deny]]
 module = "moy_gfx"
 why = "No canvas: nothing dispatches into the draw kernel (the XIAO's reason)."
 
