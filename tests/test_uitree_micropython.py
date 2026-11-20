@@ -2,11 +2,13 @@
 
 The host suite runs `uitree` on CPython, which has what a board's MicroPython
 lacks (frames, signatures, `re.fullmatch`, function attributes, a writable
-instance `__dict__`); uitree.py meets each in one guarded place at its top. This
-boots the T-Deck's console as tests/test_frame_alloc.py stages it, frozen, on
-the boards' model, opens every page ported to the layer and checks that each
-built and painted. A layer change that reaches for CPython fails here, not on a
-board.
+instance `__dict__`, `collections.Counter`); uitree.py meets each in one guarded
+place at its top. This boots the T-Deck's console as tests/test_frame_alloc.py
+stages it, frozen, on the boards' model, opens every page ported to the layer,
+drags the scrolling ones, and checks that each built and painted and that no
+frame raised. The kernel's loop runs on past a frame that raises, so a raise
+is caught here, around the frame, or it reads as a frame that drew nothing. A
+layer change that reaches for CPython fails here, not on a board.
 """
 
 import inspect
@@ -63,16 +65,32 @@ def _steps(loop, n=12):
 
 def pages(loop):
     import moy_log
+    import moy_loop
     import uitree_app
     ws = loop.ws
     painted = {}
     paint = uitree_app.Engine.paint
 
     def counted(self, *a):
+        r = paint(self, *a)
         k = self.pages[0].__name__
         painted[k] = painted.get(k, 0) + 1
-        return paint(self, *a)
+        return r
     uitree_app.Engine.paint = counted
+    # the kernel's step keeps the loop running past a frame that raised:
+    # every raise is kept here, its first traceback printed
+    errors = []
+    frame = ws.frame
+
+    def checked(dt):
+        try:
+            frame(dt)
+        except Exception as e:
+            if not errors:
+                sys.print_exception(e)
+            errors.append(repr(e))
+            raise
+    ws.frame = checked
     _steps(loop, 30)
     pids = {"kernel": moy_log.KERNEL, "shell": moy_log.SHELL}
     for t, level, who, text in LOG_RING:
@@ -83,12 +101,17 @@ def pages(loop):
     ws.updater = Updater(True)
     ws.c6_updater = C6Updater()
     shown = {}
+    W, H = ws.sys_canvas.w, ws.sys_canvas.h
     ws.open_settings()
     _steps(loop)
+    moy_loop.swipe(W // 2, H * 3 // 4, W // 2, H // 4, 8)
+    _steps(loop, 20)
     shown["rows"] = ws.wm.top_kind()
     sl = ws.settings_layer
     for p in ("tz", "paired", "log", "permissions"):
         sl.open_page(p)
+        _steps(loop)
+        moy_loop.swipe(W // 2, H * 3 // 4, W // 2, H // 4, 8)    # each page dragged
         _steps(loop)
         shown[p] = sl._stack[-1] if sl._stack else None
         sl.close_page()
@@ -110,7 +133,7 @@ def pages(loop):
     shown["web"] = ws.web.serving()
     ws.web.toggle()
     _steps(loop, 4)
-    print("RESULT " + json.dumps({"painted": painted, "shown": shown}))
+    print("RESULT " + json.dumps({"painted": painted, "shown": shown, "errors": errors}))
 '''
 
 # each ported page's build function, by name: Settings' rows, its tz, paired,
@@ -128,6 +151,7 @@ def test_every_ported_page_builds_and_draws_on_the_boards_micropython(tmp_path):
                          why="the console imports uitree at boot; this is the check "
                              "that the layer and its pages run on a board's MicroPython")
     shown, painted = info["shown"], info["painted"]
+    assert not info["errors"], (info["errors"][:3], text[-3000:])
     assert shown["rows"] == "settings", shown
     assert [shown[p] for p in ("tz", "paired", "log", "permissions")] == \
         ["tz", "paired", "log", "permissions"], shown

@@ -33,7 +33,8 @@ except (ImportError, AttributeError):
 # no fullmatch (a pattern anchored with `$` matches the same names), a
 # function takes no attributes (a wrapper keeps its own __name__ there) and
 # has no __module__, and an instance's __dict__ is read-only (the layer keeps
-# its own attributes as plain ones, set at __init__).
+# its own attributes as plain ones, set at __init__). `collections` there has
+# no Counter or OrderedDict.move_to_end; the layer uses neither.
 if hasattr(re, "fullmatch"):
     _fullmatch = re.fullmatch
 else:

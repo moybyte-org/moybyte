@@ -39,7 +39,7 @@ class PicEngine:
         self.used = 0
         self.failed = {}                           # (pic, gen) -> why
         self.owed = []
-        self.stats = collections.Counter()
+        self.stats = dict.fromkeys(("decoded", "failed", "refused", "evicted"), 0)
 
     # -- the frame's side ------------------------------------------------------------
 
@@ -52,7 +52,7 @@ class PicEngine:
         self.seen.add(k)
         got = self.cache.get(k)
         if got is not None:
-            self.cache.move_to_end(k)
+            self.cache[k] = self.cache.pop(k)       # the most recent last
             return got
         if (pic, self._gen(pic)) not in self.failed and k not in self.owed:
             self.owed.append(k)
