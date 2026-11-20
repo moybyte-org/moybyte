@@ -191,6 +191,15 @@ def shelf_cart(ws, title):
     raise AssertionError("no cart titled %r on the shelf or among the shape carts" % title)
 
 
+def editor_row(ws):
+    """What the handheld Editor's head row shows in the bar's lent zone, left
+    to right: a tab's name, an action's sentinel, None for Play
+    (`EditorApp.zone_cells`)."""
+    bl = ws.bar_layer
+    zone = bl.lent_zone("menu", bl.cell("menu", "zone")[0])
+    return [t for t, _g, _r in ws.editor_app.zone_cells(zone)]
+
+
 def open_cart(ws, title):
     """Open a seeded cart by TITLE. Games, the kid's carts and apps live in
     the home's tabs; a WALLPAPER leaves them (spec shell_ux_v1.md) but stays

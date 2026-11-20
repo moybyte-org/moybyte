@@ -40,7 +40,7 @@ import pytest
 from runtime import audio_session, host_app
 from tools import wasm_cart, wat
 import pixel_goldens
-from ws_helpers import open_cart, settle_badges
+from ws_helpers import editor_row, open_cart, settle_badges
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURES = os.path.join(ROOT, "tests", "fixtures", "wasm")
@@ -649,8 +649,7 @@ def test_the_code_tab_is_absent_unless_the_cart_ships_src(tmp_path):
     assert ws.editor_app.tab != "code"
     ws.text.set_menu_view("code")
     assert ws.editor_app.tab == "cards", "a Code tab over no code"
-    assert "code" not in [t for t, _g in ws.editor_app._ladder()]
-    assert "code" not in [t[0] for t in ws.editor_app._chips()]
+    assert "code" not in editor_row(ws)
     ws.open_in_editor(_cart(ws, "Hello Wasm"))
     assert ws.text.code_sources() == ["src/main.wat"]
     ws.text.set_menu_view("code")

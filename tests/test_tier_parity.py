@@ -14,7 +14,7 @@ import os
 import pytest
 
 from runtime import host_app
-from ws_helpers import open_cart
+from ws_helpers import editor_row, open_cart
 
 MOY = host_app.moy_carts
 
@@ -118,14 +118,13 @@ def test_only_a_python_cart_has_a_blocks_tab(tmp_path):
     for title in ("Lua Bits", "Native Bits"):
         ws.open_in_editor(_cart(ws, title))
         assert not ws.text.takes_blocks()
-        assert "blocks" not in [t for t, _g in ws.editor_app._ladder()]
-        assert "blocks" not in [t[0] for t in ws.editor_app._chips()]
+        assert "blocks" not in editor_row(ws)
         ws.text.set_menu_view("blocks")
         assert ws.editor_app.tab == "cards", title
     py = next(c for c in ws.carts.all if MOY.is_python(c) and c.get("path"))
     ws.open_in_editor(py)
     assert ws.text.takes_blocks()
-    assert "blocks" in [t for t, _g in ws.editor_app._ladder()]
+    assert "blocks" in editor_row(ws)
 
 
 def test_a_blocks_save_never_writes_python_into_a_lua_cart(tmp_path):
@@ -206,10 +205,9 @@ def test_each_tier_is_offered_the_tabs_its_run_reads(tmp_path):
     for title, tabs in want.items():
         ws.open_in_editor(_cart(ws, title))
         app = ws.editor_app
-        ladder = [t for t, _g in app._ladder()]
-        chips = [t[0] for t in app._chips()]
+        row = editor_row(ws)
         for tab in ASSET_TABS:
-            assert (tab in ladder) == (tab in tabs) == (tab in chips), (title, tab)
+            assert (tab in row) == (tab in tabs), (title, tab)
             ws.text.set_menu_view(tab)
             assert app.tab == (tab if tab in tabs else "cards"), (title, tab)
         assert app._offers("mine") == (title != "Native Bits")
