@@ -95,10 +95,10 @@
   "guition_p4_1280x800_tasks": {
     "note_banner": "fde35f011b031b08fd19260788abf6ef46371cf6479eda0ded01f675cb0aee60",
     "rec_indicator": "e3040d9970ea49c0a73da65020593ec2e579059b3392b0bc40faaeea29c3db7d",
-    "tasks_crashed_service": "7d2f94fb52c89eaa28f6c6d129f942fcc0918bc5bba01d313e781d709270a5c6",
-    "tasks_empty": "320cdc9ce896a425d7b7714267f3ff7f98d59769274eb5cca65cece8d401d94f",
-    "tasks_notes": "df832e9c709ac3fb6bb592fc384d05ebd45ed4065c5f968bf105e423867ed495",
-    "tasks_two_games": "cbf4dc0485fff9dc98258a3e9979c110bdf64b74370f4c055c5143eabe19530f"
+    "tasks_crashed_service": "5fd5ba74667c3ac466fa4e3e88667995e0761bd11859ad38369fd67ec8edb46c",
+    "tasks_empty": "f2dae6f3292f32aab5cfebee074bf16b414c2ae24d513c7d3053a5a109252a78",
+    "tasks_notes": "eace0f857a0c54467106c3c4d16116a29b2f0db94fcea7efb1aa37b8a180f2a4",
+    "tasks_two_games": "3a31c6c631887d86b7661c705819a02dd778ac1a9da4b153f965445993167474"
   },
   "guition_p4_1280x800_windowed": {
     "about": "31fbf0dee225faa1753312f930093018b3c3ef9ddadf1cfb4c6e8fbc4de6553f",
@@ -494,10 +494,10 @@
   "p4_1024x600_cs2_fs1_tasks": {
     "note_banner": "8a4a206ffefa3a1789cdeb68d1aa19bb16a8848de056ba6c156c57b797e20a58",
     "rec_indicator": "be004649bef700865cd4d0240ab7dc9d37c07e23694b1e9f2b6a07f1162ba5bc",
-    "tasks_crashed_service": "3308862fbf1783f4d412068137324fc685a4e44881ba495c1094ba691d6dba4b",
-    "tasks_empty": "d0441e38dc95ba52060cfea2d65d058ed2a31aca5b782d58a781af8dd79b1fe4",
-    "tasks_notes": "180c6abd6a50de056960d4a3834d5b59bd144fab0bb9705fa0e5532cf3e039a8",
-    "tasks_two_games": "5bbf332bc4e3c6ec7b071929fd6024e3107420841954569f1b71138a73ee3951"
+    "tasks_crashed_service": "cca75ad445a34153f5ab21a3e1e4fcca983101a80a9489c8e6ccf6acb8378fe1",
+    "tasks_empty": "49ebd01011c0ed2db7ab88df62cf2a216bcb355a79df912044b3509f51f85363",
+    "tasks_notes": "39bfbb41985b8c227e43f5aaf4a2d5b4eaf679a476bf2538e862941ea01d3222",
+    "tasks_two_games": "3e35321f08bf7069be3275d575130ef0c8aaff77583b3c93c6de000d880759f6"
   },
   "p4_1024x600_cs2_fs1_twobars": {
     "about": "bb87791b7db40fe2da3866477d93148a02780304c928aee0a297f167e79c8ada",
