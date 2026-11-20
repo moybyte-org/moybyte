@@ -63,6 +63,7 @@ import devices as _devices
 import moybyte as _moybyte
 from moy_play import Tick as TickScheduler     # the kernel's tick model
 import moy_play as _moy_play
+from lua_ext import uitree_chunks as _uitree_chunks
 
 
 # Auto-native carts (#67 spike): when the runtime HAS the native code emitter
@@ -120,6 +121,7 @@ SUPPORTED_EXTENSIONS = (
     "moybyte.wifi",       # #38: the injected wifi service (permission-gated)
     "moybyte.app",        # #224: a compiled app's role imports (native/moy_app/moy_app_wasm.h)
     "moybyte.ui",         # the public UI API, a Lua cart's `ui` (native/moycore/moycore_ui.h)
+    "moybyte.uitree",     # the UI tree API over it, Lua (runtime/run/uitree.lua)
     "moybyte.mouse",      # a compiled cart's mouse import (native/moycore/moycore_wasm_ext.h)
     "moybyte.prefs",      # a compiled game's prefs imports (native/moycore/moycore_wasm_ext.h)
 )
@@ -1382,6 +1384,8 @@ class Player(PlayerDiag):
         # declares no `sources`, and lua_ext.cart_chunks then builds the same
         # one-entry list the tiers always ran.
         pre = project.cart.get("src_before")
+        if project.cart.get("runtime") == "lua":
+            pre = _uitree_chunks(project.cart, pre)
         if pre:
             ns["_moy_pre"] = pre
         post = project.cart.get("src_after")

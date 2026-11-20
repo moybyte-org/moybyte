@@ -1,0 +1,169 @@
+"""Old against port: a hand-written Lua screen and its UI tree port, staged
+side by side on the host console and driven by one input script, a shot at
+each named step. tests/test_uitree_lua.py holds the two to the same pixels;
+run it by hand to keep the shots:
+
+    .venv/bin/python tests/uitree_lua_parity.py OUT_DIR [pair ...]
+"""
+import os
+import shutil
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+if ROOT not in sys.path:
+    sys.path[:0] = [ROOT, HERE]
+
+FIX = os.path.join(HERE, "fixtures", "uitree_lua")
+MESH = os.path.join(HERE, "fixtures", "apps", "moymesh.moy")
+DT = 1.0 / 30.0
+
+# a size: the console's (320x240 full screen) and the desk's (a 1024x600 window)
+SIZES = {"320": dict(sys_size=None, font_scale=1, windowed=False),
+         "1024": dict(sys_size=(1024, 600), font_scale=2, windowed=True)}
+
+# a pair: (old cart, its files from elsewhere), (port cart, its files), script.
+# A step is a key ("up", "a"), "type:TEXT", "enter", "key:CODE", "wait:N",
+# "tap:X,Y", "drag:X0,Y0,X1,Y1" or "shot:NAME"; DESK moves a 320 point into
+# the desk window.
+THREAD_SCRIPT = ["shot:thread", "tap:150,206", "wait:2", "shot:field", "type:hello mesh", "shot:typed", "enter", "wait:4", "shot:sent",
+                 "wait:40", "shot:failed", "up", "shot:up", "a", "wait:2", "shot:details", "b", "wait:4",
+                 "shot:closed", "wait:40", "shot:later"] + \
+                ["drag:160,70,160,200"] * 4 + ["wait:20", "shot:top"]
+PAIRS = {
+    "thread": (("mesh_old", [(MESH, "mesh.lua"), (MESH, "main.lua"), ("mesh_thread", "data.lua")]),
+               ("mesh_thread", [(MESH, "mesh.lua")]), THREAD_SCRIPT),
+}
+DESK = {"drag:160,70,160,200": "drag:700,150,700,480", "tap:150,206": "tap:650,530"}
+
+
+def _stage(carts, name, extra):
+    dst = os.path.join(carts, name + ".moy")
+    shutil.copytree(os.path.join(FIX, name + ".moy"), dst)
+    for where, f in extra:
+        src = where if os.path.isabs(where) else os.path.join(FIX, where + ".moy")
+        shutil.copy(os.path.join(src, f), dst)
+    import json
+    with open(os.path.join(dst, "manifest.json")) as fh:
+        return json.load(fh)["title"]
+
+
+def play(name, extra, script, size, launch=None):
+    """Run cart `name` at `size` through `script`: {shot name: RGB bytes},
+    the run's cart errors and its log lines."""
+    from runtime import host_app
+    from ws_helpers import open_cart, quiesce
+    from runtime.host import moy_log
+    root = tempfile.mkdtemp(prefix="uitree_lua_")
+    carts = os.path.join(root, "carts")
+    host_app.moy_carts.ensure_dirs(carts)
+    title = _stage(carts, name, extra)
+    ws = host_app.build_workstation(carts, **SIZES[size])
+    ws.look.set_theme("moy", persist=False, variant="dark")
+    ws.pointer.visible = False
+    seq0 = moy_log.next()
+    open_cart(ws, title)
+    drv = host_app.ConsoleDriver(ws)
+    shots, errors = {}, []
+
+    def frame():
+        quiesce(ws)
+        ws.mark_dirty()
+        drv.frame(DT)
+
+    for _ in range(4):
+        frame()
+    for step in script:
+        if size == "1024":
+            step = DESK.get(step, step)
+        kind, _, arg = step.partition(":")
+        if kind == "shot":
+            shots[arg] = bytes(drv.rgb888())
+            continue
+        if kind == "wait":
+            for _ in range(int(arg)):
+                frame()
+            continue
+        if kind == "type":
+            for ch in arg:
+                drv.type_char(ord(ch))
+                frame()
+            continue
+        if kind == "drag":
+            x0, y0, x1, y1 = (int(v) for v in arg.split(","))
+            drv.touch(x0, y0)
+            frame()
+            for k in range(1, 5):
+                drv.touch_drag(x0 + (x1 - x0) * k // 4, y0 + (y1 - y0) * k // 4)
+                frame()
+            drv.touch_up()
+        elif kind == "tap":
+            x, y = (int(v) for v in arg.split(","))
+            drv.click(x, y)
+        elif kind == "key":
+            drv.key_down(int(arg))
+            frame()
+            drv.key_up(int(arg))
+        elif kind == "enter":
+            drv.type_char(13)
+        else:
+            drv.press(kind)
+        frame()
+        frame()
+        err = ws.run.player.cart_error if ws.run and ws.run.player else None
+        if err and err not in errors:
+            errors.append(err)
+    cv = drv.current_canvas()
+    logs = [r[4] for r in moy_log.read(seq0, 4000)]
+    ws.home.go_home()
+    ws.spine.exit()
+    shutil.rmtree(root, ignore_errors=True)
+    return (cv.w, cv.h), shots, errors, logs
+
+
+def compare(pair, size):
+    """Both runs of `pair` at `size`: (glass size, old shots, port shots, the
+    errors of both, the port's log)."""
+    (old, oextra), (port, pextra), script = PAIRS[pair]
+    wh, a, ea, _ = play(old, oextra, script, size)
+    _, b, eb, logs = play(port, pextra, script, size)
+    return wh, a, b, ea + eb, logs
+
+
+def differing(wh, a, b, mask=()):
+    """The bounding box of the pixels that differ outside `mask` (x0, y0, x1,
+    y1 rects), and their count."""
+    w, h = wh
+    n, box = 0, None
+    for y in range(h):
+        row = y * w * 3
+        if a[row:row + w * 3] == b[row:row + w * 3]:
+            continue
+        for x in range(w):
+            i = row + x * 3
+            if a[i:i + 3] != b[i:i + 3] and not any(x0 <= x < x1 and y0 <= y < y1 for x0, y0, x1, y1 in mask):
+                n += 1
+                box = (x, y, x + 1, y + 1) if box is None else (min(box[0], x), min(box[1], y),
+                                                                 max(box[2], x + 1), max(box[3], y + 1))
+    return box, n
+
+
+def main():
+    from PIL import Image
+    out = sys.argv[1]
+    os.makedirs(out, exist_ok=True)
+    for pair in sys.argv[2:] or sorted(PAIRS):
+        for size in SIZES:
+            wh, a, b, errs, logs = compare(pair, size)
+            for e in errs:
+                print("  ERROR", e)
+            for name in a:
+                box, n = differing(wh, a[name], b[name])
+                print("%s %s %-16s %s" % (pair, size, name, "equal" if n == 0 else "%d px in %s" % (n, box)))
+                for tag, img in (("old", a[name]), ("port", b[name])):
+                    Image.frombytes("RGB", wh, img).save(os.path.join(out, "%s_%s_%s_%s.png" % (pair, size, name, tag)))
+
+
+if __name__ == "__main__":
+    main()

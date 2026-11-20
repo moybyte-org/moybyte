@@ -1,5 +1,6 @@
 # Map (grep -n a name to jump there):
 #   cart_chunks                       a cart's Lua scripts as chunks
+#   uitree_chunks                     the UI tree layer ahead of a cart that declares it
 #   wants_layout                      a Lua cart's responsive opt-in
 #   -- the frame seam, once for both Lua tiers  snap_shared, sync_view, drain_audio
 #   snap_shared                       player two, the pointer and the clock into the cart
@@ -60,6 +61,32 @@ def cart_chunks(ns, src):
     return out
 
 
+# The UI tree API for Lua apps (runtime/run/uitree.lua): a cart that declares
+# the extension "moybyte.uitree" gets the layer as its first script, so its
+# own scripts find the tree's `ui` over the engine's.
+UITREE_EXT = "moybyte.uitree"
+UITREE_FILE = "uitree.lua"
+_uitree_src = None
+
+
+def uitree_source():
+    """The layer's Lua source, read once from beside this module."""
+    global _uitree_src
+    if _uitree_src is None:
+        here = __file__.rpartition("/")[0] or "."
+        with open(here + "/" + UITREE_FILE) as f:
+            _uitree_src = f.read()
+    return _uitree_src
+
+
+def uitree_chunks(cart, pre):
+    """`pre` (the cart's scripts before main, as (name, text)) with the layer
+    first when the cart declares UITREE_EXT; `pre` itself otherwise."""
+    if UITREE_EXT not in (cart.get("extensions") or ()):
+        return pre
+    return [(UITREE_FILE, uitree_source())] + list(pre or ())
+
+
 _LAYOUT_DEFS = ("function _layout(", "_layout = function", "_layout=function")
 
 
@@ -70,7 +97,10 @@ def wants_layout(cart):
     _layout(` or `_layout = function`. A probe of the source because the
     canvas is chosen before the VM opens; the run then calls `_layout` only
     where the global is a function, as it finds `_init` (moycore's
-    `load`)."""
+    `load`). The UI tree layer defines one, so a cart that declares it is
+    responsive."""
+    if UITREE_EXT in (cart.get("extensions") or ()):
+        return True
     texts = [t for _n, t in cart.get("src_before") or ()]
     texts.append(cart.get("src") or "")
     texts += [t for _n, t in cart.get("src_after") or ()]
