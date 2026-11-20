@@ -216,6 +216,28 @@ def _open_rows_full(ws):
 
 
 # name -> what a run opens
+# The System log's ring: (t_us, level, process, text) on a pinned clock, more
+# lines than a handheld's page holds, a traceback's lines under its record.
+LOG_RING = tuple((1000000 + 250000 * n, (6, 4, 3, 7)[n % 4], ("shell", "kernel", "game")[n % 3],
+                  "record %d of the ring" % n) for n in range(24)) + (
+    (9103300, 2, "game", "Traceback (most recent call last):\n  File \"<cart>\", line 88, in _update\n"
+     "TypeError: unsupported types for +: 'int', 'NoneType'"),)
+
+
+def _open_log(ws):
+    import moy_log
+    moy_log.init(16384)
+    pids = {"kernel": moy_log.KERNEL, "shell": moy_log.SHELL}
+    for t, level, who, text in LOG_RING:
+        if who not in pids:
+            pids[who] = moy_log.spawn(who)
+        moy_log.pin_clock(t)
+        moy_log.write(level, pids[who], text)
+    moy_log.pin_clock(0)
+    ws.open_settings()
+    ws.settings_layer.open_page("log")
+
+
 SURFACES = {
     "settings_permissions": P.Surface(_open_settings_page("permissions"), _perms_carts),
     "settings_tz": P.Surface(_open_tz),
@@ -227,6 +249,7 @@ SURFACES = {
     "update_c6": P.Surface(_open_update("open_update_c6")),
     "settings_rows": P.Surface(lambda ws: ws.open_settings()),
     "settings_rows_full": P.Surface(_open_rows_full),
+    "settings_log": P.Surface(_open_log),
 }
 
 # A step a port draws differently from its record on purpose: its cause,
@@ -292,6 +315,10 @@ RUNS = (
      ["k:down"] * 24 + ["k:right", "k:up", "k:up"]),
     ("settings_rows_full-desk", "settings_rows_full", "p4_1024x600_fs2_windowed",
      ["k:down"] * 22 + ["k:a", "k:down", "k:right"]),
+    # the ring at its foot, scrolled up and down again, and closed
+    ("settings_log-tdeck", "settings_log", "tdeck_320x240_fs1_dark",
+     ["f:2", "k:up", "k:up", "k:up", "k:down", "back"]),
+    ("settings_log-desk", "settings_log", "p4_1024x600_fs2_windowed", ["f:2", "k:up", "k:down"]),
 )
 
 
