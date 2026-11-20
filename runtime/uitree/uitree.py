@@ -45,12 +45,15 @@ class UIError(Exception):
         super().__init__(self.text())
 
     def text(self):
-        out = ["error[%s] %s:%s: %s" % (self.code, self.where[0], self.where[1], self.what)]
-        for k in ("expected", "found", "fix"):
-            v = getattr(self, k)
-            if v is not None:
-                out.append("  %-9s %s" % (k + ":", v))
-        return "\n".join(out)
+        """The spec's one line: error[CODE] WHERE: WHAT; fix: FIX (expected E, found F)."""
+        out = "error[%s] %s:%s: %s" % (self.code, self.where[0], self.where[1], self.what)
+        if self.fix is not None:
+            out += "; fix: " + self.fix
+        if self.expected is not None:
+            out += " (expected %s%s)" % (self.expected, "" if self.found is None else ", found %s" % self.found)
+        elif self.found is not None:
+            out += " (found %s)" % self.found
+        return " ".join(part.strip() for part in out.split("\n"))
 
 
 def _caller():
@@ -1351,7 +1354,7 @@ def live_units(root, lenders=None):
             out.add(n.unit)
         if lenders is not None and n.kind == "tools" and n.l.get("lend"):
             if n.l["lend"] in lenders:
-                raise UIError("L02", "two shown units lend to %s" % n.l["lend"], where=n.where, fix='show one lending unit at a time')
+                raise UIError("L03", "two shown units lend to %s" % n.l["lend"], where=n.where, fix='show one lending unit at a time')
             lenders[n.l["lend"]] = n
         if n.kind == "switch":
             v = _NOW.app.s._v[n.l["name"]]
@@ -1782,7 +1785,7 @@ def _state_name(name, want, site, where):
     if not isinstance(name, str) or name not in st._t:
         if not isinstance(name, str):
             n = [k for k, x in st._v.items() if x == name and st._t[k] in want] if name is not None else []
-            raise UIError("N05", "%s takes a state name, not its value" % site, where=where,
+            raise UIError("N01", "%s takes a state name, not its value" % site, where=where,
                           found="%r (%s)" % (name, _pyt(name)),
                           fix=("\"%s\"" % n[0]) if len(n) == 1 else 'the name in quotes: "wifi"')
         raise _undeclared(name, st._t)
@@ -2003,7 +2006,7 @@ def picture(image, **p):
 def progress(value, **p):
     where = _caller()
     if "max" not in p:
-        raise UIError("N06", "progress %s has no max=" % value, where=where,
+        raise UIError("N01", "progress %s has no max=" % value, where=where,
                       fix="max=\"{NAME}\" (an int), or max=0 for work whose size is not known")
     return _node("progress", None, dict(p, value="{%s}" % value if not str(value).startswith("{") else value),
                  where)

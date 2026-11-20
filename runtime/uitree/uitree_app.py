@@ -454,13 +454,13 @@ class Engine(S.Builder):
 
     def _focus_named(self, prev):
         """G15: a handler's ui.focus(KEY) names a node; through a fragment used
-        twice, it resolves among the shown instances, and two shown is F01."""
+        twice, it resolves among the shown instances, and two shown is N08."""
         w = self.want_focus
         if w is None:
             return
         if w in self.dups:
             self.want_focus = None
-            raise S.UIError("F01", "ui.focus(%r): two shown nodes are keyed %r" % (
+            raise S.UIError("N08", "ui.focus(%r): two shown nodes are keyed %r" % (
                 re.sub(r"\b(\w+?)__(\w+)", r"\1.\2", w), w), where=("(run)", 0),
                 fix="give the two uses of the fragment different parents' keys and name the parent: "
                     "ui.focus(\"panel/key\"), or show one at a time")
