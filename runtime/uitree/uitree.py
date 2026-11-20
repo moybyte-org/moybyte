@@ -1599,9 +1599,11 @@ SCHEMA = {
     "button": dict(_C, kind="lit", label="text", icon="text", alone="lit", disabled="cond",
                    span="lit", arg="lit", focus="cond"),
     "toggle": dict(_C, label="text", on="action0", focus="cond", hint="text"),
-    "slider": dict(_C, label="text", lo="int", hi="int", on="action0", focus="cond"),
+    "slider": dict(_C, label="text", lo="int", hi="int", on="action0", focus="cond", look="lit",
+                   icon="text"),
     "field": dict(_C, label="text", max="lit", on="action0", secret="lit", focus="cond",
-                  changed="action0", hint="text"),
+                  changed="action0", hint="text", commit="lit"),
+    "seg": dict(_C, label="text", on="action0", focus="cond", look="lit", labels="lit", text="text"),
     "rows": dict(_C, cur="lit", current="lit", empty="text", filter="lit", changed="action1", group="lit"),
     "table": dict(_C, cur="lit", cols="lit", changed="action1", on="action1", empty="text", hint="text", focus="cond"),
     "col": dict(_C, text="text"),
@@ -1872,10 +1874,79 @@ def slider(label, name, lo, hi, **p):
                  dict(p, label=label, lo=lo, hi=hi), where)
 
 
-def field(label, name, max=32, **p):
+def _look(kind, look, looks, where):
+    if look not in looks:
+        raise UIError("N01", "ui.%s look=%r" % (kind, look), where=where,
+                      expected=", ".join(repr(x) for x in looks), fix="look=%r" % looks[0])
+
+
+def slider(label, name, lo, hi, look="bar", **p):
+    """A value from lo to hi, left and right its own. `look="steps"` draws
+    a segment a step and no number; `icon=` (a template; empty draws none)
+    stands before its label."""
     where = _caller()
-    return _node("field", _state_name(name, (TEXT,), "ui.field", where),
-                 dict(p, label=label, max=max), where)
+    _look("slider", look, ("bar", "steps"), where)
+    p = dict(p, look=look) if look != "bar" else p
+    if isinstance(name, str) and name.startswith("."):
+        f = _row_field("slider", name, INT, where)
+        on = p.pop("on", None)
+        n = _node("slider", f, dict(p, label=label, lo=lo, hi=hi), where)
+        n.l["field"] = f
+        if on is not None:          # it hands its row (G10)
+            n.l["on"] = _action(on, "row", "ui.slider %s on=" % name, where, seen=False)
+        return n
+    return _node("slider", _state_name(name, (INT,), "ui.slider", where),
+                 dict(p, label=label, lo=lo, hi=hi), where)
+
+
+def field(label, name, max=32, commit=False, **p):
+    """A line of text bound to a text state. `hint=` is what it shows empty.
+    `commit=True` holds the edit as a draft: the state is written when Enter
+    is pressed in it or focus leaves it (`changed=` runs then), and its hints
+    are Done and Cancel; without it every edit writes the state."""
+    where = _caller()
+    if commit not in (True, False):
+        raise UIError("N01", "ui.field(%r) commit=%r" % (name, commit), where=where,
+                      expected="True or False", fix="commit=True")
+    n = _node("field", _state_name(name, (TEXT,), "ui.field", where),
+              dict(p, label=label, max=max, commit=commit or None), where)
+    return n
+
+
+def seg(label, name, labels=None, text=None, look="seg", **p):
+    """One of several values, left and right its own while focused: over an
+    enum, each value's word from label table `labels=` (every value named);
+    over a `row_of`, its model's rows in order, each word the row template
+    `text=`. `look="cycle"` shows the one value between chevrons and
+    activation steps it; `look="seg"` shows every value."""
+    where = _caller()
+    _look("seg", look, ("seg", "cycle"), where)
+    _state_name(name, (Enum, RowOf), "ui.seg", where)
+    t = _st()._t[name]
+    if isinstance(t, Enum):
+        if text is not None:
+            raise UIError("N01", "ui.seg(%r): text= words a row_of's rows; an enum's words are a label table"
+                          % name, where=where, fix="labels=\"TABLE\", declared with ui.labels")
+        tab = _d().labels.get(labels) if isinstance(labels, str) else None
+        if tab is None:
+            raise UIError("T02", "ui.seg(%r): no label table %r" % (name, labels), where=where,
+                          fix='labels="NAME" after ui.labels("NAME", {value: "Word", ...})')
+        miss = [v for v in t.values if v not in tab]
+        if miss:
+            raise UIError("T04", "ui.seg(%r): table %s has no word for %s" % (name, labels, ", ".join(miss)),
+                          where=where, expected="a word for each of " + ", ".join(t.values),
+                          fix="add them to ui.labels(%r, ...)" % labels)
+        n = _node("seg", name, dict(p, label=label, look=look), where)
+        n.l["values"], n.l["words"] = t.values, tuple(tab[v] for v in t.values)
+        return n
+    if labels is not None or text is None:
+        raise UIError("N01", "ui.seg(%r) over a row_of words each row with text=" % name, where=where,
+                      fix='text="{.FIELD}", a template over a row of %s' % t.model)
+    n = _node("seg", name, dict(p, label=label, look=look), where)
+    n.l["model"] = t.model
+    n.l["text"] = tmpl(text, Ctx(_st()._t[t.model]), where, "text").g
+    n.src["text"] = text
+    return n
 
 
 def _list(kind, model_name, p, where):
@@ -2592,7 +2663,7 @@ def _collecting(fn, returns_node):
 
 
 NODE_CALLS = ("page", "group", "label", "info", "link", "button", "item", "card", "toggle", "slider",
-              "field", "table", "col", "rows", "cards", "picture", "progress", "empty", "dialog",
+              "field", "seg", "table", "col", "rows", "cards", "picture", "progress", "empty", "dialog",
               "popover", "menu", "split", "grid", "panel", "text", "canvas", "foot", "scroll", "scope",
               "switch", "tabs", "panes", "pane", "text_editor", "slot", "row", "tools", "lent", "status")
 DECL_CALLS = ("action", "hook", "labels", "work", "derive")

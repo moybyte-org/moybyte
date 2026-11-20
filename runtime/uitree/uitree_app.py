@@ -37,8 +37,9 @@ class Engine(S.Builder):
 
     close_root = None       # what ui.pop() on the first page does: a hosted page's host closes it
 
-    def __init__(self, decl, build, host, surface, damage, files=None):
+    def __init__(self, decl, build, host, surface, damage, files=None, gen=False):
         self.decl = decl
+        self._gen_on = gen              # the page's gen: off where a golden pins today's draw counts
         self._ui, self._surf, self._damage = host, surface, damage
         self.init_builder(decl.state, build)
         self.q = []
@@ -57,6 +58,10 @@ class Engine(S.Builder):
         self.work_run = {}              # work name -> [first frame, frames, steps, ms, over, wrote]
         self.frame_no = 0
         self.pic_wh = {}
+        self.drafts = {}                # a commit field's key -> its text until it is written
+        self._page_o = {"gen": 0}       # the page's gen: moves when what its rows show may have
+        self._gen_ok = False
+        self._edits = 0                 # a commit field's draft edits, which move the gen too
 
     # -- the engine's counted runs (G12) ------------------------------------
 
@@ -145,6 +150,7 @@ class Engine(S.Builder):
         self.root = None
         self.want_focus = None          # a fresh visit: no focus, cur or row order carried over
         self._sync, self.ids, self.focused, self.drawn = {}, {}, None, {}
+        self.drafts = {}
         self.__dict__.pop("_orders", None)
         self._lists_now = self._lists_before = set()
         hook = self.actions.get(hook)
@@ -182,6 +188,7 @@ class Engine(S.Builder):
             self.curs = []
             self._walk(self.root)
             self.fresh = True
+            self._gen_ok = self._gen_on and self._gen_safe(self.root)
         self.pics.begin_frame()
         _NOW.app, _NOW.frame = self, True
         try:
@@ -198,6 +205,20 @@ class Engine(S.Builder):
         self.frame_calls.append(self.calls)
         if q or self.timers or self.work_run or self.decl.posts:
             self._damage.all()
+
+    GEN_UNSAFE = ("canvas", "picture", "cards", "text_editor", "scope")
+
+    def _gen_safe(self, n):
+        """Whether every pixel the page's rows draw comes from state, so the
+        page's gen (the sum of the state's versions) moves whenever one may:
+        no canvas, picture, text editor or scope, and no template naming
+        @focus."""
+        if n.kind in self.GEN_UNSAFE:
+            return False
+        for v in n.src.values():
+            if isinstance(v, str) and "@focus" in v:
+                return False
+        return all(self._gen_safe(k) for k in n.kids)
 
     def calls_text(self):
         """The handler runs of each frame since the last ask, run-length."""
@@ -231,7 +252,12 @@ class Engine(S.Builder):
         if any(k.kind == "foot" for k in shown) or self._foot_in_case(n):
             self.foot_r, body = _v.cut_bottom(self.content, 44 if self.desk else 22 * self.fs)
             _v.at(*body)
-        rect = _v.page(n.p["title"](None))
+        if self._gen_ok:
+            o = self._page_o
+            o["gen"] = (sum(self.s._ver.values()) + self.builds + self.scope_builds + self._edits) & 0x7fffffff
+            rect = _v.page(n.p["title"](None), o)
+        else:
+            rect = _v.page(n.p["title"](None))
         hint = self._hints()
         placed = any(k.kind in ("split", "grid", "foot") for k in shown)
         if not placed:
@@ -277,8 +303,14 @@ class Engine(S.Builder):
         if ahead is not None and ahead not in self.ids:
             self.want_focus = ahead                     # foreseen and not drawn after all: next frame
         f = _v.focus()
+        was = self.focused
         self.focused = self.ids.get(f)
         self.focus_key = f or ""
+        if was is not None and was[0].kind == "field" and was[0].key in self.drafts and (
+                self.focused is None or self.focused[0] is not was[0]):
+            self._commit_field(was[0])          # focus left a commit field: its draft is written
+        if self.focused is not was and self._hints() != hint:
+            self._damage.all()                  # the band named another node's verbs: draw it again
         if self.focused is not None and not moved:
             node, row = self.focused
             lst = _list_of(node)
@@ -434,7 +466,11 @@ class Engine(S.Builder):
             node, row = f
             act = node.act if node.kind != "cards" else node.l.get("new")
             h = act.hint if act is not None and act.can() else None
-            if node.kind in ("toggle", "cycle", "slider"):
+            if node.kind == "field" and node.l.get("commit"):
+                return ("confirm", "Done", "cancel", "Cancel")
+            if node.kind in ("seg", "slider"):
+                out += ["change", "Change"]
+            if node.kind == "toggle":
                 h = self._t(node, "hint", row) if "hint" in node.p else "Change"
             if node.kind == "table" and "hint" in node.p:
                 h = self._t(node, "hint", None)
@@ -489,7 +525,11 @@ class Engine(S.Builder):
         if "signal" in n.p:
             o["signal"] = n.p["signal"](row)
         if "icon" in n.p:
-            _v.icon(n.p["icon"](row))
+            name = n.p["icon"](row)
+            if name:
+                _v.icon(name)
+        if n.l.get("look") == "steps":
+            o["steps"] = True
         return o
 
     def _r_scope(self, n, row, rect):
@@ -604,11 +644,67 @@ class Engine(S.Builder):
         cur = self.s._v[n.key]
         self._two_way(n, _v.slider(self._t(n, "label", row), cur, lo, hi, self._o(n, row)), cur)
 
+    def _r_seg(self, n, row, rect):
+        k = n.key
+        cur = self.s._v[k]
+        if "model" in n.l:
+            rows = self.s._v[n.l["model"]]
+            keys = [r._f[r._m.key] for r in rows]
+            words = [S._text(n.l["text"](r)) for r in rows]
+        else:
+            keys, words = n.l["values"], n.l["words"]
+        at = keys.index(cur) if cur in keys else (-1 if "model" in n.l else 0)
+        verb = _v.cycle if n.l.get("look") == "cycle" else _v.seg
+        got = verb(self._t(n, "label", row), words, None if at < 0 else at, self._o(n, row))
+        if got is not None and 0 <= got < len(keys) and got != at:
+            self._two_way(n, keys[got], cur)
+
+    def _commit_field(self, n):
+        """A commit field's draft, written to its state: Enter, or focus
+        leaving it. `changed=` runs when the state moves."""
+        k = n.key
+        text = self.drafts.pop(k, None)
+        if text is None or text == self.s._v[k]:
+            return
+        old = self.s._v[k]
+        self.s._v[k] = text
+        self.s._ver[k] += 1
+        if n.l.get("secret"):
+            old, text = "*" * len(old), "*" * len(text)
+        was, _NOW.app = _NOW.app, self
+        S._trace("state", k, "%r -> %r   (field %r committed)" % (old, text, k))
+        _NOW.app = was
+        if "changed" in n.l:
+            self.fire(n.l["changed"], (), n, None)
+
+    def leave(self):
+        """Every way out of the page: a commit field's draft is written."""
+        for n, _row in list(self.ids.values()):
+            if n.kind == "field" and n.key in self.drafts:
+                self._commit_field(n)
+        q, self.q = self.q, []
+        for act, args, src in q:
+            self.run_action(act, args, src)
+        S.commit(self)
+
     def _r_field(self, n, row, rect):
         k = n.key
         o = self._o(n, row)
         if n.l.get("secret"):
             o["secret"] = True
+        if "hint" in n.p:
+            o["hint"] = self._t(n, "hint", row)
+        if n.l.get("commit"):
+            cur = self.drafts.get(k, self.s._v[k])
+            text, done = _v.field(self._t(n, "label", row), cur, n.l.get("max", 32), o)
+            if text != cur:
+                self.drafts[k] = text
+                self._edits += 1
+            if done:
+                self._commit_field(n)
+                if "on" in n.l:
+                    self.fire(n.l["on"], (), n, None)
+            return
         text, done = _v.field(self._t(n, "label", row), self.s._v[k], n.l.get("max", 32), o)
         if text != self.s._v[k]:
             old = self.s._v[k]
@@ -1040,6 +1136,6 @@ class Page(Engine):
     the keys to it; `paint` replays the page into its content rect. It goes
     with the old engine."""
 
-    def __init__(self, build, host, damage, files=None, close=None):
-        Engine.__init__(self, S.decl_of(build.__module__), build, host, None, damage, files)
+    def __init__(self, build, host, damage, files=None, close=None, gen=False):
+        Engine.__init__(self, S.decl_of(build.__module__), build, host, None, damage, files, gen)
         self.close_root = close
