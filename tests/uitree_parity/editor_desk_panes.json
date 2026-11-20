@@ -1,0 +1,112 @@
+{
+ "surface": "editor_desk_panes",
+ "config": "p4_1024x600_cs2_fs1_windowed",
+ "commit": "0998a85b6",
+ "script": [
+  "t:x",
+  "key:F6",
+  "key:F6",
+  "key:S-F6",
+  "div:0:-100",
+  "pane:0",
+  "key:C-A-Right",
+  "key:C-0",
+  "key:C-3",
+  "pane:1",
+  "key:C-S-Enter",
+  "back",
+  "key:C-Tab",
+  "pane:0",
+  "cell:ws:code",
+  "t:y"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "e6eb3a7096a2a3a2997ce53443df81d3fd683411d5c27a8b8ead99efd157b5a7"
+  ],
+  [
+   "t:x",
+   "d55322bb2317ca77fbff51773c87f45206f29c3ae938445c99b449a8fa9e19a4"
+  ],
+  [
+   "key:F6",
+   "c98a5c09d0aadab9e781322a9a329a827528058d785ffe118017f1c1dfd6a941"
+  ],
+  [
+   "key:F6",
+   "a707ced27724e55ef597b7829e26aa248c4ceaa2aa583de5b10edcc1bfdb2c00"
+  ],
+  [
+   "key:S-F6",
+   "c98a5c09d0aadab9e781322a9a329a827528058d785ffe118017f1c1dfd6a941"
+  ],
+  [
+   "div:0:-100",
+   "22500eb6c6c858edbf2e85d7328702f3c587195ea08f04e240de0a75ece8d1ff"
+  ],
+  [
+   "pane:0",
+   "314608a069ef0b7bf01b7b060003bb4a6ae9f01ad777124df8d0d61fffba02a6"
+  ],
+  [
+   "key:C-A-Right",
+   "dcb23f42ce097215a474a76bdef6e4ed94136d7857784028e37a2c96cfee48ce"
+  ],
+  [
+   "key:C-0",
+   "429969da7cba28690150473100029781ba3fbab430b17974400154ca120588e1"
+  ],
+  [
+   "key:C-3",
+   "b7aa9ce640dd9415d18cc1b8dece9207dd3f3f94d2df585551ba26e97fced89c"
+  ],
+  [
+   "pane:1",
+   "47e3919ce51cb2f9637217486bcdc8550ad3dd38686abd87a294aa6dd0a46e47"
+  ],
+  [
+   "key:C-S-Enter",
+   "ab5995dae48a25fb3a9d619b476d415263e3b2fc4e36b11d6f38eda99fa3f2b3"
+  ],
+  [
+   "back",
+   "47e3919ce51cb2f9637217486bcdc8550ad3dd38686abd87a294aa6dd0a46e47"
+  ],
+  [
+   "key:C-Tab",
+   "f0227f9f3f397fee5499c9f75b1a99dd6b7054c34b577e3aa75f74d9c9295c03"
+  ],
+  [
+   "pane:0",
+   "6b3d47372eff4d262abe0ab3fd92ea0b2eebf0c473e4cd7908f58ebd260746d4"
+  ],
+  [
+   "cell:ws:code",
+   "c174a5604533558976dc0f779f008ff31c785ce8f213b661dafde981090fe969"
+  ],
+  [
+   "t:y",
+   "5249939e753ef5eadcb1f3dab9eabd6a4dc9ccf306dff8d32408569739f3c630"
+  ]
+ ],
+ "states": [
+  "tab=code text=9a76021a7296 undo=False redo=False playing=False top=menu ws=code focus=0 grown=None caret=0:0 panes=[0:code=666x548 1:game=340x282 2:sprites=340x260]",
+  "tab=code text=11ef1c98cfae undo=True redo=False playing=False top=menu ws=code focus=0 grown=None caret=0:1 panes=[0:code=666x548 1:game=340x282 2:sprites=340x260]",
+  "tab=code text=11ef1c98cfae undo=True redo=False playing=False top=menu ws=code focus=1 grown=None caret=0:1 panes=[0:code=666x548 1:game=340x282 2:sprites=340x260]",
+  "tab=code text=11ef1c98cfae undo=True redo=False playing=False top=menu ws=code focus=2 grown=None caret=0:1 panes=[0:code=666x548 1:game=340x282 2:sprites=340x260]",
+  "tab=code text=11ef1c98cfae undo=True redo=False playing=False top=menu ws=code focus=1 grown=None caret=0:1 panes=[0:code=666x548 1:game=340x282 2:sprites=340x260]",
+  "tab=code text=11ef1c98cfae undo=True redo=False playing=False top=menu ws=code focus=1 grown=None caret=0:1 panes=[0:code=566x548 1:game=440x282 2:sprites=440x260]",
+  "tab=code text=11ef1c98cfae undo=True redo=False playing=False top=menu ws=code focus=0 grown=None caret=18:35 panes=[0:code=566x548 1:game=440x282 2:sprites=440x260]",
+  "tab=code text=11ef1c98cfae undo=True redo=False playing=False top=menu ws=code focus=0 grown=None caret=18:35 panes=[0:code=574x548 1:game=432x282 2:sprites=432x260]",
+  "tab=code text=11ef1c98cfae undo=True redo=False playing=False top=menu ws=code focus=0 grown=None caret=18:35 panes=[0:code=666x548 1:game=340x282 2:sprites=340x260]",
+  "tab=paint text=11ef1c98cfae undo=False redo=False playing=False top=menu ws=art focus=0 grown=None caret=18:35 panes=[0:paint=400x548 1:map=606x380 2:sheet=606x162]",
+  "tab=map text=11ef1c98cfae undo=True redo=False playing=False top=menu ws=art focus=1 grown=None caret=18:35 panes=[0:paint=400x548 1:map=606x380 2:sheet=606x162]",
+  "tab=map text=11ef1c98cfae undo=True redo=False playing=False top=menu ws=art focus=1 grown=map+game caret=18:35 panes=[1:map=1012x548]",
+  "tab=map text=11ef1c98cfae undo=True redo=False playing=False top=menu ws=art focus=1 grown=None caret=18:35 panes=[0:paint=400x548 1:map=606x380 2:sheet=606x162]",
+  "tab=scene text=11ef1c98cfae undo=False redo=False playing=False top=menu ws=world focus=0 grown=None caret=18:35 panes=[0:scene=666x548 1:game=340x282 2:actor=340x260]",
+  "tab=scene text=11ef1c98cfae undo=True redo=False playing=False top=menu ws=world focus=0 grown=None caret=18:35 panes=[0:scene=666x548 1:game=340x282 2:actor=340x260]",
+  "tab=code text=11ef1c98cfae undo=False redo=False playing=False top=menu ws=code focus=0 grown=None caret=18:35 panes=[0:code=666x548 1:game=340x282 2:sprites=340x260]",
+  "tab=code text=ce5ea7dca9ef undo=True redo=False playing=False top=menu ws=code focus=0 grown=None caret=18:36 panes=[0:code=666x548 1:game=340x282 2:sprites=340x260]"
+ ]
+}

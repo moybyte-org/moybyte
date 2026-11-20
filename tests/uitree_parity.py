@@ -20,6 +20,12 @@ A step of a script, one string each:
     del        Delete
     back       Esc: the console's back
     f:N        N more frames
+    key:SPEC   a desk keyboard's key with its modifiers: `C-` Ctrl, `S-` Shift,
+               `A-` Alt before a name (Left Right Up Down Tab Enter F6) or one
+               character (`key:C-3`, `key:C-A-Right`, `key:S-F6`)
+    div:N:D    the desk Editor's divider N (in reading order) dragged D px
+               along its axis by touch, and let go
+    pane:N     a tap at the centre of the desk Editor's pane N's body
 
 `compare` reports the FIRST step whose frame differs: its index and step,
 the bounding box of the difference, the count of pixels, and a PNG of the
@@ -118,9 +124,81 @@ def _step(ws, driver, step):
         _zone_tap(ws, driver, int(arg))
     elif op == "cell":
         _cell_tap(ws, driver, arg)
+    elif op == "key":
+        _key(driver, arg)
+    elif op == "div":
+        n, _, d = arg.partition(":")
+        _div_drag(ws, driver, int(n), int(d))
+    elif op == "pane":
+        _pane_tap(ws, driver, int(arg))
     else:
-        raise ValueError("parity step %r: one of k:NAME t:TEXT enter del back f:N zone:N cell:NAME"
-                         % step)
+        raise ValueError("parity step %r: one of k:NAME t:TEXT enter del back f:N zone:N cell:NAME "
+                         "key:SPEC div:N:D pane:N" % step)
+
+
+_KEYS = {"Left": 0x110, "Right": 0x111, "Up": 0x112, "Down": 0x113, "Tab": 9, "Enter": 13,
+         "F6": 0x101 + 5}
+_MODS = {"C": 1, "S": 2, "A": 4}
+
+
+def _key(driver, spec):
+    """A desk keyboard's key `spec` (`C-A-Right`) down and up, its
+    modifiers held round it, a frame each."""
+    *mods, name = spec.split("-")
+    m = 0
+    for t in mods:
+        m |= _MODS[t]
+    code = _KEYS[name] if name in _KEYS else ord(name)
+    if m:
+        driver.set_mods(m)
+        driver.frame(DT)
+    driver.key_down(code, m)
+    driver.frame(DT)
+    driver.key_up(code, m)
+    driver.frame(DT)
+    if m:
+        driver.set_mods(0)
+        driver.frame(DT)
+
+
+def _desk_origin(ws):
+    """Where the desk Editor's surface sits on the glass."""
+    return ws.editor_desk._origin()
+
+
+def _div_drag(ws, driver, n, d):
+    """Divider `n` of the workspace on show, in its placement's order,
+    pressed at its centre, dragged `d` px along its axis in four moves, and
+    let go."""
+    desk = ws.editor_desk
+    _path, _i, axis, (x, y, w, h) = desk.placed()[1][n]
+    ox, oy = _desk_origin(ws)
+    gx, gy = ox + x + w // 2, oy + y + h // 2
+    dx, dy = (d, 0) if axis == "h" else (0, d)
+    driver.touch(gx, gy)
+    driver.frame(DT)
+    for k in range(1, 5):
+        driver.touch_drag(gx + dx * k // 4, gy + dy * k // 4)
+        driver.frame(DT)
+    driver.touch_up()
+    driver.frame(DT)
+
+
+def _pane_tap(ws, driver, n):
+    """A tap at the centre of pane `n`'s body (the panes shown, in
+    reading order)."""
+    desk = ws.editor_desk
+    for k, pane, r in desk._shown_panes():
+        if k == n:
+            break
+    else:
+        raise KeyError("no pane %d on show" % n)
+    bx, by, bw, bh = desk._body(r, desk._unit(), pane)
+    ox, oy = _desk_origin(ws)
+    driver.touch(ox + bx + bw // 2, oy + by + bh // 2)
+    driver.frame(DT)
+    driver.touch_up()
+    driver.frame(DT)
 
 
 def _cell_tap(ws, driver, name):

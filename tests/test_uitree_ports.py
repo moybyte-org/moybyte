@@ -287,6 +287,19 @@ def _desk_probe(ws):
     return "%s ws=%s" % (_frame_probe(ws), ws.editor_app._desk().key)
 
 
+def _panes_probe(ws):
+    """The desk Editor's state in a line: the frame's, the workspace, the
+    focused pane and the tab it shows, the grown pane, the caret, and each
+    pane on show with its size."""
+    d = ws.editor_desk
+    ed = ws.editor
+    fi = d._focus.get(d.key, 0)
+    shown = " ".join("%d:%s=%dx%d" % (n, d.tab_of(p), r[2], r[3]) for n, p, r in d._shown_panes())
+    return "%s focus=%d grown=%s caret=%s panes=[%s]" % (
+        _desk_probe(ws), fi, d.grown and "+".join(d.grown),
+        "%d:%d" % (ed.row, ed.col) if ed is not None else "-", shown)
+
+
 def _open_editor(tab):
     def open_(ws):
         import test_shell_goldens as G
@@ -321,6 +334,19 @@ FRAME_DESK_SCRIPT = ["cell:ws:art", "cell:ws:world", "cell:ws:sound", "cell:ws:s
                      "cell:ws:code", "k:down", "t:x", "cell:undo", "cell:redo", "cell:undo", "cell:play",
                      "f:4", "cell:restart", "f:4", "cell:stop", "f:4"]
 
+# The desk Editor's panes: the Code pane takes a typed letter; F6 and
+# Shift+F6 move the keys to the next pane and back; the Code pane's divider
+# dragged 100 px left by touch, a tap in the Code pane focusing it and
+# moving its caret, Ctrl+Alt+Right moving the divider 8 px back and Ctrl+0
+# resetting it; Ctrl+3 to Art, a tap in its second pane focusing it,
+# Ctrl+Shift+Enter growing it and Esc giving the workspace back; Ctrl+Tab to
+# World, a tap on its first pane, the row back to Code, whose pane keeps the
+# keys and takes a second letter
+FRAME_PANES_SCRIPT = ["t:x", "key:F6", "key:F6", "key:S-F6", "div:0:-100", "pane:0",
+                      "key:C-A-Right",
+                      "key:C-0", "key:C-3", "pane:1", "key:C-S-Enter", "back", "key:C-Tab",
+                      "pane:0", "cell:ws:code", "t:y"]
+
 # The System log's ring: (t_us, level, process, text) on a pinned clock, more
 # lines than a handheld's page holds, a traceback's lines under its record.
 LOG_RING = tuple((1000000 + 250000 * n, (6, 4, 3, 7)[n % 4], ("shell", "kernel", "game")[n % 3],
@@ -348,6 +374,7 @@ SURFACES = {
     "editor_code": P.Surface(_open_editor("code"), probe=_code_probe),
     "editor_frame": P.Surface(_open_editor("code"), probe=_frame_probe),
     "editor_desk_row": P.Surface(_open_editor("code"), probe=_desk_probe),
+    "editor_desk_panes": P.Surface(_open_editor("code"), probe=_panes_probe),
     "settings_permissions": P.Surface(_open_settings_page("permissions"), _perms_carts),
     "settings_tz": P.Surface(_open_tz),
     "settings_paired": P.Surface(_open_paired(BROWSERS, True)),
@@ -476,6 +503,8 @@ RUNS = (
     ("editor_frame-tdeck", "editor_frame", "tdeck_320x240_fs1_dark", FRAME_SCRIPT, P.BEHAVIOUR),
     ("editor_frame-big", "editor_frame", "big_800x480_fs3_dark", FRAME_SCRIPT, P.BEHAVIOUR),
     ("editor_desk_row", "editor_desk_row", "p4_1024x600_cs2_fs1_windowed", FRAME_DESK_SCRIPT,
+     P.BEHAVIOUR),
+    ("editor_desk_panes", "editor_desk_panes", "p4_1024x600_cs2_fs1_windowed", FRAME_PANES_SCRIPT,
      P.BEHAVIOUR),
 )
 
