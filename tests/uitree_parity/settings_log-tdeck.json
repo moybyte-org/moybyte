@@ -1,0 +1,43 @@
+{
+ "surface": "settings_log",
+ "config": "tdeck_320x240_fs1_dark",
+ "commit": "f91bb2c8c",
+ "script": [
+  "f:2",
+  "k:up",
+  "k:up",
+  "k:up",
+  "k:down",
+  "back"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "f5b244453399a1f101ea4a4fa70f80bd9bca64c589c69cc607b0ef6fbef10787"
+  ],
+  [
+   "f:2",
+   "f5b244453399a1f101ea4a4fa70f80bd9bca64c589c69cc607b0ef6fbef10787"
+  ],
+  [
+   "k:up",
+   "f5b244453399a1f101ea4a4fa70f80bd9bca64c589c69cc607b0ef6fbef10787"
+  ],
+  [
+   "k:up",
+   "f5b244453399a1f101ea4a4fa70f80bd9bca64c589c69cc607b0ef6fbef10787"
+  ],
+  [
+   "k:up",
+   "f5b244453399a1f101ea4a4fa70f80bd9bca64c589c69cc607b0ef6fbef10787"
+  ],
+  [
+   "k:down",
+   "f5b244453399a1f101ea4a4fa70f80bd9bca64c589c69cc607b0ef6fbef10787"
+  ],
+  [
+   "back",
+   "463058dca3e10c670a42f36425d4c5e11a167bb4167cdd43c8c48f551dd100d1"
+  ]
+ ]
+}

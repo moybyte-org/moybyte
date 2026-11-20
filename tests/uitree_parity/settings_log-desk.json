@@ -1,0 +1,28 @@
+{
+ "surface": "settings_log",
+ "config": "p4_1024x600_fs2_windowed",
+ "commit": "f91bb2c8c",
+ "script": [
+  "f:2",
+  "k:up",
+  "k:down"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "cee3867f91b411122acc0ea27a4324d9aadab54b3a91c5db009fdd5e2f0b1687"
+  ],
+  [
+   "f:2",
+   "cee3867f91b411122acc0ea27a4324d9aadab54b3a91c5db009fdd5e2f0b1687"
+  ],
+  [
+   "k:up",
+   "cee3867f91b411122acc0ea27a4324d9aadab54b3a91c5db009fdd5e2f0b1687"
+  ],
+  [
+   "k:down",
+   "cee3867f91b411122acc0ea27a4324d9aadab54b3a91c5db009fdd5e2f0b1687"
+  ]
+ ]
+}
