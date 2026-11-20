@@ -126,14 +126,20 @@
 #define MOY_BUS_I2C_PORT                    (0)
 #define MOY_BUS_I2C_HZ                      (400000)
 
-// The speaker (native/moy_audio/moy_aud_out.c, #82): the I2S amplifier the
+// The speaker (native/moy_audio/moy_aud_out.c, #82): the I2S amplifiers the
 // vendor firmware drives directly, on the pins of board.toml's `speaker` row
 // (MOY_HW_SPEAKER_*), with no codec and no master clock: the schematic's ES8311
 // does not answer on this unit's I2C bus (2026-11-20), and the vendor's
-// examples play through plain I2S. The mix is the default 22,050 Hz mono, on
-// the left slot. The amplifier's control pin is active LOW (the vendor
-// firmware drives it low to play).
+// examples play through plain I2S. The amplifier's control pin is active LOW
+// (the vendor firmware drives it low to play); it does not gate the speakers on
+// this unit.
 #define MOY_AUDIO_PA_ACTIVE_LOW             (1)
+// 44.1 kHz stereo out as on the other P4s (docs/os_2026-11/hardware.md section
+// 3): the mix, 22,050 Hz mono, upsampled 2x by the feeder, the streams added
+// after it. Two speakers (the J4 and J6 connectors), one amplifier each, so no
+// MOY_AUDIO_DAC_MONO: a codec reading one slot is what that is for.
+#define MOY_AUDIO_RATE                      (44100)
+#define MOY_AUDIO_STEREO                    (1)
 // The feeder on core 0, off the VM's (the P4 boards' setting).
 #define MOY_AUDIO_CORE                      (0)
 

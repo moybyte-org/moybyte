@@ -184,9 +184,10 @@ static int chan_open(int desc, int frames) {
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,
                                                         SLOT_MODE),
 #else
-        // MSB-justified mono on the left slot: the MAX98357's mono input.
+        // MSB-justified, mono on the left slot (the MAX98357's mono input) or,
+        // where the board names MOY_AUDIO_STEREO, two slots for two amplifiers.
         .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,
-                                                    I2S_SLOT_MODE_MONO),
+                                                    SLOT_MODE),
 #endif
         .gpio_cfg = {
             .mclk = (gpio_num_t)MOY_HW_SPEAKER_MCLK,

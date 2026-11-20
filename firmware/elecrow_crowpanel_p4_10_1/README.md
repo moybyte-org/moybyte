@@ -47,9 +47,9 @@ its V1.2 hardware guide, the vendor's examples, the wiki, issue threads.
 | backlight supply gate (`LCD_BK_POWER`) | 29 | gate of Q11, marked `AO3401_NC` in the schematic (not fitted); the vendor firmware never drives it, this port does not either (`never` row) |
 | touch GT911: SDA / SCL | 45 / 46 | I2C0, 400 kHz, pulled up to LDO4's rail; the codec-side devices sit behind BSS138 level shifters on the same pins |
 | touch reset / interrupt | 40 / 42 | wired, pulled up to LDO4's rail, left undriven; address 0x5D or 0x14 by INT's level at reset, the driver probes both |
-| I2S out: BCLK / LRCK / DOUT | 22 / 21 / 23 | the vendor examples drive these directly, with no master clock and no codec registers; this port does the same (mono on the left slot) |
+| I2S out: BCLK / LRCK / DOUT | 22 / 21 / 23 | the vendor examples drive these directly, with no master clock and no codec registers; this port does the same, 44.1 kHz stereo |
 | I2S master clock net (`I2S_MCLK`) | 24 | the schematic routes it to the ES8311, the ES7210 and a PDM microphone; not driven by this port |
-| amplifier control | 30 | the vendor code drives it LOW to play, and the console's tone was heard with it driven low |
+| amplifier control | 30 | the vendor code drives it LOW to play; the speakers sounded with it driven low and with it driven high, so it does not gate them on this unit |
 | microphone path | 26 (ES7210 data), 24 (clock), 20 (L/R select) | never initialised by the vendor; absent from this port |
 | microSD: CLK / CMD / D0 | 43 / 44 / 39 | SDMMC slot 0, 1-bit: D1 to D3 are not routed to the chip |
 | UART0 (CH340K) | 37 TX / 38 RX | console and flasher |
@@ -118,9 +118,7 @@ row waits for the module. GPIOs 6-10 and 28 are in the `gpio` lease row and 27
 
 Read from documents, not from this unit: the PCB revision; the touch
 orientation (the vendor maps with no swap or mirror; the corner calibration,
-`moy_runtime.run_touch_calibrate`, has not run); the amplifier pin's polarity (a tone was heard with the pin driven low; a
-run that drove it high as well was heard too, so the high sense is not ruled
-out); whether the ES8311 and ES7210 are fitted (neither answered on the bus);
+`moy_runtime.run_touch_calibrate`, has not run); what GPIO30 does (it gates nothing audible); whether the ES8311 and ES7210 are fitted (neither answered on the bus);
 that the panel is lit and its picture is right (only the framebuffer and the
 scan counters have been read back); the TF slot (no card was in it);
 the USB bridge's DTR/RTS rest state beyond "attaching and `reboot` work with
@@ -154,3 +152,14 @@ names those and the board takes the kernel's codec-less path (the one the
 Guition S3 uses). With it the output starts, `devices.present("media")` is
 true, a console tone and a cart session's tone were played at console volume
 2 of 7 and the owner heard them.
+
+The speakers: the V1.2 schematic has one speaker connector per side, J4
+(`VOLP`/`VOLN`, left) and J6 (`VORP`/`VORN`, right). Its fitted path is the
+ES8311 into U4, an NS4263B analog stereo amplifier; the alternative, not fitted
+in the schematic, is two NS4168 I2S amplifiers (U13 for J4, U3 for J6) on the
+same I2S lines, one per channel. This unit plays through plain I2S, so it has
+the second arrangement or a variant of it: one amplifier per speaker, each
+taking one slot. The speaker row names no master clock, and the board runs 44.1
+kHz stereo (`MOY_AUDIO_RATE`, `MOY_AUDIO_STEREO`, the other P4s' setting, the
+mix upsampled 2x), where the first codec-less image ran the default 22,050 Hz
+mono; `moy_aud_out.c`'s codec-less slot format now follows `MOY_AUDIO_STEREO`.
