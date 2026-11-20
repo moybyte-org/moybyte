@@ -7,6 +7,7 @@ of standard rows costs, printed for the record (`-s`).
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -108,9 +109,12 @@ def conf(loop):
     box = (0, 0, cv.w, cv.h)
     out = {"fixtures": {}, "cost": {}}
     S.TRACING = True
-    for name, src, script in FIXTURES:
+    import uitree_editor
+    pairs = (uitree_app.Engine, uitree_c.CEngine)
+    for name, src, script, pair in [f + (pairs,) for f in FIXTURES] + [
+            ("placed", PLACED_SRC, PLACED_SCRIPT, (uitree_editor.Engine, uitree_c.CEditorEngine))]:
         runs = {}
-        for tag, cls in (("py", uitree_app.Engine), ("c", uitree_c.CEngine)):
+        for tag, cls in zip(("py", "c"), pair):
             mod = _load("conf_%s_%s" % (name, tag), src)
             eng, host = _engine(cls, mod)
             eng.open()
@@ -326,19 +330,32 @@ def _fixtures():
     return out
 
 
+# the placed page (tests/uitree_fixtures/uitree_placed.py) on both engines: the row, the switch's
+# other case and the tools
+PLACED_SCRIPT = ["k:right", "k:a", "k:right", "k:a", "k:down", "k:a", "k:down", "k:up"]
+
+
 @pytest.fixture(scope="module")
 def result(tmp_path_factory):
+    placed = (Path(__file__).resolve().parent / "uitree_fixtures" / "uitree_placed.py").read_text()
     more = (DRIVER.replace("@FIXTURES@", repr(_fixtures())) + "\nLONG_SRC = %r\n" % LONG
+            + "PLACED_SRC = %r\nPLACED_SCRIPT = %r\n" % (placed, PLACED_SCRIPT)
             + "SETTINGS_KEYS = %r\nSETTINGS_RUNS = %r\n" % (SETTINGS_KEYS, SETTINGS_RUNS))
     info, text = FA._run(tmp_path_factory.mktemp("uitree_c"), entry="conf", more=more,
                          why="the C engine runs on the boards' MicroPython: this is its check there")
     return info, text
 
 
+def _latin(lines):
+    """MicroPython's repr escapes a str's characters 0x80-0xff (`\\xb7`), which
+    the C engine's trace writes as CPython's repr does: read back as they are."""
+    return [re.sub(r"\\x([89a-f][0-9a-f])", lambda m: chr(int(m.group(1), 16)), t) for t in lines]
+
+
 def test_the_c_engine_on_the_boards_micropython_draws_the_reference(result):
     info, text = result
     for name, f in info["fixtures"].items():
-        assert C.norm_trace(f["trace_c"]) == C.norm_trace(f["trace_py"]), name
+        assert C.norm_trace(f["trace_c"]) == C.norm_trace(_latin(f["trace_py"])), name
         assert f["same"] == f["frames"], (name, f["same"], f["frames"])
     for k, v in sorted(info["cost"].items()):
         print(k, json.dumps(v))

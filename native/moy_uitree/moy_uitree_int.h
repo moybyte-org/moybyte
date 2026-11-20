@@ -134,6 +134,8 @@ enum { NL_CYCLE = 1, NL_STEPS = 1, NL_COMMIT = 1, NL_SECRET = 2, NL_FIELD = 4 };
 enum { GAP_S = 0, GAP_M, GAP_L, GAP_0 };
 // A text view's options (`lit`); its syntax's index in `btn` (ui.py's _SYNTAXES).
 enum { TV_FOLLOW = 1, TV_WRAP = 2, TV_PROSE = 4 };
+// A tools row lent to a site (`lit`); a button drawn as its icon alone (`btn`).
+enum { TL_LEND = 1, BT_ALONE = 1 };
 enum { LT_WORD = 1, LT_CHAR = 2, LT_WRAP = 3, LT_FACE_SHIFT = 2, LT_ALIGN_SHIFT = 5, LT_LINES = 256 };
 
 typedef struct {
@@ -154,7 +156,9 @@ typedef struct {
     int16_t on;                 // a two-way control's on= action
     uint16_t props;
     uint16_t btn, nbtn;         // a dialog's buttons in e->btns; a field's max= in btn; a label's
-                                // lines= in btn and its text options in nbtn (LT_*)
+                                // lines= in btn and its text options in nbtn (LT_*); a button's
+                                // alone= in btn (BT_ALONE)
+    int16_t mark;               // a button's marked= cond: drawn current while it holds
 } uit_node_t;
 
 // A label table: its name, keys and words NUL-separated in the pool.
@@ -291,6 +295,13 @@ struct uit {
     int16_t cells_node;         // the table they are, + 1 (0 none)
     uit_vrows_t *vr;            // the rows lists laid out in view only
     int nvr, cvr;
+    // the placed layout: each node's rect as the last pass placed it (w -1: not placed)
+    uint8_t placed, placing;
+    int16_t ground[4];
+    int16_t *rects;
+    int crects;
+    int16_t late[8];            // the popovers and dialogs a stack draws last, over it
+    int nlate;
     // the frame drawn last, for uit_still: the versions it read and its focus
     uint32_t still_ver;
     uit_id_t still_focus;

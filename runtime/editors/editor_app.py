@@ -718,7 +718,7 @@ class EditorApp:
             import editor_ui
             import uitree_editor
             editor_ui._host[0] = self
-            page = uitree_editor.Page(editor_ui.head, _ui_draw.AppHost(), _HeadDamage(self.ws))
+            page = uitree_editor.page(editor_ui.head, _ui_draw.AppHost(), _HeadDamage(self.ws))
             page.open(hook="none")
             z = self._head_zone = uitree_editor.BarZone(page, ZoneLook(self.ws, "menu"),
                                                         host=self)

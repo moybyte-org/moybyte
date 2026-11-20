@@ -99,6 +99,9 @@ class Engine(uitree_app.Engine):
     def __init__(self, *a, **k):
         uitree_app.Engine.__init__(self, *a, **k)
         self.anchors = {}      # "key.part" -> (x, y, w, h), as this frame placed it
+        self.rects = {}        # node key -> (x, y, w, h): where a pass of the layout placed it (`rect_of`)
+        self.rects_at = {}     # node key -> the pass that placed it (a dict kept, never cleared: no
+        self._rect_pass = 0    # allocation a frame where the same nodes are placed again)
         self.views = {}        # text editor key -> [rect, top drawn, cell, line h, x0, rows]
         self._tv = {}          # text editor key -> (its packed options, its answer, its id pair)
         self._mono = [None, 0, 0, 0]    # look epoch, scale: the mono cell and line pitch
@@ -174,6 +177,7 @@ class Engine(uitree_app.Engine):
         last = self.focused                     # the last frame's focus
         prev, self.ids = self.ids, {}
         self.anchors = {}
+        self._rect_pass += 1
         self.dividers = {}
         moved, ahead = self._land_focus(prev)
         self.rect = rect
@@ -227,7 +231,16 @@ class Engine(uitree_app.Engine):
         finally:
             _NOW.app, _NOW.frame = was
 
+    def rect_of(self, key):
+        """Where node `key` was placed by the last frame or placement, else None."""
+        return self.rects.get(key) if self.rects_at.get(key) == self._rect_pass else None
+
+    def _put_rect(self, key, r):
+        self.rects[key] = r
+        self.rects_at[key] = self._rect_pass
+
     def _place_walk(self, rect):
+        self._rect_pass += 1
         self.placing = True
         try:
             self._stack(self.root, None, rect)
@@ -436,7 +449,9 @@ class Engine(uitree_app.Engine):
                 # a text editor takes whole lines; the node under it the rest
                 spare = kh % self._pitch()
                 kh -= spare
-            self._draw(k, row, (x, y, w, kh))
+            r = (x, y, w, kh)
+            self._put_rect(k.key, r)
+            self._draw(k, row, r)
             y += kh
         for k in kids:
             if k.kind in ("popover", "dialog") and not self.placing:
@@ -470,7 +485,9 @@ class Engine(uitree_app.Engine):
         for k in n.kids:
             if k.kind == "label" and self._shown(k, row):
                 # a panel's words: its labels down its middle
-                self._r_label(k, row, (x + g, ty, w - 2 * g, 16))
+                r = (x + g, ty, w - 2 * g, 16)
+                self._put_rect(k.key, r)
+                self._r_label(k, row, r)
                 ty += 18
 
     # -- a row ----------------------------------------------------------------
@@ -520,6 +537,7 @@ class Engine(uitree_app.Engine):
         for i, k in enumerate(kids):
             kw = nat[i] if nat[i] is not None else max(0, rest // max(1, len(grow)))
             r = (x, y, kw, h) if k.kind == "status" else (x, y + 2, kw, h - 4)   # a band: the row's height
+            self._put_rect(k.key, r)
             if k.kind == "button":
                 self._r_button(k, row, rect, at=r)
             else:
@@ -549,7 +567,9 @@ class Engine(uitree_app.Engine):
             else:
                 kw = rest * (j + 1) // max(1, icons) - rest * j // max(1, icons)
                 j += 1
-            self._r_button(k, row, rect, at=(x, y + 1, kw - 1, h - 2))
+            r = (x, y + 1, kw - 1, h - 2)
+            self._put_rect(k.key, r)
+            self._r_button(k, row, rect, at=r)
             x += kw
 
     def _r_canvas(self, n, row, rect):
@@ -1617,6 +1637,15 @@ class Page(Engine):
     def __init__(self, build, host, damage, files=None, close=None):
         Engine.__init__(self, S.decl_of(S.module_of(build)), build, host, None, damage, files)
         self.close_root = close
+
+
+def page(build, host, damage, files=None, close=None):
+    """A page on the Editor's kinds on the engine in use
+    (`uitree_app.use_engine`): `Page`, or the C engine's `CEditorPage`."""
+    if uitree_app.engine_in_use() == "c":
+        import uitree_c
+        return uitree_c.CEditorPage(build, host, damage, files, close)
+    return Page(build, host, damage, files, close)
 
 
 class BarZone:

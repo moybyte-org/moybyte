@@ -292,7 +292,7 @@ class CodeLayer(Layer):
         self._ui_mod = code_ui
         code_ui._ws[0] = ws
         self._host = _ui_draw.AppHost()
-        self.page = uitree_editor.Page(getattr(code_ui, self.PAGE), self._host, _Damage(ws))
+        self.page = uitree_editor.page(getattr(code_ui, self.PAGE), self._host, _Damage(ws))
         self.page.host_arrows = True
         self.page.pointer_down = lambda: bool(ws.pointer.down)
         self._journal = _Journal(self)

@@ -290,6 +290,9 @@ void uit_close(uit_t *e)
     UIT_FREE(e->vr);
     e->vr = NULL;
     e->nvr = e->cvr = 0;
+    UIT_FREE(e->rects);
+    e->rects = NULL;
+    e->crects = 0;
     free_drew(e);
     for (int i = 0; i < e->nslots; i++) {
         uit_slot_t *S = &e->slots[i];
@@ -371,7 +374,7 @@ void uit_free(uit_t *e)
     UIT_FREE(e->conds); UIT_FREE(e->terms); UIT_FREE(e->nodes); UIT_FREE(e->props);
     UIT_FREE(e->btns); UIT_FREE(e->ids); UIT_FREE(e->prev); UIT_FREE(e->evs);
     UIT_FREE(e->drew); UIT_FREE(e->orders); UIT_FREE(e->want); UIT_FREE(e->drafts);
-    UIT_FREE(e->labels); UIT_FREE(e->tvl);
+    UIT_FREE(e->labels); UIT_FREE(e->tvl); UIT_FREE(e->rects);
     uit_buf_free(&e->pool); uit_buf_free(&e->scratch); uit_buf_free(&e->evtext); uit_buf_free(&e->cells);
     uit_buf_free(&e->trace);
     UIT_FREE(e);
@@ -722,7 +725,7 @@ int uit_node(uit_t *e, int kind, const char *key, int parent)
     N.parent = up(parent);
     N.kid = N.last = N.next = N.props = UIT_NONE;
     N.act = N.shown = N.focus = N.t_main = N.t_value = N.t_icon = N.t_aux = -1;
-    N.slot = N.cur = N.changed = N.on = N.current = -1;
+    N.slot = N.cur = N.changed = N.on = N.current = N.mark = -1;
     if (kind == UIT_FIELD)
         N.btn = 32;
     if (kind == UIT_SPLIT)
@@ -769,7 +772,8 @@ const char *const uit_kind_names[UIT_KINDS] = {"", "page", "group", "label", "in
                                                "empty", "progress", "text_view", "scroll", "menu",
                                                "item", "split", "canvas", "tabs", "switch", "case",
                                                "table", "col", "foot", "cards", "card", "picture",
-                                               "popover"};
+                                               "popover", "tools", "row", "status", "text_editor",
+                                               "panes", "pane", "legacy", "slot", "panel", "lent"};
 
 static const char *const TONES[] = {"ink", "dim", "value", "danger"};
 static const char *const BKINDS[] = {"normal", "primary", "tonal", "danger", "toggle"};
@@ -945,6 +949,25 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         N->lit = (uint8_t)!strcmp(src, "danger");
         return add_prop(e, node, name, src, repr, PK_LIT, N->lit);
     }
+    if (!strcmp(name, "lend") && kind == UIT_TOOLS) {
+        // lent to a site ("bar"): drawn there by its host, nothing on the page
+        N->lit |= TL_LEND;
+        return add_prop(e, node, name, src, repr, PK_LIT, 0);
+    }
+    if (!strcmp(name, "alone") && kind == UIT_BUTTON) {
+        if (!strcmp(src, "True"))
+            N->btn |= BT_ALONE;
+        return add_prop(e, node, name, src, repr, PK_LIT, 0);
+    }
+    if (!strcmp(name, "marked") && kind == UIT_BUTTON) {
+        int c = uit_cond_compile(e, src, model);
+        if (c < 0)
+            return c;
+        N->mark = (int16_t)c;
+        return add_prop(e, node, name, src, repr, PK_COND, c);
+    }
+    if (!strcmp(name, "ground") && kind == UIT_CANVAS)
+        return add_prop(e, node, name, src, repr, PK_LIT, 0);     // its front end fills it (a theme role)
     if (!strcmp(name, "kind") && kind == UIT_BUTTON) {
         int i = lit_index(src, BKINDS, 5);
         N->lit = (uint8_t)(i < 0 ? 0 : i);

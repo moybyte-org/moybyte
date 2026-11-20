@@ -274,7 +274,7 @@ class EditorDesk(Layer):
             import editor_ui
             import uitree_editor
             editor_ui._desk[0] = self
-            page = uitree_editor.Page(editor_ui.SPACES[key], self._host, _Damage(self.ws))
+            page = uitree_editor.page(editor_ui.SPACES[key], self._host, _Damage(self.ws))
             self._pages[key] = page
         return page
 

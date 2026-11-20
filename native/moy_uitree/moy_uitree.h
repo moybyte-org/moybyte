@@ -38,7 +38,10 @@ enum {
     UIT_PAGE = 1, UIT_GROUP, UIT_LABEL, UIT_INFO, UIT_LINK, UIT_BUTTON, UIT_TOGGLE,
     UIT_ROWS, UIT_DIALOG, UIT_SEG, UIT_SLIDER, UIT_FIELD, UIT_EMPTY, UIT_PROGRESS, UIT_TEXT_VIEW,
     UIT_SCROLL, UIT_MENU, UIT_ITEM, UIT_SPLIT, UIT_CANVAS, UIT_TABS, UIT_SWITCH, UIT_CASE, UIT_TABLE,
-    UIT_COL, UIT_FOOT, UIT_CARDS, UIT_CARD, UIT_PICTURE, UIT_POPOVER, UIT_KINDS
+    UIT_COL, UIT_FOOT, UIT_CARDS, UIT_CARD, UIT_PICTURE, UIT_POPOVER,
+    // the placed kinds: a page placed by the engine's layout (uit_set_placed) holds them
+    UIT_TOOLS, UIT_ROW, UIT_STATUS, UIT_TEXT_EDITOR, UIT_PANES, UIT_PANE, UIT_LEGACY, UIT_SLOT,
+    UIT_PANEL, UIT_LENT, UIT_KINDS
 };
 
 // Events (`uit_next`).
@@ -133,6 +136,23 @@ void uit_open(uit_t *e);
 // Focus goes to node `key` (or ROWKEY/KEY) in the next frame (a push's
 // return, ui.focus); NULL clears it.
 void uit_want_focus(uit_t *e, const char *key);
+
+// -- the placed layout ----------------------------------------------------------
+// The page is placed (1) or flows (0, the default). A placed page's children
+// are stacked down its room by the engine's one layout rule, the rule of the
+// Editor's pages and the window manager's surfaces alike: a container gives
+// each shown child a rect, fixed rows their height and the fills sharing
+// the rest, a text editor whole lines.
+void uit_set_placed(uit_t *e, int on);
+// The box the page's ground covers past its content (w 0: none): the
+// toolkit's page opens there and the page lays out in the content.
+void uit_set_ground(uit_t *e, int x, int y, int w, int h);
+// The layout alone, nothing drawn, over `x, y, w, h` (a host's placement
+// before its frame): each placed region's rect, as uit_rect reads them.
+int uit_place(uit_t *e, int x, int y, int w, int h, int flags, int fs);
+// Where node `key` was placed by the last frame or placement: 1 and its rect
+// into out, else 0 (not placed: hidden, lent, inside a flow).
+int uit_rect(const uit_t *e, const char *key, int32_t out[4]);
 
 // -- the frame ----------------------------------------------------------------
 // One frame of the page into `content` of a frame the host began: answers

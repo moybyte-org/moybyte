@@ -249,6 +249,45 @@ static mp_obj_t eng_want_focus(mp_obj_t self, mp_obj_t key)
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(eng_want_focus_obj, eng_want_focus);
 
+static mp_obj_t eng_set_placed(mp_obj_t self, mp_obj_t on)
+{
+    uit_set_placed(eng(self), mp_obj_is_true(on));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(eng_set_placed_obj, eng_set_placed);
+
+// ground(x, y, w, h): the box the page's ground covers (w 0: none)
+static mp_obj_t eng_ground(size_t n, const mp_obj_t *a)
+{
+    (void)n;
+    uit_set_ground(eng(a[0]), mp_obj_get_int(a[1]), mp_obj_get_int(a[2]), mp_obj_get_int(a[3]),
+                   mp_obj_get_int(a[4]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(eng_ground_obj, 5, 5, eng_ground);
+
+// place(x, y, w, h, flags, fs): the layout alone, nothing drawn
+static mp_obj_t eng_place(size_t n, const mp_obj_t *a)
+{
+    (void)n;
+    return MP_OBJ_NEW_SMALL_INT(uit_place(eng(a[0]), mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
+                                          mp_obj_get_int(a[3]), mp_obj_get_int(a[4]), mp_obj_get_int(a[5]),
+                                          mp_obj_get_int(a[6])));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(eng_place_obj, 7, 7, eng_place);
+
+// rect(key) -> (x, y, w, h) where it was placed last, else None
+static mp_obj_t eng_rect(mp_obj_t self, mp_obj_t key)
+{
+    int32_t r[4];
+    if (!uit_rect(eng(self), CSTR(key), r))
+        return mp_const_none;
+    mp_obj_t t[4] = {MP_OBJ_NEW_SMALL_INT(r[0]), MP_OBJ_NEW_SMALL_INT(r[1]), MP_OBJ_NEW_SMALL_INT(r[2]),
+                     MP_OBJ_NEW_SMALL_INT(r[3])};
+    return mp_obj_new_tuple(4, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(eng_rect_obj, eng_rect);
+
 // frame(ctx, cv, look, x, y, w, h, flags, fs, input) -> events | owe << 30
 static mp_obj_t eng_frame(size_t n, const mp_obj_t *a)
 {
@@ -467,6 +506,10 @@ static const mp_rom_map_elem_t eng_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_close), MP_ROM_PTR(&eng_close_obj) },
     { MP_ROM_QSTR(MP_QSTR_free), MP_ROM_PTR(&eng_del_obj) },
     { MP_ROM_QSTR(MP_QSTR_want_focus), MP_ROM_PTR(&eng_want_focus_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_placed), MP_ROM_PTR(&eng_set_placed_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ground), MP_ROM_PTR(&eng_ground_obj) },
+    { MP_ROM_QSTR(MP_QSTR_place), MP_ROM_PTR(&eng_place_obj) },
+    { MP_ROM_QSTR(MP_QSTR_rect), MP_ROM_PTR(&eng_rect_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame), MP_ROM_PTR(&eng_frame_obj) },
     { MP_ROM_QSTR(MP_QSTR_still), MP_ROM_PTR(&eng_still_obj) },
     { MP_ROM_QSTR(MP_QSTR_next), MP_ROM_PTR(&eng_next_obj) },

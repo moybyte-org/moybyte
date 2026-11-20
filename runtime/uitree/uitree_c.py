@@ -5,6 +5,8 @@
 #   CEngine.paint      one frame: one call into C, then the events it queued
 #   EngineGap          a kind, prop or form the C engine does not draw yet
 #   CPage              a hosted page (uitree_app.Page) on the C engine
+#   CEditorEngine      the Editor's kinds (uitree_editor.Engine), placed by the engine's layout
+#   CEditorPage        a hosted page on them (uitree_editor.Page)
 """The UI tree on the C engine (native/moy_uitree): the app's build function
 runs through the reference's Builder (every check the reference makes), the
 checked tree is lowered into the engine's store, and each frame is one call
@@ -46,7 +48,13 @@ _KINDS = {"page": 1, "group": 2, "label": 3, "info": 4, "link": 5, "button": 6, 
           "progress": 14, "text_view": 15,
           "scroll": 16, "menu": 17, "item": 18, "split": 19,
           "canvas": 20, "tabs": 21, "switch": 22, "case": 23, "table": 24, "col": 25, "foot": 26,
-          "cards": 27, "card": 28, "picture": 29, "popover": 30}
+          "cards": 27, "card": 28, "picture": 29, "popover": 30,
+          "tools": 31, "row": 32, "status": 33, "text_editor": 34, "panes": 35, "pane": 36,
+          "legacy": 37, "slot": 38, "panel": 39, "lent": 40}
+# the placed kinds: a page the engine's layout places holds them (`CEditorPage`)
+_PLACED_KINDS = ("tools", "row", "status", "text_editor", "panes", "pane", "legacy", "slot", "panel", "lent")
+# what a placed page's frame does not draw yet
+_PLACED_GAPS = ("text_editor", "panes", "pane", "legacy", "slot", "lent", "popover", "tabs")
 _HEAD = {"rows": ("model",), "table": ("model",), "cards": ("model",), "dialog": ("buttons",)}
 _KIND_NAMES = dict((v, k) for k, v in _KINDS.items())
 _KIND_NAMES[len(_KINDS) + 1] = "cycle"          # UIT_KINDS: a seg of the cycle look
@@ -79,6 +87,8 @@ class CEngine(Engine):
     """`uitree_app.Engine` with the frame in C: the build, the checks and the
     handlers stay the reference's."""
 
+    PLACED = False          # the page is stacked by the engine's layout (uit_set_placed)
+
     def __init__(self, *a, **k):
         Engine.__init__(self, *a, **k)
         self._c_init()
@@ -92,12 +102,15 @@ class CEngine(Engine):
         self._slot, self._names, self._types, self._pushed = {}, [], [], {}
         self.direct = BUILD == "direct"
         self._draws, self._drawing = {}, False
+        self._grounds = {}      # a canvas's ground= role, by its node
 
     def _made(self):
         """The store, made and declared at the first way in that needs it."""
         x = self._x
         if x is None:
             self._x = x = _New()
+            if self.PLACED:
+                x.set_placed(1)
             self._slot, self._names, self._types, self._pushed = {}, [], [], {}
             self._drawing = False
             self._bind()            # the module's state holds this engine's values before any is pushed
@@ -341,12 +354,15 @@ class CEngine(Engine):
             self._drawing = True
         cnode, cprop, cact, aidx, fail = x.node, x.prop, x.node_action, self._aidx, self._fail
         kinds, bound, heads, lits_only, action = _KINDS, _BOUND, _HEAD, _LIT_ONLY, S.Action
+        placed, placed_kinds, placed_gaps = self.PLACED, _PLACED_KINDS, _PLACED_GAPS
+        grounds = self._grounds = {}
 
         def node(n, parent):
             nk, l = n.kind, n.l
             kind = kinds.get(nk)
-            if kind is None:
-                raise EngineGap("a %s node" % nk)
+            if kind is None or (nk in placed_kinds and not placed) or (placed and nk in placed_gaps):
+                raise EngineGap("a %s node" % nk + ("" if placed or nk not in placed_kinds else
+                                                     " outside a placed page"))
             field = l.get("field") if l and nk != "text_view" else None
             if field and nk != "toggle":
                 raise EngineGap("a %s bound to a row's field" % nk)
@@ -365,6 +381,8 @@ class CEngine(Engine):
                     r = cprop(me, "field", l["field"], None)       # a model's lines: this text field
                 if r < 0:
                     fail(r, "%s %s" % (nk, n.key), n.where)
+            if nk == "canvas" and l and l.get("ground"):
+                grounds[me] = l["ground"]
             if nk == "seg" and "labels" in l:
                 r = cprop(me, "labels", l["labels"], None)
                 if r < 0:
@@ -645,3 +663,65 @@ class CPage(CEngine, Page):
         Page.__init__(self, build, host, damage, files, close, gen, env)
         self._c_init()
 
+
+
+import uitree_editor as _ed
+
+
+class CEditorEngine(CEngine, _ed.Engine):
+    """`uitree_editor.Engine` (the Editor's kinds) with the frame and the
+    layout in C: the page is placed by the engine's one layout rule
+    (`uit_set_placed`), each region's rect read back with `rect`."""
+
+    PLACED = True
+
+    def __init__(self, *a, **k):
+        _ed.Engine.__init__(self, *a, **k)
+        self._c_init()
+
+    def paint(self, dt, cv, th, content, desk):
+        g = self.ground
+        self._made().ground(*(g if g is not None else (0, 0, 0, 0)))
+        CEngine.paint(self, dt, cv, th, content, desk)
+
+    def _flags(self, desk):
+        return CEngine._flags(self, desk) & ~F_BARE        # bare only over hosted bodies
+
+    def _hosts(self, n):
+        return False            # a legacy node is a gap of this engine's (`lower`)
+
+    def place(self, area, desk=True):
+        """The page's regions laid out over `area`, nothing drawn: each
+        one's rect for `rect_of`."""
+        self._bind()
+        self.content = area
+        self.desk = desk
+        self._ready()
+        self.placed = []
+        self._x.place(area[0], area[1], area[2], area[3], self._flags(desk), max(1, getattr(self, "fs", 1)))
+        self._hosted_no = self.frame_no
+
+    def rect_of(self, key):
+        """Where node `key` was placed by the last frame or placement, else None."""
+        return self._x.rect(key) if self._x is not None else None
+
+    def _draw(self, node, x, y, w, h):
+        """A canvas's draw in its rect, clipped to it, over its ground."""
+        cv = self.cv
+        cv.clip(x, y, w, h)
+        try:
+            g = self._grounds.get(node)
+            if g:
+                cv.rect(x, y, w, h, self.th[g])
+            CEngine._draw(self, node, x, y, w, h)
+        finally:
+            cv.clip()
+
+
+class CEditorPage(CEditorEngine, _ed.Page):
+    """`uitree_editor.Page` (a page on the Editor's kinds a surface hosts)
+    on `CEditorEngine`."""
+
+    def __init__(self, build, host, damage, files=None, close=None):
+        _ed.Page.__init__(self, build, host, damage, files, close)
+        self._c_init()

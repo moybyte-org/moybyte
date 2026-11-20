@@ -49,6 +49,10 @@ _SIGS = (
     ("uit_open", [_P], None),
     ("uit_close", [_P], None),
     ("uit_want_focus", [_P, _S], None),
+    ("uit_set_placed", [_P, _I], None),
+    ("uit_set_ground", [_P, _I, _I, _I, _I], None),
+    ("uit_place", [_P, _I, _I, _I, _I, _I, _I], _I),
+    ("uit_rect", [_P, _S, _I32], _I),
     ("uit_frame", [_P, _P, _P, _I, _I, _I, _I, _I, _I, _I], _I),
     ("uit_next", [_P, _I32, c.c_char_p, _Z], _I),
     ("uit_trace_next", [_P, c.c_char_p, _Z], _I),
@@ -288,6 +292,20 @@ class Engine:
 
     def unfocused(self):
         return self._L.uit_unfocused(self._e)
+
+    def set_placed(self, on):
+        self._L.uit_set_placed(self._e, 1 if on else 0)
+
+    def ground(self, x, y, w, h):
+        self._L.uit_set_ground(self._e, x, y, w, h)
+
+    def place(self, x, y, w, h, flags, fs):
+        return self._L.uit_place(self._e, x, y, w, h, flags, fs)
+
+    def rect(self, key):
+        """Where node `key` was placed last, (x, y, w, h), else None."""
+        out = (c.c_int32 * 4)()
+        return tuple(out) if self._L.uit_rect(self._e, b(key), out) else None
 
     def dump(self):
         n = self._L.uit_dump(self._e, None, 0)
