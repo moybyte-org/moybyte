@@ -45,11 +45,12 @@ its V1.2 hardware guide, the vendor's examples, the wiki, issue threads.
 | panel reset (`LCD_RESET`) | 41 | schematic; the vendor firmware passes no reset GPIO, this port uses it (the 7B's panel is reset the same way) |
 | backlight (MT9201 EN/PWM) | 31 | vendor: 30 kHz LEDC, 11 bit, duty rises with brightness: active HIGH |
 | backlight supply gate (`LCD_BK_POWER`) | 29 | gate of Q11, marked `AO3401_NC` in the schematic (not fitted); the vendor firmware never drives it, this port does not either (`never` row) |
-| touch GT911: SDA / SCL | 45 / 46 | I2C0, 400 kHz, behind BSS138 level shifters, pulled up to LDO4's rail |
+| touch GT911: SDA / SCL | 45 / 46 | I2C0, 400 kHz, pulled up to LDO4's rail; the codec-side devices sit behind BSS138 level shifters on the same pins |
 | touch reset / interrupt | 40 / 42 | wired, pulled up to LDO4's rail, left undriven; address 0x5D or 0x14 by INT's level at reset, the driver probes both |
-| I2S to ES8311 (DAC): MCLK / BCLK / LRCK / DOUT | 24 / 22 / 21 / 23 | schematic (`I2S_MCLK`, `I2S_SCLK`, `I2S_LRCK`, `I2S_SDOUT`); the vendor examples run I2S without MCLK and without writing ES8311 registers |
-| amplifier control | 30 | vendor code drives it LOW to play; polarity unconfirmed on the bench |
-| microphone path | 26 (ES7210 data), 24 (MCLK), 20 (L/R select) | ES7210 on the same I2C bus, never initialised by the vendor; absent from this port |
+| I2S out: BCLK / LRCK / DOUT | 22 / 21 / 23 | the vendor examples drive these directly, with no master clock and no codec registers; this port does the same (mono on the left slot) |
+| I2S master clock net (`I2S_MCLK`) | 24 | the schematic routes it to the ES8311, the ES7210 and a PDM microphone; not driven by this port |
+| amplifier control | 30 | the vendor code drives it LOW to play, and the console's tone was heard with it driven low |
+| microphone path | 26 (ES7210 data), 24 (clock), 20 (L/R select) | never initialised by the vendor; absent from this port |
 | microSD: CLK / CMD / D0 | 43 / 44 / 39 | SDMMC slot 0, 1-bit: D1 to D3 are not routed to the chip |
 | UART0 (CH340K) | 37 TX / 38 RX | console and flasher |
 | BOOT button (`SPI_BOOT`) | 35 | strap; low = download |
@@ -117,8 +118,9 @@ row waits for the module. GPIOs 6-10 and 28 are in the `gpio` lease row and 27
 
 Read from documents, not from this unit: the PCB revision; the touch
 orientation (the vendor maps with no swap or mirror; the corner calibration,
-`moy_runtime.run_touch_calibrate`, has not run); the ES8311's clocking from
-GPIO24 and the amplifier pin's polarity (the speaker has not been exercised);
+`moy_runtime.run_touch_calibrate`, has not run); the amplifier pin's polarity (a tone was heard with the pin driven low; a
+run that drove it high as well was heard too, so the high sense is not ruled
+out); whether the ES8311 and ES7210 are fitted (neither answered on the bus);
 that the panel is lit and its picture is right (only the framebuffer and the
 scan counters have been read back); the TF slot (no card was in it);
 the USB bridge's DTR/RTS rest state beyond "attaching and `reboot` work with
@@ -138,3 +140,17 @@ elecrow_p4 reboot` returning to the desk. The card slot reported
 `card_init failed: 263` (a timeout) with no card in it, and the carts stayed on
 the internal store. The ESP-NOW link reports down (`moy_c6.ping()` false): the
 C6 runs the stock slave with no shim, which this board does not replace.
+
+## Audio (2026-11-20)
+
+The first image kept the schematic's ES8311 path (I2C codec, master clock on
+GPIO24). The codec never answered: a SoftI2C scan of GPIO45/46 found only the
+GT911 at 0x5D and a device at 0x2F (not an ES8311 at 0x18 or 0x19, nor an
+ES7210), so the speaker's start returned "the ES8311 does not answer on the
+bus", the output state went FAILED, `devices.present("media")` was false and the
+Music app showed "No sound on this console". The vendor's own examples play
+through plain I2S on GPIO22/21/23 with no master clock, so the speaker row
+names those and the board takes the kernel's codec-less path (the one the
+Guition S3 uses). With it the output starts, `devices.present("media")` is
+true, a console tone and a cart session's tone were played at console volume
+2 of 7 and the owner heard them.
