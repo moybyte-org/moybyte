@@ -522,7 +522,8 @@ def test_a_ported_surface_draws_its_old_frames(run, tmp_path):
 # run on the reference: each is held to the same record on both. A page the
 # C engine does not draw yet raises its EngineGap, which a window's draw would
 # swallow: any one made fails the run.
-C_RUNS = ("settings_rows-desk", "settings_rows_layout-tdeck", "settings_rows_full-tdeck",
+C_RUNS = ("settings_rows-tdeck", "settings_rows-desk", "settings_rows_layout-tdeck",
+          "settings_rows_full-tdeck",
           "settings_wifi-tdeck", "settings_wifi-desk", "settings_wifi_none-big",
           "settings_tz-tdeck", "settings_tz-desk",
           "settings_paired-tdeck", "settings_paired-desk", "settings_paired_none-big",
