@@ -74,17 +74,15 @@ def draw_qr(cv, x, y, w, h):
 
 def web_page():
     with ui.page(""):
-        with ui.split("row", sizes=(2, 3)):
+        with ui.split("row", sizes=(1, 2)):
             ui.canvas("qr", draw_qr)
             with ui.group(""):
-                ui.label("Open in a browser", face="title")
-                ui.label("Scan this with a phone, or on a computer go to", tone="dim", wrap="word",
-                         lines=2)
+                ui.label("Open in a browser", face="title", wrap="word")
+                ui.label("Scan this with a phone, or on a computer go to", tone="dim", wrap="word")
                 ui.label("{address}", face="mono", tone="value", shown="address")
                 ui.label("Waiting for an address", tone="dim", shown="!address")
-                ui.label("{sign_in}", face="caption", tone="dim", wrap="word", lines=2,
-                         shown="address")
-                ui.label("{note}", face="caption", tone="dim", wrap="word", lines=2, shown="note")
+                ui.label("{sign_in}", face="caption", tone="dim", wrap="word", shown="address")
+                ui.label("{note}", face="caption", tone="dim", wrap="word", shown="note")
                 ui.button("update_it", shown="stale")
                 ui.button("turn_off", "danger", shown="@touch|@desk")
 

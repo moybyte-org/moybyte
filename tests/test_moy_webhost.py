@@ -1630,8 +1630,9 @@ def _turn_off_by_its_button(ws):
     ui = ws.web.ui
     ui_draw.input_kind("touch")
     try:
-        ws.mark_dirty()
-        ws.frame(1 / 30.0)
+        for _ in range(2):                   # Turn off shows, then its column centres
+            ws.mark_dirty()
+            ws.frame(1 / 30.0)
         x, y, w, h = ui.host.box("turn_off")
         ui.handle_pointer(x + 2, y + 2, True)
         for _ in range(2):                   # the press, then its release
