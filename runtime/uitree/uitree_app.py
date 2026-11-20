@@ -514,6 +514,15 @@ class Engine(S.Builder):
             want += [(i, None) for i, (node, row) in prev.items()
                      if "focus" in node.p and node.p["focus"](row)][:1]
             self.fresh = False
+        elif self.fresh and self.root is not None:
+            # the page's first frame: focus lands on its focus= node as the
+            # node draws, ahead (nothing owed: the frame that draws it shows it)
+            key = self._fresh_focus(self.root)
+            fid = self._drawn_id(key) if key is not None else None
+            if fid:
+                self._ui.focus(fid)
+                moved = True
+                self.fresh = False
         # a list shown again: drawn last frame, not the frame before, and
         # drawn some frame before that (its first showing is no return)
         before = getattr(self, "_lists_before", set())
@@ -541,6 +550,27 @@ class Engine(S.Builder):
                     self.want_focus = None
         self._lists_ever = getattr(self, "_lists_ever", set()) | before
         return moved, ahead
+
+    def _fresh_focus(self, n):
+        """The key of the first node a fresh page's first frame draws whose
+        focus= holds, or None: a list's rows are its own (its cur= lands
+        focus, and a row's focus= lands from the ids its first frame drew),
+        as are a dialog's and a popover's."""
+        for k in n.kids:
+            if not _shown(k, None) or k.kind in ("dialog", "popover", "rows", "cards", "table"):
+                continue
+            if k.kind == "switch":
+                v = self.s._v[k.l["name"]]
+                case = next((c for c in k.kids if c.l["v"] == v), None) or next(
+                    (c for c in k.kids if c.l["v"] == "_"), None)
+                got = self._fresh_focus(case) if case is not None else None
+            elif "focus" in k.p and k.p["focus"](None):
+                return k.key
+            else:
+                got = self._fresh_focus(k)
+            if got is not None:
+                return got
+        return None
 
     def _focus_after(self, moved, ahead, hint, last=None):
         """After the page drew: what holds focus now, a commit field left
