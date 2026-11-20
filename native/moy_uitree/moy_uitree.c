@@ -577,7 +577,7 @@ int uit_model_of(uit_t *e, int node)
 
 const char *const uit_kind_names[UIT_KINDS] = {"", "page", "group", "label", "info", "link", "button",
                                                "toggle", "rows", "dialog", "seg", "slider", "field",
-                                               "empty"};
+                                               "empty", "progress"};
 
 static const char *TONES[] = {"ink", "dim", "value", "danger"};
 static const char *BKINDS[] = {"normal", "primary", "tonal", "danger", "toggle"};
@@ -658,6 +658,8 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         tslot = &N->t_main;
     else if (!strcmp(name, "value") || (!strcmp(name, "lo") && kind == UIT_SLIDER))
         tslot = &N->t_value;
+    else if (!strcmp(name, "max") && kind == UIT_PROGRESS)
+        tslot = &N->t_aux;
     else if (!strcmp(name, "icon"))
         tslot = &N->t_icon;
     else if ((!strcmp(name, "empty") && kind == UIT_ROWS) ||
@@ -669,7 +671,8 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         if (t < 0)
             return t;
         const uit_tmpl_t *T = &e->tmpls[t];
-        if (kind == UIT_SLIDER && (!strcmp(name, "lo") || !strcmp(name, "hi"))) {
+        if ((kind == UIT_SLIDER && (!strcmp(name, "lo") || !strcmp(name, "hi"))) ||
+            (kind == UIT_PROGRESS && (!strcmp(name, "value") || !strcmp(name, "max")))) {
             // an int prop: an int template, or the int literal a number lowers to
             const char *d = src + (src[0] == '-');
             int lit_int = T->lit && *d;
@@ -747,8 +750,8 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
             }
         return uit_fail(e, UIT_E_NAME, "seg labels=%s: no label table of that name", src);
     }
-    if (!strcmp(name, "look") && (kind == UIT_SEG || kind == UIT_SLIDER)) {
-        if (!strcmp(src, kind == UIT_SEG ? "cycle" : "steps"))
+    if (!strcmp(name, "look") && (kind == UIT_SEG || kind == UIT_SLIDER || kind == UIT_PROGRESS)) {
+        if (!strcmp(src, kind == UIT_SEG ? "cycle" : kind == UIT_SLIDER ? "steps" : "count"))
             N->lit |= kind == UIT_SEG ? NL_CYCLE : NL_STEPS;
         return add_prop(e, node, name, src, repr, PK_LIT, N->lit);
     }

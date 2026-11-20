@@ -995,6 +995,27 @@ static void draw(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int m
             moy_ui_api_group(c, s, span_of("", 0), NULL);
         break;
     }
+    case UIT_PROGRESS: {
+        uint32_t vn, hn, va = uit_tmpl_render(e, N->t_value, model, row, &vn);
+        int32_t v = (int32_t)strtol(e->scratch.p + va, NULL, 10);
+        uint32_t ha = uit_tmpl_render(e, N->t_aux, model, row, &hn);
+        int32_t hi = (int32_t)strtol(e->scratch.p + ha, NULL, 10);
+        a1 = text(e, k, 0, model, row, &n1);
+        if (!(N->lit & NL_STEPS)) {
+            moy_ui_api_progress(c, s, sspan(e, a1, n1), v, hi, NULL);
+            break;
+        }
+        // look="count": the label, where there is one, says the count in its own words
+        char cnt[32];
+        moy_ui_span_t l = sspan(e, a1, n1);
+        if (!n1)
+            l = span_of(cnt, hi ? (size_t)snprintf(cnt, sizeof cnt, "%ld of %ld", (long)v, (long)hi) : 0);
+        int32_t one = 1;
+        moy_ui_over_none(&o);
+        moy_ui_over_put(&o, MOY_UI_OV_STEPS, &one);
+        moy_ui_api_progress(c, s, l, v, hi, &o);
+        break;
+    }
     case UIT_EMPTY: {
         uint32_t ni, ai = N->t_icon >= 0 ? uit_tmpl_render(e, N->t_icon, model, row, &ni) : 0;
         if (N->t_icon < 0 || !ni)
