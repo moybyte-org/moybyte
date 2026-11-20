@@ -14,7 +14,7 @@ typedef struct {
     const moy_ui_sink_t *s;
     moy_canvas_row_t *row;
     moy_text_target_t t;
-    int look, run, fs, desk, win, tap;
+    int look, run, fs, desk, win, tap, card;
 } pd_t;
 
 static void open_pd(const moy_ui_sink_t *s, pd_t *d, int fs, int desk) {
@@ -38,6 +38,7 @@ static void open_pd(const moy_ui_sink_t *s, pd_t *d, int fs, int desk) {
     d->desk = (desk & MOY_UI_DESK) != 0;
     d->tap = !d->desk && (desk & MOY_UI_TAP) != 0;
     d->win = (desk & MOY_UI_WINDOW) ? 1 : (desk & MOY_UI_PANEL) ? 2 : 0;
+    d->card = !d->desk && (desk & MOY_UI_ON_CARD) != 0;
 }
 
 static int metric(int kind, int slot) {
@@ -1105,18 +1106,24 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
 }
 
 
-// Text centred across x..x+w in the rows y..y+h, cut to `room` with an
-// ellipsis where the font has one.
-static void centred_cut(pd_t *d, const pf_t *f, moy_ui_span_t t, int x, int w, int y, int h,
-                        int room, uint16_t c, int sc) {
+// Text across x..x+w in the rows y..y+h, cut to `room` with an ellipsis
+// where the font has one: centred where `align` is 1, at the end where 2.
+static void aligned_cut(pd_t *d, const pf_t *f, moy_ui_span_t t, int x, int w, int y, int h,
+                        int room, uint16_t c, int sc, int align) {
     int ell = 0;
     size_t k = moy_text_cut_px(f->id, t.p, t.n, room, sc, &ell);
     int tw_ = tw(f, t.p, k, sc) + (ell ? tw(f, s_dots, sizeof(s_dots), sc) : 0);
-    int tx = x + (w - tw_) / 2;
+    int tx = x + (align == 2 ? w - tw_ : (w - tw_) / 2);
     int at = text(d, f, t.p, k, tx, y, h, c, sc);
     if (ell) {
         text(d, f, s_dots, sizeof(s_dots), tx + at, y, h, c, sc);
     }
+}
+
+// Text centred across x..x+w.
+static void centred_cut(pd_t *d, const pf_t *f, moy_ui_span_t t, int x, int w, int y, int h,
+                        int room, uint16_t c, int sc) {
+    aligned_cut(d, f, t, x, w, y, h, room, c, sc, 1);
 }
 
 // -- cards (ui.card) -------------------------------------------------------------------
@@ -1131,7 +1138,8 @@ static int card_r(const pd_t *d) {
 // The colour index a tone's text takes on the page's ground (MOY_UI_TONE_*).
 static int tone_ink(const pd_t *d, int tone) {
     if (tone == MOY_UI_TONE_DIM) {
-        return tok(d, MOY_UI_T_CHROME_INK_DIM, MOY_UI_T_INK_DIM);
+        return d->card ? tok(d, MOY_UI_T_INK_DIM, MOY_UI_T_CHROME_INK_DIM)
+                       : tok(d, MOY_UI_T_CHROME_INK_DIM, MOY_UI_T_INK_DIM);
     }
     if (tone == MOY_UI_TONE_VALUE) {
         return tok(d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT);
@@ -1148,7 +1156,8 @@ static int tone_ink(const pd_t *d, int tone) {
         }
         return tok(d, MOY_UI_T_DANGER, MOY_UI_T_INK);
     }
-    return tok(d, MOY_UI_T_CHROME_INK, MOY_UI_T_INK);
+    return d->card ? tok(d, MOY_UI_T_INK, MOY_UI_T_CHROME_INK)
+                   : tok(d, MOY_UI_T_CHROME_INK, MOY_UI_T_INK);
 }
 
 int moy_ui_card(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_box_t pic, moy_ui_span_t title,
@@ -1529,12 +1538,55 @@ int moy_ui_text_block(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, i
             }
         }
         if (centre) {
-            centred_cut(&d, &f, part, b.x, b.w, b.y + i * lh, lh, b.w, c, sc);
+            aligned_cut(&d, &f, part, b.x, b.w, b.y + i * lh, lh, b.w, c, sc, centre);
         } else {
             text_cut(&d, &f, part, b.x, b.y + i * lh, lh, b.w, c, sc);
         }
     }
     return shown * lh;
+}
+
+int moy_ui_prose(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int role, int tone,
+                 int y0, int y1, int fs, int desk, int draw, int *pitch) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    pf_t f = font_of(&d, role);
+    int sc = tscale(s);
+    int lh = f.line * sc - (d.desk ? 0 : 2 * d.fs);
+    if (pitch != NULL) {
+        *pitch = lh;
+    }
+    uint16_t c = draw ? pal(&d, tone_ink(&d, tone)) : 0;
+    moy_text_line_t ln[TEXT_LINES];
+    uint8_t buf[256];
+    size_t at = 0;
+    int y = b.y;
+    while (at < t.n) {
+        // a window of the paragraph's lines; a full one starts the next at
+        // its last line, which a greedy wrap breaks the same from there
+        int n = moy_text_wrap(f.id, t.p + at, t.n - at, b.w / sc, MOY_WRAP_WORDS_PX, ln,
+                              TEXT_LINES);
+        if (n <= 0) {
+            break;
+        }
+        int all = n <= TEXT_LINES, use = all ? n : TEXT_LINES - 1;
+        for (int i = 0; i < use; i++, y += lh) {
+            if (!draw || y + lh <= y0 || y >= y1) {
+                continue;
+            }
+            moy_ui_span_t part = {t.p + at + ln[i].off, ln[i].len};
+            if (ln[i].collapse && ln[i].len <= sizeof(buf)) {
+                part.p = buf;
+                part.n = (uint16_t)moy_text_collapse(t.p + at, &ln[i], buf);
+            }
+            text_cut(&d, &f, part, b.x, y, lh, b.w, c, sc);
+        }
+        if (all) {
+            break;
+        }
+        at += ln[use].off;
+    }
+    return y - b.y;
 }
 
 int moy_ui_empty(const moy_ui_sink_t *s, moy_ui_box_t b, int slot, int glyph, moy_ui_span_t title,

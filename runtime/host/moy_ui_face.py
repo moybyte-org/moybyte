@@ -362,6 +362,9 @@ SIGS = (
      c.c_size_t, c.c_int32, c.c_void_p], c.c_int32),
     ("moy_ui_api_part", [c.c_void_p, c.POINTER(moy_ui_sink_t), moy_ui_span_t, c.c_int, c.c_int,
      c.c_void_p, c.c_void_p], None),
+    ("moy_ui_api_measure", [c.c_void_p, c.POINTER(moy_ui_sink_t), c.c_int, moy_ui_span_t,
+     c.c_void_p, c.c_void_p], c.c_int),
+    ("moy_ui_api_space", [c.c_void_p, c.c_int], None),
     ("moy_ui_api_part_at", [c.c_void_p, c.c_void_p], c.c_int),
     ("moy_ui_api_split_at", [c.c_void_p, c.c_int, c.c_int], c.c_int),
     ("moy_ui_api_split_toward", [c.c_void_p, c.c_int, c.c_int, c.c_int, c.c_int, c.c_void_p],
@@ -567,6 +570,18 @@ def install(m, lib, ctx_, sink, span0, over, box_of):
         lib.moy_ui_api_part(p_, c.byref(sink(cv, look)), id_t, int(w), int(h), o_v, out_w)
         return tuple(out_w)
     m.api_part = api_part
+    def api_measure(ctx, cv, look, kind, text, o):
+        p_, k_ = ctx_(ctx)
+        text_t, text_k = span0(text)
+        o_v, o_k = over(o)
+        out_w = (c.c_int32 * 5)()
+        lib.moy_ui_api_measure(p_, c.byref(sink(cv, look)), int(kind), text_t, o_v, out_w)
+        return tuple(out_w)
+    m.api_measure = api_measure
+    def api_space(ctx, h):
+        p_, k_ = ctx_(ctx)
+        lib.moy_ui_api_space(p_, int(h))
+    m.api_space = api_space
     def api_part_at(ctx):
         p_, k_ = ctx_(ctx)
         out_w = (c.c_int32 * 2)()

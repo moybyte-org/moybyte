@@ -144,6 +144,9 @@ enum {
     MOY_UI_B_B = 32, MOY_UI_B_RUN = 64
 };
 #define MOY_UI_KEY_TAB 9
+// moy_input's MOY_INPUT_KEY_PGUP and MOY_INPUT_KEY_PGDN (a text view's page).
+#define MOY_UI_KEY_PGUP 0x114
+#define MOY_UI_KEY_PGDN 0x115
 
 // A part's state bits (§5).
 enum { MOY_UI_ST_FOCUS = 1, MOY_UI_ST_ACTIVATED = 2, MOY_UI_ST_PRESSED = 4, MOY_UI_ST_HOVER = 8 };
@@ -639,6 +642,7 @@ typedef struct {
     uint8_t drag_x;                 // the drag scrolls across (a table's rows side by side)
     int16_t last_x, last_y;         // the pointer last frame
     int8_t step_x, step_y;          // the steps a key the focused stop keeps makes, signed
+    int8_t page_y;                  // PgDn 1, PgUp -1 at its press, else 0 (a text view's)
     uint8_t keys, reveal, cls, fs;
     uint8_t win;                    // the page lies in a window's body (1), on a panel (2)
     uint8_t elsewhere;              // the keys are another surface's: no focus
@@ -887,11 +891,21 @@ enum {
     MOY_UI_TXO_GUTTER, MOY_UI_TXO_CARET_LINE, MOY_UI_TXO_CARET_COL,
     MOY_UI_TXO_SEL_R0, MOY_UI_TXO_SEL_C0, MOY_UI_TXO_SEL_R1, MOY_UI_TXO_SEL_C1,
     MOY_UI_TXO_ERR_LINE, MOY_UI_TXO_FIND_CI, MOY_UI_TXO_LEFT, MOY_UI_TXO_MARK,
-    MOY_UI_TXO_GEN, MOY_UI_TXO_TOP, MOY_UI_TXO_FONT, MOY_UI_TXO_PAPER, MOY_UI_TXO_LEN
+    MOY_UI_TXO_GEN, MOY_UI_TXO_TOP, MOY_UI_TXO_FONT, MOY_UI_TXO_PAPER, MOY_UI_TXO_FACE,
+    MOY_UI_TXO_KEYS, MOY_UI_TXO_LEN
 };
+// MOY_UI_TXO_FACE's: the mono face's cells (the default), or prose in the ui
+// face -- each line a paragraph broken at word breaks across the view, its
+// lines a line's pitch apart and paragraphs half a line more; no syntax,
+// caret, selection, gutter or mark; moy_ui_api_text_at, _aim and _reveal
+// answer 0 for it; `top` and `gen` name paragraphs.
+enum { MOY_UI_TXF_MONO = 0, MOY_UI_TXF_UI = 1 };
+// MOY_UI_TXO_KEYS 1: a view whose rows run past it is a focus stop (no
+// ring): Up and Down scroll it a line while it has rows that way, then step
+// focus on as a list's ends do; PgUp and PgDn scroll it a page less a line.
 // The options' defaults, in MOY_UI_TXO_* order: what a face that takes
 // fewer of them fills the rest with.
-#define MOY_UI_TXO_DEFAULTS {0, 0, MOY_UI_SYN_SGR, 0, 0, -1, -1, -1, 0, -1, 0, -1, 0, 0, 0, 0, -1, 0, -1}
+#define MOY_UI_TXO_DEFAULTS {0, 0, MOY_UI_SYN_SGR, 0, 0, -1, -1, -1, 0, -1, 0, -1, 0, 0, 0, 0, -1, 0, -1, 0, 0}
 // Answers 0, or MOY_UI_API_DEEP.
 int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id,
                              const moy_ui_lines_t *L, const int32_t *opt,
@@ -1037,7 +1051,9 @@ void moy_ui_api_menu_danger(moy_ui_ctx_t *c, uint32_t rows);
 // The Python face's options the override block does not carry, each for the
 // next call of its verb: a label's text (`lines` its most, 0 one unwrapped;
 // `centre` 1 centred, 2 in from the page's edges as a group's caption is, 3
-// on a `sunk` inset across the row, the text inside its padding;
+// on a `sunk` inset across the row, the text inside its padding, 4 each line
+// at the row's end; a label stacked in an open group lies on its card, its
+// text a row's pad in from the card's edges;
 // `tone` MOY_UI_TONE_*; `role` a font role, -1 the label's own),
 // a card's badge (icon `badge`, empty none), tone and blank picture (icon
 // `blank` on a tinted tile, empty none: moy_ui_card_blank), a grid's spread (its
@@ -1315,6 +1331,23 @@ void moy_ui_api_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
 // 0 otherwise (the part activated by a key, the pointer off it, no part
 // this frame).
 int moy_ui_api_part_at(const moy_ui_ctx_t *c, int32_t out[2]);
+// ui.measure(): the box the next call of verb `kind` with `text` and `o`
+// would take where it is called, drawing nothing and placing nothing:
+// x, y, w, h and the stack's step at out (y where the stack stands, or
+// ui.at's; the step how far the stack moves down past it, 0 under ui.at).
+// MOY_UI_MEASURE_LABEL: a label, its text options (moy_ui_api_text) taken
+// as the label takes them; w its text's width, at most its row's.
+// MOY_UI_MEASURE_BUTTON: a button, w its natural width (its label and a pad
+// each side, a minimum, at most the row's), h its row's; where `o` carries
+// `fit`, its focus ring's reach more each side but the foot. 1, or 0 for an
+// unknown kind.
+enum { MOY_UI_MEASURE_LABEL = 0, MOY_UI_MEASURE_BUTTON = 1 };
+int moy_ui_api_measure(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy_ui_span_t text,
+                       const moy_ui_over_t *o, int32_t out[5]);
+// ui.space(h): the stack moves `h` pixels down (0 or less: none), as a row
+// that draws nothing and is no stop would, with no gap after it (a column
+// the caller centres from its measure).
+void moy_ui_api_space(moy_ui_ctx_t *c, int h);
 // ui.split(id, dir, sizes, o) (docs/ui_api_2026-10.md §5a): ui.at's
 // rect (else the page's, from its row cursor down) cut into `n` panes along
 // one axis, `gap` pixels apart -- left to right, or with MOY_UI_SPLIT_Y top

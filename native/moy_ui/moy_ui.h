@@ -866,7 +866,9 @@ int moy_ui_dragtap_frame(moy_ui_dragtap_t *t, moy_ui_scroll_t *s, const int32_t 
 // at least, a bubble takes its tap metrics and faces (MOY_UI_FONT_TAP_*).
 // MOY_UI_CARDED: on the desk, a group's card (ui.group's `card`) is a ring
 // round its rows, as the handheld's card is, not rules alone.
-enum { MOY_UI_DESK = 1, MOY_UI_WINDOW = 2, MOY_UI_TAP = 8, MOY_UI_PANEL = 32, MOY_UI_CARDED = 64 };
+// MOY_UI_ON_CARD: text lies on a group's card (a handheld's card's inks).
+enum { MOY_UI_DESK = 1, MOY_UI_WINDOW = 2, MOY_UI_TAP = 8, MOY_UI_PANEL = 32, MOY_UI_CARDED = 64,
+       MOY_UI_ON_CARD = 128 };
 #define MOY_UI_TAP_ROW 36
 // moy_ui_api_begin's: the keys are another surface's this frame (a cart's
 // editor handle holds them), so no stop holds focus.
@@ -997,13 +999,20 @@ enum { MOY_UI_TONE_INK = 0, MOY_UI_TONE_DIM = 1, MOY_UI_TONE_VALUE = 2, MOY_UI_T
 // Text in box b from its top (ui.label's `wrap`, `lines`, `align`, `tone`
 // and `face`): in font `role`, broken at word breaks in b.w into at most
 // `lines` lines (0: one), an ellipsis after the last where the text runs on;
-// each line centred where `centre`; icon `slot` (else `glyph`; both -1 none)
+// each line centred where `centre` is 1, at b's end where 2; icon `slot` (else `glyph`; both -1 none)
 // before the first line in the text's ink, the lines beside it. A handheld's
 // lines stand a line less two pixels apart, a desk's a line. The height it
 // takes, drawn where `draw`.
 int moy_ui_text_block(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int role,
                       int tone, int lines, int centre, int slot, int glyph, int fs, int desk,
                       int draw);
+// A paragraph of prose (a text view's in the ui face): `t` broken at word
+// breaks across b.w in font `role` and tone `tone` (MOY_UI_TONE_*), every
+// line of it, a line's pitch apart from b.y (text_block's pitch); where
+// `draw`, the lines that meet rows y0..y1 drawn. Its height; *pitch, where
+// not NULL, the line's pitch.
+int moy_ui_prose(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int role, int tone,
+                 int y0, int y1, int fs, int desk, int draw, int *pitch);
 // An empty page's head (ui.empty), centred across b from its top: icon `slot`
 // (else `glyph`) on a disc of `value` mixed into the ground (`surface_alt` in
 // a dark look), `title` in the title role, then `lines` (NUL-separated, `n`

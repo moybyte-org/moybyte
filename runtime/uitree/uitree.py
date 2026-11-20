@@ -1791,7 +1791,7 @@ SCHEMA = {
     "picture": dict(_C, image="image", icon="text", side="int", tone="text"),
     "progress": dict(_C, label="text", value="int", max="int", look="lit"),
     "empty": dict(_C, icon="text", title="text", lines="texts"),
-    "text_view": dict(_C, wrap="lit", follow="lit", syntax="lit"),
+    "text_view": dict(_C, wrap="lit", follow="lit", syntax="lit", face="lit"),
     "dialog": dict(_C, title="text", buttons="lit"),
     "popover": dict(_C, anchor="text", w="int", close="action0"),
     "menu": dict(_C, caption="text"),
@@ -2022,8 +2022,17 @@ def text_view(name, **p):
     """A read-only lines view (§7.2) of a text state (its lines) or a model
     of lines (each row's first text field that is not its key): `wrap=`
     "cut" or "word", `follow=True` keeps a view at its foot there as lines
-    arrive, `syntax=` a terminal's colours ("sgr") or a source's."""
+    arrive, `syntax=` a terminal's colours ("sgr") or a source's; `face="ui"`
+    sets each line as a paragraph of prose in the ui face, half a line
+    between paragraphs (no syntax). A view whose text runs past it is a
+    stop: the arrows scroll it a line, PgUp and PgDn a page (L7)."""
     where = _caller()
+    if p.get("face", "mono") not in ("mono", "ui"):
+        raise UIError("N01", "ui.text_view face=%r" % (p["face"],), where=where,
+                      expected="mono, ui", fix='face="ui"')
+    if p.get("face") == "ui" and "syntax" in p:
+        raise UIError("N01", "ui.text_view face=\"ui\" with syntax=: prose takes no syntax",
+                      where=where, fix="drop syntax=, or face=")
     _state_name(name, (TEXT, Model), "ui.text_view", where)
     t = _st()._t[name]
     n = _node("text_view", name, p, where)

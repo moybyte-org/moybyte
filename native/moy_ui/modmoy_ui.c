@@ -2623,7 +2623,7 @@ static void label_text(moy_ui_ctx_t *c, mp_obj_t o) {
     static const char *const tones[] = {"ink", "dim", "value", "danger"};
     static const char *const faces[] = {"ui", "title", "mono", "caption", "key", "op",
                                         "result"};
-    static const char *const centre[] = {"center"};
+    static const char *const aligns[] = {"center", "end"};
     if (!mp_obj_is_type(o, &mp_type_dict)) {
         return;
     }
@@ -2656,7 +2656,8 @@ static void label_text(moy_ui_ctx_t *c, mp_obj_t o) {
         lines = nl != MP_OBJ_NULL && mp_obj_is_true(nl) ? (int)num(nl) : 16;
     }
     int t = tone != MP_OBJ_NULL ? word_of(tone, tones, 4) : -1;
-    int al = align != MP_OBJ_NULL && word_of(align, centre, 1) == 0 ? 1
+    int an = align != MP_OBJ_NULL ? word_of(align, aligns, 2) : -1;
+    int al = an == 0 ? 1 : an == 1 ? 4
              : sunk != MP_OBJ_NULL && mp_obj_is_true(sunk) ? 3
              : inset != MP_OBJ_NULL && mp_obj_is_true(inset) ? 2 : 0;
     moy_ui_api_text(c, lines, al,

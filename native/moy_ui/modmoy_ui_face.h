@@ -174,6 +174,27 @@ static mp_obj_t ui_api_part(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_part_obj, 7, 7, ui_api_part);
 
+static mp_obj_t ui_api_measure(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    moy_ui_over_t o_v;
+    int32_t out[5];
+    moy_ui_api_measure(c, &s, num(a[3]), span0_of(a[4]), over_of(a[5], &o_v), out);
+    mp_obj_t t_[5] = {mp_obj_new_int(out[0]), mp_obj_new_int(out[1]), mp_obj_new_int(out[2]),
+                      mp_obj_new_int(out[3]), mp_obj_new_int(out[4])};
+    return ret_tuple(5, t_);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_measure_obj, 6, 6, ui_api_measure);
+
+static mp_obj_t ui_api_space(mp_obj_t a0, mp_obj_t a1) {
+    moy_ui_ctx_t *c = ctx_of(a0);
+    moy_ui_api_space(c, num(a1));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_space_obj, ui_api_space);
+
 static mp_obj_t ui_api_part_at(mp_obj_t a0) {
     moy_ui_ctx_t *c = ctx_of(a0);
     int32_t out[2];
@@ -813,6 +834,8 @@ static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_lost_obj, ui_api_lost);
     { MP_ROM_QSTR(MP_QSTR_api_progress), MP_ROM_PTR(&ui_api_progress_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_api_list), MP_ROM_PTR(&ui_api_list_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_api_part), MP_ROM_PTR(&ui_api_part_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_api_measure), MP_ROM_PTR(&ui_api_measure_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_api_space), MP_ROM_PTR(&ui_api_space_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_api_part_at), MP_ROM_PTR(&ui_api_part_at_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_api_split_at), MP_ROM_PTR(&ui_api_split_at_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_api_split_toward), MP_ROM_PTR(&ui_api_split_toward_obj) }, \

@@ -235,6 +235,9 @@ void moy_ui_over_put(moy_ui_over_t *o, int k, const int32_t *v) {
         case MOY_UI_OV_SECRET:
             o->flags2 = v[0] ? o->flags2 | MOY_UI_O2_SECRET : o->flags2 & ~MOY_UI_O2_SECRET;
             break;
+        case MOY_UI_OV_FIT:
+            o->flags2 = v[0] ? o->flags2 | MOY_UI_O2_FIT : o->flags2 & ~MOY_UI_O2_FIT;
+            break;
         default: break;
     }
 }
@@ -1298,6 +1301,8 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     }
     c->pop.back = 0;
     int qe = key == c->last_key ? 0 : (key | 0x20) == 'q' ? -1 : (key | 0x20) == 'e' ? 1 : 0;
+    c->page_y = (int8_t)(key == c->last_key ? 0 : key == MOY_UI_KEY_PGDN ? 1
+                         : key == MOY_UI_KEY_PGUP ? -1 : 0);
     c->last_key = key;
     const moy_ui_stop_t *f = fi >= 0 ? &v[fi] : NULL;
     // A field's edit lasts while the field is drawn (its record); a cancel
@@ -1774,6 +1779,23 @@ static void snap_place(moy_ui_ctx_t *c, int y, int h) {
     c->snap.out = (int8_t)mua_snap_out(c, y, h, unit);
 }
 
+// Where the next stacked row stands, none placed: its x, y and w (an open
+// group's card inset in), h 0.
+static moy_ui_box_t stack_row(const moy_ui_ctx_t *c) {
+    moy_ui_box_t b = {c->page.x, (int16_t)(c->page.y + c->y - c->scroll), c->page.w, 0};
+    if (c->grp_open && (!c->cls || c->grp_card)) {
+        int in = mua_kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_INSET) * c->fs;
+        b.x = (int16_t)(b.x + in);
+        b.w = (int16_t)(b.w - 2 * in);
+    }
+    return b;
+}
+
+// The stack's gap under a stacked row: none between a group's rows.
+static int stack_gap(const moy_ui_ctx_t *c) {
+    return c->grp_open ? 0 : metric(MOY_UI_M_ROW_STACK_GAP) * c->fs;
+}
+
 // The next call's box: ui.at's, or the next row of the page. *stacked says
 // which (a row clips to the page); a row a popover's cut may peek is `row`.
 moy_ui_box_t mua_place_row(moy_ui_ctx_t *c, int h, int *stacked, int row) {
@@ -1790,19 +1812,14 @@ moy_ui_box_t mua_place_row(moy_ui_ctx_t *c, int h, int *stacked, int row) {
         return c->at;
     }
     *stacked = 1;
-    moy_ui_box_t b = {c->page.x, (int16_t)(c->page.y + c->y - c->scroll), c->page.w, (int16_t)h};
+    moy_ui_box_t b = stack_row(c);
+    b.h = (int16_t)h;
     if (c->snap.on) {
         snap_place(c, b.y, h);
     }
-    int gap = metric(MOY_UI_M_ROW_STACK_GAP) * c->fs;
+    int gap = stack_gap(c);
     if (c->grp_open) {
         // a group's rows sit on its card, one under the next
-        if (!c->cls || c->grp_card) {
-            int in = mua_kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_INSET) * c->fs;
-            b.x = (int16_t)(b.x + in);
-            b.w = (int16_t)(b.w - 2 * in);
-        }
-        gap = 0;
         c->grp_first = c->grp_n == 0;
         if (c->grp_n < 255) {
             c->grp_n++;
@@ -3063,63 +3080,105 @@ void moy_ui_api_page(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
     }
 }
 
+// A label's text options (moy_ui_api_text), taken from the context: where
+// its text lies across the row (`m`'s x and w), the sunk well's (`well`).
+typedef struct {
+    int lines, align, tone, role, sunk, card;
+    moy_ui_box_t m, well;
+} txt_plan_t;
+
+static int txt_take(moy_ui_ctx_t *c, txt_plan_t *p) {
+    if (!(c->txt.lines || c->txt.centre || c->txt.tone || c->txt.role >= 0)) {
+        return 0;
+    }
+    p->lines = c->txt.lines;
+    p->align = c->txt.centre == 1 ? 1 : c->txt.centre == 4 ? 2 : 0;
+    p->tone = c->txt.tone;
+    p->role = c->txt.role >= 0 ? c->txt.role : MOY_UI_FONT_UI;
+    p->sunk = c->txt.centre == 3 ? (c->cls ? 10 : 8) * c->fs : 0;
+    int pad = c->txt.centre == 2
+                  ? (mua_kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_INSET)
+                     + mua_kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_PAD)) * c->fs
+                  : mua_kmetric(MOY_UI_K_ROW, MOY_UI_M_ROW_PAD) * c->fs;
+    c->txt.lines = c->txt.centre = c->txt.tone = 0;
+    c->txt.role = -1;
+    p->card = !c->has_at && c->grp_open;
+    moy_ui_box_t m = c->has_at ? c->at : c->page;
+    if (p->card) {
+        // a stacked row of an open group: on its card, a value row's pad in
+        moy_ui_box_t r = stack_row(c);
+        pad = mua_kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_PAD) * c->fs;
+        m.x = (int16_t)(r.x + pad);
+        m.w = (int16_t)(r.w - 2 * pad);
+    } else if (!c->has_at) {
+        m.x = (int16_t)(m.x + pad);
+        m.w = (int16_t)(m.w - 2 * pad);
+    }
+    p->well = m;
+    if (p->sunk) {
+        // the inset across the row, its text `sunk` pixels inside it
+        m.x = (int16_t)(m.x + p->sunk);
+        m.w = (int16_t)(m.w - 2 * p->sunk);
+    }
+    p->m = m;
+    return 1;
+}
+
+// The ground a planned label's text lies on.
+static int txt_ground(const moy_ui_ctx_t *c, const txt_plan_t *p) {
+    return mua_ground_of(c) | (p->card ? MOY_UI_ON_CARD : 0);
+}
+
+// The height of a planned label's text, `h` its block's: a sunk well's, a
+// one-line label's stacked row's at least.
+static int txt_row_h(const moy_ui_ctx_t *c, const txt_plan_t *p, int h) {
+    if (p->sunk) {
+        return h + 2 * p->sunk - (c->cls ? 0 : 2 * c->fs);
+    }
+    return p->lines <= 1 && !c->has_at && h < mua_row_h(c) ? mua_row_h(c) : h;
+}
+
 void moy_ui_api_label(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t text,
                       const moy_ui_over_t *o) {
     o = mua_over(o);
     int stacked;
-    if (c->txt.lines || c->txt.centre || c->txt.tone || c->txt.role >= 0) {
-        // the Python face's text options: lines wrapped, centred, a tone, a role
-        int lines = c->txt.lines, centre = c->txt.centre == 1, tone = c->txt.tone;
-        int role = c->txt.role >= 0 ? c->txt.role : MOY_UI_FONT_UI;
-        int sunk = c->txt.centre == 3 ? (c->cls ? 10 : 8) * c->fs : 0;
-        int pad = c->txt.centre == 2
-                      ? (mua_kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_INSET)
-                         + mua_kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_PAD)) * c->fs
-                      : mua_kmetric(MOY_UI_K_ROW, MOY_UI_M_ROW_PAD) * c->fs;
-        c->txt.lines = c->txt.centre = c->txt.tone = 0;
-        c->txt.role = -1;
-        moy_ui_box_t m = c->has_at ? c->at : c->page;
-        if (!c->has_at) {
-            m.x = (int16_t)(m.x + pad);
-            m.w = (int16_t)(m.w - 2 * pad);
-        }
-        moy_ui_box_t well = m;
-        if (sunk) {
-            // the inset across the row, its text `sunk` pixels inside it
-            m.x = (int16_t)(m.x + sunk);
-            m.w = (int16_t)(m.w - 2 * sunk);
-        }
-        int h = moy_ui_text_block(s, m, text, role, tone, lines, centre, c->icon_slot,
-                                  c->icon_glyph, c->fs, mua_ground_of(c), 0);
-        if (sunk) {
-            int hb = h + 2 * sunk - (c->cls ? 0 : 2 * c->fs);
-            moy_ui_box_t b = mua_place(c, hb, &stacked);
-            well.y = b.y;
-            well.h = (int16_t)hb;
-            clip_t k;
-            EACH_ROW(c, k, s, well, stacked, c->page) {
+    txt_plan_t p;
+    if (txt_take(c, &p)) {
+        // the Python face's text options: lines wrapped, aligned, a tone, a role
+        int gnd = txt_ground(c, &p);
+        moy_ui_box_t m = p.m, well = p.well;
+        int h = moy_ui_text_block(s, m, text, p.role, p.tone, p.lines, p.align, c->icon_slot,
+                                  c->icon_glyph, c->fs, gnd, 0);
+        int rh = txt_row_h(c, &p, h);
+        moy_ui_box_t rb = mua_place(c, rh, &stacked);
+        clip_t k;
+        mua_band_mark(c, rb, stacked, 0);
+        if (p.sunk) {
+            well.y = rb.y;
+            well.h = (int16_t)rh;
+            EACH_ROW(c, k, s, p.card ? rb : well, stacked, c->page) {
+                mua_band(c, s, rb, stacked);
                 moy_ui_well(s, well, 0, moy_ui_token(s->look, MOY_UI_T_SUNK), c->fs,
                             mua_ground_of(c));
-                m.y = (int16_t)(b.y + sunk - (c->cls ? 0 : c->fs));
+                m.y = (int16_t)(rb.y + p.sunk - (c->cls ? 0 : c->fs));
                 m.h = (int16_t)h;
-                moy_ui_text_block(s, m, text, role, tone, lines, centre, c->row_slot,
-                                  c->row_glyph, c->fs, mua_ground_of(c), 1);
+                moy_ui_text_block(s, m, text, p.role, p.tone, p.lines, p.align, c->row_slot,
+                                  c->row_glyph, c->fs, gnd, 1);
                 mua_clip_out(&k);
             }
             return;
         }
-        int one = lines <= 1 && !c->has_at && h < mua_row_h(c);
-        moy_ui_box_t b = mua_place(c, one ? mua_row_h(c) : h, &stacked);
+        moy_ui_box_t b = rb;
         b.x = m.x;
         b.w = m.w;
-        if (one) {
-            b.y = (int16_t)(b.y + (mua_row_h(c) - h) / 2);
+        if (rh > h) {
+            b.y = (int16_t)(b.y + (rh - h) / 2);
             b.h = (int16_t)h;
         }
-        clip_t k;
-        EACH_ROW(c, k, s, b, stacked, c->page) {
-            moy_ui_text_block(s, b, text, role, tone, lines, centre, c->row_slot, c->row_glyph,
-                              c->fs, mua_ground_of(c), 1);
+        EACH_ROW(c, k, s, p.card ? rb : b, stacked, c->page) {
+            mua_band(c, s, rb, stacked);
+            moy_ui_text_block(s, b, text, p.role, p.tone, p.lines, p.align, c->row_slot,
+                              c->row_glyph, c->fs, gnd, 1);
             mua_clip_out(&k);
         }
         return;
@@ -3157,6 +3216,19 @@ void moy_ui_api_label(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t tex
     }
 }
 
+// A button's natural width: its label and a pad each side, a minimum (a
+// dialog's, a popover's, a `fit` button's).
+static int button_w(const moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label) {
+    int bpad = (c->cls ? 16 : 12) * c->fs, minw = (c->cls ? 72 : 56) * c->fs;
+    int bw = moy_ui_role_w(s, MOY_UI_FONT_UI, label) + 2 * bpad;
+    return bw > minw ? bw : minw;
+}
+
+// A focus ring's reach past a button's edge.
+static int ring_reach(const moy_ui_ctx_t *c) {
+    return moy_ui_mark_reach(MOY_UI_ITEM_CELL) * c->fs;
+}
+
 int moy_ui_api_button(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label, int kind,
                       const moy_ui_over_t *o) {
     o = mua_over(o);
@@ -3166,17 +3238,15 @@ int moy_ui_api_button(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     const char *kn = moy_ui_button_kinds[kind][0];
     int kid = moy_ui_button_kind(kn, strlen(kn));
     int stacked;
-    moy_ui_box_t b;
+    moy_ui_box_t b, rb = {0, 0, 0, 0};       // rb: the row it stands in, where not b
     if (!c->has_at && c->n_nest > 0 && c->nest[c->n_nest - 1].kind == 3) {
         // in a popover's body the buttons that follow one another are one
         // row, right-aligned inside the card's padding as a dialog's, a
         // focus ring's reach and 4 pixels between them, laid out by the
         // row's width the last frame drew
-        int fs = c->fs, reach = moy_ui_mark_reach(MOY_UI_ITEM_CELL) * fs;
+        int fs = c->fs, reach = ring_reach(c);
         int gap = (reach / fs + 4 > 8 ? reach / fs + 4 : 8) * fs;
-        int bpad = (c->cls ? 16 : 12) * fs, minw = (c->cls ? 72 : 56) * fs;
-        int bw = moy_ui_role_w(s, MOY_UI_FONT_UI, label) + 2 * bpad;
-        bw = bw > minw ? bw : minw;
+        int bw = button_w(c, s, label);
         int lp = mua_kmetric(c->cls ? MOY_UI_K_GROUP : MOY_UI_K_ROW,
                              c->cls ? MOY_UI_M_GROUP_PAD : MOY_UI_M_ROW_PAD) * fs;
         int right = c->page.x + c->page.w - lp;
@@ -3201,8 +3271,21 @@ int moy_ui_api_button(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         c->brow = 1;                    // placing a row ends a row: this one goes on
         c->brow_x = (int16_t)(c->brow_x + bw + gap);
         c->brow_w = (int16_t)(c->brow_x - gap);
+    } else if (!c->has_at && (o->flags2 & MOY_UI_O2_FIT)) {
+        // `fit`: its natural width at the row's start, its focus ring's
+        // reach inside the row on every side but the foot
+        int reach = ring_reach(c), bw = button_w(c, s, label);
+        rb = mua_place(c, mua_row_h(c) + reach, &stacked);
+        b = rb;
+        b.x = (int16_t)(b.x + reach);
+        b.y = (int16_t)(b.y + reach);
+        b.h = (int16_t)mua_row_h(c);
+        b.w = (int16_t)(bw < rb.w - 2 * reach ? bw : rb.w - 2 * reach);
     } else {
         b = mua_place(c, mua_row_h(c), &stacked);
+    }
+    if (rb.w == 0) {
+        rb = b;
     }
     int disabled = o->disabled == 1;
     int st = disabled ? 0 : mua_stop(c, mua_id_of(c, o, label), b, 0, mua_name_of(o, label));
@@ -3210,9 +3293,9 @@ int moy_ui_api_button(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         st = 0;
     }
     clip_t k;
-    mua_band_mark(c, b, stacked, mua_mark_flags(st, o));
-    EACH_ROW(c, k, s, b, stacked, c->page) {
-        mua_band(c, s, b, stacked);
+    mua_band_mark(c, rb, stacked, mua_mark_flags(st, o));
+    EACH_ROW(c, k, s, rb, stacked, c->page) {
+        mua_band(c, s, rb, stacked);
         moy_ui_button_t bt;
         bt.label = label;
         bt.glyph = -1;
@@ -3816,6 +3899,54 @@ int moy_ui_api_part_at(const moy_ui_ctx_t *c, int32_t out[2]) {
     out[0] = x - b.x;
     out[1] = y - b.y;
     return 1;
+}
+
+int moy_ui_api_measure(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy_ui_span_t text,
+                       const moy_ui_over_t *o, int32_t out[5]) {
+    o = mua_over(o);
+    memset(out, 0, 5 * sizeof(int32_t));
+    moy_ui_box_t r = c->has_at ? c->at : stack_row(c);
+    int w, h;
+    if (kind == MOY_UI_MEASURE_LABEL) {
+        txt_plan_t p;
+        if (txt_take(c, &p)) {
+            int th = moy_ui_text_block(s, p.m, text, p.role, p.tone, p.lines, p.align,
+                                       c->icon_slot, c->icon_glyph, c->fs, txt_ground(c, &p), 0);
+            h = txt_row_h(c, &p, th);
+            // the text, an icon before it, its inset from the row's either edge
+            w = moy_ui_role_w(s, p.role, text) + 2 * (p.m.x - r.x);
+            if (c->icon_slot >= 0 || c->icon_glyph >= 0) {
+                w += (16 + (c->cls ? 6 : 4)) * c->fs;
+            }
+        } else {
+            int pad = mua_kmetric(MOY_UI_K_ROW, MOY_UI_M_ROW_PAD) * c->fs;
+            h = mua_row_h(c);
+            w = moy_ui_role_w(s, MOY_UI_FONT_UI, text) + 2 * pad;
+        }
+    } else if (kind == MOY_UI_MEASURE_BUTTON) {
+        int reach = (o->flags2 & MOY_UI_O2_FIT) && !c->has_at ? ring_reach(c) : 0;
+        h = mua_row_h(c) + reach;
+        w = button_w(c, s, text) + 2 * reach;
+    } else {
+        return 0;
+    }
+    out[0] = r.x;
+    out[1] = r.y;
+    out[2] = w < r.w ? w : r.w;
+    out[3] = h;
+    out[4] = c->has_at ? 0 : h + stack_gap(c);
+    return 1;
+}
+
+void moy_ui_api_space(moy_ui_ctx_t *c, int h) {
+    if (h <= 0) {
+        return;
+    }
+    c->y = (int16_t)(c->y + h);
+    moy_ui_keep_t *k = mua_page_keep(c);
+    if (k != NULL) {
+        k->rows = c->y;
+    }
 }
 
 // -- ui.split ------------------------------------------------------------------------

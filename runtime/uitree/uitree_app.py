@@ -61,7 +61,6 @@ class Engine(S.Builder):
         self.dups = set()
         self._sync = {}
         self._orders = {}               # a list's key -> the order of its rows (_after_removal)
-        self.cell_used = {}             # a centred column's height this frame, by its id
         self._pid = (None, 0, "")       # (build, level, the id _page_id made for them)
         self.curs = []
         self.fresh = False
@@ -693,32 +692,34 @@ class Engine(S.Builder):
         _v.group()
 
     def _r_label(self, n, row, rect):
-        tone = n.l.get("tone")
-        text = self._t(n, "text", row)
-        o = {"ink": tone} if tone else None
         if "icon" in n.p:
             name = n.p["icon"](row)
             if name:
                 _v.icon(name)
+        for text, o in self._label_rows(n, row):
+            _v.label(text, o)
+
+    def _label_rows(self, n, row):
+        """A label's rows as the toolkit's labels: (text, options) each."""
+        tone = n.l.get("tone")
+        text = self._t(n, "text", row)
+        o = {"ink": tone} if tone else None
         face, wrap, align = n.l.get("face"), n.l.get("wrap"), n.l.get("align")
-        if face or wrap == "word" or align == "center" or "lines" in n.l:
+        if face or wrap == "word" or align in ("center", "end") or "lines" in n.l:
             o = {"tone": tone} if tone in ("dim", "value", "danger") else dict(o or {})
             if face and not (n.l.get("size") == "fit" and not self._fits(face, text)):
                 o["face"] = face
             if wrap == "word" or "lines" in n.l:
                 o["wrap"] = True
                 o["lines"] = n.l.get("lines", 16)
-            if align == "center":
-                o["align"] = "center"
-            _v.label(text, o)
-            return
+            if align in ("center", "end"):
+                o["align"] = align
+            return ((text, o),)
         if wrap == "char":   # lines of what fits a group's card, cut anywhere
             import ui_draw as _ud
             per = max(8, (self.rect[2] - 32) // max(1, _ud.font("ui")[1] * self.fs))
-            for at in range(0, len(text), per):
-                _v.label(text[at:at + per], o)
-            return
-        _v.label(text, o)
+            return tuple((text[at:at + per], o) for at in range(0, len(text), per))
+        return ((text, o),)
 
     def _fits(self, face, text):
         """A label's `size="fit"`: its face where the text fits the page's
@@ -742,7 +743,9 @@ class Engine(S.Builder):
             lines = [r._f[f] for r in v]
         else:
             lines = v.split("\n") if v else []
-        o = {"syntax": n.l.get("syntax", "plain")}
+        o = {"syntax": n.l.get("syntax", "plain"), "keys": True}
+        if n.l.get("face") == "ui":
+            o["face"] = "ui"
         if n.l.get("wrap") == "word":
             o["wrap"] = True
         if n.l.get("follow"):
@@ -760,21 +763,18 @@ class Engine(S.Builder):
         if n.act.can(row):
             self.fire(n.act, self.args_for(n.act, row, n.l.get("arg")), n, row)
 
+    def _fit(self, n, at):
+        """A button in a split's column takes its natural width (the
+        toolkit's `fit`) unless it grows."""
+        return at is None and getattr(self, "in_cell", False) and not n.l.get("grow")
+
     def _r_button(self, n, row, rect, at=None):
         text = self._t(n, "label", row)
-        if at is None and getattr(self, "in_cell", False) and not n.l.get("grow"):
-            # a button in a split's column: its natural width unless it grows,
-            # by the toolkit's rule for a button that is not a row (a dialog's,
-            # moy_ui_api.c's popover body): its label and a pad each side, a
-            # minimum width, the focus ring's reach clear of the row above
-            fs = self.fs
-            self._blank(n.key + " gap", 6 * fs)
-            x, y, w, h = self._blank(n.key + " row", 0)
-            bw = max(_v.text_size(text)[0] + 2 * (16 if self.desk else 12) * fs, (72 if self.desk else 56) * fs)
-            at = (x, y, min(w, bw), h)
         if at:
             _v.at(*at)
         o = self._o(n, row)
+        if self._fit(n, at):
+            o["fit"] = True
         if n.l.get("alone") and ("icon" in n.p or n.act.icon):
             text = ""
         if _v.button(text, n.l.get("kind", "normal"), o):
@@ -1021,14 +1021,15 @@ class Engine(S.Builder):
             at += s + gap
             if k.kind == "group":       # a region of the split: its own scrolled column
                 sid = "split %s %d" % (n.key, i)
-                off = self._cell_off(sid, n, r, d)
-                cell = (r[0], r[1] + off, r[2], r[3] - off)
-                _v.at(*cell)
+                _v.at(*r)
                 _v.scroll(sid)
                 was, self.in_cell = getattr(self, "in_cell", False), True
-                self._kids(k, row, cell)
+                if d == "row" and n.l.get("align", "center") == "center":
+                    used = self._col_h(k, row)
+                    if used is not None:
+                        _v.space((r[3] - used) // 2)
+                self._kids(k, row, r)
                 self.in_cell = was
-                self._cell_measure(sid, cell)
                 _v.end()
                 _v.scroll()
                 _v.at(*self.rect)
@@ -1044,24 +1045,23 @@ class Engine(S.Builder):
                 continue
             getattr(self, _rname(k.kind))(k, row, r)
 
-    def _cell_off(self, sid, n, r, d):
-        """How far down a row split's column starts: centred on the cross
-        axis where the last frame's content was shorter than the cell
-        (`align="center"`, the default), else at the top."""
-        if d != "row" or n.l.get("align", "center") != "center":
-            return 0
-        used = self.cell_used.get(sid)
-        return max(0, (r[3] - used) // 2) if used is not None else 0
-
-    def _cell_measure(self, sid, cell):
-        """The column's height this frame (a part that is no stop marks the
-        stack's foot); a change asks for the frame that centres it."""
-        y = self._blank(sid + " foot", 1)[1]
-        used = y - cell[1]
-        cu = self.cell_used
-        if cu.get(sid) != used:
-            cu[sid] = used
-            self._damage.all()
+    def _col_h(self, n, row):
+        """How tall a split's column draws, measured before it draws (the
+        toolkit's `measure`): None where it holds a kind with no measure,
+        which lays it out from its cell's top."""
+        h = 0
+        for k in n.kids:
+            if not (_shown(k, row) and (k.act is None or k.act.can(row) or k.act.off == "grey")):
+                continue
+            if k.kind == "label":
+                for text, o in self._label_rows(k, row):
+                    h += _v.measure("label", text, o)[4]
+            elif k.kind == "button":
+                h += _v.measure("button", self._t(k, "label", row),
+                                {"fit": True} if self._fit(k, None) else None)[4]
+            else:
+                return None
+        return h
 
     def _r_grid(self, n, row, rect):
         cols, rows_ = n.l["cols"], n.l["rows"]
@@ -1215,13 +1215,6 @@ class Engine(S.Builder):
     def _draws_only(n):
         """A canvas with no pointer=, keys= or on=: it draws, and is no stop."""
         return not any(p in n.l or p in n.p for p in ("pointer", "keys", "on"))
-
-    def _blank(self, key, h):
-        """A row of the stack `h` tall (0: the row's) that draws nothing and
-        is no stop: where the stack is, as (x, y, w, h)."""
-        x, y, w, hh, _st = _v.part(key, 0, h, {"id": key, "disabled": True})
-        self.cv.rect(x, y, w, hh, self.th["panel"])     # the row's band put back to the page's ground
-        return x, y, w, hh
 
     def _r_canvas(self, n, row, rect):
         o = {"id": n.key}

@@ -578,7 +578,7 @@ void moy_ui_api_menu_danger(moy_ui_ctx_t *c, uint32_t rows) {
 
 void moy_ui_api_text(moy_ui_ctx_t *c, int lines, int centre, int tone, int role) {
     c->txt.lines = (int8_t)(lines < 0 ? 0 : lines > 16 ? 16 : lines);
-    c->txt.centre = (int8_t)(centre == 2 || centre == 3 ? centre : centre != 0);
+    c->txt.centre = (int8_t)(centre >= 2 && centre <= 4 ? centre : centre != 0);
     c->txt.tone = (int8_t)(tone < 0 || tone > MOY_UI_TONE_DANGER ? 0 : tone);
     c->txt.role = (int8_t)(role < 0 || role > MOY_UI_FONT_RESULT ? -1 : role);
 }

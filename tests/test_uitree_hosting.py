@@ -190,7 +190,7 @@ def test_a_lines_view_that_follows_opens_at_its_foot_and_scrolls_a_new_line_in(t
     assert step in (13, 14, 15, 16), step
 
 
-def _split(tmp_path, config):
+def _split(tmp_path, config, script=("f:2",)):
     import uitree_app
     import uitree_kinds as K
     K.DRAWN.clear()
@@ -199,7 +199,7 @@ def _split(tmp_path, config):
 
     def opened(ws):
         seen["app"] = P.host(ws, cls)
-    fs = P.frames(config, opened, ["f:2"], str(tmp_path / "carts"))
+    fs = P.frames(config, opened, list(script), str(tmp_path / "carts"))
     return K, fs, seen["app"].engine
 
 
@@ -230,6 +230,19 @@ def test_a_splits_column_centres_and_its_button_takes_its_natural_width(tmp_path
     assert by > cy + ch // 3, (by, cy, ch)      # pushed down from the cell's top
     assert by + bh < cy + ch * 2 // 3, (by, cy, ch)
     assert bw < 200, bw
+
+
+def test_a_splits_column_centres_in_the_frame_it_first_draws(tmp_path, monkeypatch):
+    """The column is measured before it draws (the toolkit's `measure`), so
+    its first frame stands where every later one does: no frame centres it
+    late."""
+    import ui
+    tops = []
+    real = ui.button
+    monkeypatch.setattr(ui, "button", lambda t, *a: (
+        tops.append(ui.measure("button", t, a[1] if len(a) > 1 else None)[1]), real(t, *a))[1])
+    _split(tmp_path, "p4_1024x600_fs2_windowed")
+    assert len(tops) > 1 and len(set(tops)) == 1, tops
 
 
 def test_a_placed_page_on_the_desk_names_its_keys(tmp_path, monkeypatch):

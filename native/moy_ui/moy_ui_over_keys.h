@@ -47,6 +47,7 @@ enum {
     MOY_UI_OV_FOCUS,
     MOY_UI_OV_FOLLOW,
     MOY_UI_OV_SECRET,
+    MOY_UI_OV_FIT,
     MOY_UI_OV_COUNT
 };
 
@@ -130,6 +131,7 @@ enum {
 // The second flags word's bits.
 #define MOY_UI_O2_FOLLOW 0x1
 #define MOY_UI_O2_SECRET 0x2
+#define MOY_UI_O2_FIT 0x4
 
 typedef struct {
     const char *name;
@@ -176,6 +178,7 @@ typedef struct {
     {"focus", MOY_UI_KIND_TEXT, MOY_UI_AT_FLAGS, 28}, \
     {"follow", MOY_UI_KIND_FLAG, MOY_UI_AT_FLAGS2, 0}, \
     {"secret", MOY_UI_KIND_FLAG, MOY_UI_AT_FLAGS2, 1}, \
+    {"fit", MOY_UI_KIND_FLAG, MOY_UI_AT_FLAGS2, 2}, \
 }
 
 #endif

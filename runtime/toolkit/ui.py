@@ -215,6 +215,7 @@ _OVER_KEYS = (
     ('focus', 9, 2, 28),
     ('follow', 2, 4, 0),
     ('secret', 2, 4, 1),
+    ('fit', 2, 4, 2),
 )
 (_K_COLOUR, _K_TRI, _K_FLAG, _K_WASH, _K_AXIS, _K_INT, _K_INDEX, _K_PAIR, _K_QUAD,
  _K_TEXT, _K_TEXTS) = range(11)
@@ -334,26 +335,60 @@ def _tone(o):
     return _TONES.index(v) if v in _TONES else 0
 
 
+_ALIGN = {"center": 1, "end": 4}
+
+
+def _has_text(o):
+    return o and ("wrap" in o or "align" in o or "tone" in o or "face" in o
+                  or "inset" in o or "sunk" in o)
+
+
+def _text_opts(o):
+    """`o`'s text options, for the next label (or its measure)."""
+    lines = (o.get("lines") or 16) if o.get("wrap") else 0
+    f = o.get("face")
+    _C.api_text(_T[0], lines, _ALIGN.get(o.get("align"), 0) or (3 if o.get("sunk")
+                else 2 if o.get("inset") else 0),
+                _tone(o), _FACES.index(f) if f in _FACES else -1)
+
+
 def label(text, o=None):
     """A row of text; no stop. `o`'s `wrap` breaks it at word breaks in the
     row's width, at most `lines` lines (16 where it names none) with an
-    ellipsis after the last; `align` "center" centres each line; `tone`
+    ellipsis after the last; `align` "center" centres each line, "end" sets
+    it at the row's end; `tone`
     ("dim", "value", "danger") inks it; `face` ("title", "caption", "mono",
     "result" -- Calc's display, the largest) sets it in another type role; `inset` stands it in from the page's edges as a
     group's caption is; `sunk` sets it on a `sunk` inset across the row (a
     stopped run's error, in the "mono" face). Such a label is as tall as its
-    lines. (The board's
+    lines; stacked in a group it lies on the group's card. (The board's
     and the browser's module read these from the dict itself: modmoy_ui.c's
     label_text.)"""
     t = _T
-    if o and not _OVER_DICT and ("wrap" in o or "align" in o or "tone" in o or "face" in o
-                                 or "inset" in o or "sunk" in o):
-        lines = (o.get("lines") or 16) if o.get("wrap") else 0
-        f = o.get("face")
-        _C.api_text(t[0], lines, 1 if o.get("align") == "center" else 3 if o.get("sunk")
-                    else 2 if o.get("inset") else 0,
-                    _tone(o), _FACES.index(f) if f in _FACES else -1)
+    if not _OVER_DICT and _has_text(o):
+        _text_opts(o)
     _C.api_label(t[0], t[1], t[2], text, _over(o))
+
+
+_MEASURE = ("label", "button")
+
+
+def measure(verb, text, o=None):
+    """The box `ui.<verb>(text, o)` would take called next, drawing nothing
+    and placing nothing: `(x, y, w, h, step)`, `y` where the stack stands
+    (or `ui.at`'s), `w` what its text needs (a button's natural width) at
+    most the row's, `step` how far the stack moves down past it (0 under
+    `ui.at`). `verb` "label" or "button"."""
+    t = _T
+    if verb == "label" and _has_text(o):
+        _text_opts(o)
+    return _C.api_measure(t[0], t[1], t[2], _MEASURE.index(verb), text, _over(o))
+
+
+def space(h):
+    """The stack moves `h` pixels down, drawing nothing and placing no stop
+    (a column centred from its `measure`)."""
+    _C.api_space(_T[0], h)
 
 
 def button(label, kind="normal", o=None):
@@ -940,8 +975,8 @@ def scroll(id=None, o=None):
 # and writes in place.
 TXO_ROWS, TXO_WRAP, TXO_SYNTAX, TXO_FOLLOW, TXO_GUTTER, TXO_CARET = 0, 1, 2, 3, 4, 5
 TXO_SEL, TXO_ERR, TXO_FIND_CI, TXO_LEFT, TXO_MARK, TXO_GEN, TXO_TOP = 7, 11, 12, 13, 14, 15, 16
-TXO_FONT, TXO_PAPER = 17, 18
-TXO_LEN = 19
+TXO_FONT, TXO_PAPER, TXO_FACE, TXO_KEYS = 17, 18, 19, 20
+TXO_LEN = 21
 _TXO = array("i", [0] * TXO_LEN)        # the dict form's, packed each call
 _SYNTAXES = ("plain", "python", "lua", "json", "sgr", "markdown")
 
@@ -951,7 +986,8 @@ def text_options(o=None, opt=None):
     TXO_LEN words; a new one where None), which it answers: the TXO_*
     words, a caret and a selection their line and column words in turn
     (-1 none), `syntax` its index in ("plain", "python", "lua", "json",
-    "sgr", "markdown"), `top` -1 for none, `font` 0 for none, `paper` -1 for none. The error's words and the find query are
+    "sgr", "markdown"), `top` -1 for none, `font` 0 for none, `paper` -1 for none,
+    `face` 1 for "ui", `keys` 1 for true. The error's words and the find query are
     not words: `text_view` takes them beside the packed form."""
     if opt is None:
         opt = array("i", [0] * TXO_LEN)
@@ -989,6 +1025,8 @@ def text_options(o=None, opt=None):
     opt[17] = int(o.get("font", 0) or 0)
     paper = o.get("paper")
     opt[18] = -1 if paper is None else int(paper)
+    opt[19] = 1 if o.get("face") == "ui" else 0
+    opt[20] = 1 if o.get("keys") else 0
     return opt
 
 
@@ -1001,9 +1039,15 @@ def text_view(id, lines, o=None, err=None, find=None, into=None):
     no column; "plain", "python", "lua", "json", "markdown": a note's
     source, its marks dim), `follow` (a view at its foot
     when lines are added glides to the new foot: a log, a terminal),
-    `gutter` (line numbers), `caret` (a line and column: an input line's).
-    In the mono face; only the rows that changed draw. Answers the first
-    line shown and the rows shown.
+    `gutter` (line numbers), `caret` (a line and column: an input line's),
+    `face` ("mono", the default: the rows that changed draw; "ui": each line
+    a paragraph of prose in the ui face, broken at word breaks across the
+    view, half a line between paragraphs, drawn whole each frame it moves,
+    `top` and `lines_gen` naming paragraphs; no syntax, gutter or caret),
+    `keys` (where its rows run past it, it is a focus stop with no ring:
+    Up and Down scroll it a line until its ends, where they step focus on;
+    PgUp and PgDn scroll it a page less a line). Answers the first line
+    shown and the rows shown (a "ui" view: the paragraphs).
 
     The Python face's own, an editor's (the Code tab's): `sel` (line,
     column, line, column: a selection's two ends), `err` (a line and the
