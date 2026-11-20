@@ -24,7 +24,12 @@ _SIGS = (
     ("uit_state", [_P, _S, _I, _S, _Z], _I),
     ("uit_model", [_P, _I, _S, _Z, _S, _I, _I], _I),
     ("uit_row_of", [_P, _I, _I], _I),
-    ("uit_action", [_P, _S, _S, _S, _S, _I, _I, _I], _I),
+    ("uit_action", [_P, _S, _S, _S, _S, _I, _I, _S], _I),
+    ("uit_letter", [_P, _I], _I),
+    ("uit_labels", [_P, _S, _S, _Z, _S, _Z], _I),
+    ("uit_focused", [_P, c.c_char_p, _Z], _I),
+    ("uit_draft", [_P, _S, c.POINTER(_Z)], c.POINTER(c.c_char)),
+    ("uit_leave", [_P], _I),
     ("uit_set_int", [_P, _I, c.c_int32], _I),
     ("uit_set_num", [_P, _I, c.c_double], _I),
     ("uit_set_text", [_P, _I, _S, _Z], _I),
@@ -52,9 +57,9 @@ _SIGS = (
 
 # the header's numbers
 BOOL, INT, NUM, TEXT, ENUM, ROWOF, MODEL = range(1, 8)
-PAGE, GROUP, LABEL, INFO, LINK, BUTTON, TOGGLE, ROWS, DIALOG = range(1, 10)
+PAGE, GROUP, LABEL, INFO, LINK, BUTTON, TOGGLE, ROWS, DIALOG, SEG, SLIDER, FIELD = range(1, 13)
 EV_NONE, EV_ACTION, EV_WRITE = range(3)
-F_DESK, F_ON_BAR, F_BAND, F_BARE, F_TRACE, F_UP, F_DOWN = 1, 2, 4, 8, 16, 32, 64
+F_DESK, F_ON_BAR, F_BAND, F_BARE, F_TRACE, F_UP, F_DOWN, F_GEN = 1, 2, 4, 8, 16, 32, 64, 128
 F_PAGES_SHIFT = 8
 OWE = 1 << 16
 A_HOOK, A_ROLE_CONFIRM, A_ROLE_BACK, A_ROW = 1, 2, 4, 8
@@ -103,9 +108,27 @@ class Engine:
     def row_of(self, slot, model):
         return self._L.uit_row_of(self._e, slot, model)
 
-    def action(self, name, label, hint, when, off, flags, letter):
+    def action(self, name, label, hint, when, off, flags, letters):
         return self._L.uit_action(self._e, b(name), b(label), b(hint), b(when) if when else None,
-                                  off, flags, letter)
+                                  off, flags, b(letters))
+
+    def letter(self, ch):
+        return self._L.uit_letter(self._e, ch)
+
+    def labels(self, name, keys, words):
+        return self._L.uit_labels(self._e, b(name), keys, len(keys), words, len(words))
+
+    def focused(self):
+        n = self._L.uit_focused(self._e, self._buf, 512)
+        return self._buf.value.decode("utf-8") if n else ""
+
+    def draft(self, key):
+        n = c.c_size_t()
+        p = self._L.uit_draft(self._e, b(key), c.byref(n))
+        return c.string_at(p, n.value).decode("utf-8") if p else None
+
+    def leave(self):
+        return self._L.uit_leave(self._e)
 
     def set_int(self, slot, v):
         return self._L.uit_set_int(self._e, slot, v)
@@ -180,6 +203,11 @@ class Engine:
 
     def dialog(self):
         return self._L.uit_dialog(self._e)
+
+    def back_dialog(self):
+        """Back on a shown dialog: (its first button's action, its key), or -1."""
+        a = self._L.uit_back_dialog(self._e, self._buf, 512)
+        return a if a < 0 else (a, self._buf.value.decode("utf-8"))
 
     def unfocused(self):
         return self._L.uit_unfocused(self._e)

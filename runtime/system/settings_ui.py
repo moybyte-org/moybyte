@@ -121,8 +121,8 @@ class SettingsPages:
 
     def __init__(self, ws, host, damage, close):
         self.pages = {
-            "tz": (uitree_app.Page(tz_page, host, damage, close=lambda: close("tz"), env=ws), "tz_opened"),
-            "paired": (uitree_app.Page(paired_page, host, damage, close=lambda: close("paired"), env=ws),
+            "tz": (uitree_app.hosted_page(tz_page, host, damage, close=lambda: close("tz"), env=ws), "tz_opened"),
+            "paired": (uitree_app.hosted_page(paired_page, host, damage, close=lambda: close("paired"), env=ws),
                        "paired_opened"),
         }
 

@@ -105,11 +105,21 @@ static mp_obj_t eng_row_of(mp_obj_t self, mp_obj_t slot, mp_obj_t model)
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(eng_row_of_obj, eng_row_of);
 
+static mp_obj_t eng_labels(size_t n, const mp_obj_t *a)
+{
+    (void)n;
+    size_t kn, wn;
+    const char *k = str_or_null(a[2], &kn);
+    const char *w = str_or_null(a[3], &wn);
+    return MP_OBJ_NEW_SMALL_INT(uit_labels(eng(a[0]), CSTR(a[1]), k, kn, w, wn));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(eng_labels_obj, 4, 4, eng_labels);
+
 static mp_obj_t eng_action(size_t n, const mp_obj_t *a)
 {
     (void)n;
     return MP_OBJ_NEW_SMALL_INT(uit_action(eng(a[0]), CSTR(a[1]), CSTR(a[2]), CSTR(a[3]), CSTR(a[4]),
-                                           mp_obj_get_int(a[5]), mp_obj_get_int(a[6]), mp_obj_get_int(a[7])));
+                                           mp_obj_get_int(a[5]), mp_obj_get_int(a[6]), CSTR(a[7])));
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(eng_action_obj, 8, 8, eng_action);
 
@@ -250,6 +260,22 @@ static mp_obj_t eng_can(mp_obj_t self, mp_obj_t act, mp_obj_t row)
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(eng_can_obj, eng_can);
 
+static mp_obj_t eng_letter(mp_obj_t self, mp_obj_t ch)
+{
+    return MP_OBJ_NEW_SMALL_INT(uit_letter(eng(self), mp_obj_get_int(ch)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(eng_letter_obj, eng_letter);
+
+static mp_obj_t eng_back_dialog(mp_obj_t self)
+{
+    int a = uit_back_dialog(eng(self), evbuf, sizeof evbuf);
+    if (a < 0)
+        return MP_OBJ_NEW_SMALL_INT(a);
+    mp_obj_t t[2] = {MP_OBJ_NEW_SMALL_INT(a), mp_obj_new_str(evbuf, strlen(evbuf))};
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(eng_back_dialog_obj, eng_back_dialog);
+
 static mp_obj_t eng_dialog(mp_obj_t self)
 {
     return MP_OBJ_NEW_SMALL_INT(uit_dialog(eng(self)));
@@ -261,6 +287,27 @@ static mp_obj_t eng_unfocused(mp_obj_t self)
     return MP_OBJ_NEW_SMALL_INT(uit_unfocused(eng(self)));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(eng_unfocused_obj, eng_unfocused);
+
+static mp_obj_t eng_focused(mp_obj_t self)
+{
+    int n = uit_focused(eng(self), evbuf, sizeof evbuf);
+    return n ? mp_obj_new_str(evbuf, (size_t)n) : MP_OBJ_NEW_QSTR(MP_QSTR_);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(eng_focused_obj, eng_focused);
+
+static mp_obj_t eng_draft(mp_obj_t self, mp_obj_t key)
+{
+    size_t n = 0;
+    const char *s = uit_draft(eng(self), CSTR(key), &n);
+    return s ? mp_obj_new_str(s, n) : mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(eng_draft_obj, eng_draft);
+
+static mp_obj_t eng_leave(mp_obj_t self)
+{
+    return MP_OBJ_NEW_SMALL_INT(uit_leave(eng(self)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(eng_leave_obj, eng_leave);
 
 static mp_obj_t eng_dump(mp_obj_t self)
 {
@@ -291,6 +338,12 @@ static const mp_rom_map_elem_t eng_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_model), MP_ROM_PTR(&eng_model_obj) },
     { MP_ROM_QSTR(MP_QSTR_row_of), MP_ROM_PTR(&eng_row_of_obj) },
     { MP_ROM_QSTR(MP_QSTR_action), MP_ROM_PTR(&eng_action_obj) },
+    { MP_ROM_QSTR(MP_QSTR_labels), MP_ROM_PTR(&eng_labels_obj) },
+    { MP_ROM_QSTR(MP_QSTR_focused), MP_ROM_PTR(&eng_focused_obj) },
+    { MP_ROM_QSTR(MP_QSTR_draft), MP_ROM_PTR(&eng_draft_obj) },
+    { MP_ROM_QSTR(MP_QSTR_leave), MP_ROM_PTR(&eng_leave_obj) },
+    { MP_ROM_QSTR(MP_QSTR_letter), MP_ROM_PTR(&eng_letter_obj) },
+    { MP_ROM_QSTR(MP_QSTR_back_dialog), MP_ROM_PTR(&eng_back_dialog_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_int), MP_ROM_PTR(&eng_set_int_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_num), MP_ROM_PTR(&eng_set_num_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_text), MP_ROM_PTR(&eng_set_text_obj) },

@@ -361,7 +361,7 @@ class RowsPage:
     drawn each frame, its draft Name written on every way out."""
 
     def __init__(self, layer, host):
-        self.engine = uitree_app.Page(rows_page, host, self, gen=True, env=layer)
+        self.engine = uitree_app.hosted_page(rows_page, host, self, gen=True, env=layer)
         self._ws = layer.ws
         self.last = {}                  # each model's rows as this page last wrote them
         self.kept = {}                  # what rows_poll read from a source that has not moved since
@@ -392,18 +392,4 @@ class RowsPage:
 
     def draft(self, key):
         """A commit field's text typed and not yet written, or None."""
-        return self.engine.drafts.get(key)
-
-    def kinds(self):
-        """Each stop the last frame drew, by node key: link, toggle, cycle,
-        seg, slider or field."""
-        out = {}
-        for key, (n, _row) in self.engine.ids.items():
-            if n.kind in ("link", "toggle", "seg", "slider", "field"):
-                out[key] = "cycle" if n.l.get("look") == "cycle" else n.kind
-        return out
-
-    def drawn(self, key):
-        """The kind of node `key` the last frame drew, or None."""
-        got = self.engine.ids.get(key)
-        return got[0].kind if got is not None else None
+        return self.engine.draft(key)

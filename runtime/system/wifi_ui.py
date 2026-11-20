@@ -186,7 +186,7 @@ class WifiPage:
     def __init__(self, sl, host, damage, popover=False):
         self.sl, self.popover = sl, popover
         self.overflows = False          # the popover's card is shorter than its rows (its host says)
-        self.engine = uitree_app.Page(popover_page if popover else wifi_page, host, damage, env=sl)
+        self.engine = uitree_app.hosted_page(popover_page if popover else wifi_page, host, damage, env=sl)
         self.engine.bare = popover      # the popover's card is its ground
         self.nets = self.known = self.pick = self.ssid = self.ip = None
         self.sel = -1

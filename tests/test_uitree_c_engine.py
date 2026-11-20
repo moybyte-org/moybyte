@@ -97,3 +97,59 @@ def test_a_kind_the_engine_lacks_is_refused_by_name():
     eng = uitree_c.CEngine(S.decl_of(S.module_of(mod.build)), build, _Host(), None, None)
     with pytest.raises(uitree_c.EngineGap, match="rule"):
         eng._ready()
+
+
+PUSHED = '''
+import uitree as ui
+
+s = ui.state(n=0)
+
+
+def more():
+    ui.push(details)
+
+
+def add():
+    s.n += 1
+
+
+ui.action("more", "Details", more)
+ui.action("add", "Add", add)
+
+
+def build():
+    with ui.page("First"):
+        with ui.group("A"):
+            ui.link("add", focus="n=0")
+            ui.link("more")
+
+
+def details():
+    with ui.page("Details"):
+        with ui.group("B"):
+            ui.info("Count", "{n}")
+            ui.link("add")
+            ui.link("more", focus="n=0")
+'''
+
+
+@pytest.mark.parametrize("engine", ("python", "c"))
+def test_a_pushed_page_opens_on_its_own_focus_node(engine, tmp_path):
+    """Spec §9: a fresh page's first frame lands focus on its focus= node,
+    the pushed page's own, whatever the page under it drew."""
+    import uitree_app
+    import uitree_c
+    import uitree_parity as P
+    app_py = tmp_path / "pushed" / "app.py"
+    app_py.parent.mkdir()
+    app_py.write_text(PUSHED)
+    mod = C._module(str(app_py))
+    cls = uitree_app.app_layer("pushed_" + engine, "Pushed", mod.build,
+                               engine=uitree_c.CEngine if engine == "c" else None)
+    seen = {}
+
+    def opened(ws):
+        seen["app"] = P.host(ws, cls)
+    focus = P.Surface(opened, probe=lambda ws: seen["app"].engine.focus_key)
+    fs = P.frames(C.CONFIGS[0], focus, ["k:down", "k:a"])
+    assert [f.state for f in fs] == ["add", "more", "more"], [f.state for f in fs]

@@ -77,7 +77,7 @@ class PermsPage:
     NEEDS = ("carts", "install", "nav")
 
     def __init__(self, ctx, host, damage):
-        self.page = uitree_app.Page(build, host, damage, env=ctx)
+        self.page = uitree_app.hosted_page(build, host, damage, env=ctx)
 
     def open(self):
         self.page.open()

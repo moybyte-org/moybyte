@@ -488,6 +488,19 @@ static int piece(uit_t *e, const char *b, size_t n, int model, uit_tmpl_t *T)
         uit_op_t o = {OP_FMT, r.rk, r.ref, r.f, (uint16_t)spec, 0};
         return op_add(e, o);
     }
+    if (pn > 4 && !memcmp(p, "map ", 4)) {
+        const char *a = p + 4;
+        size_t an = pn - 4;
+        trim(&a, &an);
+        for (int i = 0; i < e->nlabels; i++) {
+            const char *nm = uit_str(e, e->labels[i].name);
+            if (strlen(nm) == an && !memcmp(nm, a, an)) {
+                uit_op_t o = {OP_MAP, r.rk, r.ref, r.f, (uint16_t)i, 0};
+                return op_add(e, o);
+            }
+        }
+        return uit_fail(e, UIT_E_NAME, "no label table %.*s", (int)an, a);
+    }
     return uit_fail(e, UIT_E_LANG, "transform %.*s", (int)pn, p);
 }
 
@@ -645,6 +658,15 @@ static void render(uit_t *e, int t, int model, int row)
         case OP_CHOICE:
             render(e, uit_cond_eval(e, o->ref, model, row) ? o->c : o->d, model, row);
             break;
+        case OP_MAP: {
+            ref_get(e, o->rk, o->ref, o->f, model, row, &v);
+            uint32_t at = b->n;
+            val_text(b, &v);
+            const char *w = uit_label_word(e, o->c, b->p + at, b->n - at);
+            b->n = at;
+            uit_buf_printf(b, "%s", w);
+            break;
+        }
         }
     }
 }

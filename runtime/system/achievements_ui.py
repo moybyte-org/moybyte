@@ -207,8 +207,8 @@ class AchievementsPage:
 
     def _page(self):
         if self.page is None:
-            self.page = uitree_app.Page(achievements_page, self._host, self._ctx.damage, gen=True,
-                                        env=self._ctx)
+            self.page = uitree_app.hosted_page(achievements_page, self._host, self._ctx.damage, gen=True,
+                                               env=self._ctx)
         return self.page
 
     def open(self):

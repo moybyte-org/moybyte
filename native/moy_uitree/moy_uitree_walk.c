@@ -3,6 +3,7 @@
 // `Engine._replay_page` and its `_r_*`), with focus, the hints band, a
 // list's cursor and the queue of what the user did.
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "moy_uitree_int.h"
@@ -36,6 +37,18 @@ int uit_can(uit_t *e, int a, int row)
     return uit_act_can(e, a, -1, row);
 }
 
+int uit_letter(uit_t *e, int ch)
+{
+    if (ch >= 'A' && ch <= 'Z')
+        ch += 32;
+    if (ch <= 0 || ch > 127 || uit_dialog(e) >= 0)
+        return -1;
+    for (int a = 0; a < e->nacts; a++)
+        if (strchr(uit_str(e, e->acts[a].letters), ch) && uit_act_can(e, a, -1, -1))
+            return a;
+    return -1;
+}
+
 int uit_shown(uit_t *e, int node, int model, int row)
 {
     const uit_node_t *N = NODE(node);
@@ -44,7 +57,8 @@ int uit_shown(uit_t *e, int node, int model, int row)
 
 static int is_stop(int kind)
 {
-    return kind == UIT_LINK || kind == UIT_BUTTON || kind == UIT_TOGGLE;
+    return kind == UIT_LINK || kind == UIT_BUTTON || kind == UIT_TOGGLE || kind == UIT_SEG ||
+           kind == UIT_SLIDER || kind == UIT_FIELD;
 }
 
 static const char *row_key(uit_t *e, int model, int row)
@@ -64,11 +78,11 @@ static void node_id(uit_t *e, int k, int model, int row, char out[UIT_ID_MAX + 1
 
 // -- the trace's "drew": a text prop's value, compared with the last drawn ----
 
-static void drew(uit_t *e, int k, int prop, int model, int row, const char *v, size_t n)
+static void drew(uit_t *e, int k, int t, int model, int row, const char *v, size_t n)
 {
     if (!(e->flags & UIT_F_TRACE))
         return;
-    int t = prop == 0 ? NODE(k)->t_main : NODE(k)->t_value;
+    int prop = t;
     const char *src = uit_str(e, e->tmpls[t].src);
     if (!strchr(src, '{'))
         return;
@@ -81,14 +95,12 @@ static void drew(uit_t *e, int k, int prop, int model, int row, const char *v, s
         }
     if (D && (strlen(D->val) != n || memcmp(D->val, v, n))) {
         uit_buf_t b = {0};
-        static const char *KN[UIT_KINDS] = {"", "page", "group", "label", "info", "link", "button",
-                                            "toggle", "rows", "dialog"};
         if (row >= 0)
             uit_buf_printf(&b, "'%s/%s' ", rk, uit_str(e, NODE(k)->key));
         uit_buf_repr(&b, src, strlen(src));
         uit_buf_printf(&b, " -> ");
         uit_buf_repr(&b, v, n);
-        uit_trace(e, "drew", KN[NODE(k)->kind], "%s", b.p);
+        uit_trace(e, "drew", uit_kind_names[NODE(k)->kind], "%s", b.p);
         uit_buf_free(&b);
     }
     if (!D) {
@@ -110,20 +122,25 @@ static void drew(uit_t *e, int k, int prop, int model, int row, const char *v, s
     }
 }
 
-// A text prop now (0 the main one, 1 the value): an action's label where a
-// link or button names none.
-static uint32_t text(uit_t *e, int k, int prop, int model, int row, uint32_t *n)
+// A text prop now (`_t`), template `t` of node `k` (-1: none given): an
+// action's label for the main text a link or button names none of.
+static uint32_t text_t(uit_t *e, int k, int t, int model, int row, uint32_t *n)
 {
     const uit_node_t *N = NODE(k);
-    int t = prop == 0 ? N->t_main : N->t_value;
     if (t < 0) {
-        const char *s = prop == 0 && N->act >= 0 ? uit_str(e, e->acts[N->act].label) : "";
+        const char *s = t == N->t_main && N->act >= 0 ? uit_str(e, e->acts[N->act].label) : "";
         *n = (uint32_t)strlen(s);
         return (uint32_t)uit_buf_put(&e->scratch, s, *n);
     }
     uint32_t at = uit_tmpl_render(e, t, model, row, n);
-    drew(e, k, prop, model, row, e->scratch.p + at, *n);
+    drew(e, k, t, model, row, e->scratch.p + at, *n);
     return at;
+}
+
+// The main text (prop 0) or the value (prop 1).
+static uint32_t text(uit_t *e, int k, int prop, int model, int row, uint32_t *n)
+{
+    return text_t(e, k, prop == 0 ? NODE(k)->t_main : NODE(k)->t_value, model, row, n);
 }
 
 // -- ids --------------------------------------------------------------------------
@@ -186,9 +203,7 @@ static void fire(uit_t *e, int a, int k, int model, int row, const char *how)
         snprintf(id, sizeof id, "%s", uit_str(e, NODE(k)->key));
     else
         snprintf(id, sizeof id, "%s/%s", row_key(e, model, row), uit_str(e, NODE(k)->key));
-    static const char *KN[UIT_KINDS] = {"", "page", "group", "label", "info", "link", "button",
-                                        "toggle", "rows", "dialog"};
-    uit_buf_printf(&b, "%s ", how ? how : KN[NODE(k)->kind]);
+    uit_buf_printf(&b, "%s ", how ? how : uit_kind_names[NODE(k)->kind]);
     uit_buf_repr(&b, id, strlen(id));
     uit_buf_printf(&b, " on ");
     uint32_t n, at = uit_tmpl_render(e, NODE(0)->t_main, -1, -1, &n);
@@ -305,6 +320,186 @@ void uit_after_removal(uit_t *e, int node)
     e->slots[N->cur].sync = NULL;
     e->slots[N->cur].sync_set = 1;
     UIT_FREE(old);
+}
+
+// -- two-way controls: the engine's writes ------------------------------------------
+
+// The repr of text `s` into `b`, its characters starred for a secret field.
+static void repr_of(uit_buf_t *b, const char *s, size_t n, int secret)
+{
+    if (!secret) {
+        uit_buf_repr(b, s, n);
+        return;
+    }
+    uit_buf_printf(b, "'");
+    for (size_t i = 0; i < n; i++)
+        if ((s[i] & 0xC0) != 0x80)
+            uit_buf_printf(b, "*");
+    uit_buf_printf(b, "'");
+}
+
+// Node `k`'s state written (`_two_way`): its trace line `was -> now   (how)`,
+// the write's event, then the action `then` names (-1 none).
+static void wrote(uit_t *e, int k, const char *was, const char *now, const char *how, int then)
+{
+    const uit_node_t *N = NODE(k);
+    if (e->flags & UIT_F_TRACE)
+        uit_trace(e, "state", uit_str(e, e->slots[N->slot].name), "%s -> %s   (%s)", was, now, how);
+    uit_event(e, UIT_EV_WRITE, N->slot, -1, -1, NULL, 0);
+    if (then >= 0)
+        fire(e, then, k, -1, -1, NULL);
+}
+
+// Node `k`'s text state written from `s`: the trace's reprs, the write, `then`.
+static void wrote_text(uit_t *e, int k, const char *s, size_t n, const char *how, int then)
+{
+    uit_slot_t *S = &e->slots[NODE(k)->slot];
+    int secret = NODE(k)->kind == UIT_FIELD && (NODE(k)->lit & NL_SECRET);
+    uit_buf_t was = {0}, now = {0}, why = {0};
+    if (e->flags & UIT_F_TRACE) {
+        repr_of(&was, S->s ? S->s : "", S->sn, secret);
+        repr_of(&now, s, n, secret);
+        // how: "from" (a control's own write), "typed" or "field" (a commit)
+        if (how[0] == 'f' && how[1] == 'r')
+            uit_buf_printf(&why, "from %s ", uit_kind_names[NODE(k)->kind]);
+        else
+            uit_buf_printf(&why, how[0] == 't' ? "typed in field " : "field ");
+        const char *key = uit_str(e, NODE(k)->key);
+        uit_buf_repr(&why, key, strlen(key));
+        if (how[0] == 'f' && how[1] == 'i')
+            uit_buf_printf(&why, " committed");
+    }
+    uit_set_text(e, NODE(k)->slot, s, n);
+    wrote(e, k, was.p ? was.p : "", now.p ? now.p : "", why.p ? why.p : "", then);
+    uit_buf_free(&was);
+    uit_buf_free(&now);
+    uit_buf_free(&why);
+}
+
+static uit_draft_t *draft_find(uit_t *e, const char *key)
+{
+    for (int i = 0; i < e->ndrafts; i++)
+        if (!strcmp(e->drafts[i].key, key))
+            return &e->drafts[i];
+    return NULL;
+}
+
+// Field `key`'s buffer, `cap` bytes at least.
+static uit_draft_t *draft_of(uit_t *e, const char *key, size_t cap)
+{
+    uit_draft_t *D = draft_find(e, key);
+    if (!D) {
+        if (uit_grow((void **)&e->drafts, &e->cdrafts, e->ndrafts + 1, sizeof *e->drafts))
+            return NULL;
+        D = &e->drafts[e->ndrafts];
+        memset(D, 0, sizeof *D);
+        D->key = UIT_MALLOC(strlen(key) + 1);
+        if (!D->key)
+            return NULL;
+        strcpy(D->key, key);
+        e->ndrafts++;
+    }
+    if (cap < 1)
+        cap = 1;
+    if (D->cap < cap) {
+        char *p = UIT_REALLOC(D->buf, cap);
+        if (!p)
+            return NULL;
+        D->buf = p;
+        D->cap = (uint16_t)cap;
+    }
+    return D;
+}
+
+const char *uit_draft(const uit_t *e, const char *key, size_t *n)
+{
+    uit_draft_t *D = draft_find((uit_t *)e, key);
+    if (!D || !D->has)
+        return NULL;
+    *n = D->n;
+    return D->buf;
+}
+
+// A commit field's draft written to its state (`_commit_field`): Enter, focus
+// leaving it, every way out. changed= runs when the state moves.
+static void commit_field(uit_t *e, int k)
+{
+    uit_draft_t *D = draft_find(e, uit_str(e, NODE(k)->key));
+    if (!D || !D->has)
+        return;
+    D->has = 0;
+    const uit_slot_t *S = &e->slots[NODE(k)->slot];
+    if (D->n == S->sn && !memcmp(D->buf, S->s ? S->s : "", D->n))
+        return;
+    wrote_text(e, k, D->buf, D->n, "field", NODE(k)->changed);
+}
+
+int uit_leave(uit_t *e)
+{
+    for (int i = 0; i < e->nids; i++) {
+        const uit_id_t *I = &e->ids[i];
+        if (I->kind == UIT_FIELD && I->gen == e->gen && I->node >= 0 && I->node < e->nnodes)
+            commit_field(e, I->node);
+    }
+    return e->nevs - e->evat;
+}
+
+int uit_focused(const uit_t *e, char *buf, size_t cap)
+{
+    if (buf && cap)
+        snprintf(buf, cap, "%s", e->focus_key);
+    return (int)strlen(e->focus_key);
+}
+
+// The items of a seg at the scratch's end, NUL-separated (`words`): their
+// count into *count, the current one's index into *at (-1 none).
+static uint32_t seg_items(uit_t *e, const uit_node_t *N, uint32_t *len, int *count, int *at)
+{
+    const uit_slot_t *S = &e->slots[N->slot];
+    const char *cur = S->s ? S->s : "";
+    uint32_t start = e->scratch.n;
+    *at = -1;
+    *count = 0;
+    if (S->type == UIT_ENUM) {
+        const char *v = uit_str(e, S->vals);
+        for (int i = 0; i < S->nvals; i++) {
+            size_t vn = strlen(v);
+            if (vn == S->sn && !memcmp(v, cur, vn))
+                *at = i;
+            const char *w = N->cur >= 0 ? uit_label_word(e, N->cur, v, vn) : v;
+            uit_buf_puts(&e->scratch, w);
+            v += vn + 1;
+        }
+        *count = S->nvals;
+        if (*at < 0)
+            *at = 0;
+    } else {
+        int m = S->model;
+        const uit_slot_t *M = &e->slots[m];
+        for (int r = 0; r < M->nrows; r++) {
+            const char *key = uit_cell(e, m, r, M->key);
+            if (strlen(key) == S->sn && !memcmp(key, cur, S->sn))
+                *at = r;
+            uint32_t n;
+            uit_tmpl_render(e, N->t_value, m, r, &n);
+        }
+        *count = M->nrows;
+    }
+    *len = e->scratch.n > start ? e->scratch.n - start - 1 : 0;
+    return start;
+}
+
+// The value seg `N`'s item `i` stands for (an enum's value, a row's key).
+static const char *seg_key(uit_t *e, const uit_node_t *N, int i)
+{
+    const uit_slot_t *S = &e->slots[N->slot];
+    if (S->type == UIT_ENUM) {
+        const char *v = uit_str(e, S->vals);
+        while (i-- > 0)
+            v += strlen(v) + 1;
+        return v;
+    }
+    return uit_cell(e, S->model, i, e->slots[S->model].key);
 }
 
 // -- the stops, in the page's order -------------------------------------------------
@@ -471,6 +666,15 @@ static void hints(uit_t *e, uit_buf_t *b, int pages)
         const uit_id_t *F = &e->focused;
         int a = F->act;
         int on = a >= 0 && uit_act_can(e, a, -1, -1);
+        if (F->kind == UIT_FIELD && F->gen == e->gen && (NODE(F->node)->lit & NL_COMMIT)) {
+            static const char DONE[] = "confirm\0Done\0cancel\0Cancel";
+            uit_buf_put(b, DONE, sizeof DONE - 1);
+            return;
+        }
+        if (F->kind == UIT_SEG || F->kind == UIT_SLIDER) {
+            hint_add(b, "change", 6);
+            hint_add(b, "Change", 6);
+        }
         if (F->kind == UIT_TOGGLE) {
             int t = F->gen == e->gen && F->node >= 0 ? NODE(F->node)->t_aux : -1;
             hint_add(b, "confirm", 7);
@@ -522,6 +726,63 @@ static void hints(uit_t *e, uit_buf_t *b, int pages)
 // -- the walk ---------------------------------------------------------------------------
 
 static void walk(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row);
+
+// A field (`_r_field`): a commit field types into its draft, written by
+// Enter or focus leaving it; another writes its state at each edit.
+static void draw_field(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row)
+{
+    const uit_node_t *N = NODE(k);
+    moy_ui_over_t o;
+    char id[UIT_ID_MAX + 1];
+    uint32_t hn = 0, ha = 0, ln, la;
+    over_for(e, k, model, row, c, &o, id);
+    if (N->t_aux >= 0)
+        ha = text_t(e, k, N->t_aux, model, row, &hn);
+    la = text(e, k, 0, model, row, &ln);
+    size_t max = N->btn;
+    uit_draft_t *D = draft_of(e, uit_str(e, N->key), max);
+    if (!D)
+        return;
+    const uit_slot_t *S = &e->slots[N->slot];
+    int commit = (N->lit & NL_COMMIT) != 0;
+    const char *cur = commit && D->has ? D->buf : (S->s ? S->s : "");
+    size_t cn = commit && D->has ? D->n : S->sn;
+    uint32_t was = (uint32_t)uit_buf_put(&e->scratch, cur, cn);
+    size_t len = cn;
+    if (len > max) {
+        len = max;
+        while (len > 0 && ((uint8_t)e->scratch.p[was + len] & 0xC0) == 0x80)
+            len--;              // never half a character
+    }
+    memmove(D->buf, e->scratch.p + was, len);
+    if (N->lit & NL_SECRET) {
+        int32_t one = 1;
+        moy_ui_over_put(&o, MOY_UI_OV_SECRET, &one);
+    }
+    if (N->t_aux >= 0)
+        moy_ui_over_text(&o, MOY_UI_OV_HINT, sspan(e, ha, hn));
+    int32_t r = moy_ui_api_field(c, s, sspan(e, la, ln), (uint8_t *)D->buf, max, len, &o);
+    size_t nl = (size_t)(r & 0xffff);
+    int done = (r & 0x10000) != 0;
+    int moved = nl != cn || memcmp(D->buf, e->scratch.p + was, nl);
+    if (commit) {
+        if (moved) {
+            D->has = 1;
+            D->n = (uint16_t)nl;
+            e->edits++;
+        }
+        if (done) {
+            commit_field(e, k);
+            if (N->on >= 0)
+                fire(e, N->on, k, -1, -1, NULL);
+        }
+        return;
+    }
+    if (moved)
+        wrote_text(e, k, D->buf, nl, "typed", N->changed);
+    if (done && N->on >= 0)
+        fire(e, N->on, k, -1, -1, NULL);
+}
 
 static void draw(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row)
 {
@@ -575,16 +836,58 @@ static void draw(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int m
         int got = moy_ui_api_toggle(c, s, sspan(e, a1, n1), cur, &o) != 0;
         if (got != cur) {
             uit_set_int(e, N->slot, got);
-            const char *key = uit_str(e, N->key);
             uit_buf_t b = {0};
+            const char *key = uit_str(e, N->key);
+            uit_buf_printf(&b, "from toggle ");
             uit_buf_repr(&b, key, strlen(key));
-            uit_trace(e, "state", uit_str(e, S->name), "%s -> %s   (from toggle %s)", cur ? "True" : "False",
-                      got ? "True" : "False", b.p);
+            wrote(e, k, cur ? "True" : "False", got ? "True" : "False", b.p, N->on);
             uit_buf_free(&b);
-            uit_event(e, UIT_EV_WRITE, N->slot, -1, -1, NULL, 0);
         }
         break;
     }
+    case UIT_SEG: {
+        a1 = text(e, k, 0, model, row, &n1);
+        int count, at;
+        uint32_t len, items = seg_items(e, N, &len, &count, &at);
+        over_for(e, k, model, row, c, &o, id);
+        int got = moy_ui_api_choice(c, s, (N->lit & NL_CYCLE) ? 3 : 4, sspan(e, a1, n1),
+                                    (const uint8_t *)e->scratch.p + items, len, at, &o);
+        if (got >= 0 && got < count && got != at) {
+            const char *v = seg_key(e, N, got);
+            wrote_text(e, k, v, strlen(v), "from", N->on);
+        }
+        break;
+    }
+    case UIT_SLIDER: {
+        uint32_t ln, hn, la = uit_tmpl_render(e, N->t_value, model, row, &ln);
+        int32_t lo = (int32_t)strtol(e->scratch.p + la, NULL, 10);
+        uint32_t ha = uit_tmpl_render(e, N->t_aux, model, row, &hn);
+        int32_t hi = (int32_t)strtol(e->scratch.p + ha, NULL, 10);
+        a1 = text(e, k, 0, model, row, &n1);
+        over_for(e, k, model, row, c, &o, id);
+        if (N->lit & NL_STEPS) {
+            int32_t one = 1;
+            moy_ui_over_put(&o, MOY_UI_OV_STEPS, &one);
+        }
+        int32_t cur = e->slots[N->slot].i;
+        int32_t got = moy_ui_api_slider(c, s, sspan(e, a1, n1), cur, lo, hi, &o);
+        if (got != cur) {
+            uit_set_int(e, N->slot, got);
+            char was[16], now[16];
+            snprintf(was, sizeof was, "%ld", (long)cur);
+            snprintf(now, sizeof now, "%ld", (long)got);
+            uit_buf_t b = {0};
+            const char *key = uit_str(e, N->key);
+            uit_buf_printf(&b, "from slider ");
+            uit_buf_repr(&b, key, strlen(key));
+            wrote(e, k, was, now, b.p, N->on);
+            uit_buf_free(&b);
+        }
+        break;
+    }
+    case UIT_FIELD:
+        draw_field(e, c, s, k, model, row);
+        break;
     case UIT_ROWS: {
         const uit_slot_t *M = &e->slots[N->slot];
         uit_after_removal(e, k);
@@ -666,7 +969,7 @@ static int row_stop_id(uit_t *e, int lst, const char *key, size_t n, char out[UI
     if (uit_row_find(e, NODE(lst)->slot, key, n) < 0)
         return 0;
     KIDS(lst, g)
-    if (is_stop(NODE(g)->kind)) {
+    if (is_stop(NODE(g)->kind) && NODE(g)->kind != UIT_SEG) {
         snprintf(out, UIT_ID_MAX + 1, "%.*s/%s", (int)n, key, uit_str(e, NODE(g)->key));
         return 1;
     }
@@ -684,7 +987,7 @@ static int land_focus(uit_t *e, moy_ui_ctx_t *c, char ahead[UIT_ID_MAX + 1])
     int moved = 0;
     ahead[0] = 0;
     char fid[UIT_ID_MAX + 1];
-    int fresh_prev = e->fresh && e->nprev;
+    int fresh_prev = e->fresh && e->nprev && e->prev[0].gen == e->gen;    // not another page's
     if (fresh_prev) {
         e->fresh = 0;
     } else if (e->fresh && e->nnodes) {
@@ -745,7 +1048,7 @@ static int land_focus(uit_t *e, moy_ui_ctx_t *c, char ahead[UIT_ID_MAX + 1])
     return moved;
 }
 
-static void focus_after(uit_t *e, moy_ui_ctx_t *c, int moved, const char *ahead)
+static void focus_after(uit_t *e, moy_ui_ctx_t *c, int moved, const char *ahead, const uit_id_t *last)
 {
     if (ahead[0] && !id_find(e->ids, e->nids, ahead))
         uit_want_focus(e, ahead);
@@ -756,6 +1059,9 @@ static void focus_after(uit_t *e, moy_ui_ctx_t *c, int moved, const char *ahead)
     if (I)
         e->focused = *I;
     snprintf(e->focus_key, sizeof e->focus_key, "%s", fl > 0 ? f : "");
+    if (last && last->kind == UIT_FIELD && last->gen == e->gen &&
+        (!I || I->node != last->node || I->gen != last->gen))
+        commit_field(e, last->node);    // focus left a commit field: its draft is written
     if (!I || moved)
         return;
     int m = uit_model_of(e, I->node);
@@ -786,6 +1092,8 @@ int uit_frame(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int x, int y, i
     e->cx = (int16_t)x, e->cy = (int16_t)y, e->cw = (int16_t)w, e->ch = (int16_t)h;
     e->scratch.n = 0;
     int pages = (flags >> 8) & 0xff;
+    uit_id_t last = e->focused;             // the last frame's focus
+    int had_last = e->has_focused;
     // the page
     moy_ui_over_t o;
     moy_ui_over_none(&o);
@@ -794,6 +1102,14 @@ int uit_frame(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int x, int y, i
     if (flags & UIT_F_BARE) {
         int32_t one = 1;
         moy_ui_over_put(&o, MOY_UI_OV_BARE, &one);
+    }
+    if ((flags & UIT_F_GEN) && e->gen_safe) {
+        uint32_t g = (uint32_t)e->gen + e->edits;
+        for (int i = 0; i < e->nslots; i++)
+            if (e->slots[i].in_gen)
+                g += e->slots[i].ver;
+        int32_t gen = (int32_t)(g & 0x7fffffff);
+        moy_ui_over_put(&o, MOY_UI_OV_GEN, &gen);
     }
     uint32_t n, at = text(e, 0, 0, -1, -1, &n);
     moy_ui_box_t box;
@@ -868,7 +1184,7 @@ int uit_frame(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int x, int y, i
     // after: what holds focus, and whether the band named another node's verbs
     int had = e->has_focused;
     uit_id_t was = e->focused;
-    focus_after(e, c, moved, ahead);
+    focus_after(e, c, moved, ahead, had_last ? &last : NULL);
     int owe = 0;
     if (had != e->has_focused || (had && (was.node != e->focused.node || was.gen != e->focused.gen))) {
         uit_buf_t hb2 = {0};

@@ -117,7 +117,7 @@ class WebConsoleUI:
 
     def page(self):
         if self._pg is None:
-            self._pg = uitree_app.Page(web_page, self.host, _Damage(self._damage), env=self)
+            self._pg = uitree_app.hosted_page(web_page, self.host, _Damage(self._damage), env=self)
             self._pg.open()
         return self._pg
 

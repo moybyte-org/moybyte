@@ -59,7 +59,7 @@ class LogPage:
         self.lines = []
         self._first = 0               # the running number of lines[0], each line's key
         self._seen = 0                # the seq the next read starts at
-        self.engine = None if host is None else uitree_app.Page(log_page, host, damage, env=env)
+        self.engine = None if host is None else uitree_app.hosted_page(log_page, host, damage, env=env)
 
     def open(self, pid=None):
         self.pid = pid

@@ -16,6 +16,8 @@
 #   env                   what the host handed the engine running this handler
 #   app_layer             the class a manifest names, made from a build
 #   Page                  a build hosted by a surface still drawn with today's verbs
+#   use_engine            which engine runs the apps and hosted pages made from now on
+#   hosted_page           a hosted page on the engine in use
 """The UI tree's replay: a built tree drawn each frame through the
 toolkit's `ui` verbs, call for call as a hand-written page makes them, so a
 page of standard rows draws today's pixels. No app code runs here but a
@@ -167,6 +169,7 @@ class Engine(S.Builder):
         self.curs = []
         self.tv_stop = False
         self.fresh = False
+        self._new_build = False         # no pass has drawn since the page was built (_land_focus)
         self.focused = None
         self.drawn = {}
         self.actions = decl.actions
@@ -395,6 +398,7 @@ class Engine(S.Builder):
             self.curs = []
             self._walk(self.root)
             self.fresh = True
+            self._new_build = True
             self._gen_ok = self._gen_on and self._gen_safe(self.root)
             if self._gen_ok:
                 self._cell_gens(self.root)
@@ -665,7 +669,9 @@ class Engine(S.Builder):
         want = None                     # (an id or row key, the list's cur state or None) to focus
         if self.want_focus is not None:
             want = [(self.want_focus, None)]
-        if self.fresh and prev:
+        drew_this_build = not self._new_build     # prev: what this build's last pass drew, not another page's
+        self._new_build = False
+        if self.fresh and prev and drew_this_build:
             for i, (node, row) in prev.items():
                 if "focus" in node.p and node.p["focus"](row):
                     want = (want or []) + [(i, None)]
@@ -1494,6 +1500,10 @@ class Engine(S.Builder):
         if "changed" in n.l:
             self.fire(n.l["changed"], (), n, None)
 
+    def draft(self, key):
+        """Commit field `key`'s text typed and not yet written, or None."""
+        return self.drafts.get(key)
+
     def leave(self):
         """Every way out of the page: a commit field's draft is written."""
         self._bind()
@@ -2167,7 +2177,7 @@ class App(AppLayer):
     def __init__(self, ctx, names=None):
         self._surf, self._theme, self._damage = ctx.surface, ctx.theme, ctx.damage
         build = self.BUILD[0]
-        eng = self.ENGINE[0] if self.ENGINE else Engine
+        eng = self.ENGINE[0] if self.ENGINE else _engine_class(False)
         self.engine = eng(S.decl_of(S.module_of(build)), build, ctx.ui, ctx.surface, ctx.damage,
                           getattr(ctx, "files", None), env=ctx)
 
@@ -2261,3 +2271,38 @@ class Page(Engine):
     def __init__(self, build, host, damage, files=None, close=None, gen=False, env=None):
         Engine.__init__(self, S.decl_of(S.module_of(build)), build, host, None, damage, files, gen, env)
         self.close_root = close
+
+
+# -- which engine ------------------------------------------------------------------
+
+ENGINES = ("reference", "c")
+_IN_USE = ["reference"]
+
+
+def use_engine(name):
+    """The engine the apps and hosted pages made from now on run on:
+    "reference" (this module's replay, which the host checker and the
+    CPython tests keep) or "c" (native/moy_uitree, through uitree_c). Every
+    tier starts on the reference; an app made with `engine=` keeps its own."""
+    if name not in ENGINES:
+        raise S.UIError("N01", "uitree_app.use_engine(%r)" % (name,), expected=", ".join(ENGINES),
+                        fix='use_engine("reference") or use_engine("c")')
+    _IN_USE[0] = name
+
+
+def engine_in_use():
+    return _IN_USE[0]
+
+
+def _engine_class(page):
+    if _IN_USE[0] == "c":
+        import uitree_c
+        return uitree_c.CPage if page else uitree_c.CEngine
+    return Page if page else Engine
+
+
+def hosted_page(build, host, damage, files=None, close=None, gen=False, env=None):
+    """A `uitree` page hosted by a surface still drawn with today's verbs
+    (`Page`), on the engine in use."""
+    return _engine_class(True)(build, host, damage, files=files, close=close, gen=gen, env=env)
+

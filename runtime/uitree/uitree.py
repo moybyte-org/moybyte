@@ -2272,6 +2272,7 @@ def seg(label, name, labels=None, text=None, look="seg", **p):
                           fix="add them to ui.labels(%r, ...)" % labels)
         n = _node("seg", name, dict(p, label=label, look=look), where)
         n.l["values"], n.l["words"] = t.values, tuple(tab[v] for v in t.values)
+        n.l["labels"] = labels          # the table's name: what an engine that reads tables names
         return n
     if labels is not None or text is None:
         raise UIError("N01", "ui.seg(%r) over a row_of words each row with text=" % name, where=where,

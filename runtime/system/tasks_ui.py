@@ -284,7 +284,7 @@ class TasksLayer(Layer):
 
     def page(self):
         if self._pg is None:
-            self._pg = uitree_app.Page(tasks_page, self.host, _Damage(self.ws), env=self)
+            self._pg = uitree_app.hosted_page(tasks_page, self.host, _Damage(self.ws), env=self)
         return self._pg
 
     # -- the rows -----------------------------------------------------------

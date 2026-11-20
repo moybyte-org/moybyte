@@ -89,7 +89,7 @@ class UpdateUI:
     def _page(self):
         if self._pg is None:
             import uitree_app
-            self._pg = uitree_app.Page(page, self._host, _Damage(self.ws), env=self)
+            self._pg = uitree_app.hosted_page(page, self._host, _Damage(self.ws), env=self)
             self._pg.open()
         return self._pg
 

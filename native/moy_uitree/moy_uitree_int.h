@@ -49,10 +49,11 @@ typedef struct {
     // the list's cursor sync (_sync): the value focus last landed for this cur slot
     char *sync;
     uint8_t sync_set;
+    uint8_t in_gen;             // the page's gen counts it (all but a cur= nothing else reads)
 } uit_slot_t;
 
 // Template ops.
-enum { OP_LIT = 1, OP_VAL, OP_COUNT, OP_PLURAL, OP_BYTES, OP_FMT, OP_CHOICE };
+enum { OP_LIT = 1, OP_VAL, OP_COUNT, OP_PLURAL, OP_BYTES, OP_FMT, OP_CHOICE, OP_MAP };
 // What a value op reads.
 enum { RK_SLOT = 1, RK_FIELD, RK_ROWOF, RK_SYS, RK_FOCUS, RK_INPUT };
 // System bools (@desk ...).
@@ -90,7 +91,8 @@ typedef struct {
     int16_t hint;               // a template
     int16_t when;               // a cond or -1
     uint8_t off, flags;
-    uint8_t letter;
+    uint8_t letter;             // its first letter, the band's
+    uint16_t letters;           // pool: every letter it answers
 } uit_act_t;
 
 // A prop as the build gave it, for the dump.
@@ -102,19 +104,40 @@ typedef struct {
     uint16_t next;
 } uit_prop_t;
 
+// Node flags (`lit` of a two-way control).
+enum { NL_CYCLE = 1, NL_STEPS = 1, NL_COMMIT = 1, NL_SECRET = 2 };
+
 typedef struct {
-    uint8_t kind, lit;          // lit: a label's tone, a button's kind
+    uint8_t kind, lit;          // a label's tone, a button's kind; a seg's cycle look, a slider's
+                                // steps, a field's commit and secret (NL_*)
     uint16_t parent, kid, last, next;
     uint16_t key;               // pool
     int16_t act;
     int16_t shown, focus;       // conds
-    int16_t t_main, t_value, t_icon, t_aux;     // templates
-    int16_t slot;               // a toggle's state, a rows' model
-    int16_t cur;                // a rows' cur= slot
-    int16_t changed;            // a rows' changed= action
+    int16_t t_main, t_value, t_icon, t_aux;     // templates: t_value a seg's row words and a
+                                // slider's lo; t_aux a rows' empty=, a toggle's or a field's
+                                // hint= and a slider's hi
+    int16_t slot;               // a two-way control's state, a rows' model
+    int16_t cur;                // a rows' cur= slot; a seg's label table
+    int16_t changed;            // a rows' or a field's changed= action
+    int16_t on;                 // a two-way control's on= action
     uint16_t props;
-    uint16_t btn, nbtn;         // a dialog's buttons in e->btns
+    uint16_t btn, nbtn;         // a dialog's buttons in e->btns; a field's max= in btn
 } uit_node_t;
+
+// A label table: its name, keys and words NUL-separated in the pool.
+typedef struct {
+    uint16_t name, keys, words, n;
+} uit_labels_t;
+
+// A field's text as it is typed: its node's key; a commit field's draft
+// while `has`.
+typedef struct {
+    char *key;
+    char *buf;
+    uint16_t cap, n;
+    uint8_t has;
+} uit_draft_t;
 
 // A focus id this frame drew, and what it names.
 typedef struct {
@@ -163,6 +186,8 @@ struct uit {
     int nprops, cprops;
     int16_t *btns;
     int nbtns, cbtns;
+    uit_labels_t *labels;
+    int nlabels, clabels;
     // where the declarations end: a build is truncated back to these
     int decl_done;
     uint32_t m_pool;
@@ -192,7 +217,14 @@ struct uit {
     int ndrew, cdrew;
     uit_order_t *orders;
     int norders, corders;
+    uit_draft_t *drafts;
+    int ndrafts, cdrafts;
+    uint32_t edits;             // drafts' edits: the page's gen moves with them
+    uint8_t gen_safe;           // no template names @focus, @input or @touch
 };
+
+// Each kind's name, as the trace and the dump spell it.
+extern const char *const uit_kind_names[UIT_KINDS];
 
 int uit_grow(void **p, int *cap, int need, size_t size);
 #define UIT_GROW(e, arr, n, cap) uit_grow((void **)&(e)->arr, &(e)->cap, (e)->n + 1, sizeof(*(e)->arr))
@@ -217,6 +249,7 @@ int uit_event(uit_t *e, int kind, int a, int b, int c, const char *text, size_t 
 void uit_slot_repr(uit_t *e, uit_buf_t *b, int slot);
 int uit_set_text_q(uit_t *e, int slot, const char *s, size_t n);   // no version moved
 void uit_after_removal(uit_t *e, int node);
+const char *uit_label_word(const uit_t *e, int table, const char *key, size_t n);
 
 // moy_uitree_walk.c
 int uit_act_can(uit_t *e, int a, int model, int row);

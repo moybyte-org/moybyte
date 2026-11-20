@@ -2,6 +2,7 @@
 // the dump (moy_uitree.h).
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "moy_uitree_int.h"
@@ -184,11 +185,16 @@ void uit_free(uit_t *e)
         UIT_FREE(e->orders[i].key);
         UIT_FREE(e->orders[i].keys);
     }
+    for (int i = 0; i < e->ndrafts; i++) {
+        UIT_FREE(e->drafts[i].key);
+        UIT_FREE(e->drafts[i].buf);
+    }
     free_drew(e);
     UIT_FREE(e->slots); UIT_FREE(e->acts); UIT_FREE(e->tmpls); UIT_FREE(e->ops);
     UIT_FREE(e->conds); UIT_FREE(e->terms); UIT_FREE(e->nodes); UIT_FREE(e->props);
     UIT_FREE(e->btns); UIT_FREE(e->ids); UIT_FREE(e->prev); UIT_FREE(e->evs);
-    UIT_FREE(e->drew); UIT_FREE(e->orders); UIT_FREE(e->want);
+    UIT_FREE(e->drew); UIT_FREE(e->orders); UIT_FREE(e->want); UIT_FREE(e->drafts);
+    UIT_FREE(e->labels);
     uit_buf_free(&e->pool); uit_buf_free(&e->scratch); uit_buf_free(&e->evtext);
     uit_buf_free(&e->trace);
     UIT_FREE(e);
@@ -259,8 +265,47 @@ int uit_row_of(uit_t *e, int slot, int model_slot)
     return 0;
 }
 
+int uit_labels(uit_t *e, const char *name, const char *keys, size_t klen, const char *words,
+               size_t wlen)
+{
+    if (e->decl_done)
+        return uit_fail(e, UIT_E_ARG, "labels %s declared after the first build", name);
+    int n = 0;
+    for (size_t i = 0; i <= klen; i++)
+        n += i == klen || keys[i] == 0;
+    int w = 0;
+    for (size_t i = 0; i <= wlen; i++)
+        w += i == wlen || words[i] == 0;
+    if (n != w)
+        return uit_fail(e, UIT_E_ARG, "labels %s: %d keys, %d words", name, n, w);
+    if (UIT_GROW(e, labels, nlabels, clabels))
+        return UIT_E_NOMEM;
+    int a = pool_puts(e, name), b = pool_put(e, keys, klen), c = pool_put(e, words, wlen);
+    if (a < 0 || b < 0 || c < 0)
+        return UIT_E_NOMEM;
+    uit_labels_t L = {(uint16_t)a, (uint16_t)b, (uint16_t)c, (uint16_t)n};
+    e->labels[e->nlabels] = L;
+    return e->nlabels++;
+}
+
+const char *uit_label_word(const uit_t *e, int table, const char *key, size_t n)
+{
+    const uit_labels_t *L = &e->labels[table];
+    const char *k = uit_str(e, L->keys), *w = uit_str(e, L->words), *dflt = NULL;
+    for (int i = 0; i < L->n; i++) {
+        size_t kn = strlen(k);
+        if (kn == n && !memcmp(k, key, n))
+            return w;
+        if (kn == 1 && k[0] == '_')
+            dflt = w;
+        k += kn + 1;
+        w += strlen(w) + 1;
+    }
+    return dflt ? dflt : "";
+}
+
 int uit_action(uit_t *e, const char *name, const char *label, const char *hint, const char *when,
-               int off, int flags, int letter)
+               int off, int flags, const char *letters)
 {
     if (e->decl_done)
         return uit_fail(e, UIT_E_ARG, "action %s declared after the first build", name);
@@ -285,7 +330,11 @@ int uit_action(uit_t *e, const char *name, const char *label, const char *hint, 
     }
     A.off = (uint8_t)off;
     A.flags = (uint8_t)flags;
-    A.letter = (uint8_t)letter;
+    int ls = pool_puts(e, letters ? letters : "");
+    if (ls < 0)
+        return UIT_E_NOMEM;
+    A.letters = (uint16_t)ls;
+    A.letter = (uint8_t)(letters ? letters[0] : 0);
     e->acts[e->nacts] = A;
     return e->nacts++;
 }
@@ -468,7 +517,9 @@ int uit_node(uit_t *e, int kind, const char *key, int parent)
     N.parent = up(parent);
     N.kid = N.last = N.next = N.props = UIT_NONE;
     N.act = N.shown = N.focus = N.t_main = N.t_value = N.t_icon = N.t_aux = -1;
-    N.slot = N.cur = N.changed = -1;
+    N.slot = N.cur = N.changed = N.on = -1;
+    if (kind == UIT_FIELD)
+        N.btn = 32;
     int me = e->nnodes++;
     e->nodes[me] = N;
     if (parent >= 0) {
@@ -489,6 +540,9 @@ int uit_model_of(uit_t *e, int node)
             return e->nodes[k].slot;
     return -1;
 }
+
+const char *const uit_kind_names[UIT_KINDS] = {"", "page", "group", "label", "info", "link", "button",
+                                               "toggle", "rows", "dialog", "seg", "slider", "field"};
 
 static const char *TONES[] = {"ink", "dim", "value", "danger"};
 static const char *BKINDS[] = {"normal", "primary", "tonal", "danger", "toggle"};
@@ -543,14 +597,22 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
             N->focus = (int16_t)c;
         return add_prop(e, node, name, src, repr, PK_COND, c);
     }
-    if (!strcmp(name, "title") || !strcmp(name, "caption") || !strcmp(name, "text") ||
-        !strcmp(name, "label"))
+    if (kind == UIT_SEG && !strcmp(name, "text")) {
+        // a seg over a row_of: each row's word, a template over its model's rows
+        if (N->slot < 0 || e->slots[N->slot].type != UIT_ROWOF)
+            return uit_fail(e, UIT_E_ARG, "seg text=%s before its row_of", src);
+        model = e->slots[N->slot].model;
+        tslot = &N->t_value;
+    } else if (!strcmp(name, "title") || !strcmp(name, "caption") || !strcmp(name, "text") ||
+               !strcmp(name, "label"))
         tslot = &N->t_main;
-    else if (!strcmp(name, "value"))
+    else if (!strcmp(name, "value") || (!strcmp(name, "lo") && kind == UIT_SLIDER))
         tslot = &N->t_value;
     else if (!strcmp(name, "icon"))
         tslot = &N->t_icon;
-    else if ((!strcmp(name, "empty") && kind == UIT_ROWS) || (!strcmp(name, "hint") && kind == UIT_TOGGLE))
+    else if ((!strcmp(name, "empty") && kind == UIT_ROWS) ||
+             (!strcmp(name, "hint") && (kind == UIT_TOGGLE || kind == UIT_FIELD)) ||
+             (!strcmp(name, "hi") && kind == UIT_SLIDER))
         tslot = &N->t_aux;
     if (tslot) {
         int t = uit_tmpl_compile(e, src, model);
@@ -571,13 +633,49 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         N->lit = (uint8_t)(i < 0 ? 0 : i);
         return add_prop(e, node, name, src, repr, PK_LIT, i);
     }
-    if (!strcmp(name, "bind") && (kind == UIT_TOGGLE || kind == UIT_ROWS)) {
+    if (!strcmp(name, "bind")) {
         int s = uit_slot_find(e, src, strlen(src));
-        if (s < 0 || (kind == UIT_TOGGLE && e->slots[s].type != UIT_BOOL) ||
-            (kind == UIT_ROWS && e->slots[s].type != UIT_MODEL))
-            return uit_fail(e, UIT_E_NAME, "%s bound to %s: no such state of its type", kind == UIT_ROWS ? "rows" : "toggle", src);
+        int t = s < 0 ? 0 : e->slots[s].type;
+        int ok = kind == UIT_TOGGLE ? t == UIT_BOOL : kind == UIT_ROWS ? t == UIT_MODEL
+                 : kind == UIT_SEG ? t == UIT_ENUM || t == UIT_ROWOF : kind == UIT_SLIDER ? t == UIT_INT
+                 : kind == UIT_FIELD ? t == UIT_TEXT : 0;
+        if (!ok)
+            return uit_fail(e, UIT_E_NAME, "%s bound to %s: no such state of its type", uit_kind_names[kind], src);
         N->slot = (int16_t)s;
         return 0;               // the head, not a prop the dump lists
+    }
+    if (!strcmp(name, "labels") && kind == UIT_SEG) {
+        for (int i = 0; i < e->nlabels; i++)
+            if (!strcmp(uit_str(e, e->labels[i].name), src)) {
+                N->cur = (int16_t)i;
+                return add_prop(e, node, name, src, repr, PK_LIT, i);
+            }
+        return uit_fail(e, UIT_E_NAME, "seg labels=%s: no label table of that name", src);
+    }
+    if (!strcmp(name, "look") && (kind == UIT_SEG || kind == UIT_SLIDER)) {
+        if (!strcmp(src, kind == UIT_SEG ? "cycle" : "steps"))
+            N->lit |= kind == UIT_SEG ? NL_CYCLE : NL_STEPS;
+        return add_prop(e, node, name, src, repr, PK_LIT, N->lit);
+    }
+    if (kind == UIT_FIELD && (!strcmp(name, "max") || !strcmp(name, "commit") || !strcmp(name, "secret"))) {
+        if (name[0] == 'm')
+            N->btn = (uint16_t)strtol(src, NULL, 10);
+        else if (!strcmp(src, "True"))
+            N->lit |= name[0] == 'c' ? NL_COMMIT : NL_SECRET;
+        return add_prop(e, node, name, src, repr, PK_LIT, 0);
+    }
+    if ((!strcmp(name, "on") && (kind == UIT_TOGGLE || kind == UIT_SEG || kind == UIT_SLIDER ||
+                                 kind == UIT_FIELD)) ||
+        (!strcmp(name, "changed") && kind == UIT_FIELD)) {
+        for (int a = 0; a < e->nacts; a++)
+            if (!strcmp(uit_str(e, e->acts[a].name), src)) {
+                if (name[0] == 'o')
+                    N->on = (int16_t)a;
+                else
+                    N->changed = (int16_t)a;
+                return add_prop(e, node, name, src, repr, PK_ACT, a);
+            }
+        return uit_fail(e, UIT_E_NAME, "%s %s=%s: no such action", uit_kind_names[kind], name, src);
     }
     if (!strcmp(name, "cur") && kind == UIT_ROWS) {
         int s = uit_slot_find(e, src, strlen(src));
@@ -619,10 +717,46 @@ int uit_node_action(uit_t *e, int node, int action)
     return 0;
 }
 
+static int names_engine_value(const char *src)
+{
+    return strstr(src, "@focus") || strstr(src, "@input") || strstr(src, "@touch");
+}
+
+// What the page's gen counts (`_cell_gens`, `_gen_safe`): every state but a
+// list's cur= that nothing else reads (focus, which the toolkit draws); and
+// whether it may carry one: no text of the build names an engine value.
+static void gen_of_build(uit_t *e)
+{
+    e->gen_safe = 1;
+    for (int t = e->m_tmpls; t < e->ntmpls; t++)
+        if (names_engine_value(uit_str(e, e->tmpls[t].src)))
+            e->gen_safe = 0;
+    for (int c = e->m_conds; c < e->nconds; c++)
+        if (names_engine_value(uit_str(e, e->conds[c].src)))
+            e->gen_safe = 0;
+    for (int i = 0; i < e->nslots; i++)
+        e->slots[i].in_gen = 1;
+    for (int k = 0; k < e->nnodes; k++) {
+        int ck = e->nodes[k].cur;
+        if (e->nodes[k].kind != UIT_ROWS || ck < 0)
+            continue;
+        int read = 0;
+        for (int o = 0; o < e->nops && !read; o++)
+            read = (e->ops[o].rk == RK_SLOT || e->ops[o].rk == RK_ROWOF) && e->ops[o].ref == ck;
+        for (int t = 0; t < e->nterms && !read; t++)
+            read = (e->terms[t].rk == RK_SLOT || e->terms[t].rk == RK_ROWOF) && e->terms[t].ref == ck;
+        for (int j = 0; j < e->nnodes && !read; j++)
+            read = e->nodes[j].kind != UIT_ROWS && e->nodes[j].slot == ck;
+        if (!read)
+            e->slots[ck].in_gen = 0;
+    }
+}
+
 int uit_build_end(uit_t *e)
 {
     e->gen++;
     e->fresh = 1;
+    gen_of_build(e);
     return e->nnodes ? 0 : uit_fail(e, UIT_E_ARG, "a build with no page");
 }
 
@@ -639,6 +773,8 @@ void uit_open(uit_t *e)
     }
     for (int i = 0; i < e->norders; i++)
         e->orders[i].has = 0;
+    for (int i = 0; i < e->ndrafts; i++)
+        e->drafts[i].has = 0;
     e->nevs = e->evat = 0;
     e->evtext.n = 0;
     free_drew(e);
@@ -724,15 +860,12 @@ int uit_trace_next(uit_t *e, char *buf, size_t cap)
 
 // -- the dump ---------------------------------------------------------------------
 
-static const char *KIND_NAMES[UIT_KINDS] = {"", "page", "group", "label", "info", "link", "button",
-                                           "toggle", "rows", "dialog"};
-
 static void dump_node(uit_t *e, uit_buf_t *b, int k, int depth, int model, int row)
 {
     const uit_node_t *N = &e->nodes[k];
     for (int i = 0; i < depth; i++)
         uit_buf_printf(b, "  ");
-    uit_buf_printf(b, "%s ", KIND_NAMES[N->kind]);
+    uit_buf_printf(b, "%s ", uit_kind_names[N->kind]);
     const char *key = uit_str(e, N->key);
     uit_buf_repr(b, key, strlen(key));
     if (N->act >= 0) {
@@ -741,22 +874,32 @@ static void dump_node(uit_t *e, uit_buf_t *b, int k, int depth, int model, int r
         if (!uit_act_can(e, N->act, -1, -1))
             uit_buf_printf(b, "(off: %s)", uit_str(e, e->conds[A->when].src));
     }
-    if (N->kind == UIT_TOGGLE && N->slot >= 0) {
-        uit_buf_printf(b, "  bind=%s:%s = ", uit_str(e, e->slots[N->slot].name),
-                       uit_type_name(e->slots[N->slot].type));
-        uit_slot_repr(e, b, N->slot);
+    if ((N->kind == UIT_TOGGLE || N->kind == UIT_SLIDER || N->kind == UIT_FIELD) && N->slot >= 0) {
+        const uit_slot_t *S = &e->slots[N->slot];
+        uit_buf_printf(b, "  bind=%s:%s = ", uit_str(e, S->name), uit_type_name(S->type));
+        if (N->kind == UIT_FIELD && (N->lit & NL_SECRET)) {
+            uit_buf_printf(b, "'");
+            for (uint32_t i = 0; i < S->sn; i++)
+                if ((S->s[i] & 0xC0) != 0x80)
+                    uit_buf_printf(b, "*");
+            uit_buf_printf(b, "'");
+        } else {
+            uit_slot_repr(e, b, N->slot);
+        }
     }
     for (int p = N->props; p != (int)UIT_NONE; p = e->props[p].next) {
         const uit_prop_t *P = &e->props[p];
         const char *name = uit_str(e, P->name), *src = uit_str(e, P->src);
-        if (P->kind == PK_LIT && !strcmp(name, "buttons"))
-            continue;
+        if (P->kind == PK_LIT && (!strcmp(name, "buttons") || !strcmp(name, "labels")))
+            continue;           // the dialog's are listed after; a seg's table is in its words
         uit_buf_printf(b, "  %s=", name);
         if (P->kind == PK_ACT) {
             uit_buf_printf(b, "%s", src);
         } else if (P->kind == PK_COND) {
             uit_buf_repr(b, src, strlen(src));
             uit_buf_printf(b, " = %s", uit_cond_eval(e, P->idx, model, row) ? "True" : "False");
+        } else if (P->kind == PK_TMPL && P->repr != UIT_NONE && !strchr(src, '{')) {
+            uit_buf_printf(b, "%s", uit_str(e, P->repr));
         } else if (P->kind == PK_TMPL) {
             uint32_t n;
             uint32_t at = uit_tmpl_render(e, P->idx, model, row, &n);

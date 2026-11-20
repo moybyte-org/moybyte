@@ -35,7 +35,7 @@ enum { UIT_BOOL = 1, UIT_INT, UIT_NUM, UIT_TEXT, UIT_ENUM, UIT_ROWOF, UIT_MODEL 
 // Node kinds (level 1).
 enum {
     UIT_PAGE = 1, UIT_GROUP, UIT_LABEL, UIT_INFO, UIT_LINK, UIT_BUTTON, UIT_TOGGLE,
-    UIT_ROWS, UIT_DIALOG, UIT_KINDS
+    UIT_ROWS, UIT_DIALOG, UIT_SEG, UIT_SLIDER, UIT_FIELD, UIT_KINDS
 };
 
 // Events (`uit_next`).
@@ -50,6 +50,7 @@ enum {
 enum {
     UIT_F_DESK = 1, UIT_F_ON_BAR = 2, UIT_F_BAND = 4, UIT_F_BARE = 8, UIT_F_TRACE = 16,
     UIT_F_UP = 32, UIT_F_DOWN = 64,
+    UIT_F_GEN = 128,        // the host draws shift frames: the page carries its gen where it may
 };
 // The frame flags' bits 8..15: the pages on the stack (the band's Back).
 #define UIT_F_PAGES_SHIFT 8
@@ -76,10 +77,14 @@ int uit_model(uit_t *e, int slot, const char *names, size_t nlen, const uint8_t 
               int key);
 // A row_of slot's model.
 int uit_row_of(uit_t *e, int slot, int model_slot);
+// A label table (`ui.labels`): its index. `keys` and `words` NUL-separated,
+// a word a key, a key the text of the value it names ("_" every other).
+int uit_labels(uit_t *e, const char *name, const char *keys, size_t klen, const char *words,
+               size_t wlen);
 // An action: its index. `when` a condition source or NULL; `off` 0 none, 1
-// hide, 2 grey; `letter` its first letter key or 0.
+// hide, 2 grey; `letters` the letter keys it answers (lower case, "" none).
 int uit_action(uit_t *e, const char *name, const char *label, const char *hint, const char *when,
-               int off, int flags, int letter);
+               int off, int flags, const char *letters);
 
 // -- state, written by the front end (a handler's commit) ------------------
 int uit_set_int(uit_t *e, int slot, int32_t v);
@@ -126,6 +131,9 @@ int uit_trace_next(uit_t *e, char *buf, size_t cap);
 // -- asked between frames --------------------------------------------------
 // Whether action `a` is on now, for row `row` of its model (-1 none).
 int uit_can(uit_t *e, int a, int row);
+// The action a typed letter `ch` fires (its letters hold it, lower-cased, and
+// it is on; none while a dialog is shown), -1 none.
+int uit_letter(uit_t *e, int ch);
 // The shown dialog's node, -1 none.
 int uit_dialog(uit_t *e);
 // Back on a shown dialog: its first button's action (-1: no dialog shown),
@@ -133,6 +141,13 @@ int uit_dialog(uit_t *e);
 int uit_back_dialog(uit_t *e, char *buf, size_t cap);
 // Whether no node holds focus.
 int uit_unfocused(const uit_t *e);
+// The id focus is on after the last frame ("" none): its length.
+int uit_focused(const uit_t *e, char *buf, size_t cap);
+// A commit field's draft (typed, not yet written), NULL none.
+const char *uit_draft(const uit_t *e, const char *key, size_t *n);
+// Every way out of the page: each drawn commit field's draft written, its
+// writes and its changed= queued as events: the events queued.
+int uit_leave(uit_t *e);
 // The tree as text (the reference's snapshot): its length; at most cap-1
 // bytes are written.
 int uit_dump(uit_t *e, char *buf, size_t cap);
