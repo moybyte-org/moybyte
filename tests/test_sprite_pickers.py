@@ -16,6 +16,8 @@ bytes, and the share of its frames that put the page back or left it (the
 desk: drew the pane alone) is held above a floor (a mechanism that quietly never
 engages fails)."""
 
+from array import array
+
 import pytest
 
 from runtime import host_app, ui_draw
@@ -35,7 +37,19 @@ def clock(monkeypatch):
         f = getattr(mod, "__file__", None) or ""
         if "/runtime/" in f.replace("\\", "/") and hasattr(mod, "_ticks_ms"):
             monkeypatch.setattr(mod, "_ticks_ms", lambda: _NOW[0])
+    # Pair._drive swaps the toolkit's per-console state between its two
+    # consoles, the painted frame's count among it: the test leaves it as it
+    # found it, or the next test's console counts its frames from the second
+    # console's count, into the frames a record of this test's names
+    # (`drew_within`'s, keyed by that count)
+    was = (ui_draw._KEYS_HOST[0], list(ui_draw._PAINT), ui_draw._PF[:], ui_draw._EDGE[0],
+           ui_draw._WITHIN[:])
     yield
+    ui_draw._KEYS_HOST[0] = was[0]
+    ui_draw._PAINT[:] = was[1]
+    ui_draw._PF[:] = was[2]
+    ui_draw._EDGE[0] = was[3]
+    ui_draw._WITHIN[:] = was[4]
 
 
 def _fill(sheet):
@@ -127,11 +141,12 @@ class Pair:
         """One loop pass of `ws` with the toolkit's per-console state its
         own, as on a board with one console."""
         st = self._state.setdefault(id(ws), [None, [-1, False, None] + [-1] * (
-            len(ui_draw._PAINT) - 3), False, ui_draw._PF[:]])
+            len(ui_draw._PAINT) - 3), False, ui_draw._PF[:], [-1, 0, 0, 0, 0]])
         ui_draw._KEYS_HOST[0] = st[0]
         ui_draw._PAINT[:] = st[1]
         ui_draw._PF[:] = st[3]
         ui_draw._EDGE[0] = st[2]
+        ui_draw._WITHIN[:] = array("i", st[4])
         try:
             ws.mark_dirty()
             drv.frame(DT)
@@ -140,6 +155,7 @@ class Pair:
             st[1] = list(ui_draw._PAINT)
             st[3] = ui_draw._PF[:]
             st[2] = ui_draw._EDGE[0]
+            st[4] = list(ui_draw._WITHIN)
 
     def frame(self, check=True):
         _NOW[0] += 33
