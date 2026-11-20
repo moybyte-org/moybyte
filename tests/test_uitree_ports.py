@@ -658,7 +658,8 @@ C_RUNS = ("settings_rows-tdeck", "settings_rows-desk", "settings_rows_layout-tde
           "achievements-tdeck", "achievements-desk",
           "settings_rows-p4", "settings_wifi-p4", "settings_tz-p4", "settings_paired-p4", "tasks-p4",
           "update_sd-p4", "web_console-p4", "settings_permissions_seed-tdeck",
-          "settings_permissions_seed-p4", "web_console_none-tdeck", "web_console_none-p4")
+          "settings_permissions_seed-p4", "web_console_none-tdeck", "web_console_none-p4",
+          "settings_licences-p4")
 
 
 @pytest.mark.parametrize("name", C_RUNS)

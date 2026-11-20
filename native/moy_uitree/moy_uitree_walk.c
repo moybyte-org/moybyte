@@ -1402,6 +1402,75 @@ static void draw_popover(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int 
 // A split (not in a popover): its cells across the page's room in by its pad, each a fixed size
 // in desk units or a weight of what is left ("N*"; with none, every size a weight); a group cell
 // its own scrolled column, any other kind drawn as it stands.
+// The width a link row `k` needs to draw its label and its value whole (the
+// toolkit's MOY_UI_MEASURE_LINK), 0 where it is not shown.
+static int32_t link_w(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row)
+{
+    if (!uit_shown(e, k, model, row))
+        return 0;
+    char t[256];
+    uint32_t n1, a1 = text(e, k, 0, model, row, &n1);
+    size_t m = n1 < sizeof t - 1 ? n1 : sizeof t - 1;
+    memcpy(t, e->scratch.p + a1, m);
+    t[m++] = '\t';
+    uint32_t n2, a2 = text(e, k, 1, model, row, &n2);
+    size_t v = n2 < sizeof t - m ? n2 : sizeof t - m;
+    memcpy(t + m, e->scratch.p + a2, v);
+    int32_t out[5];
+    moy_ui_api_measure(c, s, MOY_UI_MEASURE_LINK, span_of(t, m + v), NULL, out);
+    return out[2];
+}
+
+// The widest link row in region `k` (`_row_w`): every row of a rows' model, a group's own.
+static int32_t row_w(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row)
+{
+    int32_t w = 0, x;
+    KIDS(k, g) {
+        const uit_node_t *N = NODE(g);
+        if (N->kind == UIT_ROWS) {
+            for (int r = 0; r < e->slots[N->slot].nrows; r++)
+                KIDS(g, kk)
+                if (NODE(kk)->kind == UIT_LINK && (x = link_w(e, c, s, kk, N->slot, r)) > w)
+                    w = x;
+        } else if (N->kind == UIT_LINK) {
+            if ((x = link_w(e, c, s, g, model, row)) > w)
+                w = x;
+        } else if (N->kind == UIT_GROUP) {
+            if ((x = row_w(e, c, s, g, model, row)) > w)
+                w = x;
+        }
+    }
+    return w;
+}
+
+// A row split's widths (`_fit_spans`): each group cell whose link rows need more than its size
+// gives it widened to their widest, the cells beside it giving up at most half their share.
+static void fit_spans(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, const int *kids, int nk,
+                      int model, int row, int32_t *spans, int nz)
+{
+    int32_t need[SPLIT_CELLS] = {0}, floor[SPLIT_CELLS];
+    int any = 0;
+    for (int i = 0; i < nk && i < nz; i++)
+        if (NODE(kids[i])->kind == UIT_GROUP)
+            any |= (need[i] = row_w(e, c, s, kids[i], model, row)) > 0;
+    if (!any)
+        return;
+    for (int j = 0; j < nz; j++)
+        floor[j] = spans[j] / 2 > need[j] ? spans[j] / 2 : need[j];
+    for (int i = 0; i < nk && i < nz; i++) {
+        int32_t short_ = need[i] - spans[i];
+        for (int j = 0; j < nz && short_ > 0; j++) {
+            int32_t give = j != i ? spans[j] - floor[j] : 0;
+            give = give < short_ ? give : short_;
+            if (give > 0) {
+                spans[j] -= give;
+                spans[i] += give;
+                short_ -= give;
+            }
+        }
+    }
+}
+
 static void draw_split(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row)
 {
     const uit_node_t *N = NODE(k);
@@ -1419,6 +1488,8 @@ static void draw_split(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k,
     KIDS(k, g)
     if (nk < SPLIT_CELLS && uit_shown(e, g, model, row))
         kids[nk++] = g;
+    if (across)
+        fit_spans(e, c, s, kids, nk, model, row, spans, nz);
     int32_t at = 0;
     for (int i = 0; i < nk && i < nz; i++) {
         int g = kids[i];
@@ -1438,7 +1509,12 @@ static void draw_split(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k,
         char sid[UIT_ID_MAX + 1];
         snprintf(sid, sizeof sid, "split %s %d", uit_str(e, N->key), i);
         moy_ui_api_at(c, cell[0], cell[1], cell[2], cell[3]);
-        moy_ui_api_scroll(c, s, span_of(sid, strlen(sid)), NULL);
+        int32_t cg = (e->flags & UIT_F_GEN) && e->gen_safe ? uit_cell_gen(e, g) : -1;
+        moy_ui_over_t go;           // the region carries a gen of its own, as a cards list's does
+        moy_ui_over_none(&go);
+        if (cg >= 0)
+            moy_ui_over_put(&go, MOY_UI_OV_GEN, &cg);
+        moy_ui_api_scroll(c, s, span_of(sid, strlen(sid)), cg >= 0 ? &go : NULL);
         uint8_t was = e->in_cell;
         e->in_cell = 1;
         if (across && N->lit == 1) {
