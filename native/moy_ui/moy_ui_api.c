@@ -3865,8 +3865,10 @@ void moy_ui_api_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
     if (st >= 0 && !disabled && c->n_cur > 0 && c->cur[c->n_cur - 1].id == pid) {
         c->cur[c->n_cur - 1].part = 1;
     }
-    if (!disabled && st >= 0 && mua_pic_note(c, o, 1)) {
-        mua_pic_redraw(c, b);
+    rc_t q = mua_rc_of(b);
+    if (!disabled && st >= 0 && mua_pic_note(c, o, 1)
+        && (!stacked || mua_rc_cut(&q, mua_rc_of(c->page)))) {
+        mua_pic_redraw(c, mua_box_of(q));   // (a stacked part's: what its region shows)
     }
     if (st < 0) {
         st = 0;
@@ -3942,6 +3944,9 @@ int moy_ui_api_measure(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy_ui
         int reach = (o->flags2 & MOY_UI_O2_FIT) && !c->has_at ? ring_reach(c) : 0;
         h = mua_row_h(c) + reach;
         w = button_w(c, s, text) + 2 * reach;
+    } else if (kind == MOY_UI_MEASURE_PROGRESS) {
+        h = moy_ui_vrow_tall_h(c->cls, c->fs);
+        w = r.w;
     } else {
         return 0;
     }

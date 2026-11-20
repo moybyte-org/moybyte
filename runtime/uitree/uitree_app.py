@@ -68,6 +68,9 @@ class Engine(S.Builder):
         self.focused = None
         self.drawn = {}
         self.actions = decl.actions
+        self._in_pop = False            # a popover's children replaying
+        self._roles = None              # role -> its action, made again when an action is declared
+        self._roles_n = -1
         self.files = files
         self.pics = None                # the picture engine, made at the first frame over its canvas
         self.calls = 0                  # handler runs this frame: actions, hooks, timers, posts, work steps
@@ -738,12 +741,17 @@ class Engine(S.Builder):
         return None
 
     def role_action(self, role):
-        """The declared action answering `role:ROLE` (one per key, K02)."""
-        k = "role:" + role
-        for a in self.actions.values():
-            if k in a.keys:
-                return a
-        return None
+        """The declared action answering `role:ROLE` (one per key, K02).
+        Asked every frame for the arrows: a lookup, no string made."""
+        roles = self._roles
+        if roles is None or self._roles_n != len(self.actions):
+            roles = {}
+            for a in self.actions.values():
+                for k in a.keys:
+                    if k.startswith("role:") and k[5:] not in roles:
+                        roles[k[5:]] = a
+            self._roles, self._roles_n = roles, len(self.actions)
+        return roles.get(role)
 
     def role(self, role):
         """A host that routes its own keys (kernel chrome) presses ROLE: the
@@ -1167,8 +1175,76 @@ class Engine(S.Builder):
                 _v.at(box[0], box[1] - 8, w, 0)
         if not _v.popover(n.key, w, {"wash": True}) and "close" in n.l:
             self.fire(n.l["close"], self.args_for(n.l["close"]), n, None)
-        self._kids(n, row, rect)
+        self._in_pop = True
+        try:
+            self._kids(n, row, rect)
+        finally:
+            self._in_pop = False
         _v.popover()
+
+    def _pop_split(self, n, row):
+        """A split in a popover's body (dir "row"): its cells side by side on
+        the body's rows, in by its pad, as tall as its tallest cell, each a fixed size in desk units
+        or a weight of what is left ("N*"); a picture cell the picture at
+        its top, a group cell its children one under another."""
+        kids = [k for k in n.kids if _shown(k, row)]
+        sizes = n.p["sizes"](row)
+        hs = [self._pop_cell_h(k, row) for k in kids]
+        x, y, w, _h, _step = _v.measure("progress", "")    # where the body's stack stands
+        pad = self._gap(n.l.get("pad", "m"))
+        _v.space((max(hs) if hs else 0) + 2 * pad)
+        if not w:
+            return
+        x, y, w = x + pad, y + pad, max(0, w - 2 * pad)
+        gap = self._gap(n.l.get("gap", "m"))
+        at = x
+        for k, cw, h_ in zip(kids, self._spans(sizes, w - gap * (len(kids) - 1), len(kids)), hs):
+            if k.kind == "group":
+                cy = y
+                for kk in k.kids:
+                    if not _shown(kk, row):
+                        continue
+                    kh = self._pop_kid_h(kk, row)
+                    _v.at(at, cy, cw, kh)
+                    getattr(self, _rname(kk.kind))(kk, row, (at, cy, cw, kh))
+                    cy += kh
+            else:
+                _v.at(at, y, cw, h_)
+                getattr(self, _rname(k.kind))(k, row, (at, y, cw, h_))
+            at += cw + gap
+
+    def _spans(self, sizes, span, n):
+        """A split's first `n` cells across `span` pixels: with a weight
+        ("N*") among them, each int a fixed size in desk units and the
+        weights sharing the rest; else every int a weight. The last cell
+        takes what rounding leaves."""
+        sizes = sizes[:n]
+        if any(isinstance(v, str) for v in sizes):
+            ws = [int(v[:-1] or 1) if isinstance(v, str) else 0 for v in sizes]
+            rest = max(0, span - sum(self._size(v) for v in sizes if not isinstance(v, str)))
+            out = [rest * wt // max(1, sum(ws)) if isinstance(v, str) else self._size(v)
+                   for v, wt in zip(sizes, ws)]
+        else:
+            tot = max(1, sum(sizes))
+            out = [span * v // tot for v in sizes]
+        if out:
+            out[-1] += span - sum(out)
+        return out
+
+    def _pop_cell_h(self, k, row):
+        if k.kind == "picture":
+            return self._size(k.p["side"](row) if "side" in k.p else 64) + self._size(8)
+        if k.kind == "group":
+            return sum(self._pop_kid_h(kk, row) for kk in k.kids if _shown(kk, row))
+        return self._pop_kid_h(k, row)
+
+    def _pop_kid_h(self, k, row):
+        if k.kind == "label":
+            return sum(_v.measure("label", text, o)[3] for text, o in self._label_rows(k, row))
+        if k.kind == "progress":
+            return _v.measure("progress", "")[3]
+        raise S.UIError("N01", "a %s in a popover's split" % k.kind, where=k.where,
+                         fix="a picture, a label or a progress; or the %s outside the split" % k.kind)
 
     def _r_menu(self, n, row, rect):
         items = [k for k in n.kids if _shown(k, row) and k.act.can(row)]
@@ -1188,17 +1264,19 @@ class Engine(S.Builder):
     # -- placed layout ------------------------------------------------------
 
     def _r_split(self, n, row, rect):
+        if self._in_pop:
+            return self._pop_split(n, row)
         d = n.p["dir"](row)
         sizes = n.p["sizes"](row)
         pad = self._gap(n.l.get("pad", "m"))
         gap = self._gap(n.l.get("gap", "m"))
         x, y, w, h = _v.inset(rect, pad)
         span = (w if d == "row" else h) - gap * (len(sizes) - 1)
-        tot = sum(sizes)
         kids = [k for k in n.kids if _shown(k, row)]
+        spans = self._spans(sizes, span, len(sizes))
         at = 0
         for i, k in enumerate(kids):
-            s = span * sizes[i] // tot if i < len(kids) - 1 else span - at
+            s = spans[i] if i < len(kids) - 1 else span - at
             r = (x + at, y, s, h) if d == "row" else (x, y + at, w, s)
             at += s + gap
             if k.kind == "group":       # a region of the split: its own scrolled column
@@ -1400,8 +1478,10 @@ class Engine(S.Builder):
     def _r_progress(self, n, row, rect):
         v, hi = n.p["value"](row), n.p["max"](row)
         if n.l.get("look") == "count":
+            # the label, where there is one, is the whole line: it says the
+            # count in its own words ("{found} of {total} found")
             label = self._t(n, "label", row)
-            _v.progress(("%s %d of %d" % (label, v, hi)).strip() if hi else label, v, hi, {"count": True})
+            _v.progress(label or ("%d of %d" % (v, hi) if hi else ""), v, hi, {"count": True})
             return
         _v.progress(self._t(n, "label", row), v, hi)
 

@@ -680,6 +680,10 @@ static const uint8_t s_dots[] = {0xE2, 0x80, 0xA6};
 static void text_cut(pd_t *d, const pf_t *f, moy_ui_span_t t, int x, int y, int h, int room,
                      uint16_t c, int sc);
 
+int moy_ui_vrow_tall_h(int desk, int fs) {
+    return ((desk ? 28 : 20) + (desk ? 8 : 6) + 1) * fs;
+}
+
 int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                 const moy_ui_vrow_t *r) {
     pd_t d;
@@ -748,7 +752,7 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
     geo(&d, b, r, &g);
     pf_t fl = font_of(&d, MOY_UI_FONT_UI), fv = font_of(&d, MOY_UI_FONT_CAPTION);
     int rh = (d.desk ? 28 : 20) * d.fs, bh = (d.desk ? 8 : 6) * d.fs;
-    if (kind == MOY_UI_V_PROGRESS && b.h >= rh + bh + d.fs) {
+    if (kind == MOY_UI_V_PROGRESS && b.h >= moy_ui_vrow_tall_h(d.desk, d.fs)) {
         // a progress row given room for it: its label and percent on a
         // line, the bar the width of the row under them
         int span = r->hi > r->lo ? r->hi - r->lo : 1;

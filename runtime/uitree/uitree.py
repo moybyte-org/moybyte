@@ -1926,8 +1926,8 @@ def _prop(pt, k, v, ctx, where, kind):
                           expected="an int, \"{name}\" of an int, or \"{cond?a:b}\" of two ints", fix='%s=24, or a template of an int' % k)
         return t.g
     if pt == "ints":
-        if isinstance(v, tuple) and all(type(x) is int for x in v):
-            return lambda row: v
+        if isinstance(v, tuple) and all(type(x) is int or _isweight(x) for x in v):
+            return lambda row: v        # ints; with a weight ("2*"), the ints are desk units
         t = tmpl(v, ctx, where)
         for s in _branches(v):
             if not all(_isint(x) for x in s.split()):
@@ -2245,7 +2245,7 @@ def progress(value, **p):
                       fix="max=\"{NAME}\" (an int), or max=0 for work whose size is not known")
     if p.get("look", "count") != "count":
         raise UIError("N01", "progress look=%r" % (p["look"],), where=where, expected="count",
-                      fix='look="count" ("3 of 5"), or drop it (a bar)')
+                      fix='look="count" ("3 of 5", or the label saying it: "{done} of {total} found"), or drop it (a bar)')
     return _node("progress", None, dict(p, value="{%s}" % value if not str(value).startswith("{") else value),
                  where)
 
@@ -2270,6 +2270,11 @@ def popover(key, **p):
 
 def menu(caption="", **p):
     return _node("menu", None, dict(p, caption=caption), _caller())
+
+
+def _isweight(x):
+    """A split's weight, "N*" ("*" alone is 1*)."""
+    return type(x) is str and x.endswith("*") and (x[:-1] == "" or x[:-1].isdigit())
 
 
 def split(dir, sizes, **p):

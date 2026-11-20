@@ -906,6 +906,9 @@ typedef struct {
 enum { MOY_UI_VROW_PLAIN = 0, MOY_UI_VROW_DANGER = 1 };
 int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                 const moy_ui_vrow_t *r);
+// The height a progress row given it draws tall at: its label and percent
+// on a line, its bar under them.
+int moy_ui_vrow_tall_h(int desk, int fs);
 // What x on row box b picks: a seg's, a swatch picker's or a tab row's option (-1 none),
 // a slider's value (lo..hi), -1 for another kind.
 int32_t moy_ui_vrow_at(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, const moy_ui_vrow_t *r,

@@ -903,6 +903,8 @@ void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
         st = st < 0 ? 0 : st;
     }
     int f = mua_mark_flags(st, o);
+    // a card in a popover's body lies on its panel
+    int gnd = mua_ground_of(c) | (c->n_nest && c->nest[c->n_nest - 1].kind == 3 ? MOY_UI_PANEL : 0);
     clip_t k;
     moy_ui_box_t content = pic;
     uint16_t g = 0;
@@ -914,17 +916,20 @@ void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
         memcpy(saved, &row->st[MOY_ST_CX0], sizeof(saved));
         row->st[MOY_ST_CX1] = row->st[MOY_ST_CX0];
         moy_ui_card(s, b, pic, title, sub, f | (c->grid_wrap ? MOY_UI_F_WRAP : 0), c->fs,
-                    mua_ground_of(c), c->card_tone, &content, &g);
+                    gnd, c->card_tone, &content, &g);
         memcpy(&row->st[MOY_ST_CX0], saved, sizeof(saved));
-        mua_pic_redraw(c, content);
+        rc_t q = mua_rc_of(content);
+        if (!stacked || mua_rc_cut(&q, mua_rc_of(c->page))) {
+            mua_pic_redraw(c, mua_box_of(q));   // (a stacked card's: what its region shows)
+        }
     }
     c->fl.cast = 1;
     EACH_ROW(c, k, s, b, stacked, c->page) {
         moy_ui_card(s, b, pic, title, sub, f | (c->grid_wrap ? MOY_UI_F_WRAP : 0), c->fs,
-                    mua_ground_of(c), c->card_tone, &content, &g);
+                    gnd, c->card_tone, &content, &g);
         if (c->card_blank >= 0 || c->card_blank_glyph >= 0) {
             moy_ui_card_blank(s, content, c->card_blank, c->card_blank_glyph, c->card_tone,
-                              c->fs, mua_ground_of(c));
+                              c->fs, gnd);
         }
         any = 1;
     }

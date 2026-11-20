@@ -1352,9 +1352,11 @@ int moy_ui_api_part_at(const moy_ui_ctx_t *c, int32_t out[2]);
 // as the label takes them; w its text's width, at most its row's.
 // MOY_UI_MEASURE_BUTTON: a button, w its natural width (its label and a pad
 // each side, a minimum, at most the row's), h its row's; where `o` carries
-// `fit`, its focus ring's reach more each side but the foot. 1, or 0 for an
-// unknown kind.
-enum { MOY_UI_MEASURE_LABEL = 0, MOY_UI_MEASURE_BUTTON = 1 };
+// `fit`, its focus ring's reach more each side but the foot.
+// MOY_UI_MEASURE_PROGRESS: a progress row placed by ui.at, h the height it
+// draws tall at (its label and percent on a line, its bar under them), w
+// its row's. 1, or 0 for an unknown kind.
+enum { MOY_UI_MEASURE_LABEL = 0, MOY_UI_MEASURE_BUTTON = 1, MOY_UI_MEASURE_PROGRESS = 2 };
 int moy_ui_api_measure(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy_ui_span_t text,
                        const moy_ui_over_t *o, int32_t out[5]);
 // ui.space(h): the stack moves `h` pixels down (0 or less: none), as a row

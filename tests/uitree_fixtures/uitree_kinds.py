@@ -47,7 +47,7 @@ def build():
             ui.label("Touch", shown="@touch")
         ui.rule()
         ui.note(["A note's first paragraph.", "And {steps} more."], icon="info")
-        ui.progress("done", max=5, label="Steps", look="count")
+        ui.progress("done", max=5, label="Steps {done} of 5", look="count")
         with ui.group("Do"):
             ui.button("mark")
             ui.button("grow")
