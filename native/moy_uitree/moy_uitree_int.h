@@ -104,6 +104,7 @@ typedef struct {
     uint8_t letter;             // its first letter, the band's
     uint16_t letters;           // pool: every letter it answers
     uint16_t icon;              // pool: its icon ("" none)
+    int16_t row;                // row=: the row_of slot whose current row it acts on, or -1
 } uit_act_t;
 
 // A prop as the build gave it, for the dump.
@@ -258,7 +259,15 @@ struct uit {
     int32_t rect[4];            // the page's room for its placed rows (`self.rect`)
     uint8_t in_cell;            // drawing a split's column: a button takes its natural width
     uint8_t tv_stop, tv_stop_now;   // a text view that runs on drew last frame / this frame (the band's PgUp PgDn)
+    int16_t foot;               // the page's shown foot this frame, or -1
+    int32_t foot_r[4];          // its rect
+    uit_buf_t cells;            // a table's columns and cells, made each frame it draws
 };
+
+// A list: rows and a table keep a model, a cur= and a removal order.
+#define UIT_IS_LIST(kind) ((kind) == UIT_ROWS || (kind) == UIT_TABLE)
+// The case of switch node `k` its state's value names, else its "_", else -1.
+int uit_case_of(uit_t *e, int k);
 
 // Each kind's name, as the trace and the dump spell it.
 extern const char *const uit_kind_names[UIT_KINDS];

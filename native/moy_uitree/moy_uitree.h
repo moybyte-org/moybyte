@@ -37,7 +37,8 @@ enum { UIT_BOOL = 1, UIT_INT, UIT_NUM, UIT_TEXT, UIT_ENUM, UIT_ROWOF, UIT_MODEL 
 enum {
     UIT_PAGE = 1, UIT_GROUP, UIT_LABEL, UIT_INFO, UIT_LINK, UIT_BUTTON, UIT_TOGGLE,
     UIT_ROWS, UIT_DIALOG, UIT_SEG, UIT_SLIDER, UIT_FIELD, UIT_EMPTY, UIT_PROGRESS, UIT_TEXT_VIEW,
-    UIT_SCROLL, UIT_MENU, UIT_ITEM, UIT_SPLIT, UIT_CANVAS, UIT_KINDS
+    UIT_SCROLL, UIT_MENU, UIT_ITEM, UIT_SPLIT, UIT_CANVAS, UIT_TABS, UIT_SWITCH, UIT_CASE, UIT_TABLE,
+    UIT_COL, UIT_FOOT, UIT_KINDS
 };
 
 // Events (`uit_next`).
@@ -91,6 +92,9 @@ int uit_labels(uit_t *e, const char *name, const char *keys, size_t klen, const 
 // `icon` the icon a menu's item of it draws where it names none ("" none).
 int uit_action(uit_t *e, const char *name, const char *label, const char *hint, const char *when,
                int off, int flags, const char *letters, const char *icon);
+// Action `a` acts on the current row of row_of slot `slot` (row=): it is off
+// while that row_of names no row, and a node outside a list hands it that row.
+int uit_action_row(uit_t *e, int a, int slot);
 
 // -- state, written by the front end (a handler's commit) ------------------
 int uit_set_int(uit_t *e, int slot, int32_t v);

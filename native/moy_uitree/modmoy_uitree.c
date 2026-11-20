@@ -115,6 +115,12 @@ static mp_obj_t eng_row_of(mp_obj_t self, mp_obj_t slot, mp_obj_t model)
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(eng_row_of_obj, eng_row_of);
 
+static mp_obj_t eng_action_row(mp_obj_t self, mp_obj_t a, mp_obj_t slot)
+{
+    return MP_OBJ_NEW_SMALL_INT(uit_action_row(eng(self), mp_obj_get_int(a), mp_obj_get_int(slot)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(eng_action_row_obj, eng_action_row);
+
 static mp_obj_t eng_labels(size_t n, const mp_obj_t *a)
 {
     (void)n;
@@ -398,6 +404,7 @@ static const mp_rom_map_elem_t eng_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_state), MP_ROM_PTR(&eng_state_obj) },
     { MP_ROM_QSTR(MP_QSTR_model), MP_ROM_PTR(&eng_model_obj) },
     { MP_ROM_QSTR(MP_QSTR_row_of), MP_ROM_PTR(&eng_row_of_obj) },
+    { MP_ROM_QSTR(MP_QSTR_action_row), MP_ROM_PTR(&eng_action_row_obj) },
     { MP_ROM_QSTR(MP_QSTR_action), MP_ROM_PTR(&eng_action_obj) },
     { MP_ROM_QSTR(MP_QSTR_labels), MP_ROM_PTR(&eng_labels_obj) },
     { MP_ROM_QSTR(MP_QSTR_focused), MP_ROM_PTR(&eng_focused_obj) },

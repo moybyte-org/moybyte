@@ -45,12 +45,13 @@ _KINDS = {"page": 1, "group": 2, "label": 3, "info": 4, "link": 5, "button": 6, 
           "rows": 8, "dialog": 9, "seg": 10, "slider": 11, "field": 12, "empty": 13,
           "progress": 14, "text_view": 15,
           "scroll": 16, "menu": 17, "item": 18, "split": 19,
-          "canvas": 20}
-_HEAD = {"rows": ("model",), "dialog": ("buttons",)}
+          "canvas": 20, "tabs": 21, "switch": 22, "case": 23, "table": 24, "col": 25, "foot": 26}
+_HEAD = {"rows": ("model",), "table": ("model",), "dialog": ("buttons",)}
 _KIND_NAMES = dict((v, k) for k, v in _KINDS.items())
 _KIND_NAMES[len(_KINDS) + 1] = "cycle"          # UIT_KINDS: a seg of the cycle look
-_BOUND = ("toggle", "seg", "slider", "field", "text_view")       # a two-way control: bound to the state of its key
-_LIT_ONLY = {"seg": ("values", "words", "model", "labels"), "text_view": ("name",)}   # what the reference keeps beside a node's props
+_BOUND = ("toggle", "seg", "slider", "field", "text_view", "tabs")       # a two-way control: bound to the state of its key
+_LIT_ONLY = {"seg": ("values", "words", "model", "labels"), "text_view": ("name",),
+             "switch": ("name",), "case": ("v",), "tabs": ("labels", "values")}    # a switch's and a case's: in their keys   # what the reference keeps beside a node's props
 _TYPED = "typed in field "
 LOWERED = "lowered"         # an engine's root once its page is in the store: the Python tree is gone
 E_CHECK = -6                # UIT_E_CHECK: a mistake the spec names, its code `error_code()`
@@ -143,14 +144,16 @@ class CEngine(Engine):
         self._acts = list(self.actions.values())
         self._aidx = {}
         for a in self._acts:
-            if a.row is not None or a.chars or a.unit is not None:
-                raise EngineGap("action %s's row=, chars= or unit" % a.name)
+            if a.chars or a.unit is not None:
+                raise EngineGap("action %s's chars= or unit" % a.name)
             flags = (A_HOOK if a.hook else 0) | (A_ROLE_CONFIRM if "role:confirm" in a.keys else 0) | (
                 A_ROLE_BACK if "role:back" in a.keys else 0)
             off = {"hide": 1, "grey": 2}.get(getattr(a, "off", None), 0)
             self._aidx[a.name] = self._ck(x.action(
                 a.name, a.label or "", a.hint if isinstance(a.hint, str) else "", a.when_src, off, flags,
                 a.letters, a.icon or ""), "action " + a.name)
+            if a.row is not None:
+                self._ck(x.action_row(self._aidx[a.name], self._slot[a.row]), "action %s row=" % a.name)
         for name in self._names:
             self._push(name)
 
@@ -263,7 +266,15 @@ class CEngine(Engine):
                 src, _, fid = text.partition("\x02")
                 if fid:
                     self.fired_id = fid
-                self.q.append((act, self.args_for(act, row), src))
+                if row is None and act.row is not None:     # row=: the row its row_of names (the app's state)
+                    was, S._NOW.app = S._NOW.app, self
+                    try:
+                        args = self.args_for(act)
+                    finally:
+                        S._NOW.app = was
+                else:
+                    args = self.args_for(act, row)
+                self.q.append((act, args, src))
 
     # -- the build ----------------------------------------------------------------
 
@@ -315,10 +326,10 @@ class CEngine(Engine):
                 r = cprop(me, "labels", l["labels"], None)
                 if r < 0:
                     fail(r, "seg %s labels" % n.key, n.where)
-            elif nk == "rows":
+            elif nk == "rows" or nk == "table":
                 r = cprop(me, "bind", l["model"], None)
                 if r < 0:
-                    fail(r, "rows " + n.key, n.where)
+                    fail(r, "%s %s" % (nk, n.key), n.where)
             head = heads.get(nk, ())
             for k, src in n.src.items():
                 if k in head:
@@ -338,6 +349,12 @@ class CEngine(Engine):
                         rep = repr(v)
                 if type(src) is str:
                     pass
+                elif k == "cols" and nk == "table":
+                    for h in src:           # one prop a column's header
+                        r = cprop(me, k, str(h), None)
+                        if r < 0:
+                            fail(r, "ui.table cols=%r" % (src,), n.where)
+                    continue
                 elif (type(src) is list or type(src) is tuple) and S.SCHEMA[nk].get(k) == "texts":
                     for line in src:        # one prop a line
                         r = cprop(me, k, line, None) if type(line) is str else E_GAP

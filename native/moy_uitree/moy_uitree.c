@@ -208,7 +208,7 @@ void uit_free(uit_t *e)
     UIT_FREE(e->btns); UIT_FREE(e->ids); UIT_FREE(e->prev); UIT_FREE(e->evs);
     UIT_FREE(e->drew); UIT_FREE(e->orders); UIT_FREE(e->want); UIT_FREE(e->drafts);
     UIT_FREE(e->labels); UIT_FREE(e->tvl);
-    uit_buf_free(&e->pool); uit_buf_free(&e->scratch); uit_buf_free(&e->evtext);
+    uit_buf_free(&e->pool); uit_buf_free(&e->scratch); uit_buf_free(&e->evtext); uit_buf_free(&e->cells);
     uit_buf_free(&e->trace);
     UIT_FREE(e);
 }
@@ -365,8 +365,17 @@ int uit_action(uit_t *e, const char *name, const char *label, const char *hint, 
         return UIT_E_NOMEM;
     A.icon = (uint16_t)ic;
     A.letter = (uint8_t)(letters ? letters[0] : 0);
+    A.row = -1;
     e->acts[e->nacts] = A;
     return e->nacts++;
+}
+
+int uit_action_row(uit_t *e, int a, int slot)
+{
+    if (a < 0 || a >= e->nacts || slot < 0 || slot >= e->nslots || e->slots[slot].type != UIT_ROWOF)
+        return uit_fail(e, UIT_E_ARG, UIT_MSG("action %d row=%d: no row_of", "%d %d"), a, slot);
+    e->acts[a].row = (int16_t)slot;
+    return 0;
 }
 
 // -- state ----------------------------------------------------------------------
@@ -457,7 +466,7 @@ int uit_set_model(uit_t *e, int slot, int n, const char *cells, size_t len)
     S->ver++;
     // the removal rule, for each list over this model with a cur= (settle)
     for (int k = 0; k < e->nnodes; k++)
-        if (e->nodes[k].kind == UIT_ROWS && e->nodes[k].slot == slot && e->nodes[k].cur >= 0)
+        if (UIT_IS_LIST(e->nodes[k].kind) && e->nodes[k].slot == slot && e->nodes[k].cur >= 0)
             uit_after_removal(e, k);
     return 0;
 }
@@ -552,6 +561,14 @@ int uit_node(uit_t *e, int kind, const char *key, int parent)
         N.btn = 32;
     if (kind == UIT_SPLIT)
         N.btn = N.nbtn = GAP_M, N.lit = 1;          // pad="m", gap="m", align="center"
+    if (kind == UIT_SWITCH) {
+        // keyed "switch:NAME": the enum or bool it switches on
+        const char *name = strncmp(key, "switch:", 7) ? "" : key + 7;
+        int s = uit_slot_find(e, name, strlen(name));
+        if (s < 0 || (e->slots[s].type != UIT_ENUM && e->slots[s].type != UIT_BOOL))
+            return uit_fail(e, UIT_E_NAME, UIT_MSG("switch %s: no enum or bool of that name", "switch %s"), key);
+        N.slot = (int16_t)s;
+    }
     int me = e->nnodes++;
     e->nodes[me] = N;
     if (parent >= 0) {
@@ -568,7 +585,7 @@ int uit_node(uit_t *e, int kind, const char *key, int parent)
 int uit_list_of(const uit_t *e, int node)
 {
     for (int k = node; k >= 0 && k != (int)UIT_NONE; k = e->nodes[k].parent)
-        if (e->nodes[k].kind == UIT_ROWS)
+        if (UIT_IS_LIST(e->nodes[k].kind))
             return k;
     return -1;
 }
@@ -576,7 +593,7 @@ int uit_list_of(const uit_t *e, int node)
 int uit_model_of(uit_t *e, int node)
 {
     for (int k = node; k >= 0 && k != (int)UIT_NONE; k = e->nodes[k].parent)
-        if (e->nodes[k].kind == UIT_ROWS)
+        if (UIT_IS_LIST(e->nodes[k].kind))
             return e->nodes[k].slot;
     return -1;
 }
@@ -584,7 +601,8 @@ int uit_model_of(uit_t *e, int node)
 const char *const uit_kind_names[UIT_KINDS] = {"", "page", "group", "label", "info", "link", "button",
                                                "toggle", "rows", "dialog", "seg", "slider", "field",
                                                "empty", "progress", "text_view", "scroll", "menu",
-                                               "item", "split", "canvas"};
+                                               "item", "split", "canvas", "tabs", "switch", "case",
+                                               "table", "col", "foot"};
 
 static const char *TONES[] = {"ink", "dim", "value", "danger"};
 static const char *BKINDS[] = {"normal", "primary", "tonal", "danger", "toggle"};
@@ -625,7 +643,7 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         return UIT_E_ARG;
     uit_node_t *N = &e->nodes[node];
     int model = uit_model_of(e, node);
-    if (N->kind == UIT_ROWS)
+    if (UIT_IS_LIST(N->kind))
         model = -1;             // a list's own props read the page, not its rows
     int kind = N->kind;
     int16_t *tslot = NULL;
@@ -674,7 +692,9 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
     }
     else if (!strcmp(name, "icon"))
         tslot = &N->t_icon;
-    else if ((!strcmp(name, "empty") && kind == UIT_ROWS) ||
+    else if (!strcmp(name, "hint") && kind == UIT_TABLE)
+        tslot = &N->t_value;
+    else if ((!strcmp(name, "empty") && UIT_IS_LIST(kind)) ||
              (!strcmp(name, "hint") && (kind == UIT_TOGGLE || kind == UIT_FIELD)) ||
              (!strcmp(name, "hi") && kind == UIT_SLIDER))
         tslot = &N->t_aux;
@@ -769,7 +789,8 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
     if (!strcmp(name, "bind")) {
         int s = uit_slot_find(e, src, strlen(src));
         int t = s < 0 ? 0 : e->slots[s].type;
-        int ok = kind == UIT_TOGGLE ? t == UIT_BOOL : kind == UIT_ROWS ? t == UIT_MODEL
+        int ok = kind == UIT_TOGGLE ? t == UIT_BOOL : UIT_IS_LIST(kind) ? t == UIT_MODEL
+                 : kind == UIT_TABS ? t == UIT_ENUM
                  : kind == UIT_SEG ? t == UIT_ENUM || t == UIT_ROWOF : kind == UIT_SLIDER ? t == UIT_INT
                  : kind == UIT_FIELD ? t == UIT_TEXT : kind == UIT_TEXT_VIEW ? t == UIT_TEXT || t == UIT_MODEL : 0;
         if (!ok)
@@ -777,13 +798,14 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         N->slot = (int16_t)s;
         return 0;               // the head, not a prop the dump lists
     }
-    if (!strcmp(name, "labels") && kind == UIT_SEG) {
+    if (!strcmp(name, "labels") && (kind == UIT_SEG || kind == UIT_TABS)) {
         for (int i = 0; i < e->nlabels; i++)
             if (!strcmp(uit_str(e, e->labels[i].name), src)) {
                 N->cur = (int16_t)i;
                 return add_prop(e, node, name, src, repr, PK_LIT, i);
             }
-        return uit_fail(e, UIT_E_NAME, UIT_MSG("seg labels=%s: no label table of that name", "seg labels=%s"), src);
+        return uit_fail(e, UIT_E_NAME, UIT_MSG("%s labels=%s: no label table of that name", "%s labels=%s"),
+                        uit_kind_names[kind], src);
     }
     if (!strcmp(name, "look") && (kind == UIT_SEG || kind == UIT_SLIDER || kind == UIT_PROGRESS)) {
         if (!strcmp(src, kind == UIT_SEG ? "cycle" : kind == UIT_SLIDER ? "steps" : "count"))
@@ -798,7 +820,7 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         return add_prop(e, node, name, src, repr, PK_LIT, 0);
     }
     if ((!strcmp(name, "on") && (kind == UIT_TOGGLE || kind == UIT_SEG || kind == UIT_SLIDER ||
-                                 kind == UIT_FIELD)) ||
+                                 kind == UIT_FIELD || kind == UIT_TABLE)) ||
         (!strcmp(name, "changed") && kind == UIT_FIELD)) {
         for (int a = 0; a < e->nacts; a++)
             if (!strcmp(uit_str(e, e->acts[a].name), src)) {
@@ -841,20 +863,31 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         N->current = (int16_t)s;
         return add_prop(e, node, name, src, repr, PK_LIT, s);
     }
-    if (!strcmp(name, "cur") && kind == UIT_ROWS) {
+    if (!strcmp(name, "cur") && UIT_IS_LIST(kind)) {
         int s = uit_slot_find(e, src, strlen(src));
         if (s < 0 || e->slots[s].type != UIT_ROWOF)
-            return uit_fail(e, UIT_E_NAME, UIT_MSG("rows cur=%s: no row_of of that name", "rows cur=%s"), src);
+            return uit_fail(e, UIT_E_NAME, UIT_MSG("%s cur=%s: no row_of of that name", "%s cur=%s"),
+                            uit_kind_names[kind], src);
         N->cur = (int16_t)s;
         return add_prop(e, node, name, src, repr, PK_LIT, s);
     }
-    if (!strcmp(name, "changed") && kind == UIT_ROWS) {
+    if (!strcmp(name, "changed") && UIT_IS_LIST(kind)) {
         for (int a = 0; a < e->nacts; a++)
             if (!strcmp(uit_str(e, e->acts[a].name), src)) {
                 N->changed = (int16_t)a;
                 return add_prop(e, node, name, src, repr, PK_ACT, a);
             }
-        return uit_fail(e, UIT_E_NAME, UIT_MSG("rows changed=%s: no such action", "rows changed=%s"), src);
+        return uit_fail(e, UIT_E_NAME, UIT_MSG("%s changed=%s: no such action", "%s changed=%s"),
+                        uit_kind_names[kind], src);
+    }
+    if (!strcmp(name, "cols") && kind == UIT_TABLE)
+        return add_prop(e, node, name, src, repr, PK_LIT, 0);      // a column's header, one prop each
+    if (!strcmp(name, "look") && kind == UIT_FOOT) {
+        // "share": its buttons share its width; the end look is not drawn yet
+        if (strcmp(src, "share"))
+            return uit_fail(e, UIT_E_KIND, UIT_MSG("foot look=%s: only share is drawn yet", "foot look=%s"), src);
+        N->lit = 1;
+        return add_prop(e, node, name, src, repr, PK_LIT, 1);
     }
     if (!strcmp(name, "buttons") && kind == UIT_DIALOG)
         return add_prop(e, node, name, src, repr, PK_LIT, 0);
@@ -902,7 +935,7 @@ static void gen_of_build(uit_t *e)
         e->slots[i].in_gen = 1;
     for (int k = 0; k < e->nnodes; k++) {
         int ck = e->nodes[k].cur;
-        if (e->nodes[k].kind != UIT_ROWS || ck < 0)
+        if (!UIT_IS_LIST(e->nodes[k].kind) || ck < 0)
             continue;
         int read = 0;
         for (int o = 0; o < e->nops && !read; o++)
@@ -910,7 +943,7 @@ static void gen_of_build(uit_t *e)
         for (int t = 0; t < e->nterms && !read; t++)
             read = (e->terms[t].rk == RK_SLOT || e->terms[t].rk == RK_ROWOF) && e->terms[t].ref == ck;
         for (int j = 0; j < e->nnodes && !read; j++)
-            read = e->nodes[j].kind != UIT_ROWS && e->nodes[j].slot == ck;
+            read = !UIT_IS_LIST(e->nodes[j].kind) && e->nodes[j].slot == ck;
         if (!read)
             e->slots[ck].in_gen = 0;
     }
@@ -918,6 +951,9 @@ static void gen_of_build(uit_t *e)
 
 int uit_build_end(uit_t *e)
 {
+    for (int k = 0; k < e->nnodes; k++)
+        if (e->nodes[k].kind == UIT_FOOT && !e->nodes[k].lit)
+            return uit_fail(e, UIT_E_KIND, UIT_MSG("foot look=end: only share is drawn yet", "foot look=end"));
     e->gen++;
     e->fresh = 1;
     gen_of_build(e);
