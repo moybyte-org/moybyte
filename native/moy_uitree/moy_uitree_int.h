@@ -94,6 +94,7 @@ typedef struct {
     uint8_t off, flags;
     uint8_t letter;             // its first letter, the band's
     uint16_t letters;           // pool: every letter it answers
+    uint16_t icon;              // pool: its icon ("" none)
 } uit_act_t;
 
 // A prop as the build gave it, for the dump.

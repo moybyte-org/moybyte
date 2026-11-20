@@ -58,7 +58,7 @@ int uit_shown(uit_t *e, int node, int model, int row)
 static int is_stop(int kind)
 {
     return kind == UIT_LINK || kind == UIT_BUTTON || kind == UIT_TOGGLE || kind == UIT_SEG ||
-           kind == UIT_SLIDER || kind == UIT_FIELD;
+           kind == UIT_SLIDER || kind == UIT_FIELD || kind == UIT_ITEM;
 }
 
 static const char *row_key(uit_t *e, int model, int row)
@@ -899,6 +899,79 @@ static void draw_text_view(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, in
         e->tv_stop_now = 1;
 }
 
+// A menu: its items in order, a `rows` among them an item per row of its model, each shown and
+// its action on; an item's id is its text (its letter after a tab where the band shows keys).
+typedef struct {
+    int16_t node, model, row;
+} item_t;
+
+static int item_add(uit_buf_t *b, int k, int model, int row)
+{
+    item_t it = {(int16_t)k, (int16_t)model, (int16_t)row};
+    return uit_buf_put(b, (const char *)&it, sizeof it) < 0 ? -1 : 0;
+}
+
+static void draw_menu(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row)
+{
+    uit_buf_t its = {0}, labels = {0}, icons = {0};
+    KIDS(k, c2) {
+        const uit_node_t *N = NODE(c2);
+        if (N->kind == UIT_ROWS) {
+            for (int r = 0; r < e->slots[N->slot].nrows; r++)
+                KIDS(c2, g) {
+                    if (uit_shown(e, g, N->slot, r) && uit_act_can(e, NODE(g)->act, N->slot, r))
+                        item_add(&its, g, N->slot, r);
+                }
+        } else if (uit_shown(e, c2, model, row) && uit_act_can(e, N->act, model, row)) {
+            item_add(&its, c2, model, row);
+        }
+    }
+    int n = (int)(its.n / (sizeof(item_t) + 1));
+    static const char BACK[] = "back\0Back", BAR[] = "change\0Move\0confirm\0Open\0back\0Back";
+    int keys = (e->flags & UIT_F_ON_BAR) ? moy_ui_api_hints_w(c, s, (const uint8_t *)BAR, sizeof BAR - 1) > 0
+               : moy_ui_api_hints_w(c, s, (const uint8_t *)BACK, sizeof BACK - 1) > 0;
+    int32_t danger = 0;
+    for (int i = 0; i < n; i++) {
+        item_t it;
+        memcpy(&it, its.p + i * (sizeof(item_t) + 1), sizeof it);
+        const uit_node_t *N = NODE(it.node);
+        const uit_act_t *A = &e->acts[N->act];
+        uint32_t ln, la = text(e, it.node, 0, it.model, it.row, &ln);
+        if (i)
+            uit_buf_printf(&labels, "%c", 0), uit_buf_printf(&icons, "%c", 0);
+        uit_buf_printf(&labels, "%.*s", (int)ln, e->scratch.p + la);
+        const char *hot = uit_str(e, A->letters);
+        if (hot[0] && keys)
+            uit_buf_printf(&labels, "\t%c", hot[0] >= 'a' && hot[0] <= 'z' ? hot[0] - 32 : hot[0]);
+        if (N->t_icon >= 0) {
+            uint32_t in, ia = uit_tmpl_render(e, N->t_icon, it.model, it.row, &in);
+            uit_buf_printf(&icons, "%.*s", (int)in, e->scratch.p + ia);
+        } else {
+            uit_buf_printf(&icons, "%s", uit_str(e, A->icon));
+        }
+        if (N->lit && i < 32)
+            danger |= (int32_t)1 << i;
+    }
+    if (danger)
+        moy_ui_api_menu_danger(c, danger);
+    uint32_t cn, ca = text(e, k, 0, model, row, &cn);
+    int got = moy_ui_api_menu(c, s, sspan(e, ca, cn), (const uint8_t *)(labels.p ? labels.p : ""), labels.n,
+                              (const uint8_t *)(icons.p ? icons.p : ""), icons.n, NULL);
+    // each item's id: its text, cut to what the toolkit keeps
+    const char *l = labels.p;
+    for (int i = 0; i < n; i++) {
+        item_t it;
+        memcpy(&it, its.p + i * (sizeof(item_t) + 1), sizeof it);
+        char id[UIT_ID_MAX + 1];
+        snprintf(id, sizeof id, "%s", l);
+        id_put(e, it.node, it.model, it.row, id);
+        l += strlen(l) + 1;
+        if (i == got && uit_act_can(e, NODE(it.node)->act, it.model, it.row))
+            fire(e, NODE(it.node)->act, it.node, it.model, it.row, NULL);
+    }
+    uit_buf_free(&its), uit_buf_free(&labels), uit_buf_free(&icons);
+}
+
 static void draw(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row)
 {
     const uit_node_t *N = NODE(k);
@@ -1067,6 +1140,16 @@ static void draw(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int m
     case UIT_TEXT_VIEW:
         draw_text_view(e, c, s, k, model, row);
         break;
+    case UIT_MENU:
+        draw_menu(e, c, s, k, model, row);
+        break;
+    case UIT_SCROLL: {
+        const char *key = uit_str(e, N->key);
+        moy_ui_api_scroll(c, s, span_of(key, strlen(key)), NULL);
+        walk(e, c, s, k, model, row);
+        moy_ui_api_scroll(c, s, span_of("", 0), NULL);
+        break;
+    }
     case UIT_PROGRESS: {
         uint32_t vn, hn, va = uit_tmpl_render(e, N->t_value, model, row, &vn);
         int32_t v = (int32_t)strtol(e->scratch.p + va, NULL, 10);

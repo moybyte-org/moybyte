@@ -43,7 +43,8 @@ A_HOOK, A_ROLE_CONFIRM, A_ROLE_BACK = 1, 2, 4
 INPUTS = ("keys", "tdeck", "pad", "touch")
 _KINDS = {"page": 1, "group": 2, "label": 3, "info": 4, "link": 5, "button": 6, "toggle": 7,
           "rows": 8, "dialog": 9, "seg": 10, "slider": 11, "field": 12, "empty": 13,
-          "progress": 14, "text_view": 15}
+          "progress": 14, "text_view": 15,
+          "scroll": 16, "menu": 17, "item": 18}
 _HEAD = {"rows": ("model",), "dialog": ("buttons",)}
 _KIND_NAMES = dict((v, k) for k, v in _KINDS.items())
 _KIND_NAMES[len(_KINDS) + 1] = "cycle"          # UIT_KINDS: a seg of the cycle look
@@ -147,7 +148,7 @@ class CEngine(Engine):
             off = {"hide": 1, "grey": 2}.get(getattr(a, "off", None), 0)
             self._aidx[a.name] = self._ck(x.action(
                 a.name, a.label or "", a.hint if isinstance(a.hint, str) else "", a.when_src, off, flags,
-                a.letters), "action " + a.name)
+                a.letters, a.icon or ""), "action " + a.name)
         for name in self._names:
             self._push(name)
 

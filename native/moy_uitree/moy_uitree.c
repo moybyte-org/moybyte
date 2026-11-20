@@ -331,7 +331,7 @@ const char *uit_label_word(const uit_t *e, int table, const char *key, size_t n)
 }
 
 int uit_action(uit_t *e, const char *name, const char *label, const char *hint, const char *when,
-               int off, int flags, const char *letters)
+               int off, int flags, const char *letters, const char *icon)
 {
     if (e->decl_done)
         return uit_fail(e, UIT_E_ARG, "action %s declared after the first build", name);
@@ -360,6 +360,10 @@ int uit_action(uit_t *e, const char *name, const char *label, const char *hint, 
     if (ls < 0)
         return UIT_E_NOMEM;
     A.letters = (uint16_t)ls;
+    int ic = pool_puts(e, icon ? icon : "");
+    if (ic < 0)
+        return UIT_E_NOMEM;
+    A.icon = (uint16_t)ic;
     A.letter = (uint8_t)(letters ? letters[0] : 0);
     e->acts[e->nacts] = A;
     return e->nacts++;
@@ -577,7 +581,8 @@ int uit_model_of(uit_t *e, int node)
 
 const char *const uit_kind_names[UIT_KINDS] = {"", "page", "group", "label", "info", "link", "button",
                                                "toggle", "rows", "dialog", "seg", "slider", "field",
-                                               "empty", "progress", "text_view"};
+                                               "empty", "progress", "text_view", "scroll", "menu",
+                                               "item"};
 
 static const char *TONES[] = {"ink", "dim", "value", "danger"};
 static const char *BKINDS[] = {"normal", "primary", "tonal", "danger", "toggle"};
@@ -714,6 +719,10 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         else
             N->btn = (uint16_t)i, N->nbtn |= LT_LINES;
         return add_prop(e, node, name, src, repr, PK_LIT, i);
+    }
+    if (!strcmp(name, "mkind") && kind == UIT_ITEM) {
+        N->lit = (uint8_t)!strcmp(src, "danger");
+        return add_prop(e, node, name, src, repr, PK_LIT, N->lit);
     }
     if (!strcmp(name, "kind") && kind == UIT_BUTTON) {
         int i = lit_index(src, BKINDS, 5);

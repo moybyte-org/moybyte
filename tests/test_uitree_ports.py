@@ -529,7 +529,8 @@ C_RUNS = ("settings_rows-tdeck", "settings_rows-desk", "settings_rows_layout-tde
           "settings_paired-tdeck", "settings_paired-desk", "settings_paired_none-big",
           "settings_permissions-tdeck", "settings_permissions-desk",
           "update_sd-tdeck", "update_sd-desk", "update_sd_none-tdeck", "update_online-tdeck",
-          "update_online-big", "update_c6-desk", "settings_log-tdeck", "settings_log-desk")
+          "update_online-big", "update_c6-desk", "settings_log-tdeck", "settings_log-desk",
+          "wifi_popover-desk", "wifi_popover-tdeck")
 
 
 @pytest.mark.parametrize("name", C_RUNS)

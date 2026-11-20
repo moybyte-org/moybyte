@@ -25,7 +25,7 @@ _SIGS = (
     ("uit_state", [_P, _S, _I, _S, _Z], _I),
     ("uit_model", [_P, _I, _S, _Z, _S, _I, _I], _I),
     ("uit_row_of", [_P, _I, _I], _I),
-    ("uit_action", [_P, _S, _S, _S, _S, _I, _I, _S], _I),
+    ("uit_action", [_P, _S, _S, _S, _S, _I, _I, _S, _S], _I),
     ("uit_letter", [_P, _I], _I),
     ("uit_labels", [_P, _S, _S, _Z, _S, _Z], _I),
     ("uit_focused", [_P, c.c_char_p, _Z], _I),
@@ -114,9 +114,9 @@ class Engine:
     def row_of(self, slot, model):
         return self._L.uit_row_of(self._e, slot, model)
 
-    def action(self, name, label, hint, when, off, flags, letters):
+    def action(self, name, label, hint, when, off, flags, letters, icon):
         return self._L.uit_action(self._e, b(name), b(label), b(hint), b(when) if when else None,
-                                  off, flags, b(letters))
+                                  off, flags, b(letters), b(icon))
 
     def letter(self, ch):
         return self._L.uit_letter(self._e, ch)
