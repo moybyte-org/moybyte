@@ -73,7 +73,7 @@ def _model(name, rows):
         setattr(s, name, [dict(r) for r in rows])
 
 
-def _words(sl):
+def _words(sl, kept):
     ws = sl.ws
     w = sl._wifi.station()
     ssid = None
@@ -83,16 +83,30 @@ def _words(sl):
             ssid = ssid if connected else None
         except Exception:  # noqa: BLE001
             ssid = None
-    s.wifi_word = str(ssid)[:16] if ssid else "Off"
+    if kept.get("ssid", ()) != ssid:
+        kept["ssid"] = ssid
+        kept["wifi_word"] = str(ssid)[:16] if ssid else "Off"
+    s.wifi_word = kept["wifi_word"]
     bt = sl._bt_service()
     if bt is not None:
         try:
             enabled, state, name, _preferred, _error = bt.settings_status()
         except Exception:  # noqa: BLE001 -- a radio hiccup reads Off
             enabled, state, name = False, "error", None
-        s.bt_word = (str(name)[:12] if name else state[:1].upper() + state[1:]) if enabled else "Off"
-    s.theme_title = sl._theme_title()
-    s.tz_place = _wc.place(_wc.zone())
+        if kept.get("bt_on", ()) != enabled or kept.get("bt_state") != state or kept.get("bt_name", ()) != name:
+            kept["bt_on"], kept["bt_state"], kept["bt_name"] = enabled, state, name
+            kept["bt_word"] = (str(name)[:12] if name else state[:1].upper() + state[1:]) if enabled else "Off"
+        s.bt_word = kept["bt_word"]
+    look = ws.look
+    if kept.get("theme") is not look.theme_name or kept.get("variant") is not look.theme_variant:
+        kept["theme"], kept["variant"] = look.theme_name, look.theme_variant
+        kept["theme_title"] = sl._theme_title()
+    s.theme_title = kept["theme_title"]
+    zone = _wc.zone()
+    if kept.get("zone", ()) is not zone:
+        kept["zone"] = zone
+        kept["tz_place"] = _wc.place(zone)
+    s.tz_place = kept["tz_place"]
     if s.has_crash:
         s.crash_word = sl.crash_word()
     if s.has_webhost:
@@ -100,46 +114,73 @@ def _words(sl):
     s.paired_words = sl._paired_words
 
 
+_HAS = tuple(("has_" + k, k) for k in CAPS + GATED)     # (the state, the row key it asks for)
+_SCALE_WORD = dict((f, str(f)) for f in _SIZES)
+_STEP_WORD = dict((t, str(t)) for t in IDLE_STEPS)
+
+
 def rows_poll():
+    """Every value the rows show, read before each frame. A board pays for
+    each string, tuple and list a frame makes, so what is read from a source
+    that has not moved (the rows the layer offers, the settings rows' gen,
+    the look, the wifi's answer) is the value kept from the last read."""
     sl = uitree_app.env()
     ws = sl.ws
-    keys = [r[0] for r in sl._settings_rows()]
-    for k in CAPS + GATED:
-        setattr(s, "has_" + k, k in keys)
+    kept = sl.rows.kept
+    rows = sl._settings_rows()                  # memoized by the layer: the same tuple until a row comes or goes
+    if kept.get("rows") is not rows:
+        kept["rows"] = rows
+        kept["keys"] = tuple(r[0] for r in rows)
+    keys = kept["keys"]
+    for name, k in _HAS:
+        setattr(s, name, k in keys)
     s.has_updates = s.has_webhost or s.has_update or s.has_ota_channel or s.has_update_c6
-    _words(sl)
+    _words(sl, kept)
     for name, _label, _verb in TOGGLES:
         setattr(s, name, bool(getattr(ws, name, False)))
-    fs = ws.look.font_scale
-    s.font_scale = str(fs) if str(fs) in SCALES else SCALES[0]
+    look = ws.look
+    s.font_scale = _SCALE_WORD.get(look.font_scale, SCALES[0])
     if s.has_layout_theme:
-        pick = ws.look.layout_theme()
-        vals = (None,) + tuple(ws.look.layout_choices())
-        if pick is not None and pick not in vals:
-            vals = vals + (pick,)
-        _model("layouts", tuple((("v", "" if c is None else c),
-                                 ("word", "Theme" if c is None else _capital(str(c)))) for c in vals))
+        pick = look.layout_theme()
+        if kept.get("lgen", -1) != look.layout_gen or kept.get("lpick", ()) != pick:
+            kept["lgen"], kept["lpick"] = look.layout_gen, pick
+            vals = (None,) + tuple(look.layout_choices())
+            if pick is not None and pick not in vals:
+                vals = vals + (pick,)
+            _model("layouts", tuple((("v", "" if c is None else c),
+                                     ("word", "Theme" if c is None else _capital(str(c)))) for c in vals))
         s.layout_theme = "" if pick is None else pick
-    pick = ws.look.home_style()
+    pick = look.home_style()
     s.home_style = "theme" if pick is None else pick
-    s.volume = sl.level("volume")[0]
-    s.brightness = sl.level("brightness")[0]
+    gen = ws.system.gen()
+    if kept.get("gen", -1) != gen or kept.get("system") is not ws.system:
+        kept["gen"], kept["system"] = gen, ws.system      # the settings rows moved: read again
+        kept["volume"] = sl.level("volume")[0]
+        kept["brightness"] = sl.level("brightness")[0]
+        kept["name"] = str(ws.system.get("name", "") or "")
+        kept["name_shown"] = _ssh.name(ws)
+    s.volume = kept["volume"]
+    s.brightness = kept["brightness"]
     if s.has_idle_blank:
         lad = ws.idle_ladder
         for key, _label in IDLE:
-            v = lad.value(key)
-            setattr(s, key, str(v) if v in IDLE_STEPS else str(IDLE_STEPS[0]))
+            setattr(s, key, _STEP_WORD.get(lad.value(key), STEP_WORDS[0]))
     if s.has_ota_channel:
         s.ota_channel = "beta" if ws.toggles.ota_channel() == "unstable" else "stable"
     s.can_type = bool(ws.text.can_type())
-    s.name = str(ws.system.get("name", "") or "")
-    s.name_shown = _ssh.name(ws)
+    s.name = kept["name"]
+    s.name_shown = kept["name_shown"]
     lvl = ws.battery_level()
     s.has_battery = lvl is not None
     s.battery = lvl or 0
     a, t = ws.ach.count(), ws.ach.total()
-    s.ach_words = "%d of %d" % (a, t)
-    _model("about", tuple((("label", k), ("value", v)) for k, v in sl._about))
+    if kept.get("ach", -1) != a or kept.get("ach_total", -1) != t:
+        kept["ach"], kept["ach_total"] = a, t
+        kept["ach_words"] = "%d of %d" % (a, t)
+    s.ach_words = kept["ach_words"]
+    if kept.get("about") is not sl._about:
+        kept["about"] = sl._about
+        _model("about", tuple((("label", k), ("value", v)) for k, v in sl._about))
 
 
 def rows_opened():
@@ -323,6 +364,7 @@ class RowsPage:
         self.engine = uitree_app.Page(rows_page, host, self, gen=True, env=layer)
         self._ws = layer.ws
         self.last = {}                  # each model's rows as this page last wrote them
+        self.kept = {}                  # what rows_poll read from a source that has not moved since
 
     def all(self):
         """The page's damage: Settings draws another frame."""
