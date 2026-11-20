@@ -160,18 +160,55 @@ def pages(loop):
     _steps(loop)
     shown["tasks_notes"] = ws.tasks_layer.current()[1].summary
     ws.close_tasks()
+    # the Editor's Code tab: typed into, its find, Go to, completion and a
+    # stopped line's card; then theme mode's Config, the same page's other
+    for cart in ws.carts.all:
+        ws.open_in_editor(cart)
+        ws.text.set_menu_view("code")
+        if ws.editor is not None:
+            break
+        ws.spine.exit()
+    ed = ws.editor
+    ed.set_text("\n".join("def step_%d(n):\n    return n + %d" % (i, i) for i in range(30)))
+    _steps(loop)
+    cl = ws.code_layer
+    for c in b"st":
+        ed.key(c)
+        ws.mark_dirty()
+        _steps(loop, 2)
+    shown["code"] = ws.wm.top_kind()
+    for name in ("find", "goto_open", "complete_open"):
+        cl.run(name)
+        _steps(loop)
+        shown[name] = cl.page.s.finding or cl.page.s.over
+        cl.run("find_close" if name == "find" else "overlay_close")
+        _steps(loop, 4)
+    ws.code_err_row = 3
+    ws.code_err = "NameError: name 'speed' isn't defined"
+    ws.crash_popup = ws.code_err
+    ws.mark_dirty()
+    _steps(loop)
+    shown["stopped"] = cl.page.s.stopped
+    ws.spine.exit()
+    _steps(loop, 4)
+    ws.spine.open_app(ws.app("appearance"))
+    _steps(loop, 4)
+    shown["config"] = bool(ws.look.edit_file())
+    _steps(loop)
+    ws.spine.exit()
     _steps(loop, 4)
     print("RESULT " + json.dumps({"painted": painted, "shown": shown, "errors": errors}))
 '''
 
 # each ported page's build function, by name: Settings' rows, its tz, paired,
-# System log and App permissions pages, the update screen, the web console, and
+# System log and App permissions pages, the update screen, the web console,
 # Licences' list (a licence's text is a page pushed over it: shown["licence"]),
-# Achievements (a badge's popover: shown["badge"]), the Wi-Fi panel in
 # Settings and in the bar's popover,
 # and the task manager on each of its tabs
+# Achievements (a badge's popover: shown["badge"]), the task manager on each
+# of its tabs, and the Editor's Code tab and theme mode's Config
 BUILDS = ("rows_page", "tz_page", "paired_page", "log_page", "build", "page", "web_page",
-          "list_page", "tasks_page", "achievements_page", "wifi_page", "popover_page")
+          "list_page", "tasks_page", "achievements_page", "code_page", "config_page")
 
 
 def test_every_ported_page_builds_and_draws_on_the_boards_micropython(tmp_path):
@@ -195,5 +232,9 @@ def test_every_ported_page_builds_and_draws_on_the_boards_micropython(tmp_path):
         assert shown[how] == "update", (how, shown)
     assert shown["web"] is True, shown
     assert shown["tasks"] == "running" and shown["tasks_notes"] == "Ana", shown
+    assert shown["code"] == "menu", shown
+    assert [shown[k] for k in ("find", "goto_open", "complete_open")] == \
+        [True, "goto", "complete"], shown
+    assert shown["stopped"] and shown["config"], shown
     missing = [b for b in BUILDS if not painted.get(b)]
     assert not missing, ("pages that never painted", missing, painted, text[-3000:])

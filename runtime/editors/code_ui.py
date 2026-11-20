@@ -427,7 +427,7 @@ def code_page():
             ui.status("Ln {code.line}, Col {code.col} · {code.lines} lines · "
                       "{issue?1 issue:No issues}")
             ui.button("tools", icon="tools", alone=True, shown="touch", marked="tools_open")
-        ui.canvas("symbols", _draw_symbols, h=22, pointer="symbol", shown="touch")
+        ui.canvas("symbols", _draw_symbols, h=22, pointer="symbol", shown="touch", ground="surface")
         with ui.popover("complete", anchor="code.word", w="{@desk?300:150}", close="overlay_close",
                         shown="over=complete"):
             with ui.rows("cands", cur="cand"):
