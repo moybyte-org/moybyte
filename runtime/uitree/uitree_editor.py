@@ -51,6 +51,8 @@ class Engine(uitree_app.Engine):
         self.dividers = {}     # panes node id -> the divider rects this frame drew
         self.edits_traced = None
         self.host_arrows = False   # the arrows reach the document through the host (the console's nav)
+        self.ground = None         # a box the page's ground covers past its content: the
+                                   # canvas round the host's rect (a handheld's bar band)
 
     # -- the page: regions stacked, overlays last ---------------------------
 
@@ -60,7 +62,12 @@ class Engine(uitree_app.Engine):
         self.lenders = {}
         S.LIVE = S.live_units(n, self.lenders)
         self.canvases = {}
+        g = self.ground
+        if g is not None:
+            _v.at(*g)
         rect = _v.page(n.p["title"](None))
+        if g is not None:
+            rect = tuple(self.content)
         hint = self._hints()
         if hint and _v.hints_width(hint) > 0:
             # the page's band: under everything it stacks

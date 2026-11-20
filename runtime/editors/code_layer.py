@@ -652,6 +652,9 @@ class CodeLayer(Layer):
         desk = _desk()
         r = self._rect()
         self.page.text_keys = self._frame_keys()
+        # the page grounds the canvas round its rect too: a handheld's bar
+        # band, whose strip the bar draws over it, is never the last frame's
+        self.page.ground = None if desk else (0, 0, cv.w, cv.h)
         host.begin(cv, ws.theme_colors, r, desk)
         self.page.paint(dt, cv, ws.theme_colors, r, desk)
         _ui.end()
