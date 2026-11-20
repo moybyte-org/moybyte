@@ -389,6 +389,19 @@ def _open_tasks(ws):
     ws.open_tasks()
 
 
+def _open_achievements(ws):
+    """Settings' Achievements over the goldens' badges: nine found, a
+    game's goal under way."""
+    from test_shell_goldens import GOLDEN_BADGES
+    ws.ach.seed(dict(GOLDEN_BADGES))
+    ws.system.set(ws.ach.key, dict(ws.system.get(ws.ach.key), **{
+        "moybyte.harpoon_pop": {"name": "Harpoon Pop", "value": {"high_tide": 3},
+                                "found": {"first_clear": [20261020, "Bubble Buster", "star",
+                                                          "Clear level 1"]}}}))
+    ws.open_settings()
+    ws.settings_layer.open_page("achievements")
+
+
 def _open_log(ws):
     import moy_log
     moy_log.init(16384)
@@ -422,6 +435,7 @@ SURFACES = {
     "settings_log": P.Surface(_open_log),
     "web_console": P.Surface(_open_web_console),
     "tasks": P.Surface(_open_tasks),
+    "achievements": P.Surface(_open_achievements),
     "settings_wifi": P.Surface(_open_wifi()),
     "settings_wifi_none": P.Surface(_open_wifi(False)),
     "wifi_popover": P.Surface(_open_wifi_popover),
@@ -543,6 +557,13 @@ RUNS = (
      ["k:down", "k:up", "k:up", "k:right", "k:down", "k:down", "k:down", "k:a", "f:2"]),
     ("tasks-desk", "tasks", "p4_1024x600_fs2_windowed",
      ["k:down", "k:up", "k:up", "k:right", "k:down", "k:down", "k:down", "k:right", "k:a", "f:2"]),
+    # Achievements: a badge's popover opened and closed by Back, the cards
+    # stepped down their groups (a wrapping title, a locked badge), and a
+    # goal's popover with its count
+    ("achievements-tdeck", "achievements", "tdeck_320x240_fs1_dark",
+     ["k:right", "k:a", "back", "k:down", "k:down", "k:a", "back", "f:2"]),
+    ("achievements-desk", "achievements", "p4_1024x600_fs2_windowed",
+     ["k:right", "k:a", "back", "k:down", "k:down", "k:down", "k:a", "back"]),
     ("editor_code-tdeck", "editor_code", "tdeck_320x240_fs1_dark", CODE_SCRIPT, P.BEHAVIOUR),
     ("editor_code-desk", "editor_code", "p4_1024x600_fs2_windowed", CODE_DESK_SCRIPT, P.BEHAVIOUR),
     ("editor_code-big", "editor_code", "big_800x480_fs3_dark", CODE_SCRIPT, P.BEHAVIOUR),
