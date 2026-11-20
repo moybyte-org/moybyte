@@ -326,6 +326,9 @@ class Engine(S.Builder):
 
     def fire(self, act, args, n, row):
         self.fired_id = n.key if row is None else "%s/%s" % (row._f[row._m.key], n.key)
+        if not S.TRACING:               # the source only names the action's trace line
+            self.q.append((act, args, ""))
+            return
         src = "%s %r" % (n.kind, n.key if row is None else "%s/%s" % (row._f[row._m.key], n.key))
         title = self.root.p["title"](None) if self.root else ""
         self.q.append((act, args, "%s on %r" % (src, title)))
@@ -985,12 +988,13 @@ class Engine(S.Builder):
         self.s._v[ck] = self._sync[ck] = v
         self.s._ver[ck] += 1
         was, _NOW.app = _NOW.app, self
-        S._trace("state", ck, "%r -> %r   (%s)" % (old, v, why))
+        if S.TRACING:                   # a board keeps no trace: no line made for it
+            S._trace("state", ck, "%r -> %r   (%s)" % (old, v, why))
         _NOW.app = was
         if "changed" in lst.l:
             r = next((r for r in self.s._v[lst.l["model"]] if r._f[r._m.key] == v), None)
             if r is not None:
-                self.q.append((lst.l["changed"], (r,), "%s %r cur moved" % (lst.kind, lst.key)))
+                self.q.append((lst.l["changed"], (r,), "%s %r cur moved" % (lst.kind, lst.key) if S.TRACING else ""))
 
     def _id_in(self, ids, want):
         for i, (node, row) in ids.items():
@@ -1406,7 +1410,8 @@ class Engine(S.Builder):
             old = self.s._v[n.key]
             self.s._v[n.key] = setattr_ok
             self.s._ver[n.key] += 1
-            S._trace("state", n.key, "%r -> %r   (from %s %r)" % (old, new, n.kind, n.key))
+            if S.TRACING:
+                S._trace("state", n.key, "%r -> %r   (from %s %r)" % (old, new, n.kind, n.key))
             if "on" in n.l:
                 self.fire(n.l["on"], (), n, None)
 

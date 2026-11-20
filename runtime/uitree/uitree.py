@@ -717,8 +717,9 @@ class State:
             return
         self._v[k] = new
         self._ver[k] += 1
-        _trace("state", k, "%s%s" % (_change(self._t[k], old, new),
-                                     "   (in %s)" % _NOW.action if _NOW.action else ""))
+        if TRACING:                     # a board keeps no trace: no line made for it
+            _trace("state", k, "%s%s" % (_change(self._t[k], old, new),
+                                         "   (in %s)" % _NOW.action if _NOW.action else ""))
 
 
 def derive(name, *, cond=None, text=None):
@@ -2834,11 +2835,12 @@ class Builder:
             _NOW.app, _NOW.action = was, was_act
 
     def run_action(self, act, args, source):
-        was, _NOW.app = _NOW.app, self
-        try:
-            _trace("action", act.name, "from %s" % source)
-        finally:
-            _NOW.app = was
+        if TRACING:                     # a board keeps no trace: no line made for it
+            was, _NOW.app = _NOW.app, self
+            try:
+                _trace("action", act.name, "from %s" % source)
+            finally:
+                _NOW.app = was
         self.run(act.fn, *args, action=act.name)
         commit(self)
 
