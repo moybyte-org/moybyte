@@ -14,6 +14,8 @@ The order, from the bottom:
             and the simulator's runners, named where they reach up
   carts     the store and the cart formats
   toolkit   the draw toolkit, which reads the picture and sheet formats
+  uitree    the UI tree API (`import uitree as ui`) and its replay into
+            the toolkit's verbs
   system    the system's own surfaces and services
   run       running a cart
   editors   the Editor and its cores
@@ -36,6 +38,7 @@ LAYERS = (
     ("host",),
     ("carts",),
     ("toolkit",),
+    ("uitree",),
     ("system",),
     ("run",),
     ("editors",),
@@ -85,7 +88,13 @@ CROSSINGS = {
                    "sched_python", "scheduler", "wallpaper")),
     "layers": ("the Layer base every surface subclasses",
                ("cards_layer", "code_layer", "editor_desk", "paint_layer", "theme_editor",
-                "settings_layer", "tasks_ui")),
+                "settings_layer", "tasks_ui", "uitree_app")),
+    "editors_code": ("a `ui.doc` is the Code tab's text machinery under one object",
+                     ("uitree_doc",)),
+    "op_history": ("a `ui.doc`'s undo is the op journal the cart editor handle keeps",
+                   ("uitree_doc",)),
+    "artwork": ("an `image` value of a drawing decodes through My Art's cover reader",
+                ("uitree_pics",)),
     "bar_layer": ("the bar a surface lays its verbs on",
                   ("cards_layer", "code_layer", "editor_app", "theme_editor", "update_ui")),
     "chrome": ("the console's stateless base: the palette and the responsive layout",
