@@ -3,7 +3,7 @@
 moy_ui_api_label): each a new option that leaves every existing call's
 pixels as they were."""
 
-from runtime import ui, ui_host
+from runtime import ui, ui_draw, ui_host
 
 from test_ui_public import _Run
 
@@ -184,3 +184,45 @@ def test_a_view_without_keys_is_no_stop():
 def test_the_page_keys_are_moy_inputs():
     from runtime import moy_input
     assert (moy_input.KEY_PGUP, moy_input.KEY_PGDN) == (0x114, 0x115)
+
+
+def _link_rows(label, value, ws):
+    """A link row of `label` and `value` drawn at each width of `ws`, one
+    under the next; the measure of the row, of its value alone, and the
+    rows' tops."""
+    seen = {}
+
+    def draw():
+        ui.page("R")
+        seen["w"] = ui.measure("link", label + "\t" + value)[2]
+        seen["value"] = ui.measure("link", "\t" + value)[2]
+        seen["none"] = ui.measure("link", "\t")[2]
+        seen["h"] = ui.measure("link", label + "\t" + value)[3]
+        seen["label"] = ui.measure("label", label)[2]       # the text and a row pad each side
+        ui.at(0, 20, 100, seen["h"])
+        ui.link("focus", "", {"id": "focus"})        # the focus mark's, so no row below wears it
+        for i, w in enumerate(ws(seen["w"])):
+            ui.at(0, 60 + i * 40, w, seen["h"])
+            ui.link(label, value, {"id": "r%d" % i})
+    r = _Run(draw)
+    r.frame()
+    r.frame()
+    return r, seen
+
+
+def test_a_link_rows_measure_is_the_width_that_draws_its_label_whole():
+    """`measure("link", label + TAB + value)` answers the width that draws
+    the label and the value whole: at that width the label's pixels are the
+    ones a wider row draws; a narrower row cuts its label, an ellipsis at
+    its cut."""
+    label, value = "The console", "FSL-1.1-MIT"
+    r, seen = _link_rows(label, value, lambda w: (w + 60, w, w - 8))
+    assert seen["w"] > seen["value"] > seen["none"] > 0
+    tw = ui_draw.text_width(label, 1, "ui")
+    lw = (seen["label"] + tw) // 2 + 1                 # the row's pad and its label
+
+    def cols(i, n):
+        y0 = 60 + i * 40
+        return [[_px(r, x, y) for x in range(n)] for y in range(y0, y0 + seen["h"])]
+    assert cols(1, lw) == cols(0, lw)
+    assert cols(2, lw) != cols(0, lw)

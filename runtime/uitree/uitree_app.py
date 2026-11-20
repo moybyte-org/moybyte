@@ -85,6 +85,11 @@ class _Slot:
             m[0] = -1
 
 
+def _has_link(n):
+    """Whether a link row stands anywhere under node `n`."""
+    return any(k.kind == "link" or _has_link(k) for k in n.kids)
+
+
 def _shown(n, row):
     g = n.p.get("shown")
     return g is None or g(row)
@@ -188,6 +193,7 @@ class Engine(S.Builder):
         self._gen_ok = False
         self._page_names = ()           # the states the page's gen counts: all but its cells' own
         self._cells = {}                # a split's region (its group) -> [its override block, the states it reads]
+        self._split_w = {}              # a split -> [its versions, its span, its widths]; False: no link in it
         self._edits = 0                 # a commit field's draft edits, which move the gen too
         self._buttons = 0               # the frame's buttons, as keys() handed them to the host
         st = decl.state                 # this engine's own values: two consoles in one process each hold theirs
@@ -399,6 +405,7 @@ class Engine(S.Builder):
             self._walk(self.root)
             self.fresh = True
             self._new_build = True
+            self._split_w = {}
             self._gen_ok = self._gen_on and self._gen_safe(self.root)
             if self._gen_ok:
                 self._cell_gens(self.root)
@@ -1750,7 +1757,8 @@ class Engine(S.Builder):
         x, y, w, h = _v.inset(rect, pad)
         span = (w if d == "row" else h) - gap * (len(sizes) - 1)
         kids = [k for k in n.kids if _shown(k, row)]
-        spans = self._spans(sizes, span, len(sizes))
+        spans = self._fit_spans(n, row, kids, sizes, span) if d == "row" else \
+            self._spans(sizes, span, len(sizes))
         at = 0
         for i, k in enumerate(kids):
             s = spans[i] if i < len(kids) - 1 else span - at
@@ -1786,6 +1794,55 @@ class Engine(S.Builder):
                 _v.at(*self.rect)
                 continue
             getattr(self, _rname(k.kind))(k, row, r)
+
+    def _fit_spans(self, n, row, kids, sizes, span):
+        """A row split's widths: its sizes' (`_spans`), then each region whose
+        rows need more to draw whole (its widest link, the toolkit's measure)
+        widened to it, the cells beside it giving up to half their share.
+        Kept until a state or the span moves; a split with no link in its
+        regions takes its sizes' as they are."""
+        f = self._split_w.get(n)
+        if f is None:
+            f = self._split_w[n] = [None, 0, None] if any(
+                k.kind == "group" and _has_link(k) for k in n.kids) else False
+        if f is False:
+            return self._spans(sizes, span, len(sizes))
+        ver = self._all_ver()
+        if f[0] == ver and f[1] == span and ver >= 0:
+            return f[2]
+        spans = self._spans(sizes, span, len(sizes))
+        need = [self._row_w(k, row) if k.kind == "group" else 0 for k in kids]
+        floor = [max(v // 2, need[j] if j < len(need) else 0) for j, v in enumerate(spans)]
+        for i, nd in enumerate(need):
+            short = nd - spans[i]
+            for j in range(len(spans)):
+                if short <= 0:
+                    break
+                give = min(short, spans[j] - floor[j]) if j != i else 0
+                if give > 0:
+                    spans[j] -= give
+                    spans[i] += give
+                    short -= give
+        f[0], f[1], f[2] = ver, span, spans
+        return spans
+
+    def _row_w(self, n, row):
+        """The width the widest link row in region `n` needs to draw its
+        label and its value whole (the toolkit's measure), 0 with none."""
+        w = 0
+        for k in n.kids:
+            if k.kind == "rows":
+                for r in self.s._v[k.l["model"]]:
+                    for kk in k.kids:
+                        if kk.kind == "link" and _shown(kk, r):
+                            w = max(w, _v.measure("link", self._t(kk, "label", r) + "\t"
+                                                  + self._t(kk, "value", r))[2])
+            elif k.kind == "link" and _shown(k, row):
+                w = max(w, _v.measure("link", self._t(k, "label", row) + "\t"
+                                      + self._t(k, "value", row))[2])
+            elif k.kind == "group":
+                w = max(w, self._row_w(k, row))
+        return w
 
     def _col_h(self, n, row):
         """How tall a split's column draws, measured before it draws (the

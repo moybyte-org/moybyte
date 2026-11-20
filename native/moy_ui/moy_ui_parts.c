@@ -1107,10 +1107,26 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
     }
     int room = right - gap - tx;
     if (r->label.n && room > 0) {
-        size_t ln = moy_text_fit_px(fl.id, r->label.p, r->label.n, room, sc);
-        text(&d, &fl, r->label.p, ln, tx, b.y, b.h, pal(&d, lab), sc);
+        text_cut(&d, &fl, r->label, tx, b.y, b.h, room, pal(&d, lab), sc);
     }
     return MOY_UI_OK;
+}
+
+int moy_ui_vrow_w(const moy_ui_sink_t *s, int kind, const moy_ui_vrow_t *r) {
+    pd_t d;
+    open_pd(s, &d, r->fs, r->desk);
+    int sc = tscale(s);
+    pf_t fl = font_of(&d, MOY_UI_FONT_UI);
+    int gap = pm(&d, MOY_UI_M_VALUE_ROW_GAP, 1);
+    int w = 2 * pad_of(&d, r) + gap;
+    if (r->icon_slot >= 0 || r->icon_glyph >= 0) {
+        w += 16 * d.fs + gap;
+    }
+    w += tw(&fl, r->label.p, r->label.n, sc) + tw(&fl, r->value.p, r->value.n, sc);
+    if (kind == MOY_UI_V_LINK) {
+        w += pm(&d, MOY_UI_M_VALUE_ROW_CHEV, 1) + gap;
+    }
+    return w;
 }
 
 

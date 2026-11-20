@@ -3956,6 +3956,23 @@ int moy_ui_api_measure(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy_ui
     } else if (kind == MOY_UI_MEASURE_PROGRESS) {
         h = moy_ui_vrow_tall_h(c->cls, c->fs);
         w = r.w;
+    } else if (kind == MOY_UI_MEASURE_LINK) {
+        moy_ui_span_t label = text, value = {text.p, 0};
+        for (uint16_t i = 0; i < text.n; i++) {
+            if (text.p[i] == '\t') {
+                label.n = i;
+                value.p = text.p + i + 1;
+                value.n = (uint16_t)(text.n - i - 1);
+                break;
+            }
+        }
+        moy_ui_vrow_t v;
+        mua_vrow_init(c, &v, label);
+        v.icon_slot = c->icon_slot;
+        v.icon_glyph = c->icon_glyph;
+        v.value = value;
+        h = vrow_h(c);
+        w = moy_ui_vrow_w(s, MOY_UI_V_LINK, &v);
     } else {
         return 0;
     }

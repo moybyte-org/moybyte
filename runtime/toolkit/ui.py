@@ -371,7 +371,7 @@ def label(text, o=None):
     _C.api_label(t[0], t[1], t[2], text, _over(o))
 
 
-_MEASURE = ("label", "button", "progress")
+_MEASURE = ("label", "button", "progress", "link")
 
 
 def measure(verb, text, o=None):
@@ -379,8 +379,10 @@ def measure(verb, text, o=None):
     and placing nothing: `(x, y, w, h, step)`, `y` where the stack stands
     (or `ui.at`'s), `w` what its text needs (a button's natural width) at
     most the row's, `step` how far the stack moves down past it (0 under
-    `ui.at`). `verb` "label", "button" or "progress" (h the height a
-    progress row placed by `ui.at` draws tall at, its bar under its label)."""
+    `ui.at`). `verb` "label", "button", "progress" (h the height a
+    progress row placed by `ui.at` draws tall at, its bar under its label)
+    or "link" (`text` its label and its value joined by a tab; `w` the
+    width that draws both whole)."""
     t = _T
     if verb == "label" and _has_text(o):
         _text_opts(o)
