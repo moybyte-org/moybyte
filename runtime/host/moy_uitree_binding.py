@@ -54,6 +54,7 @@ _SIGS = (
     ("uit_can", [_P, _I, _I], _I),
     ("uit_dialog", [_P], _I),
     ("uit_back_dialog", [_P, c.c_char_p, _Z], _I),
+    ("uit_back_popover", [_P, c.c_char_p, _Z], _I),
     ("uit_unfocused", [_P], _I),
     ("uit_dump", [_P, c.c_char_p, _Z], _I),
     ("uit_stats", [_P, _I32], _I),
@@ -248,6 +249,12 @@ class Engine:
     def back_dialog(self):
         """Back on a shown dialog: (its first button's action, its key), or -1."""
         a = self._L.uit_back_dialog(self._e, self._buf, 512)
+        return a if a < 0 else (a, self._buf.value.decode("utf-8"))
+
+    def back_popover(self):
+        """Back on a shown popover: (its close= action, its key), -1 where it
+        names none, -2 where none shows."""
+        a = self._L.uit_back_popover(self._e, self._buf, 512)
         return a if a < 0 else (a, self._buf.value.decode("utf-8"))
 
     def unfocused(self):

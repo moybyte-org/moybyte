@@ -38,7 +38,7 @@ enum {
     UIT_PAGE = 1, UIT_GROUP, UIT_LABEL, UIT_INFO, UIT_LINK, UIT_BUTTON, UIT_TOGGLE,
     UIT_ROWS, UIT_DIALOG, UIT_SEG, UIT_SLIDER, UIT_FIELD, UIT_EMPTY, UIT_PROGRESS, UIT_TEXT_VIEW,
     UIT_SCROLL, UIT_MENU, UIT_ITEM, UIT_SPLIT, UIT_CANVAS, UIT_TABS, UIT_SWITCH, UIT_CASE, UIT_TABLE,
-    UIT_COL, UIT_FOOT, UIT_KINDS
+    UIT_COL, UIT_FOOT, UIT_CARDS, UIT_CARD, UIT_PICTURE, UIT_POPOVER, UIT_KINDS
 };
 
 // Events (`uit_next`).
@@ -156,6 +156,9 @@ int uit_dialog(uit_t *e);
 // Back on a shown dialog: its first button's action (-1: no dialog shown),
 // its key into buf.
 int uit_back_dialog(uit_t *e, char *buf, size_t cap);
+// Back on a shown popover: its close= action, -1 where it names none (Back
+// still closes nothing else), -2 where no popover shows; its key into buf.
+int uit_back_popover(uit_t *e, char *buf, size_t cap);
 // Whether no node holds focus.
 int uit_unfocused(const uit_t *e);
 // The id focus is on after the last frame ("" none): its length.

@@ -259,13 +259,19 @@ struct uit {
     int32_t rect[4];            // the page's room for its placed rows (`self.rect`)
     uint8_t in_cell;            // drawing a split's column: a button takes its natural width
     uint8_t tv_stop, tv_stop_now;   // a text view that runs on drew last frame / this frame (the band's PgUp PgDn)
+    uint8_t in_pop;             // drawing a popover's body: a split there lays out as its cells (`_pop_split`)
     int16_t foot;               // the page's shown foot this frame, or -1
     int32_t foot_r[4];          // its rect
     uit_buf_t cells;            // a table's columns and cells, made each frame it draws
 };
 
 // A list: rows and a table keep a model, a cur= and a removal order.
-#define UIT_IS_LIST(kind) ((kind) == UIT_ROWS || (kind) == UIT_TABLE)
+#define UIT_IS_LIST(kind) ((kind) == UIT_ROWS || (kind) == UIT_TABLE || (kind) == UIT_CARDS)
+// The states a page's gen can count (more: it carries none).
+#define UIT_GEN_SLOTS 128
+// A cards list's region's gen (`_cell_gens`): the builds and edits, and the versions of what its
+// rows read; -1 past UIT_GEN_SLOTS.
+int32_t uit_cell_gen(uit_t *e, int k);
 // The case of switch node `k` its state's value names, else its "_", else -1.
 int uit_case_of(uit_t *e, int k);
 

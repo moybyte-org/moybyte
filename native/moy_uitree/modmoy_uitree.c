@@ -332,6 +332,16 @@ static mp_obj_t eng_back_dialog(mp_obj_t self)
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(eng_back_dialog_obj, eng_back_dialog);
 
+static mp_obj_t eng_back_popover(mp_obj_t self)
+{
+    int a = uit_back_popover(eng(self), evbuf, sizeof evbuf);
+    if (a < 0)
+        return MP_OBJ_NEW_SMALL_INT(a);
+    mp_obj_t t[2] = {MP_OBJ_NEW_SMALL_INT(a), mp_obj_new_str(evbuf, strlen(evbuf))};
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(eng_back_popover_obj, eng_back_popover);
+
 static mp_obj_t eng_dialog(mp_obj_t self)
 {
     return MP_OBJ_NEW_SMALL_INT(uit_dialog(eng(self)));
@@ -413,6 +423,7 @@ static const mp_rom_map_elem_t eng_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_leave), MP_ROM_PTR(&eng_leave_obj) },
     { MP_ROM_QSTR(MP_QSTR_letter), MP_ROM_PTR(&eng_letter_obj) },
     { MP_ROM_QSTR(MP_QSTR_back_dialog), MP_ROM_PTR(&eng_back_dialog_obj) },
+    { MP_ROM_QSTR(MP_QSTR_back_popover), MP_ROM_PTR(&eng_back_popover_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_int), MP_ROM_PTR(&eng_set_int_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_num), MP_ROM_PTR(&eng_set_num_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_text), MP_ROM_PTR(&eng_set_text_obj) },

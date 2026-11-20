@@ -602,7 +602,8 @@ const char *const uit_kind_names[UIT_KINDS] = {"", "page", "group", "label", "in
                                                "toggle", "rows", "dialog", "seg", "slider", "field",
                                                "empty", "progress", "text_view", "scroll", "menu",
                                                "item", "split", "canvas", "tabs", "switch", "case",
-                                               "table", "col", "foot"};
+                                               "table", "col", "foot", "cards", "card", "picture",
+                                               "popover"};
 
 static const char *TONES[] = {"ink", "dim", "value", "danger"};
 static const char *BKINDS[] = {"normal", "primary", "tonal", "danger", "toggle"};
@@ -659,7 +660,7 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
             N->focus = (int16_t)c;
         return add_prop(e, node, name, src, repr, PK_COND, c);
     }
-    if (kind == UIT_ROWS && !strcmp(name, "group")) {
+    if ((kind == UIT_ROWS || kind == UIT_CARDS) && !strcmp(name, "group")) {
         // a caption drawn where its value changes from the row before: over the rows
         model = N->slot;
         tslot = &N->t_main;
@@ -694,6 +695,12 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         tslot = &N->t_icon;
     else if (!strcmp(name, "hint") && kind == UIT_TABLE)
         tslot = &N->t_value;
+    else if ((kind == UIT_CARDS && !strcmp(name, "w")) || (kind == UIT_CARD && !strcmp(name, "sub")) ||
+             (kind == UIT_PICTURE && !strcmp(name, "side")) || (kind == UIT_POPOVER && !strcmp(name, "anchor")))
+        tslot = &N->t_value;
+    else if ((kind == UIT_CARDS && !strcmp(name, "h")) || (kind == UIT_POPOVER && !strcmp(name, "w")) ||
+             ((kind == UIT_CARD || kind == UIT_PICTURE) && !strcmp(name, "tone")))
+        tslot = &N->t_aux;
     else if ((!strcmp(name, "empty") && UIT_IS_LIST(kind)) ||
              (!strcmp(name, "hint") && (kind == UIT_TOGGLE || kind == UIT_FIELD)) ||
              (!strcmp(name, "hi") && kind == UIT_SLIDER))
@@ -704,7 +711,9 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
             return t;
         const uit_tmpl_t *T = &e->tmpls[t];
         if ((kind == UIT_SLIDER && (!strcmp(name, "lo") || !strcmp(name, "hi"))) ||
-            (kind == UIT_PROGRESS && (!strcmp(name, "value") || !strcmp(name, "max")))) {
+            (kind == UIT_PROGRESS && (!strcmp(name, "value") || !strcmp(name, "max"))) ||
+            (kind == UIT_CARDS && name[1] == 0) || (kind == UIT_PICTURE && !strcmp(name, "side")) ||
+            (kind == UIT_POPOVER && !strcmp(name, "w"))) {
             // an int prop: an int template, or the int literal a number lowers to
             const char *d = src + (src[0] == '-');
             int lit_int = T->lit && *d;
@@ -821,10 +830,10 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
     }
     if ((!strcmp(name, "on") && (kind == UIT_TOGGLE || kind == UIT_SEG || kind == UIT_SLIDER ||
                                  kind == UIT_FIELD || kind == UIT_TABLE)) ||
-        (!strcmp(name, "changed") && kind == UIT_FIELD)) {
+        (!strcmp(name, "changed") && kind == UIT_FIELD) || (!strcmp(name, "close") && kind == UIT_POPOVER)) {
         for (int a = 0; a < e->nacts; a++)
             if (!strcmp(uit_str(e, e->acts[a].name), src)) {
-                if (name[0] == 'o')
+                if (name[0] == 'o' || (name[0] == 'c' && name[1] == 'l'))
                     N->on = (int16_t)a;
                 else
                     N->changed = (int16_t)a;
@@ -883,11 +892,9 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
     if (!strcmp(name, "cols") && kind == UIT_TABLE)
         return add_prop(e, node, name, src, repr, PK_LIT, 0);      // a column's header, one prop each
     if (!strcmp(name, "look") && kind == UIT_FOOT) {
-        // "share": its buttons share its width; the end look is not drawn yet
-        if (strcmp(src, "share"))
-            return uit_fail(e, UIT_E_KIND, UIT_MSG("foot look=%s: only share is drawn yet", "foot look=%s"), src);
-        N->lit = 1;
-        return add_prop(e, node, name, src, repr, PK_LIT, 1);
+        // "share": its buttons share its width (lit 1); "end" (0): at its end
+        N->lit = (uint8_t)!strcmp(src, "share");
+        return add_prop(e, node, name, src, repr, PK_LIT, N->lit);
     }
     if (!strcmp(name, "buttons") && kind == UIT_DIALOG)
         return add_prop(e, node, name, src, repr, PK_LIT, 0);
@@ -919,41 +926,158 @@ static int names_engine_value(const char *src)
     return strstr(src, "@focus") || strstr(src, "@input") || strstr(src, "@touch");
 }
 
-// What the page's gen counts (`_cell_gens`, `_gen_safe`): every state but a
-// list's cur= that nothing else reads (focus, which the toolkit draws); and
-// whether it may carry one: no text of the build names an engine value.
+// The states a template, a condition, a node reads (`_reads`): marked in m[slot].
+static void mark_tmpl(const uit_t *e, int t, uint8_t *m);
+
+static void mark_cond(const uit_t *e, int c, uint8_t *m)
+{
+    if (c < 0)
+        return;
+    const uit_cond_t *C = &e->conds[c];
+    for (int i = 0; i < C->n; i++) {
+        const uit_term_t *T = &e->terms[C->first + i];
+        if ((T->rk == RK_SLOT || T->rk == RK_ROWOF) && T->ref >= 0)
+            m[T->ref] = 1;
+    }
+}
+
+static void mark_tmpl(const uit_t *e, int t, uint8_t *m)
+{
+    if (t < 0)
+        return;
+    const uit_tmpl_t *T = &e->tmpls[t];
+    for (int i = 0; i < T->ncode; i++) {
+        const uit_op_t *o = &e->ops[T->code + i];
+        if (o->op == OP_CHOICE) {
+            mark_cond(e, o->ref, m);
+            mark_tmpl(e, (int16_t)o->c, m);
+            mark_tmpl(e, (int16_t)o->d, m);
+        } else if ((o->rk == RK_SLOT || o->rk == RK_ROWOF) && o->ref >= 0) {
+            m[o->ref] = 1;
+        }
+    }
+}
+
+// Node `k`'s own reads; a list's cur= where `cur`; hint= alone where `hint_only`.
+static void mark_node(const uit_t *e, int k, uint8_t *m, int cur, int hint_only)
+{
+    const uit_node_t *N = &e->nodes[k];
+    for (int p = N->props; p != (int)UIT_NONE; p = e->props[p].next) {
+        const uit_prop_t *P = &e->props[p];
+        const char *name = uit_str(e, P->name);
+        if (hint_only && strcmp(name, "hint"))
+            continue;
+        if (P->kind == PK_TMPL)
+            mark_tmpl(e, P->idx, m);
+        else if (P->kind == PK_COND)
+            mark_cond(e, P->idx, m);
+        else if (P->kind == PK_LIT && !strcmp(name, "current") && P->idx >= 0)
+            m[P->idx] = 1;
+    }
+    if (hint_only)
+        return;
+    if (N->slot >= 0 && !(N->kind == UIT_TOGGLE && (N->lit & NL_FIELD)))
+        m[N->slot] = 1;         // its bound state, its model, its switch's
+    if (cur && UIT_IS_LIST(N->kind) && N->cur >= 0)
+        m[N->cur] = 1;
+}
+
+static void mark_tree(const uit_t *e, int k, uint8_t *m, int cur, int hint_only)
+{
+    mark_node(e, k, m, cur, hint_only);
+    for (int g = e->nodes[k].kid; g != (int)UIT_NONE; g = e->nodes[g].next)
+        mark_tree(e, g, m, cur, hint_only);
+}
+
+// What lies outside the page's cells (a cards list each): each node's reads but a cur='s, and
+// every hint= inside a cell too.
+static void mark_rest(const uit_t *e, int k, uint8_t *m)
+{
+    if (e->nodes[k].kind == UIT_CARDS) {
+        mark_tree(e, k, m, 0, 1);
+        return;
+    }
+    mark_node(e, k, m, 0, 0);
+    for (int g = e->nodes[k].kid; g != (int)UIT_NONE; g = e->nodes[g].next)
+        mark_rest(e, g, m);
+}
+
+static void mark_cells(const uit_t *e, int k, uint8_t *m)
+{
+    if (e->nodes[k].kind == UIT_CARDS) {
+        mark_tree(e, k, m, 0, 0);
+        return;
+    }
+    for (int g = e->nodes[k].kid; g != (int)UIT_NONE; g = e->nodes[g].next)
+        mark_cells(e, g, m);
+}
+
+int32_t uit_cell_gen(uit_t *e, int k)
+{
+    uint8_t m[UIT_GEN_SLOTS] = {0};
+    uint32_t g = (uint32_t)e->gen + e->edits;
+    if (e->nslots > UIT_GEN_SLOTS)
+        return -1;
+    mark_tree(e, k, m, 0, 0);
+    for (int i = 0; i < e->nslots; i++)
+        if (m[i])
+            g += e->slots[i].ver;
+    return (int32_t)(g & 0x7fffffff);
+}
+
+// What the page's gen counts (`_cell_gens`, `_gen_safe`): every state but those only a cards
+// list's rows read (its region carries a gen of its own, `uit_cell_gen`) and those only a list's
+// cur= names (focus, which the toolkit draws); and whether it may carry one: no text of the build
+// names an engine value, and no canvas draws what no state says.
 static void gen_of_build(uit_t *e)
 {
-    e->gen_safe = 1;
+    e->gen_safe = e->nslots <= UIT_GEN_SLOTS;
     for (int t = e->m_tmpls; t < e->ntmpls; t++)
         if (names_engine_value(uit_str(e, e->tmpls[t].src)))
             e->gen_safe = 0;
     for (int c = e->m_conds; c < e->nconds; c++)
         if (names_engine_value(uit_str(e, e->conds[c].src)))
             e->gen_safe = 0;
+    for (int k = 0; k < e->nnodes; k++)
+        if (e->nodes[k].kind == UIT_CANVAS)
+            e->gen_safe = 0;
     for (int i = 0; i < e->nslots; i++)
         e->slots[i].in_gen = 1;
-    for (int k = 0; k < e->nnodes; k++) {
-        int ck = e->nodes[k].cur;
-        if (!UIT_IS_LIST(e->nodes[k].kind) || ck < 0)
-            continue;
-        int read = 0;
-        for (int o = 0; o < e->nops && !read; o++)
-            read = (e->ops[o].rk == RK_SLOT || e->ops[o].rk == RK_ROWOF) && e->ops[o].ref == ck;
-        for (int t = 0; t < e->nterms && !read; t++)
-            read = (e->terms[t].rk == RK_SLOT || e->terms[t].rk == RK_ROWOF) && e->terms[t].ref == ck;
-        for (int j = 0; j < e->nnodes && !read; j++)
-            read = !UIT_IS_LIST(e->nodes[j].kind) && e->nodes[j].slot == ck;
-        if (!read)
-            e->slots[ck].in_gen = 0;
+    if (!e->gen_safe || !e->nnodes)
+        return;
+    uint8_t rest[UIT_GEN_SLOTS] = {0}, mine[UIT_GEN_SLOTS] = {0}, seen[UIT_GEN_SLOTS] = {0},
+            focus[UIT_GEN_SLOTS] = {0};
+    mark_rest(e, 0, rest);
+    for (int a = 0; a < e->nacts; a++) {
+        mark_tmpl(e, e->acts[a].hint, rest);
+        mark_cond(e, e->acts[a].when, rest);
     }
+    mark_cells(e, 0, mine);
+    mark_tree(e, 0, seen, 0, 0);
+    mark_tree(e, 0, focus, 1, 0);
+    for (int i = 0; i < e->nslots; i++)
+        if (!rest[i] && (mine[i] || (focus[i] && !seen[i])))
+            e->slots[i].in_gen = 0;
 }
 
 int uit_build_end(uit_t *e)
 {
-    for (int k = 0; k < e->nnodes; k++)
-        if (e->nodes[k].kind == UIT_FOOT && !e->nodes[k].lit)
-            return uit_fail(e, UIT_E_KIND, UIT_MSG("foot look=end: only share is drawn yet", "foot look=end"));
+    for (int k = 0; k < e->nnodes; k++) {
+        const uit_node_t *N = &e->nodes[k];
+        if (N->kind == UIT_FOOT && !N->lit)
+            for (int g = N->kid; g != (int)UIT_NONE; g = e->nodes[g].next)
+                if (e->nodes[g].kind == UIT_BUTTON)
+                    return uit_fail(e, UIT_E_KIND, UIT_MSG("foot look=end with a button: only its label is drawn yet",
+                                                           "foot end button"));
+        if (N->kind == UIT_SPLIT)       // a popover's split lays out pictures, labels, progress, groups of them
+            for (int p = N->parent; p != (int)UIT_NONE; p = e->nodes[p].parent)
+                if (e->nodes[p].kind == UIT_POPOVER)
+                    for (int g = N->kid; g != (int)UIT_NONE; g = e->nodes[g].next) {
+                        int gk = e->nodes[g].kind;
+                        if (gk != UIT_PICTURE && gk != UIT_GROUP && gk != UIT_LABEL && gk != UIT_PROGRESS)
+                            return uit_fail(e, UIT_E_KIND, UIT_MSG("a %s in a popover's split", "%s"), uit_kind_names[gk]);
+                    }
+    }
     e->gen++;
     e->fresh = 1;
     gen_of_build(e);

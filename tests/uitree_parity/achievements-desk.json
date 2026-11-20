@@ -1,0 +1,53 @@
+{
+ "surface": "achievements",
+ "config": "p4_1024x600_fs2_windowed",
+ "commit": "e8c55f53f",
+ "script": [
+  "k:right",
+  "k:a",
+  "back",
+  "k:down",
+  "k:down",
+  "k:down",
+  "k:a",
+  "back"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "44c3e1de951e59b38a0c8f692a76b82687d1d87363a0849d8c2aed698d829ad3"
+  ],
+  [
+   "k:right",
+   "63d6cde13d91a152477697437997489f4468ee4b7ec507587e27c5b1e1ee2c93"
+  ],
+  [
+   "k:a",
+   "c6e0d885e3fcb20d0f1eef8391dc94fdf27dfe1a481fee40bc4c68b0e477f38f"
+  ],
+  [
+   "back",
+   "63d6cde13d91a152477697437997489f4468ee4b7ec507587e27c5b1e1ee2c93"
+  ],
+  [
+   "k:down",
+   "08f7e5a3964c6aab51af9fa727d2875459899b1bfaf117c37ac74a0e74e16ce7"
+  ],
+  [
+   "k:down",
+   "cc4fb6f048736533886bdda0cbe2f1de98460c345fbde7c9e1f4e90ffbdc6a4e"
+  ],
+  [
+   "k:down",
+   "562ccb9130c2138ddd6e4039372597143aa93f970918a710ccf4e7fd2e565b91"
+  ],
+  [
+   "k:a",
+   "5ba768e535973f556e3dfde1afc359e1c57ebbe9a6bdf8d590c9f6b56e46380c"
+  ],
+  [
+   "back",
+   "2bc21c4d891c367f1d2966d77630b8743988b873205aea901140ab5cf991ed10"
+  ]
+ ]
+}

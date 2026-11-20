@@ -45,8 +45,9 @@ _KINDS = {"page": 1, "group": 2, "label": 3, "info": 4, "link": 5, "button": 6, 
           "rows": 8, "dialog": 9, "seg": 10, "slider": 11, "field": 12, "empty": 13,
           "progress": 14, "text_view": 15,
           "scroll": 16, "menu": 17, "item": 18, "split": 19,
-          "canvas": 20, "tabs": 21, "switch": 22, "case": 23, "table": 24, "col": 25, "foot": 26}
-_HEAD = {"rows": ("model",), "table": ("model",), "dialog": ("buttons",)}
+          "canvas": 20, "tabs": 21, "switch": 22, "case": 23, "table": 24, "col": 25, "foot": 26,
+          "cards": 27, "card": 28, "picture": 29, "popover": 30}
+_HEAD = {"rows": ("model",), "table": ("model",), "cards": ("model",), "dialog": ("buttons",)}
 _KIND_NAMES = dict((v, k) for k, v in _KINDS.items())
 _KIND_NAMES[len(_KINDS) + 1] = "cycle"          # UIT_KINDS: a seg of the cycle look
 _BOUND = ("toggle", "seg", "slider", "field", "text_view", "tabs")       # a two-way control: bound to the state of its key
@@ -326,7 +327,7 @@ class CEngine(Engine):
                 r = cprop(me, "labels", l["labels"], None)
                 if r < 0:
                     fail(r, "seg %s labels" % n.key, n.where)
-            elif nk == "rows" or nk == "table":
+            elif nk == "rows" or nk == "table" or nk == "cards":
                 r = cprop(me, "bind", l["model"], None)
                 if r < 0:
                     fail(r, "%s %s" % (nk, n.key), n.where)
@@ -522,6 +523,13 @@ class CEngine(Engine):
             if got != -1:
                 act = self._acts[got[0]]
                 self.q.append((act, self.args_for(act), "back on dialog %r" % got[1]))
+            self._damage.all()
+            return True
+        got = self._x.back_popover() if self.root is not None else -2
+        if got != -2:                   # a popover: Back is its close=
+            if got != -1:
+                act = self._acts[got[0]]
+                self.q.append((act, self.args_for(act), "back on popover %r" % got[1]))
             self._damage.all()
             return True
         if len(self.pages) > 1:

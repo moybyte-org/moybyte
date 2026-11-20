@@ -1,0 +1,53 @@
+{
+ "surface": "achievements",
+ "config": "tdeck_320x240_fs1_dark",
+ "commit": "e8c55f53f",
+ "script": [
+  "k:right",
+  "k:a",
+  "back",
+  "k:down",
+  "k:down",
+  "k:a",
+  "back",
+  "f:2"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "477248b467b137b88501c7e268d7d06254d9ca3595c17439a7725399445487f3"
+  ],
+  [
+   "k:right",
+   "4235285ec59b26bc51a0470cd345cea8b671d51c915a8cb7826e7f6582b2eece"
+  ],
+  [
+   "k:a",
+   "e0e46eed3807ac89e9b9f8d074a7a948db80d5f99ac286acc9d81a40d588c4d5"
+  ],
+  [
+   "back",
+   "4235285ec59b26bc51a0470cd345cea8b671d51c915a8cb7826e7f6582b2eece"
+  ],
+  [
+   "k:down",
+   "216abe1c3feda1bc8bc2b5a1016f376e7a8a2b238baf42f54da851a8d1a1a245"
+  ],
+  [
+   "k:down",
+   "df310ca0ab313e962f83501ccdfc8b389e4d9cf379f2e4cfeabdde3993e30e48"
+  ],
+  [
+   "k:a",
+   "48b55e5571feaea36c3c67a13beb453c26b25f143b441e30ea9e638d2d9aefba"
+  ],
+  [
+   "back",
+   "9e1fd4126239c2aef61ffb0f209d3502bc7242116bc7c6af5727595aa2d39c0a"
+  ],
+  [
+   "f:2",
+   "9e1fd4126239c2aef61ffb0f209d3502bc7242116bc7c6af5727595aa2d39c0a"
+  ]
+ ]
+}
