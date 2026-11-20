@@ -105,6 +105,24 @@ def test_a_focus_on_no_node_stops_the_run_at_its_line(tmp_path):
     assert err and "error[N08] main.lua:2:" in err, err
 
 
+def test_an_anchor_on_no_node_stops_the_run_at_the_popover(tmp_path):
+    from runtime import host_app
+    carts = str(tmp_path / "carts")
+    host_app.moy_carts.ensure_dirs(carts)
+    _cart(carts, "Anchor", 'ui.app("Anchor", { icon = "calc" })\n'
+                           'local s = ui.state { open = true }\n'
+                           'ui.page("p", function()\n'
+                           '  ui.label("x")\n'
+                           '  ui.popover("more", { shown = "open", anchor = "nope" }, function() ui.label("y") end)\n'
+                           'end)\n')
+    ws, drv, frame, open_cart = _console(carts)
+    open_cart(ws, "Anchor")
+    for _ in range(4):
+        frame()
+    err = ws.run.player.cart_error
+    assert err and "error[N06] main.lua:5:" in err, err
+
+
 # -- the checker: one failing case per code ------------------------------------------
 
 APP = 'ui.app("T", { icon = "calc" })\n'
@@ -138,13 +156,13 @@ CASES = {
     "G01": (APP + 'local s = ui.state { n = 0 }\nui.derive("x", "bool", "y")\nui.derive("y", "bool", "x")' + PAGE, 3, None),
     "H01": (APP + 'ui.hook("tick", function() end)\nui.page("p", function() ui.button("tick") end)\n', 3, None),
     "H03": (APP + 'ui.hook("tick", function() end, { hint = "Tick" })' + PAGE, 2, None),
-    "I02": (APP + 'ui.action("go", "Go", function() end, { icon = 3 })' + PAGE, 2, None),
+    "I02": (APP + 'ui.action("go", "Go", function() end, { icon = "{n}" })' + PAGE, 2, None),
     "K01": (APP + 'ui.action("go", "Go", function() end, { keys = { "role:home" } })' + PAGE, 2, None),
     "K02": (APP + 'ui.action("go", "Go", function() end, { keys = { "s" } })\n'
             'ui.action("stop", "Stop", function() end, { keys = { "s" } })' + PAGE, 3, None),
-    "K03": (APP + 'ui.action("go", "Go", function() end, { keys = "s" })' + PAGE, 2, None),
+    "K03": (APP + 'ui.action("go", "Go", function() end, { keys = { "alt+x" } })' + PAGE, 2, None),
     "N01": (APP + 'ui.page("p", function() ui.label("x", { nope = 1 }) end)\n', 2, None),
-    "N02": (APP + GO + 'ui.page("p", function()\n  ui.button("go", { key = "k" })\n  ui.button("go", { key = "k" })\nend)\n', 5, None),
+    "N02": (APP + GO + 'ui.page("p", function()\n  ui.button("go")\n  ui.button("go")\nend)\n', 5, None),
     "N03": (APP + 'local s = ui.state { m = ui.model { key = "id", id = "" } }\nui.page("p", function()\n'
             '  ui.rows("m", function()\n    ui.rows("m", function() ui.label("x") end)\n  end)\nend)\n', 5, None),
     "N04": (APP + 'ui.at(0, 0, 10, 10)' + PAGE, 2, None),
@@ -196,7 +214,7 @@ CASES = {
 # condition was checked at build.
 NOT_RAISABLE = {"X01"}
 # what only a frame raises, cased on the console above
-RUN_CASES = {"N08"}
+RUN_CASES = {"N08", "N06"}
 
 
 def test_every_code_the_layer_raises_has_a_case():

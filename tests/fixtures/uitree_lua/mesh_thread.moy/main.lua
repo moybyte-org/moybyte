@@ -270,7 +270,7 @@ end
 
 local function message()
   ui.scroll(function()
-    ui.bubble("{msg.text}", { key = "whole", max = 1, lines = 0, head = "{msg.head}", signal = "{msg.bars}" })
+    ui.bubble("{msg.text}", { max = 1, lines = 0, head = "{msg.head}", signal = "{msg.bars}" })
     ui.switch("pick.dir", {
       ["in"] = function()
         ui.group("Heard", function()

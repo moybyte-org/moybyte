@@ -68,6 +68,8 @@ PY = {
 
 # codes both layers raise that have no pair here, and why
 NO_PAIR = {
+    "N06": "Lua raises it in a frame, for a popover's anchor no drawn node has (cased on the console in "
+           "tests/test_uitree_lua.py); Python's anchor is checked at its own stage: no checker run reaches both",
     "N08": "Lua raises it in a frame (cased on the console in tests/test_uitree_lua.py), Python at run for "
            "two shown nodes of one key: no checker run reaches either",
     "D04": "Lua's checker raises it for a cart with no app declaration; Python's at hosting "

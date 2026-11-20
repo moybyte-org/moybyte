@@ -354,6 +354,7 @@ local function model_of(name) return V[name] end
 
 local function show(x)
   if type(x) == "string" then return "\"" .. x .. "\"" end
+  if type(x) == "boolean" then return x and "True" or "False" end
   return x == nil and "(empty)" or tostring(x)
 end
 local function diff(order, a, b)
@@ -531,11 +532,16 @@ function ModelMT:set(rows)
     end
   end
   for _, r in ipairs(self.rows) do if not seen[r[self.key]] then gone = gone + 1 end end
-  if add == 0 and gone == 0 and chg == 0 and #out == #self.rows then return end
+  -- moved: kept rows whose place among the kept rows changed
+  local was, now_, moved = {}, {}, 0
+  for _, r in ipairs(self.rows) do if seen[r[self.key]] then was[#was + 1] = r[self.key] end end
+  for _, r in ipairs(out) do if self.index[r[self.key]] then now_[#now_ + 1] = r[self.key] end end
+  for i, k in ipairs(now_) do if was[i] ~= k then moved = moved + 1 end end
+  if add == 0 and gone == 0 and chg == 0 and moved == 0 and #out == #self.rows then return end
   self.rows = out
   index_rows(self)
-  model_changed(self, (add + gone == 0 and chg <= 2 and #ch > 0) and table.concat(ch, "; ")
-                or "[" .. #out .. " rows] +" .. add .. " -" .. gone .. " ~" .. chg)
+  model_changed(self, (add + gone + moved == 0 and chg <= 2 and #ch > 0) and table.concat(ch, "; ")
+                or "[" .. #out .. " rows] +" .. add .. " -" .. gone .. " ~" .. chg .. " moved " .. moved)
 end
 function ModelMT:put(row)
   local at = where()
@@ -1178,14 +1184,14 @@ end
 
 local function check_keys(name, keys, at)
   if type(keys) ~= "table" or getmetatable(keys) then
-    fail("K03", at, q(name) .. "'s keys are " .. describe(keys), "a list: { \"role:more\", \"ctrl+f\", \"s\" }", describe(keys))
+    fail("A09", at, q(name) .. "'s keys are " .. describe(keys), "a list: { \"role:more\", \"ctrl+f\", \"s\" }", describe(keys))
   end
   for k, v in pairs(keys) do
     if type(k) ~= "number" then
-      fail("K03", at, q(name) .. "'s keys name " .. q(k) .. " = " .. describe(v), "a list: { \"role:" .. tostring(k) .. "\" }",
+      fail("A09", at, q(name) .. "'s keys name " .. q(k) .. " = " .. describe(v), "a list: { \"role:" .. tostring(k) .. "\" }",
            "a table of roles", "keys = { \"role:" .. tostring(k) .. "\" }")
     end
-    if type(v) ~= "string" then fail("K03", at, q(name) .. "'s key is " .. describe(v), "a text", describe(v)) end
+    if type(v) ~= "string" then fail("A09", at, q(name) .. "'s key is " .. describe(v), "a text", describe(v)) end
     local role = v:match("^role:(.+)$")
     if role then
       if SHELL_ROLES[role] then
@@ -1271,7 +1277,10 @@ function T.action(name, label, fn, o)
   if o.off ~= nil and o.when == nil and o.row == nil then
     fail("O02", at, "the action " .. q(name) .. " has off and can never be off", "off with when or row", "off alone", "drop off")
   end
-  if o.icon ~= nil and (type(o.icon) ~= "string" or o.icon:find("{", 1, true)) then
+  if o.icon ~= nil and type(o.icon) ~= "string" then
+    fail("A09", at, "the action " .. q(name) .. "'s icon is " .. describe(o.icon), "an icon's name", describe(o.icon))
+  end
+  if o.icon ~= nil and o.icon:find("{", 1, true) then
     fail("I02", at, "the action " .. q(name) .. "'s icon is " .. describe(o.icon), "an icon's name", describe(o.icon),
          "a node's icon = \"{...}\" where it must change")
   end
@@ -1428,7 +1437,7 @@ end
 -- -- nodes -----------------------------------------------------------------------------
 
 local NodeMT = {}
-local COMMON = { key = 1, shown = 1 }
+local COMMON = { shown = 1 }
 local PROPS = {
   group = {}, row = {}, scroll = { follow = 1, new = 1 }, foot = {},
   label = { tone = 1, icon = 1, face = 1, size = 1, wrap = 1, lines = 1, align = 1 }, rule = {},
@@ -1436,7 +1445,7 @@ local PROPS = {
   note = { icon = 1, lines = 1 }, empty = { icon = 1, lines = 1 },
   bubble = { side = 1, head = 1, status = 1, signal = 1, tone = 1, max = 1, lines = 1, on = 1, cut = 1 },
   button = { kind = 1, label = 1, icon = 1, arg = 1, alone = 1, span = 1, focus = 1 },
-  link = { label = 1, value = 1, icon = 1, signal = 1, tag = 1, tone = 1, focus = 1, arg = 1 },
+  link = { label = 1, value = 1, icon = 1, signal = 1, tag = 1, tone = 1, focus = 1 },
   toggle = { label = 1, hint = 1, on = 1, focus = 1, when = 1, off = 1 },
   slider = { label = 1, lo = 1, hi = 1, on = 1, focus = 1, when = 1, off = 1 },
   field = { label = 1, max = 1, secret = 1, hint = 1, grow = 1, commit = 1, on = 1, changed = 1, input = 1,
@@ -1505,7 +1514,6 @@ local function check_opts(kind, o, at)
     elseif type(v) == "string" then compile_tpl(v, nil, at)
     else fail("N01", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "a template (a text)", describe(v)) end
   end
-  if o.key ~= nil and (type(o.key) ~= "string" or o.key == "") then fail("N01", at, "a key is " .. describe(o.key), "a text", describe(o.key)) end
   if o.lines ~= nil and kind ~= "bubble" and kind ~= "label" then
     if type(o.lines) ~= "table" then fail("N01", at, "ui." .. kind .. "'s lines are " .. describe(o.lines), "{ \"line\", ... }", describe(o.lines)) end
     for _, l in ipairs(o.lines) do compile_tpl(l, nil, at) end
@@ -1934,19 +1942,21 @@ local function ident(k)
 end
 local function finish(n, path)
   n.path = path
-  local seen, count = {}, {}
-  for _, k in ipairs(n.kids) do
+  local seen = {}
+  for i, k in ipairs(n.kids) do
     local key = ident(k)
     if not key then
-      count[k.kind] = (count[k.kind] or 0) + 1
-      key = count[k.kind] == 1 and k.kind or k.kind .. count[k.kind]
+      key = k.kind .. "#" .. (i - 1)        -- a node with no key: its kind and place (§7)
     elseif seen[key] then
       fail("N02", k.at, "two nodes keyed " .. q(key) .. " under " .. q(path), "one node per key",
            "a second " .. k.kind .. " (the first at " .. seen[key] .. ")", "a key of its own: { key = \"...\" }")
     end
     seen[key] = k.at
     k.rkey = key
-    finish(k, path .. "/" .. key)
+    -- the engine's id: the keys from the page, an unkeyed node by its place
+    -- alone (an id is at most 31 bytes, F-17)
+    finish(k, path .. "/" .. (ident(k) or tostring(i - 1)))
+
   end
   for v, c in pairs(n.built or {}) do finish(c, path .. "/" .. v) end
   if n.body then finish(n.body, path) end
@@ -2023,15 +2033,17 @@ function T.push(name, row)
          "arg = \"A_ROW_OF\" on ui.page")
   end
   local top = stack[#stack]
-  if top then top.refocus = FOCUSED end
+  local by = IDS[FOCUSED or ""]
+  if top then top.refocus, top.refocus_name = FOCUSED, by and by.name or FOCUSED end
   stack[#stack + 1] = { def = p, fresh = 1 }
   GEN = GEN + 1
-  trace("push", name, "")
+  trace("page", "push", "page " .. #stack .. (by and ", opened from " .. q(by.name) or ""))
 end
 function T.pop()
   no_command_in_build("ui.pop", where())
   if #stack > 1 then
-    trace("pop", stack[#stack].def.name, stack[#stack - 1].refocus and "focus back to " .. q(stack[#stack - 1].refocus) or "")
+    local under = stack[#stack - 1]
+    trace("page", "back", "page " .. (#stack - 1) .. (under.refocus_name and ", focus back to " .. q(under.refocus_name) or ""))
     stack[#stack] = nil
     stack[#stack].fresh = 1
     GEN = GEN + 1
@@ -2161,12 +2173,11 @@ local function icon(o, row, act)
 end
 
 local first_frame = false
-local function drew(n, id, txt)
-  if first_frame then DREW[id] = txt return end
-  if DREW[id] ~= txt then
-    DREW[id] = txt
-    trace("drew", n.kind, q(id) .. " " .. (n.a[1] or "") .. " -> \"" .. txt .. "\"")
-  end
+local function drew(n, id, txt, tpl)
+  local was = DREW[id]
+  DREW[id] = txt
+  if first_frame or was == nil or was == txt then return end
+  trace("drew", n.kind, "\"" .. tostring(tpl or n.a[1] or "") .. "\" -> \"" .. txt .. "\"")
 end
 
 local draw
@@ -2183,7 +2194,9 @@ local function anchored(id)
   end
   return false
 end
-local function reg(id, n, row) IDS[id] = { n = n, row = row } end
+local ROWKEY, ROWCUR = nil, nil
+local function nname(n) return (ROWKEY and ROWKEY .. "/" or "") .. (n.rkey or n.kind) end
+local function reg(id, n, row) IDS[id] = { n = n, row = row, name = nname(n), key = ROWKEY, cur = ROWCUR } end
 
 -- is the action a node names on, and how does it look while off
 local function site_off(n, row)
@@ -2199,11 +2212,11 @@ local function leafdraw(n, row, id)
   if k ~= "note" then icon(o, row, n.action and ACTIONS[n.action]) end
   local eo = over(n, o, row, id)
   if k == "label" then
-    local t = render(a[1], row); drew(n, id, t); E.label(t, eo) return
+    local t = render(a[1], row); drew(n, id, t, a[1]); E.label(t, eo) return
   end
   if k == "info" then
     local t1, t2 = render(a[1], row), render(o.value, row)
-    drew(n, id, t1 .. " | " .. t2)
+    drew(n, id .. "#label", t1, a[1]); drew(n, id, t2, o.value)
     E.info(t1, t2, eo) return
   end
   if k == "note" then
@@ -2214,12 +2227,12 @@ local function leafdraw(n, row, id)
   reg(id, n, row)
   if k == "link" then
     local t1, t2 = render(a[1], row), render(o.value, row)
-    drew(n, id, t1 .. " | " .. t2)
+    drew(n, id .. "#label", t1, a[1]); drew(n, id, t2, o.value)
     if site_off(n, row) == "grey" then eo.disabled = true end
-    if E.link(t1, t2, eo) then fire(n.action, "link " .. q(id), o.arg ~= nil and o.arg or row) end
+    if E.link(t1, t2, eo) then fire(n.action, "link " .. q(nname(n)), o.arg ~= nil and o.arg or row) end
   elseif k == "button" then
     if site_off(n, row) == "grey" then eo.disabled = true end
-    if E.button(render(a[1], row), o.kind or "normal", eo) then fire(n.action, "button " .. q(id), o.arg ~= nil and o.arg or row) end
+    if E.button(render(a[1], row), o.kind or "normal", eo) then fire(n.action, "button " .. q(nname(n)), o.arg ~= nil and o.arg or row) end
   elseif k == "toggle" or k == "slider" then
     local name = a[2]
     local was = V[name]
@@ -2228,8 +2241,8 @@ local function leafdraw(n, row, id)
     if k == "toggle" then now = E.toggle(render(a[1], row), was, eo)
     else now = E.slider(render(a[1], row), was, o.lo, o.hi, eo) end
     if now ~= was and not eo.disabled then
-      fire_fn(function() setv(name, now) end, k .. " " .. q(name), k .. " " .. q(id))
-      if o.on then fire(o.on, k .. " " .. q(id)) end
+      fire_fn(function() setv(name, now) end, k .. " " .. q(name), k .. " " .. q(nname(n)))
+      if o.on then fire(o.on, k .. " " .. q(nname(n))) end
     end
   elseif k == "field" then
     local name = a[2]
@@ -2243,27 +2256,27 @@ local function leafdraw(n, row, id)
       n.draft = text ~= V[name] and text or nil
       if enter then
         n.draft = nil
-        fire_fn(function() setv(name, text) end, "field " .. q(name), "field " .. q(id))
-        if o.on then fire(o.on, "field " .. q(id)) end
+        fire_fn(function() setv(name, text) end, "field " .. q(name), "field " .. q(nname(n)))
+        if o.on then fire(o.on, "field " .. q(nname(n))) end
       end
     else
       if text ~= V[name] then
-        fire_fn(function() setv(name, text) end, "field " .. q(name), "field " .. q(id))
-        if o.changed then fire(o.changed, "field " .. q(id)) end
+        fire_fn(function() setv(name, text) end, "field " .. q(name), "field " .. q(nname(n)))
+        if o.changed then fire(o.changed, "field " .. q(nname(n))) end
       end
-      if enter and o.on then fire(o.on, "field " .. q(id)) end
+      if enter and o.on then fire(o.on, "field " .. q(nname(n))) end
     end
   elseif k == "bubble" then
     eo.anchor = anchored(id) or nil
     local t = render(a[1], row)
-    drew(n, id, t .. " [" .. tostring(eo.status or "") .. "]")
+    drew(n, id, t, a[1]); drew(n, id .. "#status", tostring(eo.status or ""), o.status)
     local x, y, w, h, st = E.bubble(t, render(o.side or "in", row), eo)
     RECT[id] = { x, y, w, h }
     -- the anchor's rect is placed where it is drawn, in its view
     if eo.anchor then E.at(SYS.room[1] + L.g, y, SYS.room[3] - 2 * L.g, h); ANCHOR_AT = true end
     if st & 2 ~= 0 then
-      if st & E.CUT ~= 0 and o.cut then fire(o.cut, "bubble " .. q(id) .. " (cut)", row)
-      elseif o.on then fire(o.on, "bubble " .. q(id), row) end
+      if st & E.CUT ~= 0 and o.cut then fire(o.cut, "bubble " .. q(nname(n)) .. " (cut)", row)
+      elseif o.on then fire(o.on, "bubble " .. q(nname(n)), row) end
     end
   end
 end
@@ -2300,6 +2313,7 @@ local function rowsdraw(n, id)
     local fr = frozen(r, "row " .. q(r[m.key]) .. " of " .. q(n.a[1]), m.ty)
     local rid = id .. "/" .. tostring(r[m.key])
     local one = #c.kids == 1
+    ROWKEY, ROWCUR = tostring(r[m.key]), n.o.cur
     for _, k in ipairs(c.kids) do
       if cond(k.o.shown, fr, n.a[1]) ~= false then
         local act = k.action and ACTIONS[k.action]
@@ -2310,6 +2324,7 @@ local function rowsdraw(n, id)
     end
     ROW_ORDER[#ROW_ORDER + 1] = rid
   end
+  ROWKEY, ROWCUR = nil, nil
 end
 
 local function stacked(kids) for _, k in ipairs(kids) do draw(k) end end
@@ -2372,16 +2387,26 @@ local function dismiss_value(name)
   return nil, false
 end
 
+local REFOCUS = nil
 local function overlay(n)
-  if not cond(n.o.shown) then n.open = nil return end
+  if not cond(n.o.shown) then
+    if n.open and n.opener then REFOCUS = n.opener end
+    n.open, n.opener = nil, nil
+    return
+  end
   local fresh = not n.open
+  if fresh then n.opener = FOCUSED end
   n.open = (n.open or 0) + 1
-  if fresh then trace("open", n.kind, q(n.path)) end
+  if fresh then trace("open", n.kind, q(n.rkey)) end
   if n.kind == "popover" then
     local w = n.o.w or SYS.room[3] - 2 * L.g
     local r = nil
     if ANCHOR_KEY and not ANCHOR_AT then
       for id, rr in pairs(RECT) do if anchored(id) then r = rr end end
+    end
+    if ANCHOR_KEY and not ANCHOR_AT and not r then
+      fail("N06", n.at, "the popover " .. q(n.a[1]) .. "'s anchor " .. q(ANCHOR_KEY) .. " names no node on the page",
+           "a node's key", q(ANCHOR_KEY), "anchor = the key of a node the page draws")
     end
     if r then E.at(SYS.room[1] + L.g, r[2], w, r[4]) end
     if E.popover(n.a[1], w, over(n, n.o, nil, nil)) then
@@ -2407,7 +2432,7 @@ local function overlay(n)
     local b = E.dialog(render(n.a[1]), labels, "primary", { focus = focus })
     stacked(n.kids)
     E.dialog()
-    if b > 0 then fire(n.o.buttons[b], "dialog " .. q(n.path)) end
+    if b > 0 then fire(n.o.buttons[b], "button " .. q(n.o.buttons[b]) .. " of dialog " .. q(render(n.a[1]))) end
   end
   if n.open <= 2 then n.want_focus = true end
 end
@@ -2549,12 +2574,24 @@ end
 local function replay(p)
   local root = p.root
   local title = render(root.a[1] or "")
-  if E.bar(title, {}, {}, #stack > 1) == -1 then fire_fn(T.pop, "back", "the bar's back") end
+  local dlg = nil
+  for _, k in ipairs(root.kids) do
+    if k.kind == "dialog" and cond(k.o.shown) then dlg = k end
+  end
+  if E.bar(title, {}, {}, #stack > 1 or dlg ~= nil) == -1 then
+    if dlg then fire(dlg.o.buttons[1], "back on dialog " .. q(dlg.rkey))
+    else fire_fn(T.pop, "back", "the bar's back") end
+  end
   RECT, ROW_ORDER = {}, {}
   local _, py = E.page(title)
   local was = FOCUSED
   FOCUSED = E.focus()
   if FOCUSED ~= was then SYS.focus = FOCUSED or ""; GEN = GEN + 1 end
+  local on = IDS[FOCUSED or ""]
+  if on and on.cur and V[on.cur] ~= on.key then
+    local cur, key = on.cur, on.key
+    fire_fn(function() setv(cur, key) end, "engine: focus", "focus")
+  end
   hints(p)
   IDS = {}
   local head, ft, overs, scroll = {}, nil, {}, nil
@@ -2660,6 +2697,7 @@ local function replay(p)
   for _, k in ipairs(overs) do
     if k.want_focus then local found = {}; want_focus(k, found); want = found[1] or want end
   end
+  if REFOCUS then want, REFOCUS = REFOCUS, nil end
   if PENDING_FOCUS then
     local key, hit = PENDING_FOCUS.key, nil
     for id in pairs(IDS) do
@@ -2670,6 +2708,16 @@ local function replay(p)
     PENDING_FOCUS = nil
   end
   if want then E.focus(want) end
+end
+
+-- the page a site was on, by its title; an overlay's site names its overlay
+local function page_title(p)
+  local t = p and p.root and render(p.root.a[1] or "") or ""
+  return t ~= "" and t or (p and p.def.name or "")
+end
+local function where_on(from)
+  if from:find(" dialog ", 1, true) or from:find("^timer") or from:find("^the ") then return "" end
+  return " on " .. q(page_title(stack[#stack]))
 end
 
 local function run_queue()
@@ -2690,12 +2738,12 @@ local function run_queue()
       elseif a.row and h.args.n == 0 then
         trace("skip", a.name, "from " .. h.from .. " (" .. a.row .. " holds no row)")
       elseif a.push then
-        trace("action", a.name, "from " .. h.from .. " on " .. q(stack[#stack].def.name))
+        trace("action", a.name, "from " .. h.from .. where_on(h.from))
         in_handler = a.name
         T.push(a.push)
         in_handler = nil
       else
-        trace("action", a.name, "from " .. h.from .. " on " .. q(stack[#stack].def.name))
+        trace("action", a.name, "from " .. h.from .. where_on(h.from))
         in_handler = a.name
         a.fn(table.unpack(h.args, 1, h.args.n))
         in_handler = nil

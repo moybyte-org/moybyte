@@ -32,26 +32,43 @@ SMALL, DESK = C.CONFIGS
 CHROME = {SMALL: ((0, 28), (220, 240))}
 
 # (check, fixture, layer or config): why it does not hold, and who the spec sides with
-FOCUS_BACK = ("an overlay that closes returns focus to the node that opened it (§9.4): "
-              "Lua's focus lands nowhere after the dialog closes, so the next confirm does nothing; "
-              "the spec sides with Python")
 LUA_SCALE = ("a Lua app in a desk window draws at text scale 1 where the Python app draws at the "
              "desk's scale 2; the spec's sizes scale with the text scale (§15): the spec sides with Python")
 BAR_AND_BAND = ("the bar's title (the Python app's is empty, the Lua cart's is its manifest title) and "
                 "the hints band (Python draws the engine's control hints, Lua none for a toggle or a "
                 "link): F-38 leaves the control hints open; the bar's title is the app declaration's (§19.1)")
-LUA_TRACE = ("Lua's trace names a node by its path and the page by its name, not by its key and title "
-             "(§24.1: `from link 'Home/connect' on 'Wi-Fi'`); its drew line for an info prints the "
-             "label, not the template; it writes `(in toggle ...)` where Python writes `(from toggle ...)`; "
-             "it traces no engine write of a list's cur (§24.1 engine) and its model line lacks `moved N`")
+# The trace lines the two layers still spell apart, each an open item or a
+# Python gap: the Lua trace is held to the reference with these taken out.
+TRACE_OPEN = (
+    # §24.1's `build` names what was built and counts its builds: Python names the page
+    # function and counts builds of the app, Lua names the page and counts its own (open);
+    # `open` and a hook's `action` are host py+lua, and Python writes neither
+    (re.compile(r"^(build|open) "), None),
+    (re.compile(r"^action opened from "), None),
+    # §24.1's engine write is `(in engine: ...)`; Python writes `(focus)`
+    (re.compile(r" \(focus\)$"), " (in engine: focus)"),
+    # a control's write: `(from toggle ...)` or `(in toggle ...)`, not spelled (open)
+    (re.compile(r" \(from (toggle|slider|field) "), r" (in \1 "),
+    # a row_of no row has: Python writes '', Lua (empty) (§24.1 has `(empty)` for a record; open)
+    (re.compile(r"^(state \S+ )\(empty\)( -> )"), r"\1''\2"),
+)
+
+
+def trace_open(lines):
+    out = []
+    for line in lines:
+        for pat, sub in TRACE_OPEN:
+            if pat.search(line):
+                line = None if sub is None else pat.sub(sub, line)
+                if line is None:
+                    break
+        if line is not None:
+            out.append(line)
+    return out
 LUA_DUMP = ("the dump's grammar is open (F-30); Lua keys nodes by kind (`info`), Python by kind and "
             "number (`info#0`, §7); Lua prints the head and the props' sources, Python each bound "
             "prop's value now (§24.2's example is Python's)")
 KNOWN = {
-    ("events", "pages", None): FOCUS_BACK,
-    ("content", "pages", SMALL): FOCUS_BACK,
-    ("trace", "counter", None): LUA_TRACE, ("trace", "list", None): LUA_TRACE,
-    ("trace", "pages", None): LUA_TRACE, ("trace", "gates", None): LUA_TRACE,
     ("dump", "counter", None): LUA_DUMP, ("dump", "list", None): LUA_DUMP,
     ("dump", "pages", None): LUA_DUMP, ("dump", "gates", None): LUA_DUMP,
 }
@@ -186,7 +203,7 @@ def test_the_reference_matches_its_records(name, config):
 @pytest.mark.parametrize("name,config", _params("trace"))
 def test_lua_trace_is_the_references(name, config):
     lua, _ = _run("lua", name, SMALL)
-    assert lua == _expected(name, "trace.txt")
+    assert trace_open(lua) == trace_open(_expected(name, "trace.txt"))
 
 
 @pytest.mark.parametrize("name,config", _params("dump"))
