@@ -117,6 +117,7 @@ def _words(sl, kept):
 _HAS = tuple(("has_" + k, k) for k in CAPS + GATED)     # (the state, the row key it asks for)
 _SCALE_WORD = dict((f, str(f)) for f in _SIZES)
 _STEP_WORD = dict((t, str(t)) for t in IDLE_STEPS)
+_IDLE_RUNGS = tuple((key, rung) for key, rung, _text, _d in IDLE_ROWS)
 
 
 def rows_poll():
@@ -162,9 +163,9 @@ def rows_poll():
     s.volume = kept["volume"]
     s.brightness = kept["brightness"]
     if s.has_idle_blank:
-        lad = ws.idle_ladder
-        for key, _label in IDLE:
-            setattr(s, key, _STEP_WORD.get(lad.value(key), STEP_WORDS[0]))
+        now = ws.idle_ladder.rungs()            # one read a frame: each value() is a tuple of its own
+        for key, rung in _IDLE_RUNGS:
+            setattr(s, key, _STEP_WORD.get(now[rung], STEP_WORDS[0]))
     if s.has_ota_channel:
         s.ota_channel = "beta" if ws.toggles.ota_channel() == "unstable" else "stable"
     s.can_type = bool(ws.text.can_type())

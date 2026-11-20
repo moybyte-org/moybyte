@@ -80,6 +80,11 @@ class IdleLadder:
         return tuple((key, text, "idle") for key, rung, text, _d in ROWS
                      if rung != DIM or self.can_dim)
 
+    def rungs(self):
+        """Every rung's value as the kernel holds it, by ROWS' rung index:
+        one read for all of them."""
+        return self.loop.idle()
+
     def value(self, key):
         for k, rung, _t, _d in ROWS:
             if k == key:

@@ -58,8 +58,8 @@ class Text:
         kinds = ws.input_kinds
         if kinds is None:
             return _ui_draw.input_kind() in _TYPING_INPUTS
-        for source, kind in kinds.items():
-            if kind in _TYPING_INPUTS and (source != _BLE_SOURCE or self._ble_typing()):
+        for source in kinds:            # no item tuples: Settings asks every frame
+            if kinds[source] in _TYPING_INPUTS and (source != _BLE_SOURCE or self._ble_typing()):
                 return True
         return False
 
