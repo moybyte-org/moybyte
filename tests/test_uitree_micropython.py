@@ -108,8 +108,13 @@ def pages(loop):
     _steps(loop, 20)
     shown["rows"] = ws.wm.top_kind()
     sl = ws.settings_layer
-    for p in ("tz", "paired", "log", "permissions"):
+    for p in ("tz", "paired", "log", "permissions", "licences"):
         sl.open_page(p)
+        if p == "licences":
+            _steps(loop)
+            sl.licences.read("MicroPython")     # its text: a prose view, dragged
+            _steps(loop)
+            shown["licence"] = sl.page_title()
         _steps(loop)
         moy_loop.swipe(W // 2, H * 3 // 4, W // 2, H // 4, 8)    # each page dragged
         _steps(loop)
@@ -137,8 +142,10 @@ def pages(loop):
 '''
 
 # each ported page's build function, by name: Settings' rows, its tz, paired,
-# System log and App permissions pages, the update screen and the web console
-BUILDS = ("rows_page", "tz_page", "paired_page", "log_page", "build", "page", "web_page")
+# System log and App permissions pages, the update screen, the web console, and
+# Licences' list (a licence's text is a page pushed over it: shown["licence"])
+BUILDS = ("rows_page", "tz_page", "paired_page", "log_page", "build", "page", "web_page",
+          "list_page")
 
 
 def test_every_ported_page_builds_and_draws_on_the_boards_micropython(tmp_path):
@@ -153,8 +160,9 @@ def test_every_ported_page_builds_and_draws_on_the_boards_micropython(tmp_path):
     shown, painted = info["shown"], info["painted"]
     assert not info["errors"], (info["errors"][:3], text[-3000:])
     assert shown["rows"] == "settings", shown
-    assert [shown[p] for p in ("tz", "paired", "log", "permissions")] == \
-        ["tz", "paired", "log", "permissions"], shown
+    assert [shown[p] for p in ("tz", "paired", "log", "permissions", "licences")] == \
+        ["tz", "paired", "log", "permissions", "licences"], shown
+    assert shown["licence"] == "MicroPython", shown
     for how in ("open_update", "open_update_online", "open_update_c6", "open_update_none"):
         assert shown[how] == "update", (how, shown)
     assert shown["web"] is True, shown

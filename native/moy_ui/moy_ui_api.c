@@ -1136,6 +1136,8 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->keys = 0;
     c->edge = 0;
     c->step_x = c->step_y = 0;
+    c->kv = c->kv_next & 0x7f;          // the key view PgUp and PgDn page this frame
+    c->kv_next = c->kv_n = 0;
     c->dup = 0;
     c->lost = c->keep_lost = 0;
     c->grp_open = c->grp_n = c->grp_any = 0;

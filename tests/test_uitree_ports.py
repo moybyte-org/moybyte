@@ -261,6 +261,9 @@ STALE_TOGGLE_HINT = ("the old rows page drew its hints before its rows, so the f
                      "turned still offered the turn it had just made (Turn off on a toggle now off); "
                      "the port's hints are the toggle's as it now is")
 
+LICENCES_K5 = ("Licences is a uitree page that takes the engine's layout (owner ruling K5): its "
+               "frames are the port's, reviewed as side-by-sides and re-baked in its goldens")
+
 LOG_BACK_BAND = ("the old System log filled its page by hand (`ui.at`) and drew no hints; the port "
                  "takes the engine's layout (K5), whose band names Back on every page, a line "
                  "shorter on a handheld")
@@ -307,7 +310,7 @@ RUNS = (
       "k:left", "k:left", "k:left", "k:left", "k:left", "k:right", "k:down", "k:down", "k:down",
       "t:Bo", "enter", "k:down", "t:x", "k:down", "k:a", "k:a", "k:down", "k:down", "k:down",
       "k:down", "k:down", "k:down", "k:a", "f:2", "back", "k:up", "k:up"],
-     {24: STALE_TOGGLE_HINT, 25: STALE_TOGGLE_HINT}),
+     {24: STALE_TOGGLE_HINT, 25: STALE_TOGGLE_HINT, 32: LICENCES_K5, 33: LICENCES_K5}),
     ("settings_rows-desk", "settings_rows", "p4_1024x600_fs2_windowed",
      ["k:down", "k:down", "k:right", "k:down", "k:down", "k:left", "k:down", "k:down", "k:down",
       "t:Al", "k:down", "k:a", "k:down", "k:down", "k:down", "k:down", "k:down", "k:down", "k:down"]),
@@ -318,7 +321,7 @@ RUNS = (
     ("settings_rows_full-tdeck", "settings_rows_full", "tdeck_320x240_fs1_dark",
      ["k:down"] * 24 + ["k:right", "k:up", "k:up"]),
     ("settings_rows_full-desk", "settings_rows_full", "p4_1024x600_fs2_windowed",
-     ["k:down"] * 22 + ["k:a", "k:down", "k:right"]),
+     ["k:down"] * 22 + ["k:a", "k:down", "k:right"], dict.fromkeys((23, 24, 25), LICENCES_K5)),
     # the ring at its foot, scrolled up and down again, and closed
     ("settings_log-tdeck", "settings_log", "tdeck_320x240_fs1_dark",
      ["f:2", "k:up", "k:up", "k:up", "k:down", "back"], dict.fromkeys(range(6), LOG_BACK_BAND)),

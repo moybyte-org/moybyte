@@ -63,6 +63,7 @@ class Engine(S.Builder):
         self._orders = {}               # a list's key -> the order of its rows (_after_removal)
         self._pid = (None, 0, "")       # (build, level, the id _page_id made for them)
         self.curs = []
+        self.tv_stop = False
         self.fresh = False
         self.focused = None
         self.drawn = {}
@@ -375,6 +376,7 @@ class Engine(S.Builder):
         self.dups = set()
         self._lists_before = getattr(self, "_lists_now", set())
         self._lists_now = set()
+        self.tv_stop = False            # a text view that is a stop draws this frame (the band's next)
         self._kids(n, None, rect)
         if ahead is not None and ahead not in self.ids:
             self.want_focus = ahead                     # foreseen and not drawn after all: next frame
@@ -617,11 +619,15 @@ class Engine(S.Builder):
                 h = self._t(node, "hint", None)
             if h:
                 out += ["confirm", h]
+            if node.kind == "text_view":
+                out += ["scroll", "Scroll"]      # a text that runs on: the arrows scroll it (L7)
         else:
             a = self.role_action("confirm")
             h = a.hint_now() if a is not None and a.can() else ""
             if h:
                 out += ["confirm", h]
+        if self.desk and self.tv_stop and (f is None or f[0].kind != "text_view"):
+            out += ["PgUp PgDn", "Scroll"]       # the page's text runs on: PgUp and PgDn page it
         for a in self.actions.values():
             if a.letters and a.can():
                 out += [a.letters[0].upper(), a.hint_now()]
@@ -743,7 +749,7 @@ class Engine(S.Builder):
             lines = [r._f[f] for r in v]
         else:
             lines = v.split("\n") if v else []
-        o = {"syntax": n.l.get("syntax", "plain"), "keys": True}
+        o = self._o(n, None, syntax=n.l.get("syntax", "plain"), keys=True)   # a stop where it runs on
         if n.l.get("face") == "ui":
             o["face"] = "ui"
         if n.l.get("wrap") == "word":
@@ -751,6 +757,7 @@ class Engine(S.Builder):
         if n.l.get("follow"):
             o["follow"] = True
         _v.text_view(n.key, lines, o)
+        self.tv_stop = self.tv_stop or self._ui.box(n.key) is not None
 
     def _r_info(self, n, row, rect):
         _v.info(self._t(n, "label", row), self._t(n, "value", row), self._o(n, row))

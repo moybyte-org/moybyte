@@ -46,44 +46,64 @@ def test_a_board_holds_only_its_own_parts():
     assert set(tdeck) < set(every)
 
 
+class _I:
+    """A key press as Settings hands it on."""
+    last_key = 0
+    typed = 0
+
+    def __init__(self, name):
+        self.name = name
+
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
+
+    def pressed(self, n):
+        return n == self.name
+
+
 def test_the_page_lists_the_parts_and_opens_a_text(tmp_path):
+    """A handheld: the list's rows open their text as a page over the list,
+    whose title is the part's; the back closes it onto the list, then
+    Settings' page."""
     ws = build_ws(tmp_path)
     ws.open_settings()
     sl = ws.settings_layer
     sl.open_page("licences")
     ws.frame(1 / 30)
     page = sl.licences
-    box = sl._sub.box("MicroPython")
-    assert box is not None
-    page._focus = "MicroPython"
+    assert sl._sub.box("MicroPython/read") is not None
+    page.read("MicroPython")
     ws.mark_dirty()
     ws.frame(1 / 30)
-
-    class _I:
-        last_key = 0
-
-        def __init__(self, name):
-            self.name = name
-
-        def steps(self, n):
-            return int(bool(self.pressed(n)))
-
-        def pressed(self, n):
-            return n == self.name
-
-    sl._sub.keys(_I("a"))
-    ws.mark_dirty()
-    ws.frame(1 / 30)
-    assert page.entry is not None and page.entry[0] == "MicroPython"
-    assert sl.page_title() == "MicroPython"
-    ws.mark_dirty()
-    ws.frame(1 / 30)
-    assert page._lines and page._lines[0].startswith("Copyright")
-    assert page.keys(_I("down")) and page._top == 3
-    sl.back()
-    assert page.entry is None and sl.page == "licences"
+    assert page.text_open() and sl.page_title() == "MicroPython"
+    text = page.page.s._v["text"]
+    assert text.startswith("Copyright") and "Permission is hereby granted" in text
+    assert sl.back() is not False and not page.text_open() and sl.page == "licences"
     sl.back()
     assert sl.page is None
+
+
+def test_the_texts_arrows_scroll_it_once_it_has_focus(tmp_path):
+    """L7: the text is its own stop; Down there scrolls it a line."""
+    from runtime import ui, ui_host
+    ws = build_ws(tmp_path)
+    ws.open_settings()
+    sl = ws.settings_layer
+    sl.open_page("licences")
+    ws.frame(1 / 30)
+    sl.licences.read("MicroPython")
+    for _ in range(2):
+        ws.mark_dirty()
+        ws.frame(1 / 30)
+    assert ui.focus() == "text"
+    x, y, w, h = sl._sub.box("text")
+    off = lambda: ui_host._C.api_offset(sl._sub.ctx, x + 4, y + 4)   # noqa: E731
+    assert off() == 0
+    sl.licences.keys(_I("down"))
+    for _ in range(3):
+        ws.mark_dirty()
+        ws.frame(1 / 30)
+    assert off() > 0
 
 
 def test_every_body_inflates_on_micropython(tmp_path):

@@ -642,7 +642,6 @@ typedef struct {
     uint8_t drag_x;                 // the drag scrolls across (a table's rows side by side)
     int16_t last_x, last_y;         // the pointer last frame
     int8_t step_x, step_y;          // the steps a key the focused stop keeps makes, signed
-    int8_t page_y;                  // PgDn 1, PgUp -1 at its press, else 0 (a text view's)
     uint8_t keys, reveal, cls, fs;
     uint8_t win;                    // the page lies in a window's body (1), on a panel (2)
     uint8_t elsewhere;              // the keys are another surface's: no focus
@@ -810,6 +809,13 @@ typedef struct {
     // takes it; 0 none, and none once a frame begins.
     uint16_t paste_n;
     uint8_t paste[MOY_UI_API_PASTE];
+    // PgDn 1, PgUp -1 at its press, else 0; and the text view with keys they
+    // page, by its place among the frame's (from 1, 0 none): the one
+    // focused, else the first. kv the last frame's, kv_next this frame's so
+    // far (0x80: it is focused), kv_n the views drawn so far. Last, in the
+    // struct's tail padding.
+    int8_t page_y;
+    uint8_t kv, kv_next, kv_n;
 } moy_ui_ctx_t;
 
 // A context's size, for a face that owns it as bytes; and a fresh one, of
@@ -902,7 +908,8 @@ enum {
 enum { MOY_UI_TXF_MONO = 0, MOY_UI_TXF_UI = 1 };
 // MOY_UI_TXO_KEYS 1: a view whose rows run past it is a focus stop (no
 // ring): Up and Down scroll it a line while it has rows that way, then step
-// focus on as a list's ends do; PgUp and PgDn scroll it a page less a line.
+// focus on as a list's ends do; PgUp and PgDn scroll it a page less a line,
+// where it is focused or, focus on no such view, it is the first drawn.
 // The options' defaults, in MOY_UI_TXO_* order: what a face that takes
 // fewer of them fills the rest with.
 #define MOY_UI_TXO_DEFAULTS {0, 0, MOY_UI_SYN_SGR, 0, 0, -1, -1, -1, 0, -1, 0, -1, 0, 0, 0, 0, -1, 0, -1, 0, 0}

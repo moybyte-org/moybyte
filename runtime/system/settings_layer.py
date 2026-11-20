@@ -378,8 +378,8 @@ class SettingsLayer(Layer):
         self._dt = 0.0                # the frame's dt, for a hosted page's clock
         self.achievements = AchievementsPage(
             ws.app_context("achievements", AchievementsPage.NEEDS))
-        self.licences = LicencesPage(ws.app_context("licences", LicencesPage.NEEDS))
         _pctx = ws.app_context("permissions", PermsPage.NEEDS + ("damage",))
+        self.licences = LicencesPage(ws.app_context("licences", LicencesPage.NEEDS), self._sub)
         self.syslog = LogPage(self._sub, _pctx.damage, ws)
         self.permits = PermsPage(_pctx, self._sub, _pctx.damage)
         self.pages = SettingsPages(ws, self._sub, _pctx.damage, self._drop)
@@ -1597,7 +1597,7 @@ class SettingsLayer(Layer):
         self.licences.open()
 
     def _lic_draw(self):
-        self.licences.draw(self._content())
+        self.licences.draw(self._content(), self._dt)
         self._name_bar(self.page_title() or "Settings")
 
     def _log_open(self, pid=None):

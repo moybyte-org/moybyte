@@ -118,7 +118,6 @@ OWN_SCROLL = {
     "editors_code.py": "the code editor's buffer, caret and scroll (refactor §8)",
     "code_layer.py": "the code editor's view of that buffer",
     "editor_handle.py": "the cart editor handle's view of a CodeEditor buffer",
-    "about_ui.py": "About's licence page (S12, after the sprint)",
 }
 
 

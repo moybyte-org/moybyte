@@ -152,24 +152,31 @@ static moy_ui_box_t view_box(moy_ui_ctx_t *c, const int32_t *opt, int lh, int *u
 
 // Where `keys` and its rows (`content` tall, as the last frame left its
 // scroll `k0`) run past box b, the view is a focus stop: the move its keys
-// ask of its scroll this frame, in pixels.
-static int32_t view_keys(moy_ui_ctx_t *c, moy_ui_span_t id, moy_ui_box_t b, int placed,
-                         const moy_ui_keep_t *k0, int32_t content, int lh, const int32_t *opt) {
+// ask of its scroll this frame, in pixels -- the arrows' while it is
+// focused, PgUp's and PgDn's where it is the key view focused, else the
+// first drawn.
+static int32_t view_keys(moy_ui_ctx_t *c, moy_ui_span_t id, const moy_ui_over_t *o,
+                         moy_ui_box_t b, int placed, const moy_ui_keep_t *k0, int32_t content,
+                         int lh, const int32_t *opt) {
     if (!opt[MOY_UI_TXO_KEYS] || content <= b.h) {
         return 0;
     }
     int32_t scroll = k0 != NULL ? k0->scroll : 0, most = content - b.h;
     int fl = STOP_KEEP_UD | (scroll <= 0 ? STOP_AT_TOP : 0) | (scroll >= most ? STOP_AT_END : 0);
     c->at_last = (uint8_t)placed;
-    int st = mua_stop(c, mua_hash(id.p, id.n, TEXT_SALT + 1), b, fl, id);
-    if (st <= 0 || !(st & MOY_UI_ST_FOCUS)) {
-        return 0;
+    uint32_t sid = mua_id_of(c, o, id);     // ui.focus names it as any stop
+    int st = mua_stop(c, sid, b, fl, mua_name_of(o, id));
+    int focused = st > 0 && (st & MOY_UI_ST_FOCUS);
+    int place = c->kv_n < 0x7f ? ++c->kv_n : 0;
+    if (st >= 0 && place && !(c->kv_next & 0x80) && (focused || c->kv_next == 0)) {
+        c->kv_next = (uint8_t)(place | (focused ? 0x80 : 0));
     }
-    int page = b.h - lh > lh ? b.h - lh : lh;
-    if (c->page_y) {
+    int32_t move = focused ? c->step_y * lh : 0;
+    if (c->page_y && place && c->kv == place) {
+        move += c->page_y * (b.h - lh > lh ? b.h - lh : lh);
         c->keys = 1;
     }
-    return c->step_y * lh + c->page_y * page;
+    return move;
 }
 
 // The view's scroll `k` (the frame's `scroll`) aimed at `aim` (-1: none):
@@ -237,7 +244,7 @@ static int32_t text_prose(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     content = content > 32767 ? 32767 : content;
     int32_t was_b = k0 != NULL ? k0->rows : 0;
     int was_foot = k0 != NULL && was_b > 0 && k0->scroll >= was_b - b.h;
-    int32_t step = view_keys(c, id, b, placed, k0, content, lh, opt);
+    int32_t step = view_keys(c, id, o, b, placed, k0, content, lh, opt);
     moy_ui_over_t og = *o;
     if (!og.has_gen) {
         og.has_gen = 1;
@@ -282,7 +289,7 @@ static int32_t text_prose(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     }
     int shown = 0;
     clip_t kc;
-    for (int ok = mua_clip_row(c, &kc, s, b, 0, b); ok; ok = mua_clip_next(&kc)) {
+    EACH_ROW(c, kc, s, b, 1, b) {        // its rows clipped to its box
         int32_t at = y;
         shown = 0;
         for (int32_t i = first; i < L->n && at < b.y + b.h; i++, shown++) {
@@ -414,7 +421,7 @@ int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_spa
     content = content > 32767 ? 32767 : content;
     int32_t was_b = k0 != NULL ? k0->rows : 0;
     int was_foot = k0 != NULL && was_b > 0 && k0->scroll >= was_b - b.h;
-    int32_t step = view_keys(c, id, b, placed, k0, content, lh, opt);
+    int32_t step = view_keys(c, id, o, b, placed, k0, content, lh, opt);
     // its rows are its own gens (the view's record): the region carries a
     // gen whatever the app gives, so its frames may move and draw rows
     moy_ui_over_t og = *o;

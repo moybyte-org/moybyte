@@ -161,6 +161,17 @@ def test_a_view_with_keys_is_a_stop_its_arrows_and_pages_scroll():
         assert ui.focus() == "Above", face
 
 
+def test_page_keys_page_the_first_key_view_while_focus_is_elsewhere():
+    """A list beside a text (the Licences desk): PgDn pages the view while
+    focus stays on the list's row."""
+    draw, seen = _view({"face": "ui", "keys": True})
+    r = _Run(draw)
+    r.frame()
+    r.frame(key=0x115)
+    r.frame()
+    assert ui.focus() == "Above" and _scroll(r) > 0
+
+
 def test_a_view_without_keys_is_no_stop():
     draw, seen = _view({"face": "ui"})
     r = _Run(draw)

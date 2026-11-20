@@ -759,10 +759,7 @@ def _surface_plan(ws, cfg):
         ws.settings_layer.open_page("licences")
 
     def licence():
-        page = ws.settings_layer.licences
-        page._parts()
-        page.entry = page._ids["MicroPython"]
-        page._focus = "MicroPython"
+        ws.settings_layer.licences.read("MicroPython")
 
     def syslog():
         # The ring as a board's first minute leaves it, on a pinned clock:
