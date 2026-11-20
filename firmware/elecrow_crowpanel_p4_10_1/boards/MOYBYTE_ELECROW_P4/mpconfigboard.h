@@ -126,22 +126,15 @@
 #define MOY_BUS_I2C_PORT                    (0)
 #define MOY_BUS_I2C_HZ                      (400000)
 
-// The speaker (native/moy_audio/moy_aud_out.c, #82): the ES8311 codec on the
-// bus above, clocked from MCLK, and its power amplifier's enable, on the pins
-// of board.toml's `speaker` row (MOY_HW_SPEAKER_*). The amplifier's control
-// pin is active LOW (the vendor firmware drives it low to play; the pin's
-// polarity is not confirmed on the bench).
-#define MOY_AUDIO_CODEC_ES8311              (1)
+// The speaker (native/moy_audio/moy_aud_out.c, #82): the I2S amplifier the
+// vendor firmware drives directly, on the pins of board.toml's `speaker` row
+// (MOY_HW_SPEAKER_*), with no codec and no master clock: the schematic's ES8311
+// does not answer on this unit's I2C bus (2026-11-20), and the vendor's
+// examples play through plain I2S. The mix is the default 22,050 Hz mono, on
+// the left slot. The amplifier's control pin is active LOW (the vendor
+// firmware drives it low to play).
 #define MOY_AUDIO_PA_ACTIVE_LOW             (1)
-// 44.1 kHz stereo out (docs/os_2026-11/hardware.md section 3): the mix,
-// 22,050 Hz mono as on every board, upsampled 2x by the feeder, the streams
-// added after it. The ES8311 is a mono DAC that reads one slot, so the two
-// channels reach it as their mean.
-#define MOY_AUDIO_RATE                      (44100)
-#define MOY_AUDIO_STEREO                    (1)
-#define MOY_AUDIO_DAC_MONO                  (1)
-// The feeder on core 0, off the VM's: its stereo stage on core 1 cost a heavy
-// cart frames whether anything sounded or not (A/B'd 2026-11-05).
+// The feeder on core 0, off the VM's (the P4 boards' setting).
 #define MOY_AUDIO_CORE                      (0)
 
 // Input's BLE HID keyboard (native/moy_input/moy_ble_task.c): the kernel's

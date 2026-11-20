@@ -220,7 +220,7 @@ unused = []
 name = "i2c0"
 class = "os"
 pins = {sda = 45, scl = 46}
-why = "the GT911 touch, the ES8311 and the ES7210 share it behind level shifters, pulled up to LDO4's rail; the kernel's I2C master is its only driver"
+why = "the GT911 touch, behind level shifters and pulled up to LDO4's rail, and the header and codec-side devices; the kernel's I2C master is its only driver"
 
 [[hardware.resource]]
 name = "touch"
@@ -231,8 +231,8 @@ why = "the GT911's reset and interrupt, pulled up to LDO4's rail and left undriv
 [[hardware.resource]]
 name = "speaker"
 class = "os"
-pins = {mclk = 24, bck = 22, ws = 21, dout = 23, pa = 30}
-why = "the ES8311 codec and the amplifier's control pin (active low), which the console's mix plays through"
+pins = {bck = 22, ws = 21, dout = 23, pa = 30}
+why = "the I2S amplifier the vendor firmware drives directly (no codec, no master clock) and its control pin (active low), which the console's mix plays through"
 
 [[hardware.resource]]
 name = "panel"
@@ -308,8 +308,8 @@ why = "the gate of Q11, the backlight supply's switch, which the schematic marks
 [[hardware.resource]]
 name = "usb_phy"
 class = "never"
-pins = [25, 26, 27]
-why = "the USB 1.1 PHYs' pads: 26 carries the ES7210's data line, 25 and 27 reach the J7 and J9 headers (27 is the LoRa socket's IRQ line)"
+pins = [24, 25, 26, 27]
+why = "the USB 1.1 PHYs' pads: 24 is the schematic's master-clock net and 26 the ES7210's data line (neither used), 25 and 27 reach the J7 and J9 headers (27 is the LoRa socket's IRQ line)"
 
 [native]
 dest = "native/.staged"
