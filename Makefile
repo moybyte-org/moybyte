@@ -27,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: board-modules check-venv device-port firmware-build-guition-s3 firmware-build-guition-p4 firmware-flash-guition-p4 firmware-monitor-guition-p4 firmware-build-zero firmware-build-c3-zero firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-flash-zero firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-zero firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install preflight preflight-web release setup readme-shots site site-firmware site-tiles sync-issues test vendor-jet vendor-jet-carts vendor-libmoy vendor-dash vendor-dropbear vendor-elf-loader vendor-mbedtls vendor-monocypher vendor-p8-import vendor-wamr vendor-advisories
+.PHONY: board-modules check-venv device-port firmware-build-guition-s3 firmware-build-guition-p4 firmware-flash-guition-p4 firmware-monitor-guition-p4 firmware-build-elecrow-p4 firmware-flash-elecrow-p4 firmware-monitor-elecrow-p4 firmware-build-zero firmware-build-c3-zero firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-flash-zero firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-zero firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install preflight preflight-web release setup readme-shots site site-firmware site-tiles sync-issues test vendor-jet vendor-jet-carts vendor-libmoy vendor-dash vendor-dropbear vendor-elf-loader vendor-mbedtls vendor-monocypher vendor-p8-import vendor-wamr vendor-advisories
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -77,6 +77,7 @@ VENV_TARGETS := test preflight preflight-web board-modules \
                 ota-publish-stable ota-host ota-serve-install firmware-flash-p4 \
                 firmware-monitor-p4 firmware-flash-guition-s3 firmware-monitor-guition-s3 \
                 firmware-flash-guition-p4 firmware-monitor-guition-p4 \
+                firmware-flash-elecrow-p4 firmware-monitor-elecrow-p4 \
                 firmware-flash-zero firmware-monitor-zero \
                 firmware-flash-c3-zero firmware-monitor-c3-zero
 $(VENV_TARGETS): check-venv
@@ -667,6 +668,24 @@ firmware-monitor-guition-p4:
 	$(REQUIRE_PORT)
 	$(REQUIRE_PYSERIAL)
 	$(PYTHON) tools/board_flash.py monitor firmware/guition_jc8012p4a1c --port $(PORT)
+
+# Elecrow CrowPanel Advance 10.1" (ESP32-P4 + C6, 1024x600): a VARIANT of the
+# Waveshare P4's port on a 16MB flash -- build via the board dir's build.sh ->
+# dist/elecrow_p4/, flashed at 0x2000 over the board's CH340K UART bridge; the
+# flash/monitor facts live in its board.toml [flash]/[monitor].
+
+firmware-build-elecrow-p4:
+	firmware/elecrow_crowpanel_p4_10_1/build.sh
+
+firmware-flash-elecrow-p4:
+	$(REQUIRE_PORT)
+	$(REQUIRE_ESPTOOL)
+	$(PYTHON) tools/board_flash.py flash firmware/elecrow_crowpanel_p4_10_1 --port $(PORT)
+
+firmware-monitor-elecrow-p4:
+	$(REQUIRE_PORT)
+	$(REQUIRE_PYSERIAL)
+	$(PYTHON) tools/board_flash.py monitor firmware/elecrow_crowpanel_p4_10_1 --port $(PORT)
 
 # Zero -- Seeed XIAO ESP32-S3 (#41), a build target since 2026-08-29. Headless,
 # so there is nothing to look at after a flash: `make firmware-monitor-zero` is

@@ -190,7 +190,8 @@ enum { MOY_PLAY_PACED = 1u, MOY_PLAY_HOME = 2u, MOY_PLAY_UNSIGNED = 4u };
 // no speaker. A P4's line is what its desk keeps free with WiFi up,
 // less 3 MiB for its Python heap's next two doublings: the Guition P4's
 // rotated desk keeps about 10 MiB less than the Waveshare's, so its MEDIA and
-// ELF rows are half the Waveshare's. The image's own line is the one its mpconfigboard.h
+// ELF rows are half the Waveshare's; the Elecrow P4's desk is the Waveshare's
+// (the same unrotated 1024x600 over 32 MiB), and so is its line. The image's own line is the one its mpconfigboard.h
 // names (MOY_SHARES_BOARD); a build that names none (the host, the browser,
 // the Zero) has no shares, and nothing it takes is counted.
 #define MOY_SHARE_ABSENT 0xFFFFFFFFu
@@ -204,7 +205,8 @@ enum {
     X("tdeck",         4096,  192,              16,   256,              64)               \
     X("guition_s3",    4096,  MOY_SHARE_ABSENT, 16,   256,              64)               \
     X("p4",            7168,  1024,             256,  2048,             256)              \
-    X("guition_p4",    7168,  512,              256,  1024,             256)
+    X("guition_p4",    7168,  512,              256,  1024,             256)              \
+    X("elecrow_p4",    7168,  1024,             256,  2048,             256)
 // The image's line: MOY_SHARES_BOARD, or the line `board` names when a host
 // stands in for a board (NULL: back to the image's own). 0, or -1 for a name
 // no line has (nothing changes).

@@ -9,7 +9,7 @@ from runtime import moy_play as mp
 from runtime.run import player_fit as fit
 
 KIB, MIB = 1024, 1 << 20
-CONSOLES = ("tdeck", "guition_s3", "p4", "guition_p4")
+CONSOLES = ("tdeck", "guition_s3", "p4", "guition_p4", "elecrow_p4")
 ROWS = {"procs": mp.SHARE_PROCS, "media": mp.SHARE_MEDIA, "rings": mp.SHARE_RINGS,
         "elf": mp.SHARE_ELF, "lanes": mp.SHARE_LANES}
 
@@ -51,7 +51,7 @@ def test_the_s3s_rows_are_what_their_desks_keep_above_the_cart_floor():
 
 
 def test_the_p4s_have_every_row():
-    for name in ("p4", "guition_p4"):
+    for name in ("p4", "guition_p4", "elecrow_p4"):
         assert all(v is not None and v > 0 for v in mp.shares(name))
         assert mp.shares(name)[mp.SHARE_PROCS] == 7 * MIB
 

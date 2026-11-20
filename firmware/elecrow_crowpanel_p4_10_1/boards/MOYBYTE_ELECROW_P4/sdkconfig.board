@@ -1,0 +1,281 @@
+# Elecrow CrowPanel Advance 10.1" P4 board fragment.
+
+# The silicon is ESP32-P4 rev v1.x, which ESP-IDF builds for only when told:
+# without this an image needs rev v3.1 or later and esptool and the
+# bootloader refuse it on this chip. MicroPython's sdkconfig.p4 supplies
+# CONFIG_ESP32P4_REV_MIN_0, which this makes selectable.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+
+# PSRAM at 200MHz: the 1024x600@60Hz DPI scan-out streams ~104MB/s from the
+# PSRAM framebuffer; at the default speed the DSI fetcher underruns
+# ("can't fetch data from external memory fast enough" -- confirmed on
+# hardware). Matches Waveshare's demo sdkconfig.
+CONFIG_SPIRAM_SPEED_200M=y
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+
+# The DSI driver restarts its full-frame DW-GDMA transfer from the completion
+# ISR every refresh. Keep that path in internal RAM so scan-out remains viable
+# during cache-disabled operations and when it runs at the #106 level-3 priority.
+CONFIG_LCD_DSI_ISR_CACHE_SAFE=y
+
+# L2 cache 128KB (IDF default) -> 256KB (#159, A/B'd on glass 2026-07-27): the
+# desktop working set thrashes a 128KB L2 -- Brick Siege busy 15.5 -> 8.0ms,
+# window drags -5ms/frame, Lua table bench -13%. Costs exactly 128KB of
+# internal heap. 512KB does NOT boot: the carve starves MicroPython's
+# internal/DMA pool reservation (main_task error 0x101 abort loop), so 256KB
+# is the max viable on this port.
+CONFIG_CACHE_L2_CACHE_256KB=y
+
+# The board has 16MB flash (a W25Q128-class NOR on the P4's dedicated QSPI bus).
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# Custom partition table (#58 console staging): the default 4MiBplus table caps
+# the app at ~1.94MB and the frozen console overflows it. OTA-shaped app
+# slots + the coredump partition + auto-vfs tail; the CSV lives in boards/MOYBYTE_ELECROW_P4/ and build.sh copies
+# it into ports/esp32/ (the filename resolves project-relative).
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-elecrow-p4.csv"
+
+# Core dumps (owner, 2026-11-03, docs/os_2026-11/processes.md section 10): a
+# panic writes an ELF core dump, CRC32-checked, to the table's coredump
+# partition, which tools/coredump.py reads over the cable and Settings ->
+# LAST CRASH clears; the next panic overwrites it. Task stacks may live in
+# PSRAM here (FREERTOS_TASK_CREATE_ALLOW_EXT_MEM), so the dump runs on a stack
+# of its own in internal RAM (the IDF's 1792-byte minimum for that case), and
+# a PSRAM stack is dumped like any other. Its logs stay on (~5 KB of internal
+# RAM, which this chip has room for): a dump that does not fit the partition
+# says so on the serial. The boot check only logs, so it is off. The
+# internal RAM's .bss, .data and heap are not captured (CAPTURE_DRAM): that
+# wants a partition the size of the RAM; the kernel's own table of loaded
+# modules is (COREDUMP_DRAM_ATTR, native/moy_elf/moy_elf_maps.h).
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+CONFIG_ESP_COREDUMP_MAX_TASKS_NUM=64
+CONFIG_ESP_COREDUMP_STACK_SIZE=1792
+CONFIG_ESP_COREDUMP_CHECK_BOOT=n
+
+# BLE notifications arrive from the C6 over ESP-Hosted in bursts, and the
+# upstream 24-buffer pool exhausted under keyboard autorepeat ("alloc_acl_from_ll
+# failed", measured while MicroPython's IRQ held them behind a long draw). Keep
+# enough host-bound ACL buffers to absorb a burst.
+CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=64
+
+# NimBLE's host task runs the kernel's C callbacks (native/moy_input): the
+# 12288 bytes it once had were for MicroPython's BLE handlers running Python
+# on this task.
+CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=6144
+# The kernel's BLE keyboard keeps its bonds in NimBLE's own NVS store
+# (native/moy_input/moy_ble_task.c): the pairing survives a reboot with no file
+# on any volume.
+CONFIG_BT_NIMBLE_NVS_PERSIST=y
+
+# NimBLE's host pools are static (.bss), not allocated by nimble_port_init:
+# the kernel's BLE task starts and stops the host (native/moy_input/
+# moy_ble_task.c), and the internal-SRAM budget was measured with the pools
+# static. ESP-IDF defaults this to y; MicroPython's later sdkconfig.ble sets n.
+CONFIG_BT_NIMBLE_STATIC_TO_DYNAMIC=n
+
+
+# OTA rollback (#53 on the P4). The partition table has been OTA-shaped since
+# bring-up, but nothing enabled the bootloader's safety net -- so an image that
+# failed to come up would have stayed selected, and a bad update would need a
+# cable. With this, an app that does not call
+# esp32.Partition.mark_app_valid_cancel_rollback() on its first boot is REVERTED
+# to the previous slot automatically. moy_runtime.run_desktop makes that call
+# once the desktop is up, which is what makes a healthy boot mean "healthy".
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# --- WiFi: the S3 boards' set, spelled in THIS board's knob namespace -------
+# The two S3 boards took Espressif's "Iperf rank" set on 2026-08-21 (0890249)
+# and this board was recorded there as untouched BY CONSTRUCTION: its WiFi is
+# ESP-Hosted on a C6 over SDIO, so CONFIG_ESP_WIFI_* on the host configures a
+# driver that is not here, and its lwIP window was already 65534. The first
+# half is true and the second half is the trap. There is no WiFi DRIVER on the
+# P4 -- but there is one on the C6, and the host fragment is what configures
+# it, under a different name.
+#
+# esp_wifi_remote's idf_v5.5/Kconfig.wifi.in redefines every CONFIG_ESP_WIFI_*
+# as a PROMPTLESS symbol whose sole default is the matching CONFIG_WIFI_RMT_*.
+# Those RMT values are marshalled to the C6 inside wifi_init_config_t by the
+# ESP-Hosted RPC, and the slave feeds them straight to its own esp_wifi_init
+# (managed_components/espressif__esp_hosted/slave/main/slave_control.c). So the
+# radio's buffers ARE decided here; they are just not spelled ESP_WIFI_*.
+#
+# Which means MicroPython's own sdkconfig.p4_wifi_common has been asking with
+# the wrong name since bring-up. It sets ESP_WIFI_ STATIC_RX_BUFFER_NUM=16 /
+# DYNAMIC_RX=64 / DYNAMIC_TX=64 / RX_BA_WIN=32 / TX_BA_WIN=32, and the
+# generated sdkconfig carried IDF's defaults for every one of them --
+# 10/32/32/6/6 -- on this board AND on a stock ESP32_GENERIC_P4-C6_WIFI build.
+# Nothing reported it, because moybyte_sdkconfig_guard only checks the options
+# a BOARD fragment names, and these were named by an upstream one.
+#
+# That left the console in exactly the half-set state the T-Deck's block warns
+# is worse than none of it: TCP_WND 65534 (lwIP runs on the host, so upstream's
+# window DID take) against an 802.11n reorder window of 6. ~22 segments in
+# flight against a window that holds 6 is drop-and-retransmit, and it is the
+# state the S3 measured 20x SLOWER than stock. This board's one recorded WiFi
+# number is consistent with that and was never explained: the 2026-08-02 OTA
+# download ran at ~55 KB/s here against ~137 KB/s on the T-Deck, on a board
+# with a WiFi 6 radio and 2.5x the TCP window.
+#
+# The values are upstream's own intent, restated in the name Kconfig honours.
+# THE SET IS ATOMIC -- read the T-Deck's block before changing one line of it.
+#
+# The RAM this spends is the C6's, not the console's: the static RX buffers are
+# allocated by the SLAVE's esp_wifi_init, so unlike the S3 the internal-SRAM
+# argument does not apply here and none of it comes out of a running cart's
+# ~31KB. 16-and-not-24 is kept anyway because 16 is the number that was
+# measured; 24 is an untested lever on the C6, not a free upgrade.
+CONFIG_WIFI_RMT_STATIC_RX_BUFFER_NUM=16
+CONFIG_WIFI_RMT_DYNAMIC_RX_BUFFER_NUM=64
+CONFIG_WIFI_RMT_DYNAMIC_TX_BUFFER_NUM=64
+CONFIG_WIFI_RMT_RX_BA_WIN=32
+CONFIG_WIFI_RMT_TX_BA_WIN=32
+
+# NOT set here, and each is a decision rather than an omission:
+#
+#   CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP -- load-bearing on the S3, where it is
+#   what makes the set RAM-POSITIVE by moving the lwIP buffers out of a 227KB
+#   internal region. This board has ~512KB internal after the L2 carve and no
+#   WiFi driver competing for it, so the pressure it relieves does not exist;
+#   all it would buy is slower buffers. Revisit only with a measured shortage.
+#
+#   CONFIG_WIFI_RMT_*_IRAM_OPT -- the S3 declines the three IRAM options because
+#   there IRAM aliases DRAM and they would cost ~32KB of the SRAM the set is
+#   careful not to spend. Here they are already ON (upstream default) and the
+#   IRAM is the C6's, so the S3's reason to decline does not transfer.
+#
+#   The BLE right-sizing block -- the other half of 0890249, and it does not
+#   belong here. Its two biggest levers are CONFIG_BT_CTRL_*, and this board has
+#   no BLE controller to size: CONFIG_BT_CONTROLLER_DISABLED=y, the controller
+#   is the C6's. What is left is host NimBLE, whose numbers here were raised
+#   DELIBERATELY and on hardware evidence (the two blocks above), and which sits
+#   in ~512KB rather than the Guition's four free bytes. MAX_CONNECTIONS stays
+#   at upstream's 4 on purpose: one BLE keyboard is what is paired today, and a
+#   second one is the only local-2P path this board can have (#65 Phase 1).
+
+# ESP-Hosted's transport mempool goes to PSRAM (espnow-on-p4 track,
+# docs/espnow_p4_2026-08.md; the component bump itself is build.sh step 2c').
+# NOT optional at hosted 2.12: its mempool asks internal SRAM for more than
+# this board has free after the 256KB L2 carve, fails at boot ("E HS_MP:
+# mempool create failed: no mem"), the SDIO driver then reads no registers and
+# the board CRASH-LOOPS on a ~30s period -- observed on glass 2026-08-24. This
+# knob is upstream's own fix and its help text names this target ("preserves
+# scarce internal RAM on targets where GDMA can reach PSRAM through cache
+# (e.g. ESP32-P4)"). Upstream's EHM-250 warns it breaks SDIO TX DMA alignment
+# at a 128B L2 cache line; this board's line is 64B (CACHE_L2_CACHE_LINE_64B
+# above is IDF's default here), so the trigger is absent -- re-check that
+# issue before ever moving the line size.
+CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM=y
+
+# HCI debug logging OFF (upstream's sdkconfig.p4_wifi_common ships it ON).
+# Ruled out as the BT-on-2.12-slave breaker during the 2026-08-24 bisect, and
+# kept off anyway: it is a debug ring buffer in the HCI hot path of a kid's
+# console, and the working reference (hosted's bleprph example) runs without
+# it -- one less delta from the proven arrangement.
+CONFIG_BT_HCI_LOG_DEBUG_EN=n
+
+# --- Power management: machinery with no user ------------------------------
+# IDF's default is n; MicroPython's sdkconfig.base turns it ON for every board.
+# Nothing in this repo touches the PM API -- no machine.freq() setter, no
+# lightsleep/deepsleep, no esp_pm_* call in device/ runtime/ native/ or the
+# board modules -- and neither PM_DFS_INIT_AUTO nor tickless idle is set, so no
+# frequency scaling ever happens. What remains is only the cost:
+# esp_pm_lock_acquire is a spinlock critical section, taken per SPI/SDMMC
+# transaction and, on a P4, per DPI frame.
+#
+# A/B'd frame-neutral on the T-Deck 2026-09-20 and taken on both S3 console
+# boards first. The one behaviour lost is machine.freq(x) as a SETTER, which
+# starts raising ValueError; the getter is unaffected.
+CONFIG_PM_ENABLE=
+
+# Light sleep's code stays in flash: the console never light-sleeps (the PM
+# section above), and on a P4 each of these defaults pins code in internal
+# SRAM that only a sleep or an unused driver runs. WIFI_RMT_SLP_IRAM_OPT is
+# esp_wifi_remote's mirror of the C6's own option (this board's radio, over
+# ESP-Hosted); on the host it only sets ESP_WIFI_SLP_IRAM_OPT, which
+# MicroPython's sdkconfig.base turns off to save IRAM and the mirror turns
+# back on, and selects PM_SLEEP_FUNC_IN_IRAM, whose PM_SLP_IRAM_OPT places the
+# light-sleep path in IRAM. The PSRAM half-sleep is a light-sleep mode too.
+# The PARLIO ISR placements pin the GDMA link and DMA cache-split helpers in
+# IRAM for a driver no image links. What leaves IRAM and SPM goes to the
+# internal heap.
+CONFIG_WIFI_RMT_SLP_IRAM_OPT=n
+CONFIG_PM_SLP_SPIRAM_HALFSLEEP_ENABLED=n
+CONFIG_PARLIO_TX_ISR_HANDLER_IN_IRAM=n
+CONFIG_PARLIO_RX_ISR_HANDLER_IN_IRAM=n
+
+# The task watchdog (#160, native/moy_kernel/moy_kernel.c's header). The stock
+# build leaves it on, watching no idle task and only logging a timeout; the
+# kernel subscribes the VM task (native/moy_kernel: the console's frame feeds it
+# once per frame, and the loop leaving it unsubscribes) and a timeout PANICS, so
+# a frame that never ends is a crash record naming what ran. The timeout is
+# above the worst frame this board legitimately takes (the gate reads it with
+# `moy_kernel.watchdog()`).
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=15
+
+# --- TLS in PSRAM -----------------------------------------------------------
+# mbedtls allocates through the IDF's own hook: with the default, every block
+# under SPIRAM_MALLOC_ALWAYSINTERNAL -- the handshake's bignums, the peer
+# certificate chain, the 4 KB out record -- is internal SRAM, and an HTTPS
+# download (the kernel's updater and Get Carts, native/moy_net/moy_ota.c) took
+# about 22 KB of it at its peak on the Guition S3. External puts all of
+# mbedtls's state in PSRAM; what stays internal is the hardware AES/SHA's DMA
+# bounce, a record at a time. docs/history/kernel_survival_2026-10.md section 8; the
+# figures are #224's.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+
+# --- the CA bundle -----------------------------------------------------------
+# Every https request but the updater's verifies the server's certificate
+# against ESP-IDF's bundle (esp_crt_bundle; native/moy_net/moy_net_port.c), the
+# common set: the roots of the CAs that issue nearly every public site's
+# certificate, kept in flash and read a root at a time. MicroPython's base
+# config turns the bundle off; a board without these lines refuses https for
+# apps (docs/os_2026-11/hardware.md section 1). Its flash cost is #246's.
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y
+
+# --- Curve25519 --------------------------------------------------------------
+# An app's moybyte.x25519 (native/moy_net/moy_crypto.h) is mbedTLS's
+# Montgomery ladder on Curve25519, which MicroPython's base config turns off;
+# without this line the row answers ABSENT.
+CONFIG_MBEDTLS_ECP_DP_CURVE25519_ENABLED=y
+
+# NTP (native/moy_net/moy_wifi.c) asks the moment the station has an address:
+# a handshake waits for that answer, so lwIP's random first delay is off.
+CONFIG_LWIP_SNTP_STARTUP_DELAY=n
+
+# --- the PMP is the kernel's -------------------------------------------------
+# A native module runs in U-mode under the PMP layout moy_umode.c writes on
+# each core at start (native/moy_elf/README.md, "Isolation"). This option
+# would have the bootloader lock IDF's layout on core 0 first, and a P4 lock
+# holds until reset (no Smepmp); the app call it gates is replaced too.
+CONFIG_BOOTLOADER_REGION_PROTECTION_ENABLE=n
+
+# The speaker's I2S interrupt stays armed while an internal-flash write has
+# the cache off, so the DMA ring (moy_aud_out.c's DMA_DESC x DMA_FRAMES) keeps
+# playing through a store write on internal flash; with the interrupt masked,
+# the audio the ring played during the write was lost. Its callbacks must be
+# in IRAM (moy_aud_out.c's on_ovf).
+CONFIG_I2S_ISR_IRAM_SAFE=y
+
+# --- ESP-Hosted on THIS PCB (schematic V1.2, README "The C6") ---
+# The component's defaults are the ESP32-P4 Function EV board's (data lines
+# D0..D3 on GPIO14..17, the C6's reset on GPIO54, active high); this board
+# wires the lines the other way round and the C6's EN straight to GPIO32, so
+# the reset is active LOW. "No development board" is what makes the component's
+# range checks accept them. PCB V1.0 wires D0..D3 on 14..17 as the EV board does.
+# CLK 18 and CMD 19 are the defaults.
+CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=n
+CONFIG_ESP_HOSTED_P4_DEV_BOARD_NONE=y
+CONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE=32
+CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_LOW=y
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D0_SLOT_1=17
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D1_4BIT_BUS_SLOT_1=16
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D2_4BIT_BUS_SLOT_1=15
+CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D3_4BIT_BUS_SLOT_1=14
+
+# The SDIO clock: 20 MHz, the Guition P4's setting for the same C6 over the
+# same kind of wiring, where 40 MHz failed under a sustained download.
+CONFIG_ESP_HOSTED_SDIO_CLOCK_FREQ_KHZ=20000

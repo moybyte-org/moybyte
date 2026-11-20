@@ -36,18 +36,26 @@
 #include "esp_lcd_ek79007.h"
 #define MOY_DSI_H_RES        1024
 #define MOY_DSI_V_RES        600
+// The reset line is the board's (the Elecrow P4's is GPIO41), named in
+// mpconfigboard.cmake; the 7B's is the default.
+#ifndef MOY_DSI_LCD_RST_GPIO
 #define MOY_DSI_LCD_RST_GPIO 33
+#endif
 #define MOY_DSI_MIRROR_XY    0
 #define MOY_DSI_PANEL_QSTR   MP_QSTR_ek79007
 typedef ek79007_vendor_config_t moy_dsi_vendor_config_t;
 #define MOY_DSI_BUS_CONFIG()      EK79007_PANEL_BUS_DSI_2CH_CONFIG()
 #define MOY_DSI_DBI_CONFIG()      EK79007_PANEL_IO_DBI_CONFIG()
 #define MOY_DSI_DPI_CONFIG(fmt)   EK79007_1024_600_PANEL_60HZ_CONFIG(fmt)
-// 60 MHz: a 69.7 Hz refresh over the 1354x636 timing. The vendor's 52 MHz is
+// A board whose glass has its own blanking names MOY_DSI_HSYNC_PW /
+// MOY_DSI_VSYNC_PW and MOY_DSI_DPI_MHZ in mpconfigboard.cmake; these are the
+// 7B's, 60 MHz: a 69.7 Hz refresh over the 1354x636 timing. The vendor's 52 MHz is
 // no whole divisor of the 240 MHz PLL: ESP-IDF v5.5.6 clocks it at 48 MHz and
 // stretches the line timing back to 52's 60.4 Hz, where the drag's two-refresh
 // frame is 33 ms, not 28.7.
+#ifndef MOY_DSI_DPI_MHZ
 #define MOY_DSI_DPI_MHZ           60
+#endif
 #define moy_dsi_new_panel         esp_lcd_new_panel_ek79007
 #elif defined(MOY_DSI_PANEL_JD9365)
 // Guition JC8012P4A1C: JD9365, 10.1" 800x1280 PORTRAIT-native glass, 2-lane
@@ -85,6 +93,9 @@ typedef jd9365_vendor_config_t moy_dsi_vendor_config_t;
 #define MOY_DSI_NUM_FBS      3    // TRIPLE-BUFFER (#58 render overlap), see below
 
 static esp_ldo_channel_handle_t s_phy_ldo;
+#ifdef MOY_DSI_IO_LDO_MV
+static esp_ldo_channel_handle_t s_io_ldo;
+#endif
 static esp_lcd_dsi_bus_handle_t s_bus;
 static esp_lcd_panel_io_handle_t s_io;
 static esp_lcd_panel_handle_t s_panel;
@@ -143,6 +154,16 @@ static esp_err_t moy_dsi_bringup(const char **what) {
         .voltage_mv = MOY_DSI_PHY_LDO_MV,
     };
     MOY_DSI_TRY(esp_ldo_acquire_channel(&ldo_cfg, &s_phy_ldo), "phy ldo");
+#ifdef MOY_DSI_IO_LDO_MV
+    // A board whose GPIO pad domain and I2C pull-ups ride LDO channel 4 (the
+    // Elecrow P4) names its voltage in mpconfigboard.cmake; the panel comes up
+    // first on every boot, so the bus is powered before anything probes it.
+    esp_ldo_channel_config_t io_cfg = {
+        .chan_id = 4,
+        .voltage_mv = MOY_DSI_IO_LDO_MV,
+    };
+    MOY_DSI_TRY(esp_ldo_acquire_channel(&io_cfg, &s_io_ldo), "io ldo");
+#endif
 
     esp_lcd_dsi_bus_config_t bus_cfg = MOY_DSI_BUS_CONFIG();
     MOY_DSI_TRY(esp_lcd_new_dsi_bus(&bus_cfg, &s_bus), "dsi bus");
@@ -162,6 +183,12 @@ static esp_err_t moy_dsi_bringup(const char **what) {
     // driver one of its own framebuffers, which it switches zero-copy -- so the
     // JD9365 vendor config's DMA2D copy engine has no work and stays off.
     dpi_cfg.flags.use_dma2d = false;
+#ifdef MOY_DSI_HSYNC_PW
+    dpi_cfg.video_timing.hsync_pulse_width = MOY_DSI_HSYNC_PW;
+#endif
+#ifdef MOY_DSI_VSYNC_PW
+    dpi_cfg.video_timing.vsync_pulse_width = MOY_DSI_VSYNC_PW;
+#endif
     moy_dsi_vendor_config_t vendor_cfg = {
         .mipi_config = {
             .dsi_bus = s_bus,

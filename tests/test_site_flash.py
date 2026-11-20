@@ -416,7 +416,12 @@ def test_the_fetcher_and_the_workflow_agree_on_artifact_names():
     # flash, which is a missing feature. This set is the second kind, and it is
     # compared EXACTLY -- so an entry has to be deleted the day its card lands
     # (this test says so), and a board that silently loses its card is caught.
-    no_site_card = {}
+    no_site_card = {
+        # The Elecrow P4 builds in CI from its first port; its website card
+        # waits for the board to be proven on glass and for the release
+        # pipeline's names (OTA_IMAGES, fetch_ci_firmware.BOARDS, site/build.py).
+        "elecrow_p4": "port in bring-up, no published image yet",
+    }
     assert set(fetch.BOARDS) - set(rows) == set(), (
         "the site offers a board CI does not build: %s"
         % sorted(set(fetch.BOARDS) - set(rows)))

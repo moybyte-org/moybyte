@@ -1,0 +1,154 @@
+"""Moybyte Elecrow P4 device backend: the shared console on the Elecrow
+CrowPanel Advance 10.1" (the Waveshare 7B's tier on a bigger glass).
+
+This is the P4 sibling of the T-Deck's moy_runtime, an order of magnitude
+smaller because the board removed the walls the T-Deck backend exists to fight:
+no flush ceiling (DPI scan-out), no SD<->display bus war (separate buses), no
+keyboard mode-flipping (BLE HID has real make/break reports), no input-poller
+thread (nothing stalls the loop).
+
+The two-domain seam (#39) runs for real here for the first time on hardware:
+
+  * `P4SystemCanvas` -- the SYSTEM canvas (device/p4_canvas.py since
+    2026-09-06, one body for every P4 board): a DeviceCanvas (RGB565 + native
+    moy_gfx) drawing DIRECTLY into the 1024x600 DSI scan-out framebuffer, plus
+    what a system surface must add over a game canvas: a settings-chosen
+    font_scale, font-scale-carrying layers, and the two native composite hooks
+    the shared presentation code probes for -- blit_game and blit_cover -- on
+    the P4 PPA where it wins.
+  * the GAME canvas stays a plain 320x240 DeviceCanvas over an off-screen
+    buffer; carts + make_api (device_api, staged from the T-Deck tree) are
+    byte-identical to the T-Deck's.
+  * `run_desktop` constructs the shared Workstation with BOTH canvases and
+    installs `WindowedWM` -- the launcher is the desktop, every app a floating
+    window (#73's presentation tier, finally on its intended hardware).
+
+Carts live on the TF card when one is in the slot and mounts (FAT32 or exFAT),
+and on the INTERNAL flash VFS (the tail of the 16MB chip after the app slots)
+when not -- the card is optional, never a requirement. `device/p4_desktop.py`
+owns the mount (LDO4, SDMMC slot 0), `device/card_store.py` the choice.
+"""
+
+# The seed roster, generated from system_carts/ at build time and PACKED
+# (2026-08-30): one raw-deflate blob per cart, inflated ONE AT A TIME by
+# `moy_carts.seed_any`, which reads the roster's form rather than being told.
+# Named CARTS because that is what it is to everything downstream -- the
+# compression is a storage detail of this one import.
+from carts_data import CARTS_Z as CARTS
+
+GAME_W, GAME_H = 320, 240
+FONT_SCALE = 1                     # 1x everywhere (owner call, 2026-07-12): a
+                                   # 1024x600 desk fits CONTENT, not magnification --
+                                   # geometry is resolution-driven; persisted
+                                   # system/settings still overrides (Settings FONT SIZE)
+PANEL_DIAGONAL_IN = 10.1           # the glass, in inches -- board.toml [panel] is
+                                   # the authority and tests/test_board_toml.py
+                                   # pins the two together. It buys the #203 chrome
+                                   # tap-target floor: at ~170 PPI a 16px bar icon
+                                   # is 2.4mm, so interactive geometry lays out at
+                                   # scale 2 while every glyph stays at FONT_SCALE.
+# Internal-flash store root. NOT "/moybyte/..." -- a root-level dir named like an
+# importable module SHADOWS the frozen module of that name ('' precedes '.frozen'
+# on sys.path), and the first boot's seeded /moybyte dir broke the next boot's
+# `from moybyte.input import ...` (hardware-learned 2026-07-08).
+CARTS_ROOT = "/moy/carts"
+# The OTA directory (#53) -- a copied image, the pending marker, the C6's
+# image. It is on the internal VFS whether or not a card holds the carts: it
+# is the device's own, and a card can be pulled out. NOT under /moy/carts: the
+# store scans that directory. A WiFi firmware update streams into the inactive
+# slot and stages nothing here.
+OTA_UPDATE_DIR = "/moy/update"
+
+
+# Loading the carts is DeviceBoot.load_carts (#161 Phase 4): the seed + scan +
+# built-in fallback is the same on every board, and what differs here is
+# arguments -- the card's root when one mounts, else the internal-flash root
+# above (`store_root` to run_desktop), and no storage SESSION at all (the card's
+# SDMMC slot is shared with nobody). On a full-erase boot that call is 17.5 of
+# the 25 seconds before anything composes, and every second of it is seeding --
+# which is what the splash's progress bar is for.
+
+
+def run_touch_calibrate():
+    """Touch calibration aid (#58): corner + center targets on the glass, every
+    GT911 sample printed to serial as raw + mapped coords + the live knob state.
+
+    Run it from the REPL (Ctrl-C out of the desktop first):
+
+        import moy_runtime; moy_runtime.run_touch_calibrate()
+
+    Tap each numbered box; read which box the MAPPED coords land in. The knobs
+    are live attributes on the kernel's touch driver -- `py touch.flip_x = 1`
+    over the dev channel, or on the REPL's driver -- and once mapped == tapped
+    everywhere, bake the winners into mpconfigboard.h's MOY_INPUT_TOUCH_*. The
+    body is `device/p4_desktop.run_touch_calibrate`, shared with the other P4 boards."""
+    from moy_glass import backlight as set_backlight
+    from moy_input import touch as Touch
+    from p4_desktop import run_touch_calibrate as _calibrate
+
+    _calibrate("Moybyte Elecrow P4", P4Compositor, set_backlight, Touch,
+               lambda touch: "swap=%s flip_x=%s flip_y=%s"
+               % (touch.swap_xy, touch.flip_x, touch.flip_y))
+
+
+def P4Compositor():
+    """The kernel's DSI compositor over this glass: moy_dsi's three scan
+    buffers and the PPA's fences (native/moy_glass/moy_present.h), dark until
+    the first composed frame."""
+    import moy_dsi
+    import moy_glass
+    import moy_ppa
+    return moy_glass.DsiCompositor(moy_dsi, moy_ppa)
+
+
+def run_ppa_smoke(scale=2, iters=60):
+    """A/B the PPA vs the CPU composite on this board's glass -- the body is
+    device/p4_canvas.run_ppa_smoke (one copy for both P4 boards); this hands
+    it the compositor and the backlight. Ctrl-C the desktop first, then:
+
+        import moy_runtime; moy_runtime.run_ppa_smoke()
+    """
+    from moy_glass import backlight as set_backlight
+    from p4_canvas import run_ppa_smoke as _smoke
+    _smoke(P4Compositor(), set_backlight, scale=scale, iters=iters,
+           game_w=GAME_W, game_h=GAME_H)
+
+
+# Idle screen blank (#58): milliseconds of NO INPUT before the panel goes dark,
+# so the board can sit plugged in for days without a lit screen. 0 disables it.
+# Overridable before boot (`import moy_runtime; moy_runtime.POWER_SAVE_MS = ...`)
+# and at runtime over the serial `power` command.
+#
+# This is a DARK SCREEN, not a suspend, and deliberately so: the loop keeps
+# running, a cart mid-run keeps ticking, and the serial dev channel stays live,
+# because the on-glass harness (#156) has to reach a board that has been idle
+# for hours. The backlight is also the one power lever the board README calls
+# out as unmeasured -- its 2.85W draw has never been split between the SoC and
+# the panel, and "one reading with the backlight blanked settles it".
+POWER_SAVE_MS = 300000          # 5 minutes
+# A layer's in-place shift (DeviceCanvas.LAYER_SHIFT_COST, measured in #58):
+# the 2D-DMA moves it (moy_ppa.shift_in), up in one transfer and down through
+# a scratch, for well under what its rows cost to draw; the CPU takes the few
+# the engine refuses.
+LAYER_SHIFT_COST = 500
+
+
+def run_desktop(fps_cap=60):
+    """Boot the shared console on the Elecrow P4: launcher-as-desktop under
+    WindowedWM, the 1024x600 DSI glass, GT911 touch as the pointer, a BLE HID
+    keyboard over the companion C6, and carts on internal flash. Ctrl-C over
+    the CH340K REPL interrupts the loop.
+
+    The BODY is `device/p4_desktop.py`, shared by every P4 board. What is left
+    here is what    this glass decides -- its compositor, its touch, its constants."""
+    from moy_glass import backlight as set_backlight
+    from moy_input import touch as Touch
+    from p4_desktop import run_desktop as _run_desktop
+
+    return _run_desktop(
+        name="Moybyte Elecrow P4", link_id="elecrow_p4",
+        compositor=P4Compositor, set_backlight=set_backlight, touch_cls=Touch,
+        font_scale=FONT_SCALE, panel_diagonal_in=PANEL_DIAGONAL_IN, seed_carts=CARTS,
+        store_root=CARTS_ROOT, ota_dir=OTA_UPDATE_DIR,
+        power_save_ms=POWER_SAVE_MS, game_wh=(GAME_W, GAME_H), fps_cap=fps_cap,
+        layer_shift_cost=LAYER_SHIFT_COST)

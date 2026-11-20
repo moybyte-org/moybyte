@@ -28,6 +28,7 @@
 //   MOY_HW_SPEAKER_MCLK                 the master clock pin, where a codec needs one
 //   MOY_AUDIO_CODEC_ES8311              the codec on the kernel's I2C bus (moy_codec_es8311.c)
 //   MOY_HW_SPEAKER_PA                   the amplifier's enable, driven high once the codec is up
+//   MOY_AUDIO_PA_ACTIVE_LOW             ... or low, where the amplifier's control pin is active low
 //   MOY_AUDIO_RATE                      the output rate, 22050 unless named
 //   MOY_AUDIO_STEREO                    16-bit stereo at MOY_AUDIO_RATE, twice the
 //                                       mix's (moy_aud_render_st); mono otherwise
@@ -390,7 +391,11 @@ int moy_aud_out_start(void) {
 #ifdef MOY_HW_SPEAKER_PA
     gpio_config_t pa = {.pin_bit_mask = 1ULL << MOY_HW_SPEAKER_PA, .mode = GPIO_MODE_OUTPUT};
     gpio_config(&pa);
+#ifdef MOY_AUDIO_PA_ACTIVE_LOW
+    gpio_set_level(MOY_HW_SPEAKER_PA, 0);
+#else
     gpio_set_level(MOY_HW_SPEAKER_PA, 1);
+#endif
 #endif
     s_mutex = xSemaphoreCreateMutex();
     if (s_mutex == NULL) {

@@ -100,7 +100,7 @@ ALL = ("python", "lua", "wasm", "elf")
 # runs with the kernel, unconfined, and the line says so. Every other board
 # says the table's line.
 _P4_FULL = "Run its own machine code. Unsigned code has full access to the console"
-FULL_ACCESS_LINES = {"p4": _P4_FULL, "guition_p4": _P4_FULL}
+FULL_ACCESS_LINES = {"p4": _P4_FULL, "guition_p4": _P4_FULL, "elecrow_p4": _P4_FULL}
 
 
 def _board():

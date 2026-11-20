@@ -6,7 +6,8 @@
 // card on a boot no VM has run in (the recovery floor's shell) and the
 // console's Python (`moy_sd.up()`) calls the same C:
 //
-//   sdmmc0 {clk, cmd, d0..d3}   an SDMMC card on slot 0 (the P4s), its LDO
+//   sdmmc0 {clk, cmd, d0[, d1..d3]}  an SDMMC card on slot 0 (the P4s; a row
+//                               with no d1 is a 1-bit bus), its LDO
 //                               switched on first where mpconfigboard.h names
 //                               the register (MOY_SD_MMC_LDO_REG, the P4s' LDO4)
 //   spi2 {sd_cs, radio_cs}      an sdspi card ATTACHED to the panel's SPI2 (the

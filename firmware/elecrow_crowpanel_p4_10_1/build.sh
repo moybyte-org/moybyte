@@ -1,0 +1,220 @@
+#!/usr/bin/env bash
+# Moybyte Elecrow P4 (Elecrow CrowPanel Advance 10.1" ESP32-P4 HMI: ESP32-P4NRW32
+# + ESP32-C6, 10.1" 1024x600 EK79007 MIPI-DSI, GT911 touch, CH340K UART) -- a
+# VARIANT of the Waveshare 7B's port (#58) on a 16MB flash: mainline MicroPython
+# (ESP32_GENERIC_P4, C6_WIFI variant) + the P4 silicon tier (native/p4, staged
+# as board.toml data). The SHARED half of the build lives in
+# tools/esp32_build_lib.sh; what stays here is this board's patch ladder -- the
+# Waveshare's, line for line, because the console is the same CH34x UART and the
+# silicon is the same -- and its sdkconfig facts. Output flashes at offset 0x2000:
+#   tools/board.py elecrow_p4 flash   (board.toml [flash] has the offset and rate)
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+BUILD_DIR="${SCRIPT_DIR}/.build"
+MPY_DIR="${BUILD_DIR}/micropython"
+BOARD="MOYBYTE_ELECROW_P4"
+BOARD_DIR="${SCRIPT_DIR}/boards/${BOARD}"
+DIST_DIR="${REPO_ROOT}/dist/elecrow_p4"
+MODULES_DIR="${SCRIPT_DIR}/modules"
+MANIFEST="${BUILD_DIR}/moybyte_elecrow_p4_manifest.py"
+
+# shellcheck source=../../tools/esp32_build_lib.sh
+source "${REPO_ROOT}/tools/esp32_build_lib.sh"
+moybyte_resolve_build_python
+
+mkdir -p "${BUILD_DIR}" "${DIST_DIR}" "${MODULES_DIR}"
+
+# ---------------------------------------------------------------------------
+# 1) Toolchain: our OWN MicroPython checkout (sharing one would race the other
+#    boards' sed-patched esp32_common.cmake), and ESP-IDF reused from
+#    the Waveshare P4, which owns the shared checkout (see its build.sh) --
+#    falling back to a clone of our own, which is what happens on every CI
+#    runner. The patches below are marker-guarded, so several P4 builds over
+#    one IDF apply each once.
+# ---------------------------------------------------------------------------
+moybyte_clone_micropython
+moybyte_setup_idf esp32p4 \
+  "${REPO_ROOT}/firmware/esp32_p4_wifi6_touch_lcd_7b/.build/esp-idf"
+
+# ---------------------------------------------------------------------------
+# 2) The patch ladder -- THIS BOARD'S half of the build. All marker-guarded,
+#    because both the .build tree and a reused IDF checkout persist.
+# ---------------------------------------------------------------------------
+
+# 2a) The P4 SILICON patch (shared lib, both P4 boards): the #106 DSI
+#     bridge-underrun ISR and scan-out DMA priorities in the (shared) ESP-IDF
+#     checkout. It was this directory's patches/ until 2026-09-06; it lives in
+#     patches/p4_*.patch now.
+moybyte_patch_p4_dsi_underrun
+
+# 2b) The P4 SRM macro-block-order bypass (shared lib, both P4 boards): the
+#     DIG-734 deadlock the Guition P4's rotated present hit (the lib says why).
+moybyte_patch_p4_ppa_srm_mb_order
+
+#     The core dump's DRAM region on a rev < v3 P4 (the lib says why).
+moybyte_patch_p4_coredump_dram
+
+#     The low SRAM's heap priority on a rev < v3 P4 (the lib says why).
+moybyte_patch_p4_heap_low_sram
+
+#     The PPA transactions' internal-RAM share (the lib says why).
+moybyte_patch_p4_ppa_trans_context
+
+#     The CPU clock switch's suspended-cache window kept in IRAM (the lib says
+#     why).
+moybyte_patch_p4_clk_switch
+
+# 2c) moy_dsi needs esp_lcd, moy_ppa needs esp_driver_ppa (the P4 pixel
+#     accelerator) in the main component's REQUIRES.
+moybyte_idf_component esp_lcd
+moybyte_idf_component esp_driver_ppa
+
+# 2c') ESP-Hosted 2.7.0 -> 2.12.12 -- the espnow-on-p4 track (shared lib). On
+#      THIS board the C6 runs Elecrow's factory slave, which this build never
+#      touches; README records what hosted 2.12 against it reports.
+moybyte_patch_esp_hosted_bump esp32p4
+
+# 2d) Un-static esp_native_code_free_all (#66) -- shared with the T-Deck.
+#     Mainline's ports/esp32/main.c has the identical grow-only
+#     esp_native_code_commit list, and the P4's RV32 native emitter feeds it
+#     (MICROPY_EMIT_RV32=1), so edit->PLAY sessions would hit the same cliff,
+#     just later (bigger internal pool).
+moybyte_patch_native_code_free
+
+# 2e) REPR_C -- applied 2026-08-24, and NOT for the S3's reason. This stood as
+#     "DECLINED, an open question" for a week because the only argument was
+#     perf (the S3's measured float-boxing gc hitch) and per-board perf
+#     verdicts don't transfer. The espnow lockstep match (#7 Phase E) turned
+#     it into a CORRECTNESS requirement: both consoles in a match run the same
+#     sim from the same inputs, and a 30-bit REPR_C float (the S3s) against a
+#     boxed 32-bit single (this board, until now) diverges the two worlds by
+#     construction -- measured on glass, P4<->T-Deck Brick Siege: tanks
+#     identical, 0/1105 world checksums agreeing, and the same accumulator
+#     printing 0.21666668 on one board and 0.216666668 on the other. FLOAT
+#     WIDTH IS PART OF THE LOCKSTEP CONTRACT: every board that can hold a
+#     link runs REPR_C, and a future board that cannot take REPR_C is a
+#     board that cannot join a match until something re-solves this. The
+#     perf A/B ran the same day, paired on the same tree and flash cycle:
+#     Sky Run 58.0 -> 56.5, Sakura 51.0 -> 51.5 -- ~1.5fps on one cart,
+#     noise on the other. It would not have gotten a vote anyway.
+#     With it, the map-lookup cache index re-aimed for REPR_C (#77), paired
+#     with mpconfigboard.h's 512-slot table.
+moybyte_patch_repr_c
+moybyte_patch_map_cache_for_repr_c
+# Size-class run hints for gc_alloc (#66): every console board takes it; the
+# lib and tools/patch_gc_run_hints.py say why, and the verdict is per board.
+moybyte_patch_gc_run_hints
+# The gc meters (gc.pauses, gc.areas): every console board takes them, for
+# the PERF line's gc= field and the dev channel's `heapcaps` word.
+moybyte_patch_gc_meters
+# An equal-length slice store moves no tail: every board takes it, and
+# tools/patch_slice_store.py carries the measurement.
+moybyte_patch_slice_store
+# FatFS's long-name buffer on the calling task's stack, which the re-entrant
+# oofatfs needs (mpconfigboard.h, tools/patch_fatfs_lfn.py).
+moybyte_patch_fatfs_lfn
+# A found extensible built-in enters sys.modules: every board takes it,
+# and tools/patch_import_cache.py carries the measurement.
+moybyte_patch_import_cache
+# A hash map grows at three quarters full: every console board takes it, and
+# tools/patch_map_load.py carries the measurement.
+moybyte_patch_map_load
+# The VM's thread state in a `__thread` variable, not a FreeRTOS TLS slot
+# whose lookup masks interrupts: tools/patch_thread_state_tls.py carries the
+# P4 profile behind it.
+moybyte_patch_thread_state_tls
+
+# 2f) A 4 KB stdin ring, in TCM, and a UART RX ISR that wakes the reader: this
+#     board's serial is the CH343's UART, with no flow control, and the stock
+#     260 bytes are 23 ms of line rate against a heap collection of up to
+#     ~95 ms. tools/patch_stdin_ring.py carries the sizing, why TCM, and why
+#     the wake.
+moybyte_patch_stdin_ring
+
+# machine.PWM takes its LEDC channels and timers from the kernel's book,
+# as the compiled programs' PWM handles and the backlight do
+# (tools/patch_pwm_ledc_book.py).
+moybyte_patch_pwm_ledc_book
+
+# DECLINED moybyte_patch_usj_rx_init -- the USB-Serial/JTAG console's start.
+# This board's console is the CH343's UART, whose ISR is installed with the
+# port and takes every byte as it arrives.
+
+# LittleFS sized for a flash store: the cart store is this board's internal
+# flash, which the stock sizes program 128 bytes at a time and search for free
+# blocks 256 at a time. tools/patch_lfs_sizes.py carries the measurements.
+moybyte_patch_lfs_sizes
+
+# DECLINED moybyte_patch_sdcard_runs -- machine.SDCard in multi-block runs.
+# This console has no card in play: carts live on the internal flash VFS (the
+# moy_sd denial in board.toml says the same for the T-Deck's module).
+
+# DECLINED moybyte_patch_gc_grow_step -- the split heap's growth step cap. A
+# P4's 32 MB keeps the stock doubling; MOYBYTE_GC_GROW_MAX is the S3 boards' alone.
+# DECLINED moybyte_patch_gc_split_reserve -- the split-heap growth cap (#66).
+# The patch reserves MOYBYTE_GC_SPLIT_RESERVE bytes of PSRAM outside the Python
+# heap, and that define is set by the two S3 boards' mpconfigboard.h alone, so a
+# call here reserves 0 -- the patch applies and the cap computes to nothing.
+# Whether a P4 with 32MB of PSRAM wants a reserve at all is unmeasured (#58);
+# the day it is, the board sets the define and takes the call back.
+
+# DECLINED moybyte_patch_mdns_psram -- measured on the two S3s, whose internal
+# SRAM is the squeeze (#246); this board's mDNS keeps the component's statics.
+
+# The MSC endpoint buffer, CFG_TUD_MSC_EP_BUFSIZE 8192 here, is PSRAM taken at
+# the drive's first start instead of 8 KB of the idle desk's internal .bss.
+moybyte_patch_tinyusb_msc_psram
+
+# DECLINED moybyte_patch_psram_retune -- not applicable. That patch relaxes the
+# ESP32-S3 MSPI timing tuner's flash-vendor gate (#169); this is an ESP32-P4 and
+# the file does not exist in its build. Its PSRAM constraint is a different one
+# entirely (200MHz or the DSI scan-out underruns -- see this dir's README).
+
+# ---------------------------------------------------------------------------
+# 3) Stage: the shared native modules (board.toml [native.shared] -- the
+#    denials, moy_sd/moy_audio/moy_flush, live there WITH their reasons; all
+#    plain C, the S3-specific pieces are include-guarded, so they compile
+#    unchanged on RISC-V) plus the P4 silicon tier ([native.p4] over
+#    native/p4/), with the browser console blob generated into the staged copy
+#    (never into the shared native/ tree two builds read -- this used to
+#    generate there and race a concurrent T-Deck build); then the shared
+#    PYTHON modules (#58 console staging, #161 Phase 3 -- board.toml holds the
+#    denylist over runtime/ and the allowlist over device/, and the stager
+#    prunes untracked strays); then the generated modules.
+# ---------------------------------------------------------------------------
+moybyte_stage_native
+"${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" stage "${SCRIPT_DIR}"
+
+#    carts_data.py is built from system_carts/ so the seed + embedded-fallback
+#    carts can never drift from the host source of truth. PACKED (2026-08-30):
+#    one raw-deflate blob per cart instead of 732 KB of literal source, because
+#    the roster only grows and the slot does not. `moy_carts.seed_any` picks the
+#    decoder off the roster's FORM, so nothing else in the boot changed.
+"${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_device_carts.py" --packed "${MODULES_DIR}/carts_data.py"
+
+#    fonts_data.py: the font set this board's tier takes (tools/make_font.py,
+#    native/moy_ui/fonts/), frozen so its bytes stay in flash.
+"${BUILD_PYTHON}" "${REPO_ROOT}/tools/make_font.py" module "${SCRIPT_DIR}" "${MODULES_DIR}/fonts_data.py"
+
+#    The OTA identity stamp (#53). An app image is board-specific in the
+#    strongest way (Xtensa there, RISC-V here), so the manifest url carries the
+#    board and the device refuses a manifest naming another one.
+moybyte_ota_identity elecrow_p4 "${REPO_ROOT}/device/moy_ota.py"
+
+# ---------------------------------------------------------------------------
+# 4) Frozen manifest + partition table (#58: OTA-shaped 2x8 MiB app slots +
+#    auto-vfs tail -- the default 4MiBplus table's ~1.94MB app can't hold the
+#    frozen console) + the stale-sdkconfig guard.
+# ---------------------------------------------------------------------------
+moybyte_frozen_manifest "${MANIFEST}"
+moybyte_sdkconfig_guard "${BOARD_DIR}" \
+  "${MPY_DIR}/ports/esp32/build-${BOARD}/sdkconfig"
+
+# ---------------------------------------------------------------------------
+# 5) Build + collect (shared lib: mpy-cross, the port, the two images and the
+#    #168 size guard -- moybyte_app_size_guard runs in there).
+# ---------------------------------------------------------------------------
+moybyte_build_and_collect "${BOARD_PARTITION_CSV}" \
+  moybyte_elecrow_p4 "flash at offset 0x2000"

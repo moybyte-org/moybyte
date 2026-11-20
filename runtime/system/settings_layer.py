@@ -199,7 +199,8 @@ _HOME_WORDS = ("Theme", "Carousel", "Grid", "Icons")
 # A board's name in About, by its OTA id (each board.toml's [board] ota):
 # the name a reader knows it by.
 BOARDS = {"tdeck": "T-Deck Plus", "p4": "Waveshare P4 7″", "guition_s3": "Guition 3.5″",
-          "guition_p4": "Guition P4 10″", "xiao_zero": "XIAO ESP32-S3"}
+          "guition_p4": "Guition P4 10″", "elecrow_p4": "Elecrow P4 10″",
+          "xiao_zero": "XIAO ESP32-S3"}
 _PAGE_TITLES = {"achievements": "Achievements", "licences": "Licences", "log": "System log",
                 "permissions": "App permissions"}
 

@@ -194,13 +194,22 @@ static int mmc_up(const char **what) {
     vTaskDelay(pdMS_TO_TICKS(10));
 #endif
     sdmmc_slot_config_t cfg = SDMMC_SLOT_CONFIG_DEFAULT();
-    cfg.width = 4;
     cfg.clk = (gpio_num_t)MOY_HW_SDMMC0_CLK;
     cfg.cmd = (gpio_num_t)MOY_HW_SDMMC0_CMD;
     cfg.d0 = (gpio_num_t)MOY_HW_SDMMC0_D0;
+#if defined(MOY_HW_SDMMC0_D1)
+    cfg.width = 4;
     cfg.d1 = (gpio_num_t)MOY_HW_SDMMC0_D1;
     cfg.d2 = (gpio_num_t)MOY_HW_SDMMC0_D2;
     cfg.d3 = (gpio_num_t)MOY_HW_SDMMC0_D3;
+#else
+    // A row with no d1 is a 1-bit bus: the pins D1 to D3 would use are other
+    // signals on that board.
+    cfg.width = 1;
+    cfg.d1 = GPIO_NUM_NC;
+    cfg.d2 = GPIO_NUM_NC;
+    cfg.d3 = GPIO_NUM_NC;
+#endif
     // The host is initialised here or by whoever holds another slot
     // (ESP-Hosted's).
     esp_err_t err = sdmmc_host_init();

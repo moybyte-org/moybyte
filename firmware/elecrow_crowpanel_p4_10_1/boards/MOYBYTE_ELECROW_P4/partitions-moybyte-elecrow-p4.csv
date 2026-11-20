@@ -1,0 +1,50 @@
+# Moybyte Elecrow P4 partition table -- 16MB flash, the Guition P4's table (the
+# Waveshare P4's head -- nvs, otadata at 0xd000, phy -- with slots cut for half
+# the chip). The factory firmware's own table (nvs, phy_init and one 15 MB
+# factory app) is replaced by this at the first cable flash.
+#
+# The mainline default (partitions-4MiBplus.csv) caps the app at 0x1F0000
+# (~1.94MB); the frozen console overflows that. This table is OTA-SHAPED --
+# two app slots -- so the board OTAs from day one. The slots are 6.5 MiB
+# (2026-11-17; 4 MiB at first, 6 MiB from 2026-10-05, up to 7.8125 MiB through
+# 2026-11 for the theme fonts, the terminal's C shell and the SSH server): the
+# browser console left the image for its add-on cart
+# (native/moy_net/moy_page.h) and its 1.9 MB with it. The coredump partition
+# (owner, 2026-11-03, docs/os_2026-11/processes.md section 10) follows ota_1:
+# a panic writes an ESP-IDF ELF core dump there (sdkconfig.board),
+# tools/coredump.py reads it over the cable, and Settings -> LAST CRASH clears
+# it; 128 KiB holds every task's TCB and the used part of its stack with room
+# for a deep VM stack. On 16MB every slot byte is paid for twice out of the
+# store, which is what is left: the tail from 0xD50000 (2.69 MiB). The store
+# is the TF card when one mounts; without a card that internal fallback holds
+# the kernel's own files and the carts that fit (the seed set, the browser
+# console add-on), and a write that does not fit is the store-full notice. The tail is deliberately
+# UNLISTED: mainline MicroPython auto-builds the vfs over the unallocated
+# remainder (the "plus" table behavior). build.sh copies this file into
+# ports/esp32/ at stage time (CONFIG_PARTITION_TABLE_CUSTOM_FILENAME resolves
+# project-relative).
+#
+# The store's size and offset are the tail's, so a change to the slots moves
+# it: the LittleFS there no longer mounts, and a stale first sector reads as
+# "filesystem appears to be corrupted" on every boot. A cable flash that finds
+# the store somewhere else on the board erases the new store's first blocks
+# before it writes (tools/board_flash.py); the store re-seeds.
+#
+# The pmem partition (owner, 2026-11-18) follows the coredump partition: the
+# pmem log, a raw area a cart's pmem save appends to where the store is this
+# internal flash (native/moy_store/moy_plog.h), erased ahead so a save is one
+# program of its record and never a littlefs write. 128 KiB is 32 sectors,
+# hours of a typical cart's saves between two quiet moments; it came off the
+# store. Its subtype 0x40 is ours: nothing of ESP-IDF's or MicroPython's
+# looks for it, and an image on an older table (an OTA keeps the table it was
+# cabled with) finds no "pmem" partition and keeps pmem in each cart's
+# pmem.bin.
+#
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x4000,
+otadata,  data, ota,     0xd000,   0x2000,
+phy_init, data, phy,     0xf000,   0x1000,
+ota_0,    app,  ota_0,   0x10000,  0x680000,
+ota_1,    app,  ota_1,   0x690000, 0x680000,
+coredump, data, coredump, 0xD10000, 0x20000,
+pmem,     data, 0x40,    0xD30000, 0x20000,
