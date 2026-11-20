@@ -947,7 +947,7 @@ class BarZone:
     GAP = 5          # the widest gap between two cells, at fs 1: with a tab's pad,
                      # a labelled tab's pill ends 8 px before the next one's icon (R2-08)
     LEAST = 2        # ...the least
-    GROUP = 9        # ...the least about a hairline, the line at its middle
+    GROUP = 8        # ...the least about a hairline, the line at its middle
     END = 6          # the room after the end run: with the bar's gap, its ink stands
                      # 10 px clear of the status widgets that follow (R4-26)
 

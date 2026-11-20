@@ -125,6 +125,6 @@ def test_a_tap_runs_through_the_engine_and_the_generation_follows():
 def test_the_need_is_every_cell_an_icon():
     F, page, _look, z = _zone()
     # three cells of the tabs' two (the current one widened), undo, Play
-    assert z.zone_need(20) == (20 + 2 * 3) + 20 + 20 + 20 + 2 * 2 + 9 + 6
+    assert z.zone_need(20) == (20 + 2 * 3) + 20 + 20 + 20 + 2 * 2 + 8 + 6
     page.run(setattr, F.s, "has_three", True)
-    assert z.zone_need(20) == (20 + 2 * 3) + 20 + 20 + 20 + 20 + 3 * 2 + 9 + 6
+    assert z.zone_need(20) == (20 + 2 * 3) + 20 + 20 + 20 + 20 + 3 * 2 + 8 + 6
