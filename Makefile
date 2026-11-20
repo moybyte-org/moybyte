@@ -268,7 +268,7 @@ UNIX_MP_NATIVE := native
 # (docs/history/kernel_appabi_2026-10.md), moy_ui sprint 6's toolkit
 # (docs/history/kernel_toolkit_2026-10.md).
 UNIX_MP_MODULES ?= moy_gfx moy_lua moycore moy_audio moy_web moy_png moy_index moy_spine moy_store \
-    moy_glass moy_input moy_net moy_kernel moy_play moy_app moy_ui
+    moy_glass moy_input moy_net moy_kernel moy_play moy_app moy_ui moy_uitree
 UNIX_MP_INDEX ?= c
 UNIX_MP_JOBS ?= $(shell nproc 2>/dev/null || echo 4)
 

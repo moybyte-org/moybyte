@@ -877,5 +877,5 @@ int uit_frame(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int x, int y, i
         uit_buf_free(&hb2);
     }
     uit_buf_free(&hb);
-    return (e->nevs - e->evat) | (owe ? 1 << 30 : 0);
+    return (e->nevs - e->evat) | (owe ? 1 << 16 : 0);
 }

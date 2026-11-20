@@ -112,7 +112,7 @@ void uit_want_focus(uit_t *e, const char *key);
 
 // -- the frame ----------------------------------------------------------------
 // One frame of the page into `content` of a frame the host began: answers
-// the events queued (UIT_F_* flags; `input` an UIT_IN_*). Bit 30 set in the
+// the events queued (UIT_F_* flags; `input` an UIT_IN_*). Bit 16 set in the
 // answer: the hints band names another node's verbs, so the frame owes a
 // redraw of the whole page.
 int uit_frame(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int x, int y, int w, int h,
