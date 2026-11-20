@@ -259,6 +259,27 @@ def _open_wifi_popover(ws):
 
 
 # name -> what a run opens
+def _open_editor(tab):
+    def open_(ws):
+        import test_shell_goldens as G
+        ws.open_in_editor(G._cart_by_title(ws, G._EDITOR_CART))
+        ws.text.set_menu_view(tab)
+    return open_
+
+
+# The Code tab: the caret by the arrows, a typed word and Enter; Ctrl+F's
+# find strip searching as it is typed, Enter for the next match, Back
+# closing it; Ctrl+G's Go to filtered and taken; Ctrl+E's completion and
+# Back; Ctrl+Z taking the typing back
+CODE_SCRIPT = ["k:down", "k:down", "k:right", "k:right", "t:x", "enter", "t:\x06", "t:spr", "enter",
+               "back", "t:\x07", "t:dr", "enter", "k:down", "t:sp", "t:\x05", "back", "t:\x1a",
+               "t:\x1a", "k:up"]
+# The desk's Esc is the window's: Ctrl+F closes the strip it opened, and
+# Enter takes a completion
+CODE_DESK_SCRIPT = ["k:down", "k:down", "k:right", "k:right", "t:x", "enter", "t:\x06", "t:spr",
+                    "enter", "t:\x06", "t:\x07", "t:dr", "enter", "k:down", "t:sp", "t:\x05", "enter",
+                    "t:\x1a", "t:\x1a", "k:up"]
+
 # The System log's ring: (t_us, level, process, text) on a pinned clock, more
 # lines than a handheld's page holds, a traceback's lines under its record.
 LOG_RING = tuple((1000000 + 250000 * n, (6, 4, 3, 7)[n % 4], ("shell", "kernel", "game")[n % 3],
@@ -281,7 +302,9 @@ def _open_log(ws):
     ws.settings_layer.open_page("log")
 
 
+# name -> what a run opens
 SURFACES = {
+    "editor_code": P.Surface(_open_editor("code")),
     "settings_permissions": P.Surface(_open_settings_page("permissions"), _perms_carts),
     "settings_tz": P.Surface(_open_tz),
     "settings_paired": P.Surface(_open_paired(BROWSERS, True)),
@@ -404,6 +427,9 @@ RUNS = (
       11: WIFI_RING_IN_VIEW}),
     ("wifi_popover-tdeck", "wifi_popover", "tdeck_320x240_fs1_dark",
      ["k:down", "k:a", "f:2", "k:down", "k:a", "t:abc", "enter", "f:2", "back"]),
+    ("editor_code-tdeck", "editor_code", "tdeck_320x240_fs1_dark", CODE_SCRIPT),
+    ("editor_code-desk", "editor_code", "p4_1024x600_fs2_windowed", CODE_DESK_SCRIPT),
+    ("editor_code-big", "editor_code", "big_800x480_fs3_dark", CODE_SCRIPT),
 )
 
 
