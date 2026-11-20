@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "tests" / "uitree_fixtures"))
 
 import uitree_check  # noqa: E402
+from board_config import runtime_file  # noqa: E402
 
 # Every module written against uitree. A port adds its module here.
 PORTED = (
@@ -75,7 +76,7 @@ def test_every_error_the_layer_raises_carries_its_fix():
     the checker names `fix=`, and never a bare None."""
     import ast
     bad = []
-    for p in sorted((ROOT / "runtime" / "uitree").glob("*.py")) + [ROOT / "tools" / "uitree_check.py"]:
+    for p in sorted(runtime_file("uitree.py").parent.glob("*.py")) + [ROOT / "tools" / "uitree_check.py"]:
         for n in ast.walk(ast.parse(p.read_text(encoding="utf-8"))):
             if isinstance(n, ast.Call) and getattr(n.func, "id", getattr(n.func, "attr", "")) == "UIError":
                 fix = [k.value for k in n.keywords if k.arg == "fix"]

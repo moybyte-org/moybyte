@@ -30,8 +30,14 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 LUA_SRC = os.path.join(ROOT, "native", "moy_lua", "lua")
-LAYER = os.path.join(ROOT, "runtime", "run", "uitree.lua")
-DRIVER = os.path.join(ROOT, "runtime", "run", "uitree_check.lua")
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+from board_config import runtime_file  # noqa: E402
+
+# the Lua layer and its checker's driver stage beside lua_ext.py, which reads the layer
+LUA_DIR = str(runtime_file("lua_ext.py").parent)
+LAYER = os.path.join(LUA_DIR, "uitree.lua")
+DRIVER = os.path.join(LUA_DIR, "uitree_check.lua")
 BUILD = os.path.join(ROOT, ".build", "uitree_lua")
 
 MAIN_C = r"""
@@ -186,7 +192,7 @@ def read_source(cart, facts):
             texts[n] = f.read()
     blanked = {n: _blank(t) for n, t in texts.items()}
     import importlib.util
-    spec = importlib.util.spec_from_file_location("_cart_verbs", os.path.join(ROOT, "runtime", "run", "cart_verbs.py"))
+    spec = importlib.util.spec_from_file_location("_cart_verbs", str(runtime_file("cart_verbs.py")))
     cv = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(cv)
     known = LUA_STD | APP_GLOBALS | set(cv.CART_VERBS)

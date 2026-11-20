@@ -26,13 +26,15 @@ for p in (ROOT, os.path.join(ROOT, "tools")):
     if p not in sys.path:
         sys.path.insert(0, p)
 
+from board_config import runtime_file  # noqa: E402
+
 with open(os.path.join(CONTRACT, "contract.json"), encoding="utf-8") as _f:
     TABLE = json.load(_f)
 
-PY_FILES = [os.path.join(ROOT, "runtime", "uitree", f) for f in
+PY_FILES = [str(runtime_file(f)) for f in
             ("uitree.py", "uitree_app.py", "uitree_editor.py", "uitree_doc.py", "uitree_pics.py")] + \
            [os.path.join(ROOT, "tools", "uitree_check.py")]
-LUA_FILES = [os.path.join(ROOT, "runtime", "run", f) for f in ("uitree.lua", "uitree_check.lua")] + \
+LUA_FILES = [str(runtime_file("lua_ext.py").parent / f) for f in ("uitree.lua", "uitree_check.lua")] + \
             [os.path.join(ROOT, "tools", "uitree_lua_check.py")]
 CODE = re.compile(r'"([A-Z][0-9]{2})"')
 
