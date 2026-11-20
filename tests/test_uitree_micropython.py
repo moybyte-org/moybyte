@@ -229,6 +229,30 @@ def pages(loop):
     _steps(loop)
     ws.spine.exit()
     _steps(loop, 4)
+    # the bridge (ui.legacy): a page on the Editor's kinds hosting a surface
+    # on today's verbs, its hosted phase before the host begins the frame
+    with open(ROOT + "/fakes/uitree_legacy_app.py", "w") as f:
+        f.write(@LEGACY@)
+    import uitree_legacy_app as LA
+    import uitree_editor
+    import ui_draw
+    import ui
+
+    class Damage:
+        def all(self):
+            pass
+    lh = ui_draw.AppHost()
+    lp = uitree_editor.Page(LA.build, lh, Damage())
+    lp.open()
+    cv, th = ws.sys_canvas, ws.theme_colors
+    box = (0, 0, cv.w, cv.h)
+    for _k in range(3):
+        lp.hosted(0.033, cv, th, box, False)
+        lh.begin(cv, th, box)
+        lp.paint(0.033, cv, th, box, False)
+        ui.end()
+    hs = LA._SURF[id(None)]
+    shown["legacy"] = [hs.draws, list(hs.rects[-1]), list(lp.legacies["list"][1])]
     print("RESULT " + json.dumps({"painted": painted, "shown": shown, "errors": errors}))
 '''
 
@@ -247,8 +271,9 @@ BUILDS = ("rows_page", "tz_page", "paired_page", "log_page", "build", "page", "w
 
 def test_every_ported_page_builds_and_draws_on_the_boards_micropython(tmp_path):
     PORTS._perms_carts(tmp_path / "carts")
-    sources = "\n\n".join(inspect.getsource(c) for c in (PORTS.Updater, PORTS.C6Updater, Webhost, PORTS._Station))
-    more = (PAGES.replace("@SOURCES@", sources)
+    sources = "\n\n".join(inspect.getsource(c) for c in (PORTS.Updater, PORTS.C6Updater, Webhost))
+    legacy = (Path(__file__).resolve().parent / "uitree_fixtures" / "uitree_legacy_app.py").read_text()
+    more = (PAGES.replace("@SOURCES@", sources).replace("@LEGACY@", repr(legacy))
             .replace("@BROWSERS@", repr(PORTS.BROWSERS))
             .replace("@LOG_RING@", repr(PORTS.LOG_RING)))
     info, text = FA._run(tmp_path, entry="pages", more=more,
@@ -274,5 +299,7 @@ def test_every_ported_page_builds_and_draws_on_the_boards_micropython(tmp_path):
     assert shown["head_tab"] == "paint", shown
     assert shown["desk_head"][:3] == ["ws:settings", "ws:code", "ws:art"], shown
     assert shown["desk_ws"] == "art", shown
+    draws, drew_at, laid_at = shown["legacy"]
+    assert draws == 3 and drew_at == laid_at, shown["legacy"]
     missing = [b for b in BUILDS if not painted.get(b)]
     assert not missing, ("pages that never painted", missing, painted, text[-3000:])

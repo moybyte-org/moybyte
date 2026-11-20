@@ -152,7 +152,7 @@ frames its old code drew.
 |---|---|
 | `uitree.py` | **(shared, staged)** the API an app imports as `ui`: declarations per app module (`Decl`), the types, templates and conditions, node kinds, the build, the errors (each with its code, file:line and fix) |
 | `uitree_app.py` | **(shared, staged)** the replay into the toolkit's verbs: `Engine` (a built tree in a frame its host began, handlers run as one commit), `App` and `app_layer` (a registered app whose screen is a build), `Page` (a build hosted by a surface still on today's verbs) |
-| `uitree_editor.py` | **(shared, staged)** the Editor's kinds over the replay: rows, tabs, panes, the text editor, slots, the status line |
+| `uitree_editor.py` | **(shared, staged)** the Editor's kinds over the replay: rows, tabs, panes (the desk Editor's sizes, held sizes, divider resets, pane focus and grow), the text editor, slots, the status line, and the bridge's `legacy` node (a surface still on today's verbs hosted in a region: its host runs `Engine.hosted` before it begins the frame) |
 | `uitree_doc.py` | **(shared, staged)** a `ui.doc`'s engine side: the Code tab's `CodeEditor` and the op journal under one object |
 | `uitree_pics.py` | **(shared, staged)** an `image` value found, decoded, cached under a byte budget and drawn |
 

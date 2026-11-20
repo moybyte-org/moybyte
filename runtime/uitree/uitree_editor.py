@@ -2,8 +2,11 @@
 #   Engine                the replay of the Editor's kinds over uitree_app.Engine
 #   -- the page: regions stacked  regions down the page, overlays last
 #   -- a row              a row's widths and cells
+#   Engine.hosted         the bridge's first phase: regions placed, the hosted surfaces drawn
+#   Engine._r_legacy      a legacy node in the pass: one stop over its body
 #   Engine.point          a pointer routed to rows, panes, dividers, the text editor
-#   -- panes and their dividers  ui.split's panes, their cards and headers
+#   -- panes and their dividers  the desk Editor's rules over ui.split, a pane's header
+#   Engine._pane_keys     F6, Ctrl+Shift+Enter, Ctrl+0, Ctrl+Alt+arrows
 #   -- the text editor    ui.text_editor over ui.text_view and the document's keys
 #   -- popovers hang      popovers hung from a node's part
 #   Engine.keys           keys: popovers, the text editor, then rows
@@ -16,9 +19,10 @@
 #   BarZone.activate      a lent cell's action run
 """The replay of the Editor's kinds (uitree.py EXT-4) through today's `ui`
 verbs: regions stacked down the page, rows, tabs, panes over `ui.split`
-with its dividers, a pane's card and header, the text editor over
-`ui.text_view` and the document's keys, a slot, a status line, and popovers
-hung from a node's part.
+with its dividers, a pane's header, the text editor over `ui.text_view` and
+the document's keys, a slot, a status line, popovers hung from a node's
+part, and the bridge's `legacy` node, a surface still on today's verbs
+hosted in a region.
 
 What is placed here by arithmetic -- a row's widths, the caret's box, a
 tab's x -- is the engine's in the shape; the replay computes it the way the
@@ -28,18 +32,68 @@ from array import array
 from moy_input import SHIFT as _SHIFT
 import ui as _v
 import ui_draw as _ud
+import layout_base as _lb
 import uitree as S
 from uitree import _NOW
 import uitree_app
+from ui_host import _outside
 
 _SYN = {"python": "python", "lua": "lua", "json": "json", "markdown": "markdown", "plain": "plain"}
-_FILL = ("switch", "panes", "pane", "text_editor", "slot", "panel", "case", "canvas")
+_FILL = ("switch", "panes", "pane", "text_editor", "slot", "panel", "case", "canvas", "legacy")
+# what the hosted phase walks to place the legacy nodes: the regions
+_PLACED = ("case", "switch", "panes", "pane", "panel", "legacy")
+# The panes' sizes in desk units (runtime/editors/editor_panes.py's, the
+# desk Editor's): the gutter, a pane's header, a divider's handle drawn and
+# the touch it takes, a touch drag's travel before it takes, the
+# Ctrl+Alt+arrow step, a pane's least size where it names none.
+GUTTER = 6
+HEADER = 32
+HANDLE = (6, 36)
+HANDLE_HIT = (16, 48)
+DRAG_SLOP = 8
+KEY_STEP = 8
+FLOOR = (64, HEADER + 16)
+RADIUS = 8
+DOUBLE_MS = 400            # a second tap this soon on a divider resets it
+# The key event (native/moy_input/moy_input.h): the code in the low 16
+# bits, the modifiers above.
+_MODS_AT = 16
+_CTRL, _KSHIFT, _ALT = 1, 2, 4
+_F6 = 0x101 + 5
+_LEFT, _RIGHT, _UP, _DOWN = 0x110, 0x111, 0x112, 0x113
+_ENTERS = (10, 13)
+
+
+def fit(start, mins, total):
+    """The children's sizes along a panes `total` long (gutters taken
+    off): each held child at its size, at least its minimum, and the one
+    that grows (None in `start`) the rest; where the rest falls under its
+    minimum the held children give it room, last first, down to their own
+    (editor_panes._fit, the desk's rule)."""
+    sizes = [0 if v is None else max(v, m) for v, m in zip(start, mins)]
+    flex = start.index(None) if None in start else len(start) - 1
+    rest = total - sum(sizes[i] for i in range(len(sizes)) if i != flex)
+    need = mins[flex] - rest
+    for i in range(len(sizes) - 1, -1, -1):
+        if need <= 0:
+            break
+        if i == flex:
+            continue
+        give = min(need, sizes[i] - mins[i])
+        if give > 0:
+            sizes[i] -= give
+            rest += give
+            need -= give
+    sizes[flex] = max(0, rest)
+    return sizes
 STATUS_SEP = " \u00b7 "  # a status template's fields are split at it
 _TEXT_PAD = 8          # moy_ui_api_int.h's TEXT_PAD: the view's text inset at the scale
 
 
 
 class Engine(uitree_app.Engine):
+
+    STOPS = uitree_app.Engine.STOPS + ("legacy",)
 
     def __init__(self, *a, **k):
         uitree_app.Engine.__init__(self, *a, **k)
@@ -53,19 +107,55 @@ class Engine(uitree_app.Engine):
         self.host_arrows = False   # the arrows reach the document through the host (the console's nav)
         self.ground = None         # a box the page's ground covers past its content: the
                                    # canvas round the host's rect (a handheld's bar band)
+        # the bridge (`legacy`): the hosted phase places and draws them
+        self.under = True          # the hosted phase draws the page's ground round them
+        self.placing = False       # the hosted phase's walk: regions placed, nothing drawn
+        self.placed = []           # (node, row, rect) of each legacy node the phase placed
+        self._hosted_no = -1       # the frame whose hosted phase ran
+        self.legacies = {}         # key -> (node, rect), as this frame's pass drew it
+        self.legacy_gens = {}      # key -> its gen() when its body was drawn
+        self.held_legacy = None    # (node, rect) a press holds until its release
+        # the panes: their splits as drawn, pane focus, the divider's flash
+        self.du = 1                # the desk unit, this frame's
+        self.mouse = None          # a host's word on its pointer (True: hovers), else the surface's
+        self.splits = {}           # split id -> (panes node, kids, sizes) as this frame placed them
+        self.pane_order = []       # (pane node, rect) of the panes shown, in reading order
+        self.panes_root = None     # the outermost panes shown this frame
+        self.pane_cur = None       # the key of the pane the keys reach
+        self.flash = None          # (pane node, words): a divider held at a minimum
+        self._last_div = (None, 0)  # the last tap on a divider: (split id, divider), when
+        self._ev = 0               # the last frame's key event
+        self._focus_seen = None    # the focused node the last pass ended on
 
     # -- the page: regions stacked, overlays last ---------------------------
 
-    def _replay_page(self, n):
+    def _frame_setup(self, n):
         w, h = self.content[2], self.content[3]
         self.classes = ("desk" if self.desk else "handheld", "wide" if w * 3 > h * 4 else "tall")
         self.lenders = {}
         S.LIVE = S.live_units(n, self.lenders)
+        self.du = max(1, _lb.chrome_size(self.fs) // _lb.render_scale())
+        self.pane_order = []
+        self.panes_root = None
+        self.splits = {}
+
+    def _replay_page(self, n):
+        self._frame_setup(n)
         self.canvases = {}
+        self.legacies = {}
+        self.flash = None
+        hosting = self._hosted_no == self.frame_no
         g = self.ground
         if g is not None:
             _v.at(*g)
-        rect = _v.page(n.p["title"](None))
+        if hosting and self.placed:
+            # the hosted phase drew the ground round the bodies: the page
+            # opens over them drawing nothing
+            self.cv.clip(0, 0, 0, 0)
+            rect = _v.page(n.p["title"](None))
+            self.cv.clip()
+        else:
+            rect = _v.page(n.p["title"](None))
         if g is not None:
             rect = tuple(self.content)
         hint = self._hints()
@@ -85,9 +175,137 @@ class Engine(uitree_app.Engine):
         self._lists_now = set()
         self.late = []
         self._stack(n, None, rect)
+        if self.flash is not None:
+            self._draw_flash()
         for k, row, r in self.late:
             self._draw(k, row, r)
         self._focus_after(moved, ahead, hint, last)
+        self._pane_follow()
+
+    # -- the bridge: surfaces hosted in `legacy` nodes ------------------------
+    #
+    # A page that hosts a surface still drawn with today's verbs draws in
+    # two phases: `hosted`, which its host runs BEFORE it begins the frame,
+    # places the page's regions by arithmetic (nothing drawn), draws the
+    # page's ground round them and then each hosted surface in its own
+    # verbs pass; the frame's pass (`paint`) then draws everything else,
+    # each legacy node a focus stop that draws nothing, its overlays last.
+    # No verbs pass ever runs inside another: the desk Editor's own order
+    # (its pane bodies, then its one verbs pass of headers, dividers and
+    # menus), and what a C engine does as layout, then its paint in layers.
+
+    def hosted(self, dt, cv, th, content, desk):
+        self._bind()
+        self._start(dt)
+        self._started = True
+        self._hosted_no = self.frame_no
+        self.cv, self.th = cv, th
+        self.content = content
+        self.desk = desk
+        self.fs = max(1, getattr(cv, "font_scale", 1))
+        self._ready()
+        placed = self.placed = []
+        if not self._hosts(self.root):
+            return
+        was = _NOW.app, _NOW.frame
+        _NOW.app, _NOW.frame = self, True
+        try:
+            self._frame_setup(self.root)
+            rect = tuple(self.content) if self.ground is not None else tuple(content)
+            hint = self._hints()
+            if hint and self._band_w(hint, cv, th) > 0:
+                rect = (rect[0], rect[1], rect[2], rect[3] - self._h_row())
+            self.placing = True
+            try:
+                self._stack(self.root, None, rect)
+            finally:
+                self.placing = False
+            if self.under and placed:
+                self._ground_round(cv, th, placed)
+            for n, row, r in placed:
+                focused = self.focused is not None and self.focused[0] is n
+                _NOW.app, _NOW.frame = self, True
+                n.l["draw"](cv, th, r[0], r[1], r[2], r[3], focused, dt)
+                cv.clip()
+                if "gen" in n.l:
+                    _NOW.app = self
+                    self.legacy_gens[n.key] = n.l["gen"]()
+        finally:
+            _NOW.app, _NOW.frame = was
+
+    def _hosts(self, n):
+        """Whether the page holds a legacy node (asked once a build)."""
+        got = getattr(self, "_hosts_of", (None, False))
+        if got[0] is not n:
+            def walk(k):
+                return k.kind == "legacy" or any(walk(c) for c in k.kids)
+            got = self._hosts_of = (n, n is not None and walk(n))
+        return got[1]
+
+    def _band_w(self, hint, cv, th):
+        """The page's band width for `hint`, asked of this page's context
+        with no frame begun (the hosted phase places above it)."""
+        t = _ud.UI_TARGET
+        was = (t[0], t[1], t[2], t[3])
+        t[0], t[1], t[2] = self._ui.ctx, cv, _ud._look(th)
+        try:
+            return _v.hints_width(hint)
+        finally:
+            t[0], t[1], t[2], t[3] = was
+
+    def _ground_round(self, cv, th, placed):
+        """The page's ground where the hosted bodies leave it showing: the
+        Editor's `panel`, never filled under a body (it draws its own)."""
+        left = [tuple(self.ground if self.ground is not None else self.content)]
+        for _n, _row, r in placed:
+            out = []
+            for piece in left:
+                out += _outside(piece, r)
+            left = out
+        col = th["panel"]
+        for x, y, w, h in left:
+            if w > 0 and h > 0:
+                cv.rect(x, y, w, h, col)
+
+    def _r_legacy(self, n, row, rect):
+        if self.placing:
+            self.placed.append((n, row, rect))
+            return
+        if self._hosted_no != self.frame_no:
+            raise S.UIError("N03", "ui.legacy(%r) in a page whose host ran no hosted phase" % n.key,
+                            where=n.where, fix="the host calls engine.hosted(dt, cv, th, content, desk) "
+                            "before host.begin, then engine.paint")
+        if not any(p[0] is n and p[2] == rect for p in self.placed):
+            # placed elsewhere than the pass lays it out this frame (a band
+            # came or went between the phases): the next frame draws it
+            # where it lies now
+            S._trace("legacy", n.key, "placed at %r, laid out at %r: drawn again" % (
+                next((p[2] for p in self.placed if p[0] is n), None), rect))
+            self._damage.all()
+        # one stop over the body; the stop's well is not drawn (the body is)
+        self.cv.clip(0, 0, 0, 0)
+        _v.at(*rect)
+        _v.part(n.key, 0, 0, {"id": n.key})
+        self.cv.clip()
+        self.ids[n.key] = (n, None)
+        self.legacies[n.key] = (n, rect)
+
+    def legacy_moved(self):
+        """Whether a hosted surface's gen() moved since its body was drawn."""
+        was, _NOW.app = _NOW.app, self
+        try:
+            for key, (n, _r) in self.legacies.items():
+                if "gen" in n.l and n.l["gen"]() != self.legacy_gens.get(key):
+                    return True
+            return False
+        finally:
+            _NOW.app = was
+
+    def idle_step(self):
+        if self.legacy_moved():
+            self._damage.all()
+            return
+        uitree_app.Engine.idle_step(self)
 
     def _h_row(self):
         return 48 if self.desk else 22 * self.fs
@@ -152,10 +370,12 @@ class Engine(uitree_app.Engine):
             self._draw(k, row, (x, y, w, kh))
             y += kh
         for k in kids:
-            if k.kind in ("popover", "dialog"):
+            if k.kind in ("popover", "dialog") and not self.placing:
                 self.late.append((k, row, rect))     # over every pane, after the page
 
     def _draw(self, k, row, rect):
+        if self.placing and k.kind not in _PLACED:
+            return
         getattr(self, uitree_app._rname(k.kind))(k, row, rect)
 
     def _r_case(self, n, row, rect):
@@ -171,6 +391,8 @@ class Engine(uitree_app.Engine):
     def _r_panel(self, n, row, rect):
         if n.key in ("hand", "desk"):
             self._stack(n, row, rect)
+            return
+        if self.placing:
             return
         x, y, w, h = rect
         g = 6 if self.desk else 4
@@ -285,6 +507,40 @@ class Engine(uitree_app.Engine):
                 self.held = None
             self._damage.all()
             return True
+        held = self.held_legacy
+        if held is not None:
+            n, r = held
+            _NOW.app = self
+            try:
+                n.l["pointer"](px - r[0], py - r[1], click)
+            finally:
+                _NOW.app = None
+            if not down:
+                self.held_legacy = None
+            uitree_app.Engine.point(self, px, py, click)
+            self._damage.all()
+            return True
+        if click:
+            for n, r in self.legacies.values():
+                if r[0] <= px < r[0] + r[2] and r[1] <= py < r[1] + r[3]:
+                    # the press focuses the stop (the toolkit's) and the
+                    # hosted surface takes it, in its own coordinates
+                    uitree_app.Engine.point(self, px, py, click)
+                    if "pointer" in n.l:
+                        _NOW.app = self
+                        try:
+                            n.l["pointer"](px - r[0], py - r[1], click)
+                        finally:
+                            _NOW.app = None
+                        if down:
+                            self.held_legacy = (n, r)
+                    self._damage.all()
+                    return True
+            for p, r in self.pane_order:
+                if r[0] <= px < r[0] + r[2] and r[1] <= py < r[1] + r[3] and p.key != self.pane_cur:
+                    self.pane_cur = p.key       # a press in a pane gives it the keys
+                    self._damage.all()
+                    break
         if click:
             for n, r in getattr(self, "canvases", {}).values():
                 if "pointer" in n.l and r[0] <= px < r[0] + r[2] and r[1] <= py < r[1] + r[3]:
@@ -386,82 +642,222 @@ class Engine(uitree_app.Engine):
     # -- panes and their dividers --------------------------------------------
 
     def _size_of(self, k):
-        """A child's held size now: its state, else its start; None grows."""
+        """A child's held size now, in pixels: its state, else its start
+        (desk units); None grows."""
         if k.l.get("grow") or "size" not in k.l:
             return None
         v = self.s._v[k.l["size"]]
-        return k.l["start"] if v is None else v
+        return k.l["start"] * self.du if v is None else v
 
     def _min_of(self, k, axis):
+        """A child's least size along `axis`, in pixels, its gutters in."""
         if k.kind == "pane":
-            return k.l.get("min", (64, 48))[axis]
+            return k.l.get("min", FLOOR)[axis] * self.du
         if k.kind != "panes":
             return 0
         kids = [c for c in k.kids if self._shown(c, None)]
         m = [self._min_of(c, axis) for c in kids]
-        along = (k.l["dir"] if "dir" in k.l else k.p["dir"](None)) == ("row" if axis == 0 else "col")
-        return sum(m) + 6 * (len(m) - 1) if along else max(m or [0])
+        along = self._axis(k) == axis
+        return sum(m) + self._gap(k) * (len(m) - 1) if along else max(m or [0])
+
+    def _axis(self, n):
+        return 0 if (n.l["dir"] if "dir" in n.l else n.p["dir"](None)) == "row" else 1
+
+    def _gap(self, n):
+        return n.l.get("gap", GUTTER) * self.du
+
+    def _mouse(self):
+        if self.mouse is not None:
+            return self.mouse
+        p = self._surf.pointer() if self._surf is not None else None
+        return bool(getattr(p, "hovers", False))
 
     def _r_panes(self, n, row, rect):
-        d = n.p["dir"](row)
-        axis = 0 if d == "row" else 1
+        """The desk Editor's rules (runtime/editors/editor_panes.py): sizes
+        in desk units; held sizes yield to the area, last first, down to
+        their minimums, so the growing child keeps its own; under the
+        workspace's least size, or grown, one pane stands over the area
+        alone. The dividers are `ui.split`'s: a drag's let-go writes the
+        held sizes beside it, a double tap puts them back."""
+        outer = n.parent is None or n.parent.kind not in ("pane", "panes")
+        if outer:
+            self.panes_root = n
+            alone = self._alone(n, rect)
+            if alone is not None:
+                self._draw(alone, row, rect)
+                return
+        axis = self._axis(n)
         kids = [k for k in n.kids if self._shown(k, row)]
-        gap = 6
+        gap = self._gap(n)
         span = rect[2 + axis] - gap * (len(kids) - 1)
         held = [self._size_of(k) for k in kids]
         mins = [self._min_of(k, axis) for k in kids]
-        if span < sum(mins):
-            # narrower than the workspace's least: the growing pane alone
-            # (today's EditorDesk.alone), the rest reached by the keys
-            alone = next((k for k, v in zip(kids, held) if v is None), kids[0])
-            self._draw(alone, row, rect)
-            return
-        # a held size is the user's wish; the area wins: held sizes give way
-        # down to their minimums so the growing child keeps its own
-        grow_min = sum(m for m, v in zip(mins, held) if v is None)
-        over = sum(v for v in held if v is not None) + grow_min - span
-        for j in range(len(held)):
-            if over > 0 and held[j] is not None:
-                give = min(over, held[j] - mins[j])
-                held[j] -= give
-                over -= give
-        free = span - sum(v for v in held if v is not None)
-        sizes = [v if v is not None else max(mins[i], free) for i, v in enumerate(held)]
+        sizes = fit(held, mins, span)
+        rects, divs = [], []
+        x, y, w, h = rect
+        for j in range(len(kids)):
+            sz = sizes[j] if j < len(kids) - 1 else (w if axis == 0 else h)
+            r = (x, y, sz, h) if axis == 0 else (x, y, w, sz)
+            rects.append(r)
+            if j < len(kids) - 1:
+                if axis == 0:
+                    divs.append((x + sz, y, gap, h))
+                    x += sz + gap
+                    w -= sz + gap
+                else:
+                    divs.append((x, y + sz, w, gap))
+                    y += sz + gap
+                    h -= sz + gap
         sid = "split:" + "/".join(k.key for k in kids)
-        _v.at(*rect)
-        o = {"drag": True, "gap": gap, "mins": mins, "line": 2, "slop": 0,
-             "handle": (6, 36), "hit": (16, 48)}
-        out = self.split_out
-        _v.split(sid, "x" if axis == 0 else "y", sizes, o, out)
-        nk = len(kids)
-        i, bits = out[4 * nk], out[4 * nk + 3]
-        divs = []
-        for j in range(nk - 1):
-            a = out[4 * j: 4 * j + 4]
-            divs.append((a[0] + a[2], a[1], gap, a[3]) if axis == 0 else (a[0], a[1] + a[3], a[2], gap))
-        self.dividers[sid] = divs
-        if i >= 0 and bits & _v.LET_GO and bits & _v.LIVE:
-            for j in (i, i + 1):
-                k = kids[j]
-                if held[j] is not None and sizes[j] != held[j]:
-                    nm = k.l["size"]
-                    old = self.s._v[nm]
-                    self.s._v[nm] = sizes[j]
-                    self.s._ver[nm] += 1
-                    S._trace("state", nm, "%r -> %r   (divider %d of %r let go)" % (old, sizes[j], i, sid))
-            self._damage.all()
-        for j, k in enumerate(kids):
-            r = tuple(out[4 * j: 4 * j + 4])
+        self.splits[sid] = (n, kids, sizes)
+        if not self.placing:
+            self._split(n, sid, kids, sizes, mins, held, rect, axis, gap)
+            self.dividers[sid] = divs
+        for k, r in zip(kids, rects):
             self._draw(k, row, r)
+
+    def _split(self, n, sid, kids, sizes, mins, held, rect, axis, gap):
+        """The dividers of panes `n` on `ui.split`: drawn, a press on one
+        held, its drag's let-go written, a double tap reset; held at a
+        minimum, the flash."""
+        u = self.du
+        mouse = self._mouse()
+        o = {"drag": True, "gap": gap, "mins": mins, "line": 2 * u,
+             "slop": 0 if mouse else DRAG_SLOP * u, "handle": (HANDLE[0] * u, HANDLE[1] * u),
+             "hit": None if mouse else (HANDLE_HIT[0] * u, HANDLE_HIT[1] * u),
+             "focus": self._keys_child(kids)}
+        _v.at(*rect)
+        out = self.split_out
+        got = list(sizes)
+        _v.split(sid, "x" if axis == 0 else "y", got, o, out)
+        nk = len(kids)
+        i, stop, bits = out[4 * nk], out[4 * nk + 2], out[4 * nk + 3]
+        if i < 0:
+            return
+        if bits & _v.LET_GO:
+            if bits & _v.LIVE:
+                self._hold(kids, got, (i, i + 1), "divider %d of %r let go" % (i, sid))
+            else:
+                last, at = self._last_div
+                self._last_div = ((sid, i), self.clock)
+                if last == (sid, i) and self.clock - at < DOUBLE_MS:
+                    self._last_div = (None, 0)
+                    self._unhold(kids[i:i + 2], "divider %d of %r tapped twice" % (i, sid))
+            self._damage.all()
+        elif bits & _v.LIVE and stop >= 0:
+            child = kids[i + stop]
+            pane = self._first_pane(child)
+            m = self._min_of(child, axis)
+            self.flash = (pane, "%s stops at its minimum, %d %s" % (
+                self._pane_name(pane), m, "wide" if axis == 0 else "tall"))
+
+    def _hold(self, kids, sizes, js, why):
+        """The held sizes of children `js` written from `sizes` (pixels);
+        the child that grows holds none."""
+        for j in js:
+            k = kids[j]
+            if "size" not in k.l or k.l.get("grow"):
+                continue
+            nm = k.l["size"]
+            if self._size_of(k) == sizes[j] and self.s._v[nm] is not None:
+                continue
+            old = self.s._v[nm]
+            self.s._v[nm] = sizes[j]
+            self.s._ver[nm] += 1
+            S._trace("state", nm, "%r -> %r   (%s)" % (old, sizes[j], why))
+
+    def _unhold(self, kids, why):
+        """Children `kids` back at their start= (their states absent)."""
+        for k in kids:
+            if "size" in k.l and not k.l.get("grow") and self.s._v[k.l["size"]] is not None:
+                nm = k.l["size"]
+                old = self.s._v[nm]
+                self.s._v[nm] = None
+                self.s._ver[nm] += 1
+                S._trace("state", nm, "%r -> None   (%s)" % (old, why))
+
+    @staticmethod
+    def _first_pane(n):
+        while n.kind == "panes":
+            n = n.kids[0]
+        return n
+
+    def _pane_name(self, pane):
+        if "title" in pane.p:
+            return self._t(pane, "title", None)
+        tabs = pane.l.get("tabs")
+        if tabs:
+            return self.decl.labels[pane.l["labels"]][self.s._v[tabs]]
+        return pane.key
+
+    def _alone(self, n, rect):
+        """The pane shown over the whole panes area, or None: the grown
+        one, else the focused one where the area is under the workspace's
+        least size (one pane at a time; the keys reach the rest)."""
+        g = n.l.get("grown")
+        if g is not None and self.s._v[g] is not None:
+            p = self._pane_named(n, self.s._v[g])
+            if p is not None:
+                return p
+        if rect[2] < self._min_of(n, 0) or rect[3] < self._min_of(n, 1):
+            return self._pane_named(n, self.pane_cur) or self._panes_in(n)[0]
+        return None
+
+    def _panes_in(self, n):
+        """The shown panes under `n`, in reading order."""
+        out = []
+
+        def walk(k):
+            for c in k.kids:
+                if not self._shown(c, None):
+                    continue
+                if c.kind == "pane":
+                    out.append(c)
+                elif c.kind == "panes":
+                    walk(c)
+        walk(n)
+        return out
+
+    def _pane_named(self, n, key):
+        return next((p for p in self._panes_in(n) if p.key == key), None) if key else None
+
+    def _pane_of(self, node):
+        while node is not None and node.kind != "pane":
+            node = node.parent
+        return node
+
+    def _keys_child(self, kids):
+        """The child of a split the keys reach (its pane, or the panes
+        holding it), -1 where none does."""
+        p = self._pane_named(self.panes_root, self.pane_cur) if self.panes_root is not None else None
+        while p is not None:
+            if p in kids:
+                return kids.index(p)
+            p = p.parent
+        return -1
 
     def _r_pane(self, n, row, rect):
         x, y, w, h = rect
+        u = self.du
+        hh = HEADER * u
+        self.pane_order.append((n, rect))
+        body = [k for k in n.kids if k.kind != "tools"]
+        tmp = S.Node("case", n.key + ":body", n.where)
+        tmp.kids, tmp.parent = body, n
+        if not self.placing:
+            self._pane_head(n, row, rect, hh)
+        self._stack(tmp, row, (x, y + hh, w, max(0, h - hh)))
+
+    def _pane_head(self, n, row, rect, hh):
+        """The header row: its title (and icon) or its tabs, its tools at
+        the right. (The card look and the desk's header rules are not yet
+        the engine's.)"""
+        x, y, w, _h = rect
         cv, th = self.cv, self.th
-        hh = 32
         # the header only: the body's ground is the page's, which the text
         # view's kept rows sit on (a fill under them each frame wipes them)
-        cv.rect(x, y, w, hh, th["panel"])
-        cv.rect(x, y + hh, w, 1, th["border"])
+        cv.rect(x, y, w, hh - 1, th["panel"])
+        cv.rect(x, y + hh - 1, w, 1, th["border"])
         self.anchors[n.key + ".head"] = (x, y, w, hh)
         tools = [k for k in n.kids if k.kind == "tools" and self._shown(k, row)]
         tw = 0
@@ -477,10 +873,121 @@ class Engine(uitree_app.Engine):
             if "icon" in n.p:
                 _v.icon(n.p["icon"](row))
             _v.label(self._t(n, "title", row))
-        body = [k for k in n.kids if k.kind != "tools"]
-        tmp = S.Node("case", n.key + ":body", n.where)
-        tmp.kids, tmp.parent = body, n
-        self._stack(tmp, row, (x + 4, y + hh + 2, w - 8, h - hh - 6))
+
+    def _draw_flash(self):
+        """A divider held at a pane's minimum: the pane ringed, its words
+        along its foot (the desk's)."""
+        pane, why = self.flash
+        u = self.du
+        for p, r in self.pane_order:
+            if p is pane:
+                self.cv.rrect(r[0] - 2 * u, r[1] - 2 * u, r[2] + 4 * u, r[3] + 4 * u,
+                              (RADIUS + 2) * u, None, self.th["value"])
+                _v.at(r[0] + 8 * u, r[1] + r[3] - 28 * u, r[2] - 16 * u, 24 * u)
+                _v.label(why, {"tone": "value"})
+
+    # -- pane focus -------------------------------------------------------------
+
+    def _pane_follow(self):
+        """After the pass: the pane the keys reach follows focus where it
+        moved into another pane (a press, a step), and the panes'
+        focused= state says which it is."""
+        root = self.panes_root
+        if root is None:
+            return
+        f = self.focused[0] if self.focused is not None else None
+        if f is not self._focus_seen:
+            self._focus_seen = f
+            p = self._pane_of(f)
+            if p is not None:
+                self.pane_cur = p.key
+        if self._pane_named(root, self.pane_cur) is None:
+            order = self._panes_in(root)
+            self.pane_cur = order[0].key if order else None
+        nm = root.l.get("focused")
+        if nm is not None and self.s._v[nm] != self.pane_cur:
+            old = self.s._v[nm]
+            self.s._v[nm] = self.pane_cur
+            self.s._ver[nm] += 1
+            S._trace("state", nm, "%r -> %r   (pane focus)" % (old, self.pane_cur))
+
+    def focus_pane(self, key):
+        """The keys to pane `key`: its first stop takes focus."""
+        root = self.panes_root
+        p = self._pane_named(root, key) if root is not None else None
+        if p is None:
+            return False
+        self.pane_cur = key
+        first = next(iter(self._stops(p)), None)
+        if first is not None:
+            self.want_focus = first[0].key
+        self._damage.all()
+        return True
+
+    def _pane_keys(self, i):
+        """The workspace's keys (the desk Editor's): F6 and Shift+F6 step
+        the pane the keys reach, Ctrl+Shift+Enter grows it or puts it back,
+        Ctrl+0 puts every divider back, Ctrl+Alt+arrows move its right or
+        bottom divider. True where one acted."""
+        root = self.panes_root
+        ev = getattr(i, "key_event", 0) or 0
+        fresh = ev != 0 and ev != self._ev
+        self._ev = ev
+        if root is None or not fresh:
+            return False
+        code, mods = ev & 0xFFFF, ev >> _MODS_AT
+        ctrl = mods & _CTRL
+        if code == _F6 and not ctrl:
+            order = [p.key for p in self._panes_in(root)]
+            if not order:
+                return False
+            j = order.index(self.pane_cur) if self.pane_cur in order else 0
+            return self.focus_pane(order[(j + (-1 if mods & _KSHIFT else 1)) % len(order)])
+        if ctrl and mods & _KSHIFT and code in _ENTERS and root.l.get("grown") is not None:
+            nm = root.l["grown"]
+            old = self.s._v[nm]
+            new = None if old == self.pane_cur else self.pane_cur
+            self.s._v[nm] = new
+            self.s._ver[nm] += 1
+            S._trace("state", nm, "%r -> %r   (Ctrl+Shift+Enter)" % (old, new))
+            self._damage.all()
+            return True
+        if ctrl and not mods & (_ALT | _KSHIFT) and code == ord("0"):
+            def walk(k):
+                for c in k.kids:
+                    if c.kind in ("pane", "panes"):
+                        self._unhold([c], "Ctrl+0")
+                        walk(c)
+            walk(root)
+            self._damage.all()
+            return True
+        if ctrl and mods & _ALT and code in (_LEFT, _RIGHT, _UP, _DOWN):
+            return self._nudge(code)
+        return False
+
+    def _nudge(self, code):
+        """Ctrl+Alt+arrows: the focused pane's right (left and right) or
+        bottom (up and down) divider moves KEY_STEP units, neither pane
+        beside it under its minimum."""
+        axis = 0 if code in (_LEFT, _RIGHT) else 1
+        step = KEY_STEP * self.du * (-1 if code in (_LEFT, _UP) else 1)
+        p = self._pane_named(self.panes_root, self.pane_cur)
+        while p is not None and p.parent is not None and p.parent.kind == "panes":
+            par = p.parent
+            for sid, (pn, kids, sizes) in self.splits.items():
+                if pn is par and self._axis(par) == axis and p in kids and kids.index(p) < len(kids) - 1:
+                    i = kids.index(p)
+                    lo = self._min_of(kids[i], axis)
+                    hi = max(lo, sizes[i] + sizes[i + 1] - self._min_of(kids[i + 1], axis))
+                    pair = sizes[i] + sizes[i + 1]
+                    got = list(sizes)
+                    got[i] = min(hi, max(lo, sizes[i] + step))
+                    got[i + 1] = pair - got[i]
+                    self._hold(kids, got, (i, i + 1), "Ctrl+Alt+arrow on %r" % self.pane_cur)
+                    self._damage.all()
+                    return True
+            p = par
+        return True
 
     def _r_slot(self, n, row, rect):
         """The shell docks another process's window here; the replay draws a
@@ -701,6 +1208,9 @@ class Engine(uitree_app.Engine):
             return ()                   # the card names its close itself
         closer = pops[0] if pops else (self._closer(self.root) if self.root is not None else None)
         f = self.focused
+        if closer is None and f is not None and f[0].kind == "legacy":
+            # the hosted surface's own hints, passed through (none: it keeps its keys)
+            return tuple(f[0].l["hints"]()) if "hints" in f[0].l else ()
         if closer is None:
             if f is None or f[0].kind == "text_editor":
                 return tuple(getattr(self, "text_keys", ()))   # the host's keys, if it names any
@@ -848,6 +1358,8 @@ class Engine(uitree_app.Engine):
             _NOW.app = was
 
     def _keys(self, i):
+        if self._pane_keys(i):
+            return True
         ch = getattr(i, "typed", 0) & 0xFF
         self.shift = bool(getattr(i, "mods", 0) & _SHIFT)
         live = ()
@@ -870,6 +1382,12 @@ class Engine(uitree_app.Engine):
             return True
         text = ch and (ch in (8, 9, 13, 127) or 32 <= ch < 127)
         f = self.focused
+        if f is not None and f[0].kind == "legacy" and not self.popover_shown():
+            # the hosted surface takes the keys it answers; the rest move
+            # focus as from any stop
+            if "keys" in f[0].l and f[0].l["keys"](i):
+                self._damage.all()
+                return True
         if ch == 13 and f is not None and f[0].kind == "link" and self.popover_shown():
             self._activate(f[0], f[1])      # Enter takes a popover's row, as A does
             self._damage.all()
@@ -903,7 +1421,20 @@ class Engine(uitree_app.Engine):
                 return True
         return uitree_app.Engine.keys(self, i)
 
+    def _grown(self):
+        root = self.panes_root
+        g = root.l.get("grown") if root is not None else None
+        return g if g is not None and self.s._v[g] is not None else None
+
     def _back(self):
+        g = self._grown()
+        if g is not None and not self.popover_shown():
+            old = self.s._v[g]
+            self.s._v[g] = None
+            self.s._ver[g] += 1
+            S._trace("state", g, "%r -> None   (back)" % old)
+            self._damage.all()
+            return True
         for k in self.shown_popovers():
             if "close" in k.l:
                 self.q.append((k.l["close"], self.args_for(k.l["close"]), "back on popover %r" % k.key))
@@ -915,7 +1446,8 @@ class Engine(uitree_app.Engine):
         """Back is the app's while a popover or a row with close= (a find
         strip) is shown."""
         return (uitree_app.Engine._has_page(self) or self.popover_shown()
-                or (self.root is not None and self._closer(self.root) is not None))
+                or (self.root is not None and self._closer(self.root) is not None)
+                or self._grown() is not None)
 
     # -- for the scripts --------------------------------------------------------
 

@@ -138,7 +138,12 @@ class Engine(S.Builder):
 
     @property
     def idle_owed(self):
-        return self.pics is not None and self.pics.idle_owed
+        return (self.pics is not None and self.pics.idle_owed) or self.legacy_moved()
+
+    def legacy_moved(self):
+        """Whether a hosted surface's gen moved since it drew: this replay
+        hosts none."""
+        return False
 
     def idle_step(self):
         """A frame with nothing to paint: one owed picture decoded, the card
@@ -240,14 +245,9 @@ class Engine(S.Builder):
         """One frame: posts, timers, the page replayed into `content` of a
         frame the host began, the queued handlers as one commit, work."""
         self._bind()
-        self.frame_no += 1
-        self.calls = 0
-        self._posts()
-        self.clock += int(dt * 1000)
-        if self.timers:
-            for t in [t for t in self.timers if t[0] <= self.clock]:
-                self.timers.remove(t)
-                self.run_action(t[1], (), "timer")
+        if not self._started:
+            self._start(dt)
+        self._started = False
         self.cv, self.th = cv, th
         if self.pics is None:
             import uitree_pics
@@ -255,14 +255,7 @@ class Engine(S.Builder):
                                               uitree_pics.budget_for(cv.w, cv.h))
         fs = max(1, getattr(cv, "font_scale", 1))
         self.content = content
-        if self.root is None:
-            self._build()
-            self.curs = []
-            self._walk(self.root)
-            self.fresh = True
-            self._gen_ok = self._gen_on and self._gen_safe(self.root)
-            if self._gen_ok:
-                self._cell_gens(self.root)
+        self._ready()
         self.pics.begin_frame()
         _NOW.app, _NOW.frame = self, True
         try:
@@ -284,7 +277,38 @@ class Engine(S.Builder):
         if q or self.timers or self.work_run or self.decl.posts:
             self._damage.all()
 
-    GEN_UNSAFE = ("canvas", "picture", "cards", "text_editor")
+    _started = False        # the frame's start ran in its hosted phase
+
+    def _start(self, dt):
+        """The frame's start: its posts and the timers due, before anything
+        is placed."""
+        self.frame_no += 1
+        self.calls = 0
+        self._posts()
+        self.clock += int(dt * 1000)
+        if self.timers:
+            for t in [t for t in self.timers if t[0] <= self.clock]:
+                self.timers.remove(t)
+                self.run_action(t[1], (), "timer")
+
+    def _ready(self):
+        """The page built, where the frame finds it unbuilt."""
+        if self.root is None:
+            self._build()
+            self.curs = []
+            self._walk(self.root)
+            self.fresh = True
+            self._gen_ok = self._gen_on and self._gen_safe(self.root)
+            if self._gen_ok:
+                self._cell_gens(self.root)
+
+    def hosted(self, dt, cv, th, content, desk):
+        """The frame's first phase, which a host runs BEFORE it begins the
+        frame (`host.begin`): the surfaces the page hosts (`legacy`) drawn
+        each in its own verbs pass. This replay's layout is the toolkit's,
+        which places nothing before the pass: it hosts none (`_r_legacy`)."""
+
+    GEN_UNSAFE = ("canvas", "picture", "cards", "text_editor", "legacy")
 
     def _gen_safe(self, n):
         """Whether every pixel the page's rows draw comes from state, so the
@@ -1607,6 +1631,11 @@ class Engine(S.Builder):
                 _v.at(x + 26, by, max(0, bx - x - 26), fh)
                 self._r_label(k, row, rect)
 
+    def _r_legacy(self, n, row, rect):
+        raise S.UIError("N03", "ui.legacy(%r) in a page this replay lays out with the toolkit" % n.key,
+                        where=n.where, fix="host it in a page on uitree_editor.Engine (app_layer(..., "
+                        "engine=uitree_editor.Engine)), whose regions are placed before the pass")
+
     @staticmethod
     def _draws_only(n):
         """A canvas with no pointer=, keys= or on=: it draws, and is no stop."""
@@ -1793,6 +1822,7 @@ class App(AppLayer):
         fs = max(1, getattr(cv, "font_scale", 1))
         cs = max(fs, self._surf.chrome_scale() or fs)
         content = content_of(cv.w, cv.h, 0 if win else bar_rows(cs))
+        self.engine.hosted(dt, cv, th, content, desk)
         self.engine._ui.begin(cv, th, content, desk, win)
         self.engine.paint(dt, cv, th, content, desk)
 

@@ -35,6 +35,7 @@ PORTED = (
     "code_ui",
     "editor_ui",
     "uitree_bar_row",
+    "uitree_legacy_app",
 )
 
 

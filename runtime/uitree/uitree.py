@@ -1857,17 +1857,27 @@ SCHEMA = {
     "case": {},
     # EXT-4. The Editor's kinds (see the calls below)
     "tabs": dict(_C, labels="lit", icons="lit", focus="cond", on="action0", offered="conds"),
-    "panes": dict(_C, dir="choice", gap="lit", size="lit", start="lit", min="lit", grow="lit"),
+    "panes": dict(_C, dir="choice", gap="lit", size="lit", start="lit", min="lit", grow="lit",
+                  focused="lit", grown="lit"),
     "pane": dict(_C, title="text", icon="text", size="lit", start="lit", min="lit", grow="lit",
                  tabs="lit", labels="lit"),
     "text_editor": dict(_C, find="lit", find_on="cond", marks="lit", gutter="cond", focus="cond"),
     "slot": dict(_C, min="lit"),
+    # §7.7's bridge: a surface still on today's verbs hosted in one node
+    "legacy": dict(_C, draw="fn", pointer="fn", keys="fn", hints="fn", gen="fn"),
     "row": dict(_C, close="action0"),
     "tools": dict(_C, lend="lit"),
     "lent": dict(_C),
     "status": dict(_C, text="text"),
 }
 TWO_WAY = ("toggle", "slider", "field", "tabs", "seg")
+# what a function prop takes, for its N01's fix
+_FN_FIX = {None: "%s=draw, where def draw(cv, x, y, w, h)",
+           ("legacy", "draw"): "%s=draw, where def draw(cv, th, x, y, w, h, focused, dt)",
+           ("legacy", "pointer"): "%s=pointer, where def pointer(x, y, click) returns whether it took it",
+           ("legacy", "keys"): "%s=keys, where def keys(i) returns whether it took the input",
+           ("legacy", "hints"): "%s=hints, where def hints() returns the band's hints",
+           ("legacy", "gen"): "%s=gen, where def gen() returns an int that moves with its pixels"}
 CHOICES = {"dir": ("row", "col"), "kind": ("normal", "primary", "danger", "tonal"),
            "wrap": ("cut", "word", "char"), "align": ("start", "center", "end"),
            "face": ("ui", "title", "mono", "caption", "result"), "follow": (True, False),
@@ -1915,7 +1925,7 @@ def _node(kind, key, props, where, act=None):
         elif pt == "fn":
             if not callable(v):
                 raise UIError("N01", "ui.%s %s= takes a draw function (the escape hatch)" % (kind, k),
-                              where=where, found=repr(v), fix='%s=draw, where def draw(cv, x, y, w, h)' % k)
+                              where=where, found=repr(v), fix=_FN_FIX.get((kind, k), _FN_FIX[None]) % k)
             n.l[k] = v
         elif pt == "cond":
             n.p[k] = cond(v, b.ctx, where)
@@ -2456,11 +2466,26 @@ def panes(dir, key=None, **p):
     """Panes side by side ("row") or stacked ("col"): each child is a
     ui.pane or a ui.panes, which holds its size (size= an opt(int) state,
     start= until the user drags it) or grows (grow=True); exactly one grows.
-    A divider between two children is dragged by the user, and its let-go
-    writes the sizes beside it into their states."""
+    Sizes, starts and minimums are desk units. A divider between two
+    children is dragged by the user, and its let-go writes the sizes beside
+    it into their states. The outermost panes may name `focused=`, an
+    opt(text) state the engine writes with the key of the pane the keys
+    reach (F6, Shift+F6, a press), and `grown=`, an opt(text) state holding
+    the key of the pane grown over the others (Ctrl+Shift+Enter; Back puts
+    it back), absent while none is."""
     where = _caller()
     _sized("panes", key, p, where)
+    for prop in ("focused", "grown"):
+        if p.get(prop) is not None:
+            nm = _state_name(p[prop], (Opt,), "ui.panes %s=" % prop, where)
+            if _st()._t[nm].base is not TEXT:
+                raise UIError("T03", "ui.panes %s=%r is %s" % (prop, nm, _st()._t[nm]), where=where,
+                              fix='%s=ui.opt("") in the state: the engine writes a pane\'s key' % nm)
     n = _node("panes", key, dict(p, dir=dir), where)
+    if n.parent is not None and n.parent.kind in ("pane", "panes") and (
+            p.get("focused") is not None or p.get("grown") is not None):
+        raise UIError("N03", "ui.panes(%r) focused=/grown= on panes inside panes" % key, where=where,
+                      fix="name them on the outermost ui.panes: pane focus and grow are the workspace's")
     return n
 
 
@@ -2497,6 +2522,32 @@ def text_editor(name, **p):
             raise UIError("T03", "ui.text_editor marks=%r: its rows need %s" % (m, ", ".join(bad)),
                           where=where, fix='ui.model(key="line", line=0, kind=ui.enum("error", ...), words="")')
     return _node("text_editor", name, p, where)
+
+
+LEGACY_IN = ("page", "panel", "case", "pane")
+
+
+def legacy(key, draw, **p):
+    """A surface still drawn with today's verbs, hosted in one node (§7.7,
+    the bridge): one focus stop over the rect the engine lays out for it.
+    `draw(cv, th, x, y, w, h, focused, dt)` draws the surface into that rect,
+    under the page's theme `th`,
+    BEFORE the page's own verbs pass (a hosted surface begins its own pass;
+    the page's overlays lie over it); `pointer(x, y, click)` is handed a
+    press in its own coordinates and what follows until the release, True
+    where it took it; `keys(i)` the frame's input while it holds focus,
+    True where it took it (else the page moves focus as from any stop);
+    `hints()` the hints the page's band shows while it holds focus; `gen()`
+    an int that moves whenever its pixels may, which an idle frame polls
+    (it asks for its own frames otherwise). Stands where a region stands:
+    in a page, a panel, a case or a pane. It goes with the old engine."""
+    where = _caller()
+    n = _node("legacy", key, dict(p, draw=draw), where)
+    if n.parent is not None and n.parent.kind not in LEGACY_IN:
+        raise UIError("N03", "ui.legacy(%r) in a %s" % (key, n.parent.kind), where=where,
+                      expected=", ".join(LEGACY_IN),
+                      fix="a hosted surface is a region: put it in a pane, a case or a panel")
+    return n
 
 
 def slot(name, **p):
@@ -2995,7 +3046,8 @@ def _collecting(fn, returns_node):
 NODE_CALLS = ("page", "group", "label", "info", "link", "button", "item", "card", "toggle", "slider",
               "field", "seg", "table", "col", "rows", "cards", "picture", "progress", "empty", "dialog",
               "popover", "menu", "split", "grid", "panel", "canvas", "foot", "scroll", "rule", "note",
-              "text_view", "switch", "tabs", "panes", "pane", "text_editor", "slot", "row", "tools", "lent", "status")
+              "text_view", "switch", "tabs", "panes", "pane", "text_editor", "slot", "row", "tools", "lent", "status",
+              "legacy")
 DECL_CALLS = ("action", "hook", "labels", "work", "derive", "app")
 COMMAND_CALLS = ("push", "pop", "focus", "after", "post")
 for _n in NODE_CALLS:

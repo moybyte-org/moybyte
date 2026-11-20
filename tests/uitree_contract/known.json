@@ -35,7 +35,6 @@
   "kind not in the table: case",
   "kind missing: L1 bubble",
   "kind missing: L2 cells",
-  "kind missing: L1 legacy",
   "kind missing: L2 month",
   "kind missing: L2 toast",
   "kind missing: L2 tool",
@@ -96,7 +95,6 @@
   "verb missing: L1 bubble",
   "verb missing: L2 cells",
   "verb missing: L1 damage",
-  "verb missing: L1 legacy",
   "verb missing: L2 load",
   "verb missing: L2 month",
   "verb missing: L2 pictures",
@@ -104,7 +102,13 @@
   "verb missing: L2 tool",
   "verb missing: L1 unit",
   "prop not in the table: seg.text",
-  "prop not in the table: slider.icon"
+  "prop not in the table: slider.icon",
+  "prop not in the table: legacy.gen",
+  "prop not in the table: legacy.hints",
+  "prop not in the table: legacy.keys",
+  "prop not in the table: legacy.pointer",
+  "prop not in the table: panes.focused",
+  "prop not in the table: panes.grown"
  ],
  "lua": [
   "code not in the table: X01",
