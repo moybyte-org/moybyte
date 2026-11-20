@@ -31,12 +31,6 @@ def _list_of(node):
     return node
 
 
-def change_args(act, new, old):
-    """What a two-way control's hook is handed: the new value and the old
-    when it takes=change."""
-    return (new, old) if act.takes == "change" else ()
-
-
 class Engine(S.Builder):
     """One app's built tree replayed into today's verbs, inside a frame its
     host has begun (`host.begin`), and the commits of its handlers."""
@@ -523,7 +517,7 @@ class Engine(S.Builder):
             self.s._ver[n.key] += 1
             S._trace("state", n.key, "%r -> %r   (from %s %r)" % (old, new, n.kind, n.key))
             if "on" in n.l:
-                self.fire(n.l["on"], change_args(n.l["on"], new, old), n, None)
+                self.fire(n.l["on"], (), n, None)
 
     def _row_write(self, n, row, new):
         """A two-way control over `.field`: the engine writes that field of
@@ -587,7 +581,7 @@ class Engine(S.Builder):
             else:
                 S._trace("state", k, "%r -> %r   %s" % (old, text, tag))
             if "changed" in n.l:
-                self.fire(n.l["changed"], change_args(n.l["changed"], text, old), n, None)
+                self.fire(n.l["changed"], (), n, None)
         if done and "on" in n.l:
             self.fire(n.l["on"], (), n, None)
 

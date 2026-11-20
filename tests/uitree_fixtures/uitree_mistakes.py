@@ -23,6 +23,7 @@ ui.action("clear", "Clear", nothing, when="count")  # O01
 ui.action("pick", "Pick", pick, takes="row")
 ui.action("bad", "", nothing)  # A08
 ui.hook("tick", nothing)
+ui.hook("moved", nothing, takes="change")  # N04
 
 
 def build():
@@ -32,7 +33,10 @@ def build():
         ui.link("tick")  # H01
         ui.toggle("On", "count")  # T03
         ui.info("Name", "{nam}")  # T02
-        ui.label(s.name)  # S05
+        ui.label(s.name)  # B01
+        s.count = 2  # B02
+        ui.focus("add")  # B02
+        ui.hook("late", nothing)  # B03
         with ui.rows("items", cur="sel"):
             ui.link("add", label="{.label}")  # A02
             ui.link("pick", label="{.label}")

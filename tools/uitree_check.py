@@ -153,7 +153,7 @@ def source_pass(path, tree, mod, decl, pages):
                                 fix=("did you mean %s?" % near) if near else
                                 "declare it: ui.state(..., %s=<initial value>)" % node.attr))
             elif isinstance(node.ctx, ast.Load) and id(node) in builds and id(node) not in scoped:
-                out.append(_err("S05", "s.%s read inside a page function" % node.attr, path, node.lineno,
+                out.append(_err("B01", "s.%s read inside a page function" % node.attr, path, node.lineno,
                                 fix='"{%s}" in a text, "%s" in a condition' % (node.attr, node.attr)))
     return out
 
@@ -173,7 +173,7 @@ def _store(tgt, val, node, names, st, path, builds):
     if not isinstance(tgt, ast.Attribute) or tgt.attr not in st._t:
         return out
     if id(node) in builds:
-        out.append(_err("S06", "s.%s written inside a page function" % tgt.attr, path, node.lineno,
+        out.append(_err("B02", "s.%s written inside a page function" % tgt.attr, path, node.lineno,
                         fix="write it in a handler; a page names its actions"))
     t = st._t[tgt.attr]
     if isinstance(node, ast.AugAssign):

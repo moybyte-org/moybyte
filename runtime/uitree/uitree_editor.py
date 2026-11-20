@@ -275,7 +275,7 @@ class Engine(uitree_app.Engine):
             self.s._ver[key] += 1
             S._trace("state", key, "%r -> %r   (from tabs %r)" % (old, vals[got], key))
             if "on" in n.l:
-                self.fire(n.l["on"], uitree_app.change_args(n.l["on"], vals[got], old), n, None)
+                self.fire(n.l["on"], (), n, None)
 
     def _r_field(self, n, row, rect):
         k = n.key
@@ -291,7 +291,7 @@ class Engine(uitree_app.Engine):
             self.s._ver[k] += 1
             S._trace("state", k, "%r -> %r   (typed in field %r)" % (before, text, k))
             if "changed" in n.l:
-                self.fire(n.l["changed"], uitree_app.change_args(n.l["changed"], text, before), n, None)
+                self.fire(n.l["changed"], (), n, None)
         if done and "on" in n.l:
             self.fire(n.l["on"], (), n, None)
 

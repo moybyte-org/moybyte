@@ -54,8 +54,6 @@ class UIError(Exception):
 
 
 def _caller():
-    if _NOW.where is not None:          # a description loaded from data: its file and line
-        return _NOW.where
     if _frame is None:
         return "?", 0
     f = _frame(1)
@@ -88,7 +86,6 @@ class _Now:
     frame = False           # a replay is running (canvas draws read, never write)
     app = None              # the app building, replaying or running a handler
     action = None           # the action whose handler runs
-    where = None            # (file, line) of the data line being loaded
     load_move = False       # a LoadView moving its load's state
     collect = None          # the checker's list: a refused call is recorded and the run goes on
 
@@ -184,6 +181,9 @@ class Record(T):
 
 class Model(T):
     def __init__(self, key, fields):
+        if "key" in fields:
+            raise UIError("S07", "a model's field is named 'key'", expected="key= names the key field",
+                          fix='name the field for what it holds: ui.model(key="id", id="", ...)')
         T.__init__(self, "model(key=%s; %s)" % (key, ", ".join(fields)))
         self.key = key
         self.fields = {k: _decl(v, k)[0] for k, v in fields.items()}
@@ -209,7 +209,8 @@ class Opt(T):
 def opt(initial):
     t, _v = _decl(initial, "opt")
     if isinstance(t, (Opt, Model, Doc)):
-        raise UIError("S07", "ui.opt of %s" % t, fix="ui.opt(0), ui.opt(\"\"), ui.opt(ui.record(...))")
+        raise UIError("S13", "ui.opt of %s: only a value may be absent" % t,
+                      fix="ui.opt(0), ui.opt(\"\"), ui.opt(ui.record(...)); an empty model is ()")
     return Opt(t)
 
 
@@ -232,17 +233,20 @@ class Doc(T):
 
 def doc(text="", lang="plain"):
     if lang not in ("plain", "python", "lua", "json", "markdown"):
-        raise UIError("S07", "ui.doc lang=%r" % lang, expected="plain, python, lua, json, markdown", fix='lang="plain" (or python, lua, json, markdown)')
+        raise UIError("S12", "ui.doc lang=%r" % lang, expected="plain, python, lua, json, markdown", fix='lang="plain" (or python, lua, json, markdown)')
     return Doc(text, lang)
 
 
 def enum(*values, init=None):
-    if init is not None and init not in values:
-        raise UIError("S07", "enum init=%r is not one of its values" % init, expected=", ".join(values), fix='init=%r' % values[0])
     if len(values) < 2 or len(set(values)) != len(values) or not all(
             isinstance(v, str) and v for v in values):
-        raise UIError("S07", "an enum needs two or more distinct non-empty texts",
-                      found=repr(values), fix='ui.enum("ok", "waiting", "changed")')
+        raise UIError("E03", "an enum needs two or more distinct non-empty texts",
+                      found=repr(values), fix='ui.enum("ok", "waiting", init="ok"); one value is a bool')
+    if init is None:
+        raise UIError("E01", "an enum names its initial value", expected="init= one of " + ", ".join(values),
+                      fix='ui.enum(%s, init=%r)' % (", ".join(repr(v) for v in values), values[0]))
+    if init not in values:
+        raise UIError("E02", "enum init=%r is not one of its values" % init, expected=", ".join(values), fix='init=%r' % values[0])
     return Enum(values, init)
 
 
@@ -251,11 +255,8 @@ def record(**fields):
 
 
 def model(key=None, **fields):
-    return model_of(key, fields)
-
-
-def model_of(key, fields):
-    """A model from a dict of fields (a field may be called `key`)."""
+    """Rows of `fields`, each row named by its `key` field. No field is
+    called `key` (S07): the word names the key field."""
     if key not in fields:
         raise UIError("S07", "a model names its key field, one of its fields",
                       expected="key= one of %s" % ", ".join(fields), found=repr(key),
@@ -282,8 +283,10 @@ def _decl(v, name):
            tuple: 'a list is a model: %s=ui.model(key="id", id="", ...)' % name,
            dict: "a dict is a record: %s=ui.record(field=initial, ...)" % name,
            type(None): "None has no type: give a typed initial value (0, \"\", False) "
-                       "or an enum: ui.enum(\"none\", ...)"}.get(type(v))
-    raise UIError("S07", "%r has no type the state can hold" % name,
+                       "or an enum: ui.enum(\"none\", ...)"}.get(
+        type(v), "a typed initial value: 0, \"\", False, ui.enum(...), ui.record(...); "
+                 "a handler is declared with ui.action or ui.hook")
+    raise UIError("S13", "%r has no type the state can hold" % name,
                   expected="a bool, int, number, text, ui.enum, ui.record, ui.model or ui.row_of",
                   found=repr(v) + " (%s)" % _pyt(v), fix=fix)
 
@@ -502,8 +505,8 @@ class DocView:
         if k in self.VERBS:
             def verb(*a):
                 if _NOW.building or _NOW.frame:
-                    raise UIError("S06", "s.%s.%s() inside a %s" % (
-                        self._n, k, "build" if _NOW.building else "frame"),
+                    raise UIError("B02" if _NOW.building else "S06", "s.%s.%s() inside a %s" % (
+                        self._n, k, "build" if _NOW.building else "draw"),
                         fix="call it in a handler; name the handler as an action")
                 before = b.summary()
                 got = getattr(b, k)(*a)
@@ -558,11 +561,11 @@ class State:
         if k not in self._t:
             raise _undeclared(k, self._t)
         if _NOW.building and k not in _NOW.allowed and isinstance(self._t[k], Doc):
-            raise UIError("S05", "s.%s read inside a build" % k, found="s.%s" % k,
+            raise UIError("B01", "s.%s read inside a build" % k, found="s.%s" % k,
                           fix='"{%s.line}" or another field (%s) in a text; '
                               'ui.text_editor(%r) shows it' % (k, ", ".join(DOC_FIELDS), k))
         if _NOW.building and k not in _NOW.allowed:
-            e = UIError("S05", "s.%s read inside a build" % k,
+            e = UIError("B01", "s.%s read inside a build" % k,
                         expected="a build names state; it does not read it",
                         found="s.%s" % k,
                         fix='"{%s}" in a text, "%s" in a condition or for a two-way control; '
@@ -598,10 +601,18 @@ class State:
         if k in self._derive:
             raise UIError("S08", "s.%s = ...: %s is derived; the engine computes it, nobody writes it" % (k, k),
                           fix="write the names its expression reads")
-        if _NOW.building or _NOW.frame:
-            raise UIError("S06", "s.%s written inside a %s" % (k, "build" if _NOW.building else "frame"),
+        if _NOW.building:
+            e = UIError("B02", "s.%s written inside a build" % k,
+                        expected="a build names state; handlers write it",
+                        fix="name the handler as an action (on=\"name\"); do not call it")
+            if _NOW.collect is None:
+                raise e
+            _NOW.collect.append(e)
+            return
+        if _NOW.frame:
+            raise UIError("S06", "s.%s written inside a draw" % k,
                           expected="writes happen in handlers",
-                          fix="name the handler as an action (on=\"name\"); do not call it")
+                          fix="write it in the handler of the event; a draw reads")
         new = _check(self._t[k], val, "s." + k)
         old = self._v[k]
         if new == old and not isinstance(self._t[k], Model):
@@ -616,6 +627,7 @@ def derive(name, *, cond=None, text=None):
     """A value the engine computes from state: `cond=` a condition (a bool)
     or `text=` a template (a text). Handlers read it; nobody writes it."""
     where = _caller()
+    _declaring("derive")
     if (cond is None) == (text is None):
         raise UIError("D02", "ui.derive(%r) takes one of cond= or text=" % name, where=where,
                       fix='ui.derive(%r, cond="count > 1") or ui.derive(%r, text="{n} left")' % (name, name))
@@ -710,6 +722,26 @@ def _change(t, old, new):
 
 # -- declarations: each app module's state, actions, hooks, labels and work -----
 
+def _command(name):
+    """A command (push, pop, focus, after, post) is a handler's: never a
+    build's (B02), never outside a handler (A10). Returns the app."""
+    if _NOW.building:
+        raise UIError("B02", "ui.%s inside a build" % name, expected="a build names; handlers act",
+                      fix='name an action the node fires (on="NAME"), and call ui.%s in its handler' % name)
+    if _NOW.app is None:
+        raise UIError("A10", "ui.%s outside a handler" % name,
+                      fix="call ui.%s from a handler or the opened hook; a service posts" % name)
+    return _NOW.app
+
+
+def _declaring(what):
+    """A declaration stands at the module's top level, never in a build (B03)."""
+    if _NOW.building:
+        raise UIError("B03", "ui.%s inside a page function" % what,
+                      expected="declarations at the module's top level",
+                      fix="move ui.%s(...) out of the page function, above it" % what)
+
+
 class Decl:
     """What one app module declares at import: its state, its actions and
     hooks in declaration order (the hints band's order), its label tables,
@@ -777,6 +809,7 @@ def _d():
 
 def state(**decl):
     """Declare the module's state (once): the start of an app's declaration."""
+    _declaring("state")
     name = _caller_module()
     d = Decl(name, State(decl))
     _DECLS[name if name is not None else id(d)] = d
@@ -789,6 +822,7 @@ def _st():
 
 
 def labels(name, table):
+    _declaring("labels")
     if not isinstance(table, dict) or not table:
         raise UIError("T04", "ui.labels(%r) takes a dict of value -> label" % name, fix='ui.labels(%r, {"value": "Label", ...})' % name)
     _d().labels[name] = dict(table)
@@ -1351,13 +1385,13 @@ def _chord_byte(k):
 
 
 # What a handler is handed (`takes=`), and its parameter count.
-TAKES = {"none": 0, "row": 1, "arg": 1, "char": 1, "change": 2}
-_HANDED = {"none": "nothing", "row": "the row", "arg": "the site's arg=", "char": "the typed character",
-           "change": "the new value and the old"}
+TAKES = {"none": 0, "row": 1, "arg": 1, "char": 1}
+_HANDED = {"none": "nothing", "row": "the row", "arg": "the site's arg=", "char": "the typed character"}
 OFFS = ("hide", "grey")
 
 
 def _declare(name, label, fn, takes, where, what):
+    _declaring(what)
     if not isinstance(name, str) or not re.fullmatch(r"[a-z_][a-z0-9_]*", name):
         raise UIError("A03", "%s name %r" % (what, name), where=where,
                       expected="a lower-case name: letters, digits and _",
@@ -1366,6 +1400,10 @@ def _declare(name, label, fn, takes, where, what):
         raise UIError("A03", "ui.%s(%r): the handler is not a function" % (what, name), where=where,
                       found="%r (%s)" % (fn, _pyt(fn)),
                       fix="pass the function itself: %s, not its result" % getattr(fn, "__name__", "fn"))
+    if takes == "change":
+        raise UIError("N04", "ui.%s(%r) takes=\"change\" is retired" % (what, name), where=where,
+                      expected='takes="none": a two-way control\'s handler reads the state it changed',
+                      fix='drop takes=, and read s.NAME in the handler')
     if takes not in TAKES:
         raise UIError("A02", "ui.%s(%r) takes=%r" % (what, name, takes), where=where,
                       expected="one of " + ", ".join(TAKES),
@@ -1380,8 +1418,7 @@ def _declare(name, label, fn, takes, where, what):
         f = getattr(fn, "__name__", "handler")
         raise UIError("A03", "%s %r takes=%r: its handler is handed %s" % (what, name, takes, _HANDED[takes]),
                       where=where,
-                      expected="def %s(%s)" % (f, ", ".join(("new", "old")[:want]) if takes == "change"
-                                               else (takes if want else "")),
+                      expected="def %s(%s)" % (f, takes if want else ""),
                       found="def %s(%s)" % (f, "*args or defaults" if got == -1 else
                                             ", ".join("p%d" % i for i in range(got))),
                       fix="give %s exactly %d parameter%s, no defaults, or declare what it takes"
@@ -1513,9 +1550,7 @@ def _action(name, hands, site, where, seen=True):
 
 
 def after(ms, name):
-    a = _NOW.app
-    if a is None:
-        raise UIError("A04", "ui.after outside a handler or setup", fix='call ui.after from a handler or the opened hook')
+    a = _command("after")
     act = _action(name, "none", "ui.after", _caller(), seen=False)
     a.timers.append([a.clock + ms, act])
 
@@ -1525,9 +1560,7 @@ def focus(key=None):
     if key is None:
         raise UIError("N04", "ui.focus() reads nothing back",
                       fix="@focus in a template, or a list's cur= state")
-    if _NOW.building:
-        raise UIError("N04", "ui.focus(key) inside a build", fix='focus=True (or a condition) on the node')
-    _NOW.app.want_focus = key
+    _command("focus").want_focus = key
 
 
 # -- the tree -----------------------------------------------------------------
@@ -1613,15 +1646,15 @@ CHOICES = {"dir": ("row", "col"), "kind": ("normal", "primary", "danger", "tonal
 def _b():
     a = _NOW.app
     if a is None or not _NOW.building:
-        raise UIError("N03", "a ui node outside build()",
-                      fix="describe the page in build(); a handler writes state or names an action")
+        raise UIError("B03", "a ui node outside a page function",
+                      fix="make nodes in a page function, under `with ui.page(title):`; a handler writes state")
     return a
 
 
 def _node(kind, key, props, where, act=None):
     b = _b()
     if kind != "page" and not b.stack:
-        raise UIError("N03", "ui.%s outside a page" % kind, where=where,
+        raise UIError("B03", "ui.%s outside a page" % kind, where=where,
                       fix="put it inside `with ui.page(title):`")
     schema = SCHEMA[kind]
     n = Node(kind, key, where)
@@ -1652,8 +1685,6 @@ def _node(kind, key, props, where, act=None):
         elif pt in ("action0", "action1"):
             want = "row" if pt == "action1" else "none"
             a = _d().actions.get(v) if isinstance(v, str) else None
-            if a is not None and a.takes == "change" and want == "none" and kind in TWO_WAY:
-                want = "change"
             n.l[k] = _action(v, want, "ui.%s %s=" % (kind, k), where, seen=False)
         else:
             n.p[k] = _prop(pt, k, v, b.ctx, where, kind)
@@ -2170,9 +2201,7 @@ def _anchors(root):
 
 
 def push(build):
-    if _NOW.building:
-        raise UIError("N03", "ui.push inside a build", fix="push from a handler")
-    a = _NOW.app
+    a = _command("push")
     a.pages.append(build)
     a.openers = getattr(a, "openers", []) + [getattr(a, "fired_id", None)]
     _trace("page", "push", "page %d, opened from %r" % (len(a.pages), a.openers[-1]))
@@ -2183,9 +2212,7 @@ def pop():
     """From a handler: the page on top closes, and focus returns to the node
     that pushed it. On the first page of a page its host shows (a Settings
     page), the host closes it."""
-    a = _NOW.app
-    if a is None or _NOW.building:
-        raise UIError("N03", "ui.pop outside a handler", fix="pop from a handler")
+    a = _command("pop")
     if len(a.pages) > 1:
         a.pages.pop()
         a.root = None
@@ -2218,8 +2245,11 @@ def fade(rect, top):
 
 def _q(name, *a):
     app = _NOW.app
+    if _NOW.building:
+        raise UIError("B01", "ui.%s inside a build: a build asks the engine nothing" % name,
+                      fix="a text or a condition the engine evaluates; a canvas asks in its draw")
     if app is None:
-        raise UIError("N03", "ui.%s outside a build, a handler or a draw" % name, fix='ask it in a page function, a handler or a canvas draw')
+        raise UIError("A10", "ui.%s outside a handler or a draw" % name, fix='ask it in a handler or a canvas draw')
     return app.query(name, *a)
 
 
@@ -2276,12 +2306,12 @@ class Builder:
         try:
             r = self.pages[-1]()
             if r is not None:
-                raise UIError("N03", "build() returned a value", fix="build() describes; it returns nothing")
+                raise UIError("N01", "a page function returned a value", fix="a page function describes; it returns nothing")
         finally:
             _NOW.building = False
             _NOW.app = was
         if self.root is None:
-            raise UIError("N03", "build() made no page", fix="start it with `with ui.page(title):`",
+            raise UIError("B03", "a page function made no page", fix="start it with `with ui.page(title):`",
                           where=(getattr(self.pages[-1], "__code__", None) and (
                               _base(self.pages[-1].__code__.co_filename),
                               self.pages[-1].__code__.co_firstlineno)) or ("?", 0))
@@ -2447,6 +2477,8 @@ def post(name, arg=None, ticket=None):
     """G12: a service hands the app a value from outside any handler: the
     hook `name` runs before the next frame. A post whose ticket a later
     start() made stale is dropped there, and traced."""
+    if _NOW.building:
+        raise UIError("B02", "ui.post inside a build", fix="post from a service's callback; a build names")
     d = _d()
     a = d.actions.get(name)
     if a is None or not a.hook:
@@ -2477,6 +2509,7 @@ def work(name, fn, due, budget=4, unit=None):
     as fit `budget` ms of a frame's time left after its input and paint,
     never on a frame whose input is late."""
     where = _caller()
+    _declaring("work")
     if name in _d().works or name in _d().actions:
         raise UIError("U02", "work %r: the name is taken" % name, where=where, fix='give the work a name no action, hook or work has')
     if _params(fn) not in (0, None):
@@ -2563,8 +2596,9 @@ NODE_CALLS = ("page", "group", "label", "info", "link", "button", "item", "card"
               "popover", "menu", "split", "grid", "panel", "text", "canvas", "foot", "scroll", "scope",
               "switch", "tabs", "panes", "pane", "text_editor", "slot", "row", "tools", "lent", "status")
 DECL_CALLS = ("action", "hook", "labels", "work", "derive")
+COMMAND_CALLS = ("push", "pop", "focus", "after", "post")
 for _n in NODE_CALLS:
     globals()[_n] = _collecting(globals()[_n], True)
-for _n in DECL_CALLS:
+for _n in DECL_CALLS + COMMAND_CALLS:
     globals()[_n] = _collecting(globals()[_n], False)
 del _n
