@@ -2062,6 +2062,14 @@ local function key_arg(a, key, at, what)
   end
 end
 
+-- the console's clock in ms since the app began (the cart's time()); a
+-- host with no clock counts frames
+local function now_ms()
+  local t = type(time) == "function" and time() or nil
+  if type(t) == "number" then return math.floor(t * 1000) end
+  return frame_no * 1000 // 30
+end
+
 -- a timer's key is its identity: a second timer of one key replaces the
 -- first; a timer with no key is keyed by its action
 function T.after(ms, name, key)
@@ -2080,8 +2088,26 @@ function T.after(ms, name, key)
   for i = #timers, 1, -1 do
     if timers[i].id == id then table.remove(timers, i); replaced = ", replacing the timer keyed " .. show(id) end
   end
-  timers[#timers + 1] = { at = frame_no + ms * 30 // 1000, name = name, key = key, id = id }
+  timers[#timers + 1] = { at = now_ms() + ms, name = name, key = key, id = id }
   trace("timer", name, (key ~= nil and show(key) .. " " or "") .. "in " .. ms .. " ms" .. replaced .. "   (in " .. in_handler .. ")")
+end
+
+-- a timer cancelled runs nothing: KEY is the key it was armed with, or its
+-- action's name for one armed with none (F-41)
+function T.cancel(key)
+  local at = where()
+  no_command_in_build("ui.cancel", at)
+  if not in_handler then
+    fail("A10", at, "ui.cancel outside a handler", "a call from a handler or the opened hook",
+         sealed and "a service or a callback" or "the top level")
+  end
+  if key == nil then fail("N01", at, "ui.cancel names no timer", "a timer's key, or its action's name", "nil") end
+  for i = #timers, 1, -1 do
+    if timers[i].id == key then
+      trace("timer", timers[i].name, show(key) .. " cancelled   (in " .. in_handler .. ")")
+      table.remove(timers, i)
+    end
+  end
 end
 
 -- a service reaches the app by posting a hook, run before the next frame
@@ -2796,7 +2822,7 @@ function _draw()
   posted = {}
   for i = #timers, 1, -1 do
     local t = timers[i]
-    if frame_no >= t.at then
+    if now_ms() >= t.at then
       if t.key ~= nil then fire(t.name, "timer " .. show(t.key), t.key) else fire(t.name, "timer") end
       table.remove(timers, i)
     end

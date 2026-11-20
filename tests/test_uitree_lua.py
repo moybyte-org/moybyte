@@ -123,6 +123,35 @@ def test_an_anchor_on_no_node_stops_the_run_at_the_popover(tmp_path):
     assert err and "error[N06] main.lua:5:" in err, err
 
 
+def test_a_cancelled_timer_runs_nothing(tmp_path):
+    from runtime import host_app
+    from runtime.host import moy_log
+    carts = str(tmp_path / "carts")
+    host_app.moy_carts.ensure_dirs(carts)
+    _cart(carts, "Timers", 'ui.app("Timers", { icon = "calc" })\n'
+                           'local s = ui.state { log = "" }\n'
+                           'ui.action("tick", "Tick", function() s.log = s.log .. "t" end)\n'
+                           'ui.action("boom", "Boom", function() s.log = s.log .. "b" end)\n'
+                           'ui.action("late", "Late", function() s.log = s.log .. "l" end)\n'
+                           'ui.hook("opened", function()\n'
+                           '  ui.after(0, "tick")\n'
+                           '  ui.after(0, "boom")\n'
+                           '  ui.after(60000, "late")\n'
+                           '  ui.cancel("boom")\n'
+                           'end)\n'
+                           'ui.page("p", function() ui.label("{log}") end)\n')
+    ws, drv, frame, open_cart = _console(carts)
+    seq0 = moy_log.next()
+    open_cart(ws, "Timers")
+    for _ in range(12):
+        frame()
+    assert ws.run.player.cart_error is None
+    lines = [r[4] for r in moy_log.read(seq0, 4000) if "[trace]" in str(r[4])]
+    ran = [l.split()[3] for l in lines if " action " in l]
+    assert "tick" in ran and "boom" not in ran and "late" not in ran, lines
+    assert any("cancelled" in l for l in lines), lines
+
+
 # -- the checker: one failing case per code ------------------------------------------
 
 APP = 'ui.app("T", { icon = "calc" })\n'
