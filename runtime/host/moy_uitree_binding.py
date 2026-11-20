@@ -21,6 +21,7 @@ _SIGS = (
     ("uit_new", [], _P),
     ("uit_free", [_P], None),
     ("uit_error", [_P], _S),
+    ("uit_error_code", [_P], _S),
     ("uit_state", [_P, _S, _I, _S, _Z], _I),
     ("uit_model", [_P, _I, _S, _Z, _S, _I, _I], _I),
     ("uit_row_of", [_P, _I, _I], _I),
@@ -37,6 +38,7 @@ _SIGS = (
     ("uit_set_model", [_P, _I, _I, _S, _Z], _I),
     ("uit_get_int", [_P, _I], c.c_int32),
     ("uit_get_text", [_P, _I, c.POINTER(_Z)], c.POINTER(c.c_char)),
+    ("uit_get_cell", [_P, _I, _I, _I], c.c_char_p),
     ("uit_build_begin", [_P, _S], None),
     ("uit_node", [_P, _I, _S, _I], _I),
     ("uit_prop", [_P, _I, _S, _S, _S], _I),
@@ -100,6 +102,9 @@ class Engine:
     def error(self):
         return self._L.uit_error(self._e).decode("utf-8", "replace")
 
+    def error_code(self):
+        return self._L.uit_error_code(self._e).decode("ascii")
+
     def state(self, name, ty, values):
         return self._L.uit_state(self._e, b(name), ty, values, len(values) if values else 0)
 
@@ -156,6 +161,10 @@ class Engine:
         n = c.c_size_t()
         p = self._L.uit_get_text(self._e, slot, c.byref(n))
         return c.string_at(p, n.value).decode("utf-8") if p else ""
+
+    def get_cell(self, slot, row, f):
+        p = self._L.uit_get_cell(self._e, slot, row, f)
+        return p.decode("utf-8") if p is not None else None
 
     def build_begin(self, page_id):
         self._L.uit_build_begin(self._e, b(page_id))

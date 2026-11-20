@@ -523,7 +523,10 @@ def test_a_ported_surface_draws_its_old_frames(run, tmp_path):
 # C engine does not draw yet raises its EngineGap, which a window's draw would
 # swallow: any one made fails the run.
 C_RUNS = ("settings_rows-desk", "settings_rows_layout-tdeck", "settings_rows_full-tdeck",
-          "settings_wifi-tdeck", "settings_wifi-desk", "settings_wifi_none-big")
+          "settings_wifi-tdeck", "settings_wifi-desk", "settings_wifi_none-big",
+          "settings_tz-tdeck", "settings_tz-desk",
+          "settings_paired-tdeck", "settings_paired-desk", "settings_paired_none-big",
+          "settings_permissions-tdeck", "settings_permissions-desk")
 
 
 @pytest.mark.parametrize("name", C_RUNS)
@@ -538,9 +541,17 @@ def test_a_ported_surface_draws_its_old_frames_on_the_c_engine(name, tmp_path, m
         gaps.append(what)
         init(self, what)
     monkeypatch.setattr(uitree_c.EngineGap, "__init__", gap)
+    lowered = []
+    lower = uitree_c.CEngine.lower
+
+    def counted(self, root):
+        lowered.append(root.kind)
+        return lower(self, root)
+    monkeypatch.setattr(uitree_c.CEngine, "lower", counted)
     uitree_app.use_engine("c")
     try:
         P.check_recorded(name, SURFACES[run[1]], tmp_path / "carts", run[4] if len(run) > 4 else None)
     finally:
         uitree_app.use_engine("reference")
     assert not gaps, gaps
+    assert lowered, "no page of the run was built on the C engine"

@@ -129,7 +129,19 @@ int uit_fail(uit_t *e, int code, const char *fmt, ...)
     va_start(ap, fmt);
     vsnprintf(e->err, sizeof e->err, fmt, ap);
     va_end(ap);
+    e->code[0] = 0;
     return code;
+}
+
+int uit_check_fail(uit_t *e, const char *code, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(e->err, sizeof e->err, fmt, ap);
+    va_end(ap);
+    memcpy(e->code, code, 3);
+    e->code[3] = 0;
+    return UIT_E_CHECK;
 }
 
 const char *uit_str(const uit_t *e, uint16_t off)
@@ -159,6 +171,7 @@ uit_t *uit_new(void)
         return NULL;
     memset(e, 0, sizeof *e);
     pool_put(e, "", 0);         // offset 0 is the empty text
+    e->ccur = -1;
     return e;
 }
 
@@ -203,6 +216,19 @@ void uit_free(uit_t *e)
 const char *uit_error(const uit_t *e)
 {
     return e->err;
+}
+
+const char *uit_get_cell(const uit_t *e, int slot, int row, int f)
+{
+    if (slot < 0 || slot >= e->nslots || e->slots[slot].type != UIT_MODEL || row < 0 || row >= e->slots[slot].nrows ||
+        f < 0 || f >= e->slots[slot].nf)
+        return NULL;
+    return uit_cell(e, slot, row, f);
+}
+
+const char *uit_error_code(const uit_t *e)
+{
+    return e->code;
 }
 
 // -- declarations ---------------------------------------------------------------
@@ -396,7 +422,7 @@ int uit_set_text(uit_t *e, int slot, const char *s, size_t n)
 
 int uit_set_model(uit_t *e, int slot, int n, const char *cells, size_t len)
 {
-    if (!slot_ok(e, slot) || e->slots[slot].type != UIT_MODEL || n < 0)
+    if (slot < 0 || slot >= e->nslots || e->slots[slot].type != UIT_MODEL || n < 0)
         return UIT_E_ARG;
     uit_slot_t *S = &e->slots[slot];
     char *c = UIT_MALLOC(len + 1);
@@ -517,7 +543,7 @@ int uit_node(uit_t *e, int kind, const char *key, int parent)
     N.parent = up(parent);
     N.kid = N.last = N.next = N.props = UIT_NONE;
     N.act = N.shown = N.focus = N.t_main = N.t_value = N.t_icon = N.t_aux = -1;
-    N.slot = N.cur = N.changed = N.on = -1;
+    N.slot = N.cur = N.changed = N.on = N.current = -1;
     if (kind == UIT_FIELD)
         N.btn = 32;
     int me = e->nnodes++;
@@ -533,6 +559,14 @@ int uit_node(uit_t *e, int kind, const char *key, int parent)
     return me;
 }
 
+int uit_list_of(const uit_t *e, int node)
+{
+    for (int k = node; k >= 0 && k != (int)UIT_NONE; k = e->nodes[k].parent)
+        if (e->nodes[k].kind == UIT_ROWS)
+            return k;
+    return -1;
+}
+
 int uit_model_of(uit_t *e, int node)
 {
     for (int k = node; k >= 0 && k != (int)UIT_NONE; k = e->nodes[k].parent)
@@ -542,7 +576,8 @@ int uit_model_of(uit_t *e, int node)
 }
 
 const char *const uit_kind_names[UIT_KINDS] = {"", "page", "group", "label", "info", "link", "button",
-                                               "toggle", "rows", "dialog", "seg", "slider", "field"};
+                                               "toggle", "rows", "dialog", "seg", "slider", "field",
+                                               "empty"};
 
 static const char *TONES[] = {"ink", "dim", "value", "danger"};
 static const char *BKINDS[] = {"normal", "primary", "tonal", "danger", "toggle"};
@@ -587,6 +622,8 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         model = -1;             // a list's own props read the page, not its rows
     int kind = N->kind;
     int16_t *tslot = NULL;
+    int list = uit_list_of(e, node);
+    e->ccur = list >= 0 && list != node ? e->nodes[list].current : -1;
     if (!strcmp(name, "shown") || !strcmp(name, "focus")) {
         int c = uit_cond_compile(e, src, model);
         if (c < 0)
@@ -597,7 +634,20 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
             N->focus = (int16_t)c;
         return add_prop(e, node, name, src, repr, PK_COND, c);
     }
-    if (kind == UIT_SEG && !strcmp(name, "text")) {
+    if (kind == UIT_ROWS && !strcmp(name, "group")) {
+        // a caption drawn where its value changes from the row before: over the rows
+        model = N->slot;
+        tslot = &N->t_main;
+    } else if (kind == UIT_EMPTY && !strcmp(name, "lines")) {
+        // one prop a line, each a template, drawn in order (an empty one left out)
+        int t = uit_tmpl_compile(e, src, model);
+        if (t < 0)
+            return t;
+        if (e->tmpls[t].type == UIT_BOOL || e->tmpls[t].type == UIT_MODEL)
+            return uit_check_fail(e, "T03", "empty lines=%s is a %s, not a text", src,
+                                  uit_type_name(e->tmpls[t].type));
+        return add_prop(e, node, name, src, repr, PK_TMPL, t);
+    } else if (kind == UIT_SEG && !strcmp(name, "text")) {
         // a seg over a row_of: each row's word, a template over its model's rows
         if (N->slot < 0 || e->slots[N->slot].type != UIT_ROWOF)
             return uit_fail(e, UIT_E_ARG, "seg text=%s before its row_of", src);
@@ -618,6 +668,21 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         int t = uit_tmpl_compile(e, src, model);
         if (t < 0)
             return t;
+        const uit_tmpl_t *T = &e->tmpls[t];
+        if (kind == UIT_SLIDER && (!strcmp(name, "lo") || !strcmp(name, "hi"))) {
+            // an int prop: an int template, or the int literal a number lowers to
+            const char *d = src + (src[0] == '-');
+            int lit_int = T->lit && *d;
+            for (; *d && lit_int; d++)
+                lit_int = *d >= '0' && *d <= '9';
+            if (T->type != UIT_INT && !lit_int)
+                return uit_check_fail(e, "T03", "%s %s=%s is a %s, not an int", uit_kind_names[kind], name, src,
+                                      uit_type_name(T->type));
+        } else if (!(kind == UIT_SEG && !strcmp(name, "text"))) {      // a seg's row words: any type
+            if (T->type == UIT_BOOL || T->type == UIT_MODEL)
+                return uit_check_fail(e, "T03", "%s %s=%s is a %s, not a text", uit_kind_names[kind], name, src,
+                                      uit_type_name(T->type));
+        }
         *tslot = (int16_t)t;
         return add_prop(e, node, name, src, repr, PK_TMPL, t);
     }
@@ -628,10 +693,40 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         N->lit = (uint8_t)i;
         return add_prop(e, node, name, src, repr, PK_LIT, i);
     }
+    if (kind == UIT_LABEL && (!strcmp(name, "wrap") || !strcmp(name, "face") || !strcmp(name, "align") ||
+                              !strcmp(name, "lines"))) {
+        static const char *const WRAPS[] = {"cut", "word", "char"}, *const ALIGNS[] = {"start", "center", "end"};
+        static const char *const FACES[] = {"ui", "title", "mono", "caption", "key", "op", "result"};
+        static const uint8_t CENTRE[] = {0, 1, 4};
+        int i = name[0] == 'w' ? lit_index(src, WRAPS, 3) : name[0] == 'f' ? lit_index(src, FACES, 7)
+                : name[0] == 'a' ? lit_index(src, ALIGNS, 3) : (int)strtol(src, NULL, 10);
+        if (i < 0)
+            return uit_fail(e, UIT_E_KIND, "label %s=%s", name, src);
+        if (name[0] == 'w')
+            N->nbtn = (uint16_t)((N->nbtn & ~LT_WRAP) | i);
+        else if (name[0] == 'f')
+            N->nbtn |= (uint16_t)((i + 1) << LT_FACE_SHIFT);
+        else if (name[0] == 'a')
+            N->nbtn |= (uint16_t)(CENTRE[i] << LT_ALIGN_SHIFT);
+        else
+            N->btn = (uint16_t)i, N->nbtn |= LT_LINES;
+        return add_prop(e, node, name, src, repr, PK_LIT, i);
+    }
     if (!strcmp(name, "kind") && kind == UIT_BUTTON) {
         int i = lit_index(src, BKINDS, 5);
         N->lit = (uint8_t)(i < 0 ? 0 : i);
         return add_prop(e, node, name, src, repr, PK_LIT, i);
+    }
+    if (!strcmp(name, "field") && kind == UIT_TOGGLE) {
+        // a toggle bound to a bool field of its list's row: the row's cell is its value
+        int m = uit_model_of(e, node);
+        int f = uit_field_find(e, m, src, strlen(src));
+        if (f < 0 || e->slots[m].ftype[f] != UIT_BOOL)
+            return uit_fail(e, UIT_E_NAME, "toggle .%s: no bool field of its rows", src);
+        N->slot = (int16_t)m;
+        N->cur = (int16_t)f;
+        N->lit |= NL_FIELD;
+        return 0;
     }
     if (!strcmp(name, "bind")) {
         int s = uit_slot_find(e, src, strlen(src));
@@ -676,6 +771,14 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
                 return add_prop(e, node, name, src, repr, PK_ACT, a);
             }
         return uit_fail(e, UIT_E_NAME, "%s %s=%s: no such action", uit_kind_names[kind], name, src);
+    }
+    if (!strcmp(name, "current") && kind == UIT_ROWS) {
+        int s = uit_slot_find(e, src, strlen(src));
+        int t = s < 0 ? 0 : e->slots[s].type;
+        if (t != UIT_TEXT && t != UIT_ROWOF && t != UIT_INT)
+            return uit_fail(e, UIT_E_NAME, "rows current=%s: no text, int or row_of of that name", src);
+        N->current = (int16_t)s;
+        return add_prop(e, node, name, src, repr, PK_LIT, s);
     }
     if (!strcmp(name, "cur") && kind == UIT_ROWS) {
         int s = uit_slot_find(e, src, strlen(src));

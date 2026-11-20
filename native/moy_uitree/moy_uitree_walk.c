@@ -186,6 +186,13 @@ static void over_for(uit_t *e, int k, int model, int row, moy_ui_ctx_t *c, moy_u
         int32_t one = 1;
         moy_ui_over_put(o, MOY_UI_OV_DISABLED, &one);
     }
+    if (row >= 0) {
+        int list = uit_list_of(e, k);
+        if (list >= 0 && NODE(list)->current >= 0) {
+            int32_t on = uit_row_current(e, list, model, row);
+            moy_ui_over_put(o, MOY_UI_OV_CURRENT, &on);
+        }
+    }
     if (N->t_icon >= 0) {
         uint32_t n, at = uit_tmpl_render(e, N->t_icon, model, row, &n);
         if (n)
@@ -348,6 +355,31 @@ static void wrote(uit_t *e, int k, const char *was, const char *now, const char 
     uit_event(e, UIT_EV_WRITE, N->slot, -1, -1, NULL, 0);
     if (then >= 0)
         fire(e, then, k, -1, -1, NULL);
+}
+
+// A toggle bound to its row's bool field written (`_row_write`): the cell in
+// place, the model's version, its trace line `KEY: FIELD old -> new   (from
+// toggle .FIELD)`, the cell's event, then its on= handed the row.
+static void row_wrote(uit_t *e, int k, int model, int row, int now)
+{
+    const uit_node_t *N = NODE(k);
+    uit_slot_t *M = &e->slots[model];
+    M->cells[M->at[row * M->nf + N->cur]] = now ? '1' : '0';
+    M->ver++;
+    if (e->flags & UIT_F_TRACE) {
+        uit_buf_t key = {0};
+        const char *kv = uit_cell(e, model, row, M->key), *f = uit_str(e, M->fname[N->cur]);
+        if (M->ftype[M->key] == UIT_TEXT)
+            uit_buf_repr(&key, kv, strlen(kv));
+        else
+            uit_buf_printf(&key, "%s", kv);
+        uit_trace(e, "state", uit_str(e, M->name), "%s: %s %s -> %s   (from %s .%s)", key.p, f,
+                  now ? "False" : "True", now ? "True" : "False", uit_kind_names[N->kind], f);
+        uit_buf_free(&key);
+    }
+    uit_event(e, UIT_EV_CELL, model, row, N->cur, NULL, 0);
+    if (N->on >= 0)
+        fire(e, N->on, k, model, row, NULL);
 }
 
 // Node `k`'s text state written from `s`: the trace's reprs, the write, `then`.
@@ -692,7 +724,8 @@ static void hints(uit_t *e, uit_buf_t *b, int pages)
             int t = F->gen == e->gen && F->node >= 0 ? NODE(F->node)->t_aux : -1;
             hint_add(b, "confirm", 7);
             if (t >= 0) {
-                uint32_t n, at = uit_tmpl_render(e, t, -1, -1, &n);
+                int m = uit_model_of(e, F->node);
+                uint32_t n, at = uit_tmpl_render(e, t, m, m >= 0 ? F->row : -1, &n);
                 hint_add(b, e->scratch.p + at, n);
             } else {
                 hint_add(b, "Change", 6);
@@ -810,21 +843,52 @@ static void draw(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int m
         walk(e, c, s, k, model, row);
         moy_ui_api_group(c, s, span_of("", 0), NULL);
         break;
-    case UIT_LABEL:
+    case UIT_LABEL: {
         if (N->t_icon >= 0) {
             uint32_t n, at = uit_tmpl_render(e, N->t_icon, model, row, &n);
             if (n)
                 moy_ui_api_icon(c, sspan(e, at, n));
         }
         a1 = text(e, k, 0, model, row, &n1);
-        if (N->lit) {
-            moy_ui_over_none(&o);
-            moy_ui_api_text(c, 0, 0, N->lit, -1);
-            moy_ui_api_label(c, s, sspan(e, a1, n1), &o);
-        } else {
-            moy_ui_api_label(c, s, sspan(e, a1, n1), NULL);
+        int t = N->nbtn, opts = N->lit || (t & ~LT_CHAR);
+        int lines = (t & LT_WRAP) == LT_WORD || (t & LT_LINES) ? (N->btn ? N->btn : 16) : 0;
+        // wrap="char": lines of what fits the page's width, cut anywhere, each a label
+        uint32_t per = 0;
+        if ((t & LT_WRAP) == LT_CHAR) {
+            moy_font_info_t fi;
+            moy_ui_font(s->cart, MOY_UI_FONT_UI, &fi);
+            int cw = fi.w * e->fs;
+            per = (uint32_t)((e->pw - 32) / (cw > 1 ? cw : 1));
+            if (per < 8)
+                per = 8;
         }
+        // `per` characters a line (a UTF-8 sequence is one); one line however long unwrapped,
+        // none for an empty text cut by character (the reference's range over its length)
+        if ((t & LT_WRAP) == LT_CHAR && !n1)
+            break;
+        const char *txt = e->scratch.p + a1;
+        uint32_t at = 0;
+        do {
+            uint32_t m = at, chars = 0;
+            while (m < n1 && chars < per) {
+                m++;
+                while (m < n1 && (txt[m] & 0xc0) == 0x80)
+                    m++;
+                chars++;
+            }
+            if ((t & LT_WRAP) != LT_CHAR)
+                m = n1;
+            if (opts) {
+                moy_ui_over_none(&o);
+                moy_ui_api_text(c, lines, (t >> LT_ALIGN_SHIFT) & 7, N->lit, ((t >> LT_FACE_SHIFT) & 7) - 1);
+                moy_ui_api_label(c, s, sspan(e, a1 + at, m - at), &o);
+            } else {
+                moy_ui_api_label(c, s, sspan(e, a1 + at, m - at), NULL);
+            }
+            at = m;
+        } while (at < n1);
         break;
+    }
     case UIT_INFO:
     case UIT_LINK:
         a1 = text(e, k, 0, model, row, &n1);
@@ -843,11 +907,14 @@ static void draw(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int m
         break;
     case UIT_TOGGLE: {
         uit_slot_t *S = &e->slots[N->slot];
-        int cur = S->i != 0;
+        int field = (N->lit & NL_FIELD) != 0;
+        int cur = field ? uit_cell(e, model, row, N->cur)[0] == '1' : S->i != 0;
         a1 = text(e, k, 0, model, row, &n1);
         over_for(e, k, model, row, c, &o, id);
         int got = moy_ui_api_toggle(c, s, sspan(e, a1, n1), cur, &o) != 0;
-        if (got != cur) {
+        if (got != cur && field) {
+            row_wrote(e, k, model, row, got);
+        } else if (got != cur) {
             uit_set_int(e, N->slot, got);
             uit_buf_t b = {0};
             const char *key = uit_str(e, N->key);
@@ -909,8 +976,46 @@ static void draw(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int m
             if (n)
                 moy_ui_api_label(c, s, sspan(e, at, n), NULL);
         }
-        for (int r = 0; r < e->slots[N->slot].nrows; r++)
+        // group=: a caption where its text changes from the row before, the rows under it on its card
+        uint32_t cap_at = 0, cap_n = 0;
+        int capped = 0;
+        for (int r = 0; r < e->slots[N->slot].nrows; r++) {
+            if (N->t_main >= 0) {
+                uint32_t n, at = uit_tmpl_render(e, N->t_main, N->slot, r, &n);
+                if (!capped || n != cap_n || memcmp(e->scratch.p + at, e->scratch.p + cap_at, n)) {
+                    if (capped)
+                        moy_ui_api_group(c, s, span_of("", 0), NULL);
+                    moy_ui_api_group(c, s, sspan(e, at, n), NULL);
+                    cap_at = at, cap_n = n, capped = 1;
+                }
+            }
             walk(e, c, s, k, N->slot, r);
+        }
+        if (capped)
+            moy_ui_api_group(c, s, span_of("", 0), NULL);
+        break;
+    }
+    case UIT_EMPTY: {
+        uint32_t ni, ai = N->t_icon >= 0 ? uit_tmpl_render(e, N->t_icon, model, row, &ni) : 0;
+        if (N->t_icon < 0 || !ni)
+            ai = 0, ni = 0;
+        a1 = text(e, k, 0, model, row, &n1);
+        uit_buf_t lines = {0};
+        int any = 0;
+        for (int p = N->props; p != (int)UIT_NONE; p = e->props[p].next) {
+            const uit_prop_t *P = &e->props[p];
+            if (strcmp(uit_str(e, P->name), "lines"))
+                continue;
+            uint32_t n, at = uit_tmpl_render(e, P->idx, model, row, &n);
+            if (!n)
+                continue;
+            if (any++)
+                uit_buf_printf(&lines, "%c", 0);
+            uit_buf_printf(&lines, "%.*s", (int)n, e->scratch.p + at);
+        }
+        moy_ui_api_empty(c, s, ni ? sspan(e, ai, ni) : span_of("warn", 4), sspan(e, a1, n1),
+                         (const uint8_t *)(lines.p ? lines.p : ""), lines.n);
+        uit_buf_free(&lines);
         break;
     }
     case UIT_DIALOG: {
@@ -1127,6 +1232,7 @@ int uit_frame(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int x, int y, i
     uint32_t n, at = text(e, 0, 0, -1, -1, &n);
     moy_ui_box_t box;
     moy_ui_api_page(c, s, sspan(e, at, n), &o, &box);
+    e->pw = box.w;
     // what focus is on as the page begins
     char f[UIT_ID_MAX + 1];
     int fl = moy_ui_api_focus(c, span_of(NULL, 0), f, sizeof f);

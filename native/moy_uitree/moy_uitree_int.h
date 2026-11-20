@@ -55,7 +55,7 @@ typedef struct {
 // Template ops.
 enum { OP_LIT = 1, OP_VAL, OP_COUNT, OP_PLURAL, OP_BYTES, OP_FMT, OP_CHOICE, OP_MAP };
 // What a value op reads.
-enum { RK_SLOT = 1, RK_FIELD, RK_ROWOF, RK_SYS, RK_FOCUS, RK_INPUT };
+enum { RK_SLOT = 1, RK_FIELD, RK_ROWOF, RK_SYS, RK_FOCUS, RK_INPUT, RK_CURRENT };
 // System bools (@desk ...).
 enum { SYS_DESK = 1, SYS_HANDHELD, SYS_WIDE, SYS_TALL, SYS_TOUCH };
 
@@ -70,6 +70,7 @@ typedef struct {
     uint16_t src;               // pool
     uint16_t code, ncode;
     uint8_t row, lit;           // reads a row's field; nothing but literal text
+    uint8_t type;               // what it renders: one piece's type, else UIT_TEXT
 } uit_tmpl_t;
 
 typedef struct {
@@ -105,7 +106,10 @@ typedef struct {
 } uit_prop_t;
 
 // Node flags (`lit` of a two-way control).
-enum { NL_CYCLE = 1, NL_STEPS = 1, NL_COMMIT = 1, NL_SECRET = 2 };
+enum { NL_CYCLE = 1, NL_STEPS = 1, NL_COMMIT = 1, NL_SECRET = 2, NL_FIELD = 4 };
+// A label's text options (`nbtn`): wrap= in bits 0-1 (LT_WORD, LT_CHAR), its face's
+// role + 1 in bits 2-4, the toolkit's `centre` for align= in bits 5-7, lines= given.
+enum { LT_WORD = 1, LT_CHAR = 2, LT_WRAP = 3, LT_FACE_SHIFT = 2, LT_ALIGN_SHIFT = 5, LT_LINES = 256 };
 
 typedef struct {
     uint8_t kind, lit;          // a label's tone, a button's kind; a seg's cycle look, a slider's
@@ -114,15 +118,18 @@ typedef struct {
     uint16_t key;               // pool
     int16_t act;
     int16_t shown, focus;       // conds
-    int16_t t_main, t_value, t_icon, t_aux;     // templates: t_value a seg's row words and a
+    int16_t t_main, t_value, t_icon, t_aux;     // templates (t_main a rows' group=): t_value a seg's row words and a
                                 // slider's lo; t_aux a rows' empty=, a toggle's or a field's
                                 // hint= and a slider's hi
     int16_t slot;               // a two-way control's state, a rows' model
-    int16_t cur;                // a rows' cur= slot; a seg's label table
+    int16_t cur;                // a rows' cur= slot; a seg's label table; a toggle's row field (NL_FIELD,
+                                // `slot` then its list's model)
+    int16_t current;            // a rows' current= slot: the row whose key it holds is current
     int16_t changed;            // a rows' or a field's changed= action
     int16_t on;                 // a two-way control's on= action
     uint16_t props;
-    uint16_t btn, nbtn;         // a dialog's buttons in e->btns; a field's max= in btn
+    uint16_t btn, nbtn;         // a dialog's buttons in e->btns; a field's max= in btn; a label's
+                                // lines= in btn and its text options in nbtn (LT_*)
 } uit_node_t;
 
 // A label table: its name, keys and words NUL-separated in the pool.
@@ -167,6 +174,8 @@ typedef struct {
 
 struct uit {
     char err[160];
+    char code[4];               // the spec's code of a UIT_E_CHECK error
+    int ccur;                   // while a prop compiles: its list's current= slot, or -1
     uit_buf_t pool;
     uit_slot_t *slots;
     int nslots, cslots;
@@ -200,6 +209,7 @@ struct uit {
     // a frame
     int flags, fs, input;
     int16_t cx, cy, cw, ch;
+    int16_t pw;                 // the page's width, as its page call placed it
     uit_buf_t scratch;
     uit_id_t *ids, *prev;
     int nids, nprev, cids, cprev;
@@ -229,6 +239,8 @@ extern const char *const uit_kind_names[UIT_KINDS];
 int uit_grow(void **p, int *cap, int need, size_t size);
 #define UIT_GROW(e, arr, n, cap) uit_grow((void **)&(e)->arr, &(e)->cap, (e)->n + 1, sizeof(*(e)->arr))
 int uit_fail(uit_t *e, int code, const char *fmt, ...);
+// A mistake the spec names: UIT_E_CHECK, its code kept for uit_error_code.
+int uit_check_fail(uit_t *e, const char *code, const char *fmt, ...);
 const char *uit_str(const uit_t *e, uint16_t off);
 
 // moy_uitree_lang.c
@@ -256,5 +268,10 @@ int uit_act_can(uit_t *e, int a, int model, int row);
 int uit_shown(uit_t *e, int node, int model, int row);
 void uit_cur_moved(uit_t *e, int node, const char *v, size_t n, const char *why);
 int uit_model_of(uit_t *e, int node);
+// The rows node `node` is in (itself included), or -1.
+int uit_list_of(const uit_t *e, int node);
+// Whether row `row` of `model` is the current one of rows node `list` (its current=).
+int uit_row_current(const uit_t *e, int list, int model, int row);
+int uit_row_slot_current(const uit_t *e, int slot, int model, int row);
 
 #endif

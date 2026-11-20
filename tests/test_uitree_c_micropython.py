@@ -79,6 +79,16 @@ def _engine(cls, mod):
     return cls(S.decl_of(mod.__name__), mod.build, host, None, Damage()), host
 
 
+def _use(tag):
+    """Engines made after this: "reference", "c" (the C engine, its build
+    direct: C compiles every template) or "c_checked" (the reference's
+    checked build, lowered)."""
+    import uitree_app
+    import uitree_c
+    uitree_c.BUILD = "checked" if tag == "c_checked" else "direct"
+    uitree_app.use_engine("reference" if tag == "reference" else "c")
+
+
 def _frame(eng, host, cv, th, box):
     import ui
     host.begin(cv, th, box)
@@ -122,15 +132,19 @@ def conf(loop):
         gc.collect()
     S.TRACING = False
     for name, src in (("long", LONG_SRC), ("counter", FIXTURES[0][1])):
-        for tag, cls in (("py", uitree_app.Engine), ("c", uitree_c.CEngine)):
+        for tag, cls in (("py", uitree_app.Engine), ("c", uitree_c.CEngine), ("c_checked", uitree_c.CEngine)):
+            _use(tag)
             gc.collect()
             mod = _load("cost_%s_%s" % (name, tag), src)
             m0 = gc.mem_alloc()
+            t0 = time.ticks_us()
             eng, host = _engine(cls, mod)
             eng.open()
-            t0 = time.ticks_us()
+            t1 = time.ticks_us()
             _frame(eng, host, cv, th, box)
-            first = time.ticks_diff(time.ticks_us(), t0)
+            first = time.ticks_diff(time.ticks_us(), t1)
+            opened = time.ticks_diff(t1, t0)
+            _use("reference")
             gc.collect()
             held = gc.mem_alloc() - m0
             for _ in range(5):
@@ -147,9 +161,10 @@ def conf(loop):
                 ui.end()
             us.sort()
             out["cost"]["%s_%s" % (name, tag)] = {
-                "open_first_frame_us": first, "held_bytes": held, "paint_us_median": us[len(us) // 2],
+                "open_us": opened, "first_frame_us": first, "open_first_frame_us": opened + first,
+                "held_bytes": held, "paint_us_median": us[len(us) // 2],
                 "paint_alloc_max": max(alloc), "paint_alloc_median": sorted(alloc)[len(alloc) // 2],
-                "stats": eng.stats() if tag == "c" else None}
+                "stats": eng.stats() if tag != "py" else None}
             eng = mod = None
     out["settings"] = settings(loop)
     print("RESULT " + json.dumps(out))
@@ -189,18 +204,21 @@ def _rows_frames(ws, sl, settings_rows, uitree_app, tag):
     cv, th = ws.sys_canvas, ws.theme_colors
     box = (0, 0, cv.w, cv.h)
     for _ in range(2):              # the second: what opening the page costs, measured
+        gc.collect()
+        m0 = gc.mem_alloc()
         t0 = time.ticks_us()
-        uitree_app.use_engine(tag)
+        _use(tag)
         page = settings_rows.RowsPage(sl, host)
-        uitree_app.use_engine("reference")
+        _use("reference")
         page.open()
         t1 = time.ticks_us()
         host.begin(cv, th, box)
         page.draw(cv, th, box, False, 0.033)
         ui.end()
         t2 = time.ticks_us()
+        gc.collect()
         r = {"engine": type(page.engine).__name__, "open_us": time.ticks_diff(t1, t0),
-             "open_first_frame_us": time.ticks_diff(t2, t0)}
+             "open_first_frame_us": time.ticks_diff(t2, t0), "held_bytes": gc.mem_alloc() - m0}
         if _ == 0:
             page = None
 
@@ -236,9 +254,9 @@ def settings(loop):
     first = None
     for tag in SETTINGS_RUNS:
         frames, r = _rows_frames(ws, sl, settings_rows, uitree_app, tag)
-        uitree_app.use_engine(tag)
+        _use(tag)
         sl.rows = settings_rows.RowsPage(sl, sl._host)
-        uitree_app.use_engine("reference")
+        _use("reference")
         ws.open_settings()
         _steps(loop, 20)
         if first is None:
@@ -289,7 +307,7 @@ def settings(loop):
     return out
 '''
 
-SETTINGS_RUNS = ("reference", "c")
+SETTINGS_RUNS = ("reference", "c", "c_checked")
 
 # each a step of Settings' rows on the T-Deck, every change undone (Volume starts at its top)
 SETTINGS_KEYS = ["down", "down", "right", "left", "down", "right", "left", "down", "left", "left",
@@ -324,9 +342,10 @@ def test_the_c_engine_on_the_boards_micropython_draws_the_reference(result):
         assert f["same"] == f["frames"], (name, f["same"], f["frames"])
     for k, v in sorted(info["cost"].items()):
         print(k, json.dumps(v))
-    # A still frame of a page on the C engine allocates nothing.
+    # A still frame of a page on the C engine allocates nothing, in either build.
     for name in ("long", "counter"):
-        assert info["cost"][name + "_c"]["paint_alloc_median"] == 0, info["cost"][name + "_c"]
+        for tag in ("c", "c_checked"):
+            assert info["cost"][name + "_" + tag]["paint_alloc_median"] == 0, info["cost"][name + "_" + tag]
 
 
 def _median(xs):
@@ -343,16 +362,18 @@ def test_settings_rows_on_the_c_engine_draw_the_reference_and_shift_cheaper(resu
     info, text = result
     st = info["settings"]
     ref, c = st["reference"], st["c"]
-    assert c["engine"] == "CPage" and ref["engine"] == "Page", (c["engine"], ref["engine"])
-    assert len(c["same"]) == c["frames"], ("frames that differ", sorted(set(range(c["frames"])) - set(c["same"])))
-    for tag, r in (("reference", ref), ("c", c)):
+    assert c["engine"] == "CPage" and st["c_checked"]["engine"] == "CPage" and ref["engine"] == "Page"
+    for r in (c, st["c_checked"]):
+        assert len(r["same"]) == r["frames"], ("frames that differ", sorted(set(range(r["frames"])) - set(r["same"])))
+    for tag, r in (("reference", ref), ("c", c), ("c_checked", st["c_checked"])):
         drawn = [d for d in r["drag"] if d[1]]
         shifted = [d[0] for d in drawn if d[2]]
         r["shift_median"] = _median(shifted)
         print(tag, json.dumps({"drawn": len(drawn), "shifted": len(shifted), "shift_median": r["shift_median"],
                                "idle_sum": sum(r["idle"]), "idle_median": _median(r["idle"]),
                                "toggle_sum": sum(r["toggle"]), "toggle_max": max(r["toggle"]),
-                               "open_us": r["open_us"], "open_first_frame_us": r["open_first_frame_us"]}))
+                               "open_us": r["open_us"], "open_first_frame_us": r["open_first_frame_us"],
+                               "held_bytes": r["held_bytes"]}))
         assert len(drawn) > 30 and len(shifted) > len(drawn) // 2, (tag, len(shifted), len(drawn))
     assert c["shift_median"] < FA.SETTINGS_FRAME, c["shift_median"]
     assert c["shift_median"] <= ref["shift_median"], (c["shift_median"], ref["shift_median"])

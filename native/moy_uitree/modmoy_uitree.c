@@ -79,6 +79,13 @@ static mp_obj_t eng_error(mp_obj_t self)
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(eng_error_obj, eng_error);
 
+static mp_obj_t eng_error_code(mp_obj_t self)
+{
+    const char *s = uit_error_code(eng(self));
+    return mp_obj_new_str(s, strlen(s));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(eng_error_code_obj, eng_error_code);
+
 static mp_obj_t eng_state(size_t n, const mp_obj_t *a)
 {
     (void)n;
@@ -170,6 +177,13 @@ static mp_obj_t eng_get_text(mp_obj_t self, mp_obj_t slot)
     return s ? mp_obj_new_str(s, n) : MP_OBJ_NEW_QSTR(MP_QSTR_);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(eng_get_text_obj, eng_get_text);
+
+static mp_obj_t eng_get_cell(size_t n_args, const mp_obj_t *a)
+{
+    const char *s = uit_get_cell(eng(a[0]), mp_obj_get_int(a[1]), mp_obj_get_int(a[2]), mp_obj_get_int(a[3]));
+    return s ? mp_obj_new_str(s, strlen(s)) : mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(eng_get_cell_obj, 4, 4, eng_get_cell);
 
 static mp_obj_t eng_build_begin(mp_obj_t self, mp_obj_t pid)
 {
@@ -344,6 +358,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(eng_stats_obj, eng_stats);
 static const mp_rom_map_elem_t eng_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&eng_del_obj) },
     { MP_ROM_QSTR(MP_QSTR_error), MP_ROM_PTR(&eng_error_obj) },
+    { MP_ROM_QSTR(MP_QSTR_error_code), MP_ROM_PTR(&eng_error_code_obj) },
     { MP_ROM_QSTR(MP_QSTR_state), MP_ROM_PTR(&eng_state_obj) },
     { MP_ROM_QSTR(MP_QSTR_model), MP_ROM_PTR(&eng_model_obj) },
     { MP_ROM_QSTR(MP_QSTR_row_of), MP_ROM_PTR(&eng_row_of_obj) },
@@ -361,6 +376,7 @@ static const mp_rom_map_elem_t eng_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_model), MP_ROM_PTR(&eng_set_model_obj) },
     { MP_ROM_QSTR(MP_QSTR_get_int), MP_ROM_PTR(&eng_get_int_obj) },
     { MP_ROM_QSTR(MP_QSTR_get_text), MP_ROM_PTR(&eng_get_text_obj) },
+    { MP_ROM_QSTR(MP_QSTR_get_cell), MP_ROM_PTR(&eng_get_cell_obj) },
     { MP_ROM_QSTR(MP_QSTR_build_begin), MP_ROM_PTR(&eng_build_begin_obj) },
     { MP_ROM_QSTR(MP_QSTR_node), MP_ROM_PTR(&eng_node_obj) },
     { MP_ROM_QSTR(MP_QSTR_prop), MP_ROM_PTR(&eng_prop_obj) },

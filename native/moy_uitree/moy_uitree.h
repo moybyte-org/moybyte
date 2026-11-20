@@ -27,6 +27,7 @@ enum {
     UIT_E_KIND = -3,        // a kind or prop this engine does not draw
     UIT_E_NOMEM = -4,
     UIT_E_ARG = -5,         // a handle out of range, a value of the wrong type
+    UIT_E_CHECK = -6,       // a mistake the spec names (T01-T05, C01-C02, N04): `uit_error_code`
 };
 
 // State types.
@@ -35,7 +36,7 @@ enum { UIT_BOOL = 1, UIT_INT, UIT_NUM, UIT_TEXT, UIT_ENUM, UIT_ROWOF, UIT_MODEL 
 // Node kinds (level 1).
 enum {
     UIT_PAGE = 1, UIT_GROUP, UIT_LABEL, UIT_INFO, UIT_LINK, UIT_BUTTON, UIT_TOGGLE,
-    UIT_ROWS, UIT_DIALOG, UIT_SEG, UIT_SLIDER, UIT_FIELD, UIT_KINDS
+    UIT_ROWS, UIT_DIALOG, UIT_SEG, UIT_SLIDER, UIT_FIELD, UIT_EMPTY, UIT_KINDS
 };
 
 // Events (`uit_next`).
@@ -44,6 +45,7 @@ enum {
     UIT_EV_ACTION = 1,      // a = action, b = model slot or -1, c = row index or -1; text: the source,
                             // then 0x02 and the id of the node that fired it where a node did
     UIT_EV_WRITE = 2,       // a = the slot the engine wrote
+    UIT_EV_CELL = 3,        // a = the model slot, b = the row, c = the field the engine wrote (`uit_get_cell`)
 };
 
 // Frame flags (`uit_frame`).
@@ -67,6 +69,8 @@ uit_t *uit_new(void);
 void uit_free(uit_t *e);
 // The last error's text (a refused name, a source and where it stopped).
 const char *uit_error(const uit_t *e);
+// The spec's code of the last error when it was UIT_E_CHECK ("T02"), else "".
+const char *uit_error_code(const uit_t *e);
 
 // -- declarations (once, at open) ------------------------------------------
 // A state slot: its index. `values` an enum's values, NUL-separated.
@@ -96,6 +100,8 @@ int uit_set_model(uit_t *e, int slot, int n, const char *cells, size_t len);
 int32_t uit_get_int(const uit_t *e, int slot);
 // A text slot's bytes (n out), NULL for another type.
 const char *uit_get_text(const uit_t *e, int slot, size_t *n);
+// A model's cell's text (row `row`, field `f`), NULL out of range.
+const char *uit_get_cell(const uit_t *e, int slot, int row, int f);
 
 // -- the build (each page) -------------------------------------------------
 // A fresh tree; `page_id` the toolkit id of the page (its build and level).

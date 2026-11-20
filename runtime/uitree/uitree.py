@@ -1939,10 +1939,11 @@ def _node(kind, key, props, where, act=None):
     n = Node(kind, key, where)
     n.act = act
     n.ctx = b.ctx
+    direct = b.direct
     for k, v in props.items():
-        if v is None and schema.get(k, "").startswith("action") is False:
-            continue                        # an optional prop given None is not given
         pt = schema.get(k)
+        if v is None and (pt is None or not pt.startswith("action")):
+            continue                        # an optional prop given None is not given
         if pt is None and k in RETIRED_PROPS:
             raise UIError("N04", "ui.%s %s= is retired" % (kind, k), where=where, fix=RETIRED_PROPS[k])
         if pt is None:
@@ -1961,6 +1962,8 @@ def _node(kind, key, props, where, act=None):
                 raise UIError("N01", "ui.%s %s= takes a draw function (the escape hatch)" % (kind, k),
                               where=where, found=repr(v), fix=_FN_FIX.get((kind, k), _FN_FIX[None]) % k)
             n.l[k] = v
+        elif direct and pt in _DIRECT:
+            _direct_src(kind, k, v, pt, where)    # the engine compiles the source at lowering
         elif pt == "cond":
             n.p[k] = cond(v, b.ctx, where)
         elif pt == "conds":
@@ -1994,6 +1997,31 @@ def _node(kind, key, props, where, act=None):
     n.parent = parent
     parent.kids.append(n)
     return n
+
+
+# what a direct build (`Builder.direct`) leaves to the engine's compiler
+_DIRECT = ("cond", "text", "int", "choice", "ints", "image", "texts")
+
+
+def _direct_src(kind, k, v, pt, where):
+    """A direct build's check of a source it does not compile: its Python
+    type (C01, T01), what only Python can see."""
+    if pt == "cond":
+        if not isinstance(v, (str, bool)) or isinstance(v, str) and not v.strip():
+            raise UIError("C01", "a condition is a text", found="%r (%s)" % (v, _pyt(v)),
+                          fix='shown="on", "!busy", "mode=edit", "a & !b"', where=where)
+    elif pt == "texts":
+        if isinstance(v, str) or not isinstance(v, (list, tuple)):
+            raise UIError("N01", "ui.%s %s= is a list of texts" % (kind, k), where=where,
+                          found=repr(v), fix="%s=[%r]" % (k, v))
+        for x in v:
+            _direct_src(kind, k, x, "text", where)
+    elif pt == "int" and type(v) is int or pt == "ints" and isinstance(v, tuple):
+        pass
+    elif not isinstance(v, str):
+        raise UIError("T01", "%s=: a template is a text" % k, found="%r (%s)" % (v, _pyt(v)),
+                      fix='"{name}" to show a state name' if not callable(v) else
+                      "name an action, never a function", where=where)
 
 
 def _texts(gs):
@@ -2279,7 +2307,10 @@ def seg(label, name, labels=None, text=None, look="seg", **p):
                       fix='text="{.FIELD}", a template over a row of %s' % t.model)
     n = _node("seg", name, dict(p, label=label, look=look), where)
     n.l["model"] = t.model
-    n.l["text"] = tmpl(text, Ctx(_st()._t[t.model]), where, "text").g
+    if _NOW.app.direct:
+        _direct_src("seg", "text", text, "text", where)
+    else:
+        n.l["text"] = tmpl(text, Ctx(_st()._t[t.model]), where, "text").g
     n.src["text"] = text
     return n
 
@@ -2305,7 +2336,10 @@ def _list(kind, model_name, p, where):
     n.ctx = Ctx(mt, p.get("current"))
     n.l["model"] = model_name
     if group is not None:           # a caption drawn where its value changes from the row before
-        n.l["group"] = tmpl(group, n.ctx, where, "group").g
+        if b.direct:
+            _direct_src(kind, "group", group, "text", where)
+        else:
+            n.l["group"] = tmpl(group, n.ctx, where, "group").g
         n.src["group"] = group
     b.ctx = n.ctx
     return n
@@ -2783,6 +2817,9 @@ class _AnyColour(dict):
 class Builder:
     """Runs a page's build: typed, keyed, every name resolved."""
 
+    # a direct build keeps each template's and condition's source for the
+    # engine that compiles it (the C engine's board build mode)
+    direct = False
     QUERIES = {"text_size": lambda t, sc=1: (6 * sc * len(t), 8 * sc),
                "colors": lambda: _AnyColour(), "fade": lambda r, top: None}
 

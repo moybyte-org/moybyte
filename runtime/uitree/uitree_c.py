@@ -35,14 +35,14 @@ class EngineGap(S.UIError):
 
 # the engine's numbers (native/moy_uitree/moy_uitree.h)
 BOOL, INT, NUM, TEXT, ENUM, ROWOF, MODEL = 1, 2, 3, 4, 5, 6, 7
-EV_NONE, EV_ACTION, EV_WRITE = 0, 1, 2
+EV_NONE, EV_ACTION, EV_WRITE, EV_CELL = 0, 1, 2, 3
 F_DESK, F_ON_BAR, F_BAND, F_BARE, F_TRACE, F_UP, F_DOWN, F_GEN = 1, 2, 4, 8, 16, 32, 64, 128
 F_PAGES_SHIFT = 8
 OWE = 1 << 16
 A_HOOK, A_ROLE_CONFIRM, A_ROLE_BACK = 1, 2, 4
 INPUTS = ("keys", "tdeck", "pad", "touch")
 _KINDS = {"page": 1, "group": 2, "label": 3, "info": 4, "link": 5, "button": 6, "toggle": 7,
-          "rows": 8, "dialog": 9, "seg": 10, "slider": 11, "field": 12}
+          "rows": 8, "dialog": 9, "seg": 10, "slider": 11, "field": 12, "empty": 13}
 _HEAD = {"rows": ("model",), "dialog": ("buttons",)}
 _KIND_NAMES = dict((v, k) for k, v in _KINDS.items())
 _KIND_NAMES[len(_KINDS) + 1] = "cycle"          # UIT_KINDS: a seg of the cycle look
@@ -50,6 +50,24 @@ _BOUND = ("toggle", "seg", "slider", "field")       # a two-way control: bound t
 _LIT_ONLY = {"seg": ("values", "words", "model", "labels")}   # what the reference keeps beside a node's props
 _TYPED = "typed in field "
 LOWERED = "lowered"         # an engine's root once its page is in the store: the Python tree is gone
+E_CHECK = -6                # UIT_E_CHECK: a mistake the spec names, its code `error_code()`
+E_GAP = -3                  # UIT_E_KIND: what this engine does not draw yet
+# The build mode of the engines made after it is set. "direct": the build's
+# calls keep each template's and condition's source and C compiles it at
+# lowering, raising the spec's codes (T01-T05, C01-C02) from its compiler.
+# "checked": the reference's Builder compiles and checks them first, as the
+# host's checker does.
+BUILD = "direct"
+# each code C's compiler raises, with the fix the contract gives it
+FIXES = {"T01": "the template's syntax: {name}, {name|fmt %d}, {cond?a:b}; '{{' for a brace, '\\:' for a colon "
+                "in a branch",
+         "T02": "name a declared state, a field of the rows, a system value or a label table",
+         "T03": "name a value of the type the site takes",
+         "T04": "a label for each value of the enum, True and False for a bool, else \"_\"",
+         "T05": "{sel.field} outside a list; {.field} and @current inside ui.rows",
+         "C01": 'a bare condition: shown="on", "!busy", "mode=edit", "a & !b"',
+         "C02": "a condition needing & and | is a derive, named here",
+         "N04": "a size class: @wide, @desk, @tall, @handheld"}
 
 
 class CEngine(Engine):
@@ -64,13 +82,22 @@ class CEngine(Engine):
         if _New is None:
             raise EngineGap("on a tier with no moy_uitree")
         self._x = _New()
+        self.direct = BUILD == "direct"
         self._slot, self._names, self._types, self._pushed = {}, [], [], {}
         self._declare()
 
-    def _ck(self, r, what):
+    def _ck(self, r, what, where=None):
         if r < 0:
-            raise EngineGap("%s (%s)" % (what, self._x.error()))
+            self._fail(r, what, where)
         return r
+
+    def _fail(self, r, what, where):
+        """A refusal of C's: a mistake the spec names (UIError, its code), or
+        what this engine does not draw yet (EngineGap)."""
+        if r == E_CHECK:
+            code = self._x.error_code()
+            raise S.UIError(code, "%s: %s" % (what, self._x.error()), where=where or ("?", 0), fix=FIXES[code])
+        raise EngineGap("%s (%s)" % (what, self._x.error()))
 
     # -- declarations ----------------------------------------------------------
 
@@ -182,6 +209,23 @@ class CEngine(Engine):
         st._ver[name] += 1
         self._pushed[name] = st._ver[name]
 
+    def _pull_cell(self, slot, ri, fi):
+        """A row's field the engine wrote (a toggle bound to `.field`): the
+        row made again with it, as the reference's `_row_write` makes it."""
+        st = self.s
+        name, t = self._names[slot], self._types[slot]
+        f = list(t.fields)[fi]
+        ft, raw = t.fields[f], self._x.get_cell(slot, ri, fi)
+        v = raw == "1" if ft is S.BOOL else int(raw) if ft is S.INT else float(raw) if ft is S.NUM else raw
+        rows = st._v[name]
+        old = rows[ri]
+        d = dict(old._f)
+        d[f] = v
+        new = S.Row(old._m, d)
+        st._v[name] = tuple(new if r is old else r for r in rows)
+        st._ver[name] += 1
+        self._pushed[name] = st._ver[name]
+
     def _drain(self):
         """The engine's trace lines, then its events: writes pulled, actions queued."""
         x = self._x
@@ -207,6 +251,8 @@ class CEngine(Engine):
             k, a, m, r, text = ev
             if k == EV_WRITE:
                 self._pull(a)
+            elif k == EV_CELL:
+                self._pull_cell(a, m, r)
             elif k == EV_ACTION:
                 act = self._acts[a]
                 row = self.s._v[self._names[m]][r] if m >= 0 and r >= 0 else None
@@ -227,45 +273,81 @@ class CEngine(Engine):
 
     def lower(self, root):
         """The checked tree into the store: one node call a node, one prop call
-        a prop, in the order the build gave them."""
+        a prop, in the order the build gave them. Nothing is formatted but
+        for a refusal."""
         x = self._x
         x.build_begin(self._page_id())
+        cnode, cprop, cact, aidx, fail = x.node, x.prop, x.node_action, self._aidx, self._fail
+        kinds, bound, heads, lits_only, action = _KINDS, _BOUND, _HEAD, _LIT_ONLY, S.Action
 
         def node(n, parent):
-            kind = _KINDS.get(n.kind)
+            nk, l = n.kind, n.l
+            kind = kinds.get(nk)
             if kind is None:
-                raise EngineGap("a %s node" % n.kind)
-            if n.l.get("field"):
-                raise EngineGap("a %s bound to a row's field" % n.kind)
-            me = self._ck(x.node(kind, n.key, parent), "node %s" % n.key)
-            if n.kind in _BOUND:
-                self._ck(x.prop(me, "bind", n.key, None), "%s %s" % (n.kind, n.key))
-            if n.kind == "seg" and "labels" in n.l:
-                self._ck(x.prop(me, "labels", n.l["labels"], None), "seg %s labels" % n.key)
-            elif n.kind == "rows":
-                self._ck(x.prop(me, "bind", n.l["model"], None), "rows " + n.key)
+                raise EngineGap("a %s node" % nk)
+            field = l.get("field") if l else None
+            if field and nk != "toggle":
+                raise EngineGap("a %s bound to a row's field" % nk)
+            me = cnode(kind, n.key, parent)
+            if me < 0:
+                fail(me, "node %s" % n.key, n.where)
+            if field:
+                r = cprop(me, "field", field, None)
+                if r >= 0 and "on" in l:
+                    r = cprop(me, "on", l["on"].name, repr(l["on"]))
+                if r < 0:
+                    fail(r, "%s .%s" % (nk, field), n.where)
+            elif nk in bound:
+                r = cprop(me, "bind", n.key, None)
+                if r < 0:
+                    fail(r, "%s %s" % (nk, n.key), n.where)
+            if nk == "seg" and "labels" in l:
+                r = cprop(me, "labels", l["labels"], None)
+                if r < 0:
+                    fail(r, "seg %s labels" % n.key, n.where)
+            elif nk == "rows":
+                r = cprop(me, "bind", l["model"], None)
+                if r < 0:
+                    fail(r, "rows " + n.key, n.where)
+            head = heads.get(nk, ())
             for k, src in n.src.items():
-                if k in _HEAD.get(n.kind, ()):
+                if k in head:
                     continue
-                v = n.l.get(k)
-                rep = repr(v) if k in n.l else None
-                if hasattr(v, "fn") and hasattr(v, "takes"):        # an action named by a prop
-                    src = v.name
+                rep = None
+                if k in l:
+                    v = l[k]
+                    if type(v) is action:              # an action named by a prop
+                        src = v.name
+                    if type(v) is action or not callable(v):     # a compiled template keeps no literal
+                        rep = repr(v)
+                if type(src) is str:
+                    pass
+                elif (type(src) is list or type(src) is tuple) and S.SCHEMA[nk].get(k) == "texts":
+                    for line in src:        # one prop a line
+                        r = cprop(me, k, line, None) if type(line) is str else E_GAP
+                        if r < 0:
+                            fail(r, "ui.%s %s=%r" % (nk, k, line), n.where)
+                    continue
+                elif type(src) is bool and S.SCHEMA[nk].get(k) == "cond":
+                    raise EngineGap("%s %s=%r: a literal condition" % (nk, k, src))
                 elif type(src) is int or type(src) is bool:        # a literal number or flag
                     src, rep = str(src), repr(src)
                 elif not isinstance(src, str):
-                    raise EngineGap("%s %s=%r" % (n.kind, k, src))
-                self._ck(x.prop(me, k, src, rep), "%s %s=%r" % (n.kind, k, src))
-            lits = _LIT_ONLY.get(n.kind, ())
-            for k in n.l:
-                if k not in n.src and k not in ("model", "buttons", "field") and k not in lits and \
-                        n.l[k] is not None:
-                    raise EngineGap("%s %s=" % (n.kind, k))
+                    raise EngineGap("%s %s=%r" % (nk, k, src))
+                r = cprop(me, k, src, rep)
+                if r < 0:
+                    fail(r, "ui.%s %s=%r" % (nk, k, src), n.where)
+            if l:
+                lits = lits_only.get(nk, ())
+                for k in l:
+                    if k not in n.src and k not in ("model", "buttons", "field", "on") and k not in lits and \
+                            l[k] is not None:
+                        raise EngineGap("%s %s=" % (nk, k))
             if n.act is not None:
-                x.node_action(me, self._aidx[n.act.name])
-            if n.kind == "dialog":
-                for a in n.l["buttons"]:
-                    x.node_action(me, self._aidx[a.name])
+                cact(me, aidx[n.act.name])
+            if nk == "dialog":
+                for a in l["buttons"]:
+                    cact(me, aidx[a.name])
             for k in n.kids:
                 node(k, me)
         node(root, -1)
