@@ -74,6 +74,10 @@ Then a finger on its Games tab, over a shelf of the kid's games: the
 carousel flung (HOME_SWIPE_FRAME, HOME_SWIPE_MEAN) and the icons
 arrangement dragged up its rows and flung (ICONS_SWIPE_MEDIAN).
 
+Then the bar's popovers a handheld opens, the clock's month and the control
+center: open and idle, a popover allocates nothing; stepped as its keys step
+it, no more than on today's verbs (POPOVER_STEPS).
+
 THE CLOCK. The console's frame is handed one slot of the T-Deck's 60 fps cap as
 its dt, whatever the frame cost (the driver's FRAME_S), and an input is given a
 fixed number of frames. A glide, a coast and a swipe's release velocity then
@@ -436,6 +440,7 @@ def measure(loop):
     panes(loop, info)
     row_of_parts(loop, info)
     status_panel(loop, info)
+    popovers(loop, info)
     print("RESULT " + json.dumps(info))
 
 
@@ -1084,6 +1089,66 @@ def status_panel(loop, info):
     for _ in range(10):
         loop.step()
 
+
+def _pop_seen(ws, widget):
+    """What the open popover shows that a step moves: the clock's month,
+    the control center's Volume."""
+    if widget == "clock":
+        return ws.sysmenu.comp.month()
+    return ws.settings_layer.level("volume")[0]
+
+
+def popovers(loop, info):
+    """The bar's popovers a handheld opens (runtime/system/popover.py): the
+    clock's month and the control center, each open and idle, then stepped
+    every fourth frame as its key steps it (the month paged, the Volume
+    lowered, handed to the popover as its handler does, the key's decoding
+    outside the frame measured): what each frame allocates. The open
+    frame's cost is recorded beside them, unpinned (an open is an event)."""
+    from gc import mem_alloc
+    ws = loop.ws
+    sl = ws.settings_layer
+    for widget in ("clock", "battery"):
+        for _ in range(30):
+            loop.step()
+        gc.collect()
+        gc.disable()
+        m = mem_alloc()
+        ws.toggle_popover(widget)
+        loop.step()
+        info["pop_%s_open" % widget] = mem_alloc() - m
+        gc.enable()
+        info["pop_%s_kind" % widget] = type(ws.sysmenu.comp).__name__ if ws.sysmenu.open else None
+        for _ in range(30):
+            loop.step()
+        gc.collect()
+        gc.disable()
+        idle = []
+        for _ in range(60):
+            m = mem_alloc()
+            loop.step()
+            idle.append(mem_alloc() - m)
+        info["pop_%s_idle" % widget] = idle
+        before = _pop_seen(ws, widget)
+        step = []
+        for n in range(60):
+            if n % 4 == 0:
+                if widget == "clock":
+                    ws.sysmenu.comp.page(1 if n % 8 == 0 else -1)
+                else:
+                    cur, lo, _hi = sl.level("volume")
+                    sl.set_level("volume", cur - 1 if cur > lo + 1 else cur + 1)
+                    ws.mark_dirty()
+                ws.popover_touch()
+            m = mem_alloc()
+            loop.step()
+            step.append(mem_alloc() - m)
+        info["pop_%s_stepped" % widget] = step
+        info["pop_%s_moved" % widget] = _pop_seen(ws, widget) != before
+        gc.enable()
+        ws.close_popover()
+        for _ in range(30):
+            loop.step()
 
 def row_of_parts(loop, info):
     """A table of parts side by side under snap (docs/ui_api_2026-10.md
@@ -2383,3 +2448,35 @@ def test_a_match_tick_allocates_nothing_around_the_c(tmp_path):
         "the board-model MicroPython measures what it allocates.")
     assert (held, pressed) == (1, 1), "the slots read the last tick's masks"
     assert spent == 0, "200 match ticks allocated %d bytes" % spent
+
+
+@pytest.mark.parametrize("widget,kind", (("clock", "MonthView"), ("battery", "ControlCenter")))
+def test_an_open_bar_popover_idles_allocating_nothing(result, widget, kind):
+    """A handheld's bar popover open and idle: its frames allocate nothing
+    (a modal layer's pointer once made a tuple a frame, its component's
+    handler a bound method and an argument tuple)."""
+    info, text = result
+    assert info["pop_%s_kind" % widget] == kind, text[-3000:]
+    _assert_quiet(info["pop_%s_idle" % widget], "%s popover idle" % widget, text)
+
+
+# What fifteen steps of an open popover allocate, in bytes, on the popover
+# drawn with today's verbs: a paged month 416 a step (the frame that paints
+# the card), a Volume step 3392 to 3408 (the stepped level marks the whole
+# frame, whose repaint of the home under it differs by a block from run to
+# run) and 160 the frame after. A port of the popover must not cost more
+# than these, POPOVER_STEP_SLACK a step aside.
+POPOVER_STEPS = {"clock": 6240, "battery": 53280}
+POPOVER_STEP_SLACK = 32
+
+
+@pytest.mark.parametrize("widget", ("clock", "battery"))
+def test_an_open_bar_popover_steps_allocating_no_more_than_on_todays_verbs(result, widget):
+    """The popover stepped as its keys step it (the month paged, the
+    control center's Volume moved), each step's frames together."""
+    info, text = result
+    assert info["pop_%s_moved" % widget], "the steps moved nothing on the %s popover" % widget
+    got = info["pop_%s_stepped" % widget]
+    assert len(got) == 60, len(got)
+    assert sum(got) <= POPOVER_STEPS[widget] + 15 * POPOVER_STEP_SLACK, (
+        widget, sum(got), [d for d in got if d][:20])

@@ -28,6 +28,16 @@ editor cores).
 import ui_draw as _ui_draw
 
 
+def _strip_tap(ws):
+    """A modal's pointer: the game pointer's tap and hold cleared, so a
+    cart under it never sees the press. A pointer with neither stays the
+    object it is: the router keeps its idle publish from frame to frame,
+    and a new tuple there would make it publish afresh every frame."""
+    gp = ws.input.game_pointer
+    if gp is not None and (gp[2] or (len(gp) > 3 and gp[3])):
+        ws.input.game_pointer = (gp[0], gp[1], False, False)
+
+
 class Layer:
     """One composited surface of the console (docs/history/shell_layers_refactor_v1.md): it
     owns its own pixels, input, state, and constants, and plugs into Workstation's
@@ -515,8 +525,7 @@ class _PauseLayer(Layer):
     def handle_pointer(self, px, py, click):
         ws = self.ws
         ws.pause.handle_pointer(px, py, click)
-        gp = ws.input.game_pointer
-        ws.input.game_pointer = (gp[0], gp[1], False, False)
+        _strip_tap(ws)
         return True
 
 
@@ -539,8 +548,7 @@ class _ConfirmLayer(Layer):
     def handle_pointer(self, px, py, click):
         ws = self.ws
         ws.confirm.handle_pointer(px, py, click)
-        gp = ws.input.game_pointer
-        ws.input.game_pointer = (gp[0], gp[1], False, False)
+        _strip_tap(ws)
         return True
 
 
@@ -571,13 +579,13 @@ class _SysMenuLayer(Layer):
         else:
             self.ws.menu_ui.draw_full(dt)   # a full frame: dim the content first
 
-    def _comp(self, fn, *args):
-        """Run a component's handler: a change inside the panel is the
-        popover's (whatever dirty mark the handler left), one outside it
-        marks the frame."""
+    def _comp(self, was, got):
+        """A component's handler ran, the frame's dirty mark `was` before
+        it, answering `got`: a change inside the panel is the popover's
+        (whatever dirty mark the handler left), one outside it marks the
+        frame. Its callers read the mark and run the handler in its
+        arguments: no bound method or argument tuple a frame."""
         ws = self.ws
-        was = ws.frame_state.dirty
-        got = fn(*args)
         if got == "global":
             ws.mark_dirty()
         elif got == "local":
@@ -589,13 +597,13 @@ class _SysMenuLayer(Layer):
         m = ws.sysmenu
         comp = m.comp
         if comp is not None and comp.typing():
-            self._comp(comp.handle_input, i)
+            self._comp(ws.frame_state.dirty, comp.handle_input(i))
         elif (i.pressed("b") or i.pressed("stop") or i.pressed("home")
               or i.last_key == 27):
             m.close()
             ws.popover_touch()
         elif comp is not None:
-            self._comp(comp.handle_input, i)
+            self._comp(ws.frame_state.dirty, comp.handle_input(i))
         elif i.steps("up"):
             m.move(-1)
             ws.popover_touch()
@@ -616,7 +624,7 @@ class _SysMenuLayer(Layer):
             if comp is not None:
                 r = m.panel_rect()
                 if px >= r[0] and py >= r[1] and px < r[0] + r[2] and py < r[1] + r[3]:
-                    self._comp(comp.click, px, py, r)
+                    self._comp(ws.frame_state.dirty, comp.click(px, py, r))
                 else:
                     m.close()             # outside dismisses
                     ws.popover_touch()
@@ -632,8 +640,7 @@ class _SysMenuLayer(Layer):
                     m.activate()
                     ws.mark_dirty()
                 ws.popover_touch()
-        gp = ws.input.game_pointer
-        ws.input.game_pointer = (gp[0], gp[1], False, False)
+        _strip_tap(ws)
         return True
 
 
@@ -661,6 +668,5 @@ class _AboutLayer(Layer):
         ws = self.ws
         if ws.menu_ui.about.host.point(px, py, click, bool(getattr(ws.pointer, "down", False))):
             ws.mark_dirty()
-        gp = ws.input.game_pointer
-        ws.input.game_pointer = (gp[0], gp[1], False, False)
+        _strip_tap(ws)
         return True
