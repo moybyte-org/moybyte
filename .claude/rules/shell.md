@@ -112,8 +112,8 @@ to whoever called it.
   and the Editor's one bar none (its B and Esc step back, and it shows no
   Wi-Fi). LEFT zone = LENT to the active app (`draw_zone`):
   the home shows the active tab's verbs on the selected card, the Editor its
-  tab ladder, UNDO, REDO and PLAY (on a desk its workspaces instead,
-  `runtime/editors/editor_desk.py`). Icons are the theme's icon set where its look names
+  tab ladder, UNDO, REDO and PLAY (on a desk its workspaces instead), both
+  lent from `runtime/editors/editor_ui.py`'s rows (`head`, `desk_head`). Icons are the theme's icon set where its look names
   one and the image carries it (`runtime/toolkit/iconsets.py`: a smooth set's masks or the pixel
   set, a tile a slot of its `SLOTS`), else 16×16 sprites from the shell's baked `IconSheet`; the slots a
   theme's `icons.pixel_slots` names draw from its own tiles, painted in the Editor's theme mode
