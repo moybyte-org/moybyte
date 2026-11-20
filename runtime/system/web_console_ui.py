@@ -9,8 +9,9 @@ distributed-state problem, and the two-writer collision it exists to prevent is
 simply designed out instead: while a browser is editing this store, nothing on
 the glass can be editing it too, because the glass is showing this screen.
 
-The screen is a page (docs/history/look_2026-10.md step 33) and deliberately
-nothing else:
+The screen is a `uitree` page (`web_page`: the code a canvas cell of a split,
+what to do the column beside it), hosted on the screen's own AppHost, and
+deliberately nothing else:
 
   * THE QR CODE, which is the feature, on its white quiet zone. The link is
     `http://<ip>/#t=TOKEN&b=ID`: the address and, after its `#`, a single-use
@@ -39,19 +40,66 @@ injected at construction rather than imported back from console.py.
 
 import ui as _ui
 import ui_draw as _ui_draw
-_in = _ui.rect_in   # one hit-test (ui.rect_in)
-
+import uitree as ui
+import uitree_app
 import moy_qr as _qr
 import layout_base as _lb
 
-_HEAD = {"face": "title"}
-_SAY = {"tone": "dim", "wrap": True, "lines": 3}
-_ADDRESS = {"face": "mono", "tone": "value"}
-_CAP = {"tone": "dim", "face": "caption", "wrap": True, "lines": 2}
-_KEYS = ("back", "Turn off")
+s = ui.state(address="", sign_in="", note="", stale=False)
+
+
+def web_poll(web):
+    """What the page says, read from the WebConsole each frame."""
+    s.address = _split(web.url())
+    s.sign_in = web.sign_in_hint() if s.address else ""
+    s.note = web.page_note() or ""
+    s.stale = bool(web.page_stale())
+
+
+def update_it():
+    uitree_app.env()._web.update_page()
+
+
+def turn_off():
+    uitree_app.env()._web.stop()
+
+
+ui.action("update_it", "Update it", update_it)
+ui.action("turn_off", "Turn off", turn_off, keys=("role:back",))
+
+
+def draw_qr(cv, x, y, w, h):
+    uitree_app.env().draw_qr(cv, (x, y, w, h))
+
+
+def web_page():
+    with ui.page(""):
+        with ui.split("row", sizes=(2, 3)):
+            ui.canvas("qr", draw_qr)
+            with ui.group(""):
+                ui.label("Open in a browser", face="title")
+                ui.label("Scan this with a phone, or on a computer go to", tone="dim", wrap="word",
+                         lines=2)
+                ui.label("{address}", face="mono", tone="value", shown="address")
+                ui.label("Waiting for an address", tone="dim", shown="!address")
+                ui.label("{sign_in}", face="caption", tone="dim", wrap="word", lines=2,
+                         shown="address")
+                ui.label("{note}", face="caption", tone="dim", wrap="word", lines=2, shown="note")
+                ui.button("update_it", shown="stale")
+                ui.button("turn_off", "danger", shown="@touch|@desk")
+
+
+class _Damage:
+    def __init__(self, damage):
+        self.d = damage
+
+    def all(self):
+        self.d.all()
 
 
 class WebConsoleUI:
+    """The connection screen's host: the page (`web_page`) on its own
+    AppHost, its keys and pointer, and the code's matrix."""
 
     NEEDS = ("surface", "theme", "damage")
 
@@ -61,13 +109,19 @@ class WebConsoleUI:
         self._damage = ctx.damage
         self._web = web
         self._NAMES = names
-        self._fs = 1                  # the font scale the last draw laid out at
         # The encoded matrix, cached by the url it encodes. Re-encoding costs
         # a Reed-Solomon pass per frame otherwise, and this screen repaints on
         # every theme change.
         self._qr_for = None
         self._qr = None
         self.host = _ui_draw.AppHost()
+        self._pg = None
+
+    def page(self):
+        if self._pg is None:
+            self._pg = uitree_app.Page(web_page, self.host, _Damage(self._damage), env=self)
+            self._pg.open()
+        return self._pg
 
     def on_enter(self):
         self.host.reset()
@@ -81,7 +135,7 @@ class WebConsoleUI:
             # what the mode forbids -- every other exit path re-parks here (see
             # the Workstation's go_home) -- so a HOME that did nothing would
             # read as a frozen console.
-            self._web.stop()
+            self.page().role("back")
         elif self.host.keys(i):
             self._damage.all()
         return True
@@ -109,71 +163,31 @@ class WebConsoleUI:
             self._qr_for = url
         return self._qr
 
-    def draw(self, rect):
+    def draw(self, rect, dt=0.0):
         """The page over `rect`, the content under the bar: the code at the
-        left, what to do at its right -- "Open in a browser", how, the
-        address in the code face, how else to sign in -- and Turn off where a
-        finger or a pointer is."""
+        left, what to do at its right, and Turn off where a finger or a
+        pointer is."""
         cv = self._surf.canvas()
-        fs = self._fs = self._surf.font_scale()
+        th = self._theme.colors()
         desk = _lb.metric_class() == _lb.DESK
-        cx, cy, cw, ch = rect
-        self.host.begin(cv, self._theme.colors(), rect, desk)
-        _ui.page("")
-        _ui.hints(_KEYS)
-        url = self._web.url()
-        host = _split(url)
-        pad = (24 if desk else 14) * fs
-        foot = (_ui_draw.metrics("value_row")[17 if desk else 16] * fs
-                if _ui_draw.hint_kind() != "touch" else 0)
-        room_h = ch - foot - 2 * pad
-        side = min(room_h, (cw - 3 * pad) * 2 // 5)
-        qr = (cx + pad, cy + pad + (room_h - side) // 2, side, side)
-        self._draw_qr(cv, qr, url, self._NAMES)
-        x = qr[0] + side + pad
-        w = cx + cw - pad - x
-        y = qr[1]
-        y = self._line("Open in a browser", _HEAD, x, y, w, "title")
-        y = self._line("Scan this with a phone, or on a computer go to", _SAY, x, y, w,
-                       "ui", 2)
-        y = self._line(host or "Waiting for an address", _ADDRESS if host else _SAY, x, y, w,
-                       "mono")
-        if host:
-            y += 6 * fs
-            y = self._line(self._web.sign_in_hint(), _CAP, x, y, w, "caption", 2)
-        note = self._web.page_note()
-        if note is not None:
-            y += 6 * fs
-            y = self._line(note, _CAP, x, y, w, "caption", 2)
+        self.host.begin(cv, th, rect, desk)
+        pg = self.page()
+        pg.run(web_poll, self._web, action="web_poll")
+        ui.commit(pg)
+        pg.paint(dt, cv, th, rect, desk)
+        if s.note:
             self._damage.again()           # the update's progress moves on its own
-        if self._web.page_stale():
-            _ui.at(x, y + 8 * fs, min(w, 150 * fs), 28 * fs)
-            if _ui.button("Update it"):
-                self._web.update_page()
-            y += 36 * fs
-        if _ui.input_kind() == "touch" or desk:
-            _ui.at(x, y + 8 * fs, min(w, 120 * fs), 28 * fs)
-            if _ui.button("Turn off", "danger"):
-                self._web.stop()
         if self.host.owed or self.host.tap == 2:
             self._damage.again()             # a tap's release, next frame
 
-    def _line(self, text, o, x, y, w, role, lines=1):
-        """`text` stacked at (x, y) `w` wide in `role`'s face, `lines` lines
-        at most: the y under it."""
-        fs = self._fs
-        h = _ui_draw.font(role)[2] * fs * lines + 4 * fs
-        _ui.at(x, y, w, h)
-        _ui.label(text, o)
-        return y + h
-
-    def _draw_qr(self, cv, rect, url, NAMES):
+    def draw_qr(self, cv, rect):
         """The code, centered in `rect` at the largest whole-pixel module size
         that fits -- including the spec's four-module quiet zone, which is drawn
         as part of the light field rather than left to whatever is behind.
-
         BLACK ON WHITE from the palette, never from the theme: `ink` is white on
         every dark theme, and an inverted code is one most scanners refuse."""
+        NAMES = self._NAMES
+        url = self._web.url()
         m = self.matrix(url) if url else None
         if not m:
             cv.print("NO ADDRESS", rect[0], rect[1], NAMES["red"], 1)

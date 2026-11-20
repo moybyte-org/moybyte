@@ -1632,7 +1632,7 @@ def _turn_off_by_its_button(ws):
     try:
         ws.mark_dirty()
         ws.frame(1 / 30.0)
-        x, y, w, h = ui.host.box("Turn off")
+        x, y, w, h = ui.host.box("turn_off")
         ui.handle_pointer(x + 2, y + 2, True)
         for _ in range(2):                   # the press, then its release
             ws.mark_dirty()

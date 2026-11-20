@@ -24,6 +24,7 @@ PORTED = (
     "update_ui",
     "settings_rows",
     "log_ui",
+    "web_console_ui",
 )
 
 

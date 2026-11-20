@@ -323,7 +323,7 @@ class _WebConsoleLayer(Layer):
     def draw(self, dt):
         ws = self.ws
         lay = ws.layout
-        ws.web.ui.draw((lay.cx, lay.cy, lay.cw, lay.ch))
+        ws.web.ui.draw((lay.cx, lay.cy, lay.cw, lay.ch), dt)
 
     def handle_input(self, i):
         return self.ws.web.ui.handle_input(i)
