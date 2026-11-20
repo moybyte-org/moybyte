@@ -1,0 +1,2504 @@
+{
+ "spec": "ui_api_spec_2026-11.md revision 3",
+ "about": "The UI API's contract as data: every error code (§25.2), node kind and prop (§7), takes= value (§5.4), role (§13.1), retired name (§7.9), app field (§19.1) and system value (§14). Both reference layers are tested against it (tests/test_uitree_contract.py).",
+ "types": {
+  "tpl": "a template",
+  "cond": "a condition",
+  "name": "a declared name (state, model, row_of, unit)",
+  "action": "an action",
+  "hook": "a hook",
+  "action|hook": "an action or a hook",
+  "int": "an int",
+  "bool": "a bool",
+  "list": "a list",
+  "lit": "a literal",
+  "fn": "a function",
+  "key": "a node's key",
+  "table": "a label table",
+  "takes": "a takes= value",
+  "text": "a literal text",
+  "word:A,B": "one of the words",
+  "list:T": "a list of T"
+ },
+ "common_props": {
+  "shown": {
+   "type": "cond",
+   "level": 1
+  }
+ },
+ "child_props": {
+  "span": "a grid's child (§7.6)",
+  "grow": "a row's child (§7.1)"
+ },
+ "codes": {
+  "A01": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a site names no action (the message says when the text given is an action's label)",
+   "fix": {
+    "python": "`app.action(\"add\", \"Add one\", add)`, then `app.button(\"add\")`",
+    "lua": "`ui.action(\"add\", \"Add one\", add)`",
+    "c": "an `action` node named `add`"
+   },
+   "as_run": ""
+  },
+  "A02": {
+   "stage": [
+    "build",
+    "read",
+    "run"
+   ],
+   "meaning": "a site hands what the action's `takes=` does not take (an `arg=`, a row, a typed char, a timer's or a post's key)",
+   "fix": {
+    "python": "`takes=\"arg\"` on the action, or no `arg=` at the site",
+    "lua": "`{ takes = \"arg\" }`",
+    "c": "`moy_ui_prop(\"takes\", \"arg\")`"
+   },
+   "as_run": ""
+  },
+  "A03": {
+   "stage": [
+    "build (host)"
+   ],
+   "meaning": "a handler's parameter count against its `takes=`",
+   "fix": {
+    "python": "`def choose(row):` for `takes=\"row\"`",
+    "lua": "`function(row)`",
+    "c": "— (one entry)"
+   },
+   "as_run": "A02"
+  },
+  "A07": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a row action reached from rows of another model",
+   "fix": {
+    "python": "a second action, or `row=` naming a `row_of` of this model",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": "A05"
+  },
+  "A08": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "an action with an empty label",
+   "fix": {
+    "python": "`app.hook(\"scanned\", scanned)`",
+    "lua": "`ui.hook(\"scanned\", scanned)`",
+    "c": "a `hook` node"
+   },
+   "as_run": "H02"
+  },
+  "A09": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a bad value in an action's declaration: `off`, `takes`, a `row` naming no `row_of`, a name or label not a text, a handler not a function",
+   "fix": {
+    "python": "pass the function: `add`, not `add()`",
+    "lua": "`add`, not `add()`",
+    "c": "`moy_ui_prop(\"off\", \"hide\")`"
+   },
+   "as_run": "A03 (Python), A02 and A04 (Lua)"
+  },
+  "A10": {
+   "stage": [
+    "run"
+   ],
+   "meaning": "`after` called outside a handler",
+   "fix": {
+    "python": "call it from a handler or the `opened` hook",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": "A04"
+  },
+  "B01": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a build reads state, a derive, a document's field or a system value, or asks the engine anything",
+   "fix": {
+    "python": "a template `\"{count}\"`, a condition `shown=\"busy\"`, a switch or rows",
+    "lua": "as Python",
+    "c": "— (a C build has no read call)"
+   },
+   "as_run": "S05 (Python)"
+  },
+  "B02": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a build writes state or issues a command (`push`, `pop`, `focus`, `after`, `post`, `damage`)",
+   "fix": {
+    "python": "name an action the node fires: `on=\"add\"`",
+    "lua": "`{ on = \"add\" }`",
+    "c": "—"
+   },
+   "as_run": ""
+  },
+  "B03": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a declaration inside a page's or a case's function, or a node outside one",
+   "fix": {
+    "python": "declare at the module's top level; make nodes in a function given to `app.page`",
+    "lua": "as Python, `ui.page`",
+    "c": "inside a `page` node"
+   },
+   "as_run": "A05 (Lua)"
+  },
+  "C01": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a condition that is a template, or neither a text nor a bool",
+   "fix": {
+    "python": "`shown=\"pick\"`, not `shown=\"{pick}\"`",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
+  "C02": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "`&&` and `||` mixed at one bracket level (inline: at all)",
+   "fix": {
+    "python": "`app.derive(\"ok\", \"bool\", \"a && (b || c)\")` and `shown=\"ok\"`",
+    "lua": "`ui.derive(...)`",
+    "c": "a `derive` node"
+   },
+   "as_run": ""
+  },
+  "C03": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "brackets in an inline condition",
+   "fix": {
+    "python": "a derive, as for C02",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": "C02"
+  },
+  "D01": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "the `app` declaration: an unknown or placement field (`x`, `place`, `tools`...), or a second one",
+   "fix": {
+    "python": "drop `place=`: the shell places windows",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": "A01 for `tools=`"
+  },
+  "D02": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "`size=` or `min=` not `(w, h)` of desk units or fractions `\"a/b\"` with `0 < a ≤ b`",
+   "fix": {
+    "python": "`size=(\"7/8\", \"9/10\")`",
+    "lua": "`size = { \"7/8\", \"9/10\" }`",
+    "c": "two `moy_ui_prop(\"size\", ...)`"
+   },
+   "as_run": ""
+  },
+  "D04": {
+   "stage": [
+    "tree"
+   ],
+   "meaning": "an app with no `app` declaration",
+   "fix": {
+    "python": "`app.app(\"Counter\", icon=\"calc\")`",
+    "lua": "`ui.app(\"Counter\", { icon = \"calc\" })`",
+    "c": "an `app` node"
+   },
+   "as_run": ""
+  },
+  "D05": {
+   "stage": [
+    "tree"
+   ],
+   "meaning": "a `slot` not in `slots=`, or `slots=` naming a slot the tree lacks",
+   "fix": {
+    "python": "`slots=[\"run\"]` and `app.slot(\"run\")`",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
+  "D06": {
+   "stage": [
+    "open"
+   ],
+   "meaning": "the manifest's `\"ui\"` level is missing, or one this console does not run",
+   "fix": {
+    "python": "`\"ui\": 1` in the manifest",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
+  "E01": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "an enum with no `init=`",
+   "fix": {
+    "python": "`app.enum(\"a\", \"b\", init=\"a\")`",
+    "lua": "`ui.enum(\"a\", \"b\", { init = \"a\" })`",
+    "c": "`moy_ui_prop(\"init\", \"a\")`"
+   },
+   "as_run": ""
+  },
+  "E02": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "`init=` is not one of the enum's values",
+   "fix": {
+    "python": "name one of them",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
+  "E03": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "an enum with fewer than two distinct non-empty values",
+   "fix": {
+    "python": "a bool, or a second value",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": "S07"
+  },
+  "G01": {
+   "stage": [
+    "tree"
+   ],
+   "meaning": "a derive cycle",
+   "fix": {
+    "python": "compute one of them in a handler",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": "D09"
+  },
+  "H01": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a hook where an action belongs (a button, link, tool, item, card, a dialog's `buttons=`)",
+   "fix": {
+    "python": "`app.action(NAME, \"Label\", fn)`",
+    "lua": "`ui.action(...)`",
+    "c": "an `action` node"
+   },
+   "as_run": ""
+  },
+  "H03": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a hook with a label, an icon, keys or `when=`",
+   "fix": {
+    "python": "an action, if a person sees it",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
+  "I01": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a tool or a lent action with no icon from its action or its site, and no `fill=`",
+   "fix": {
+    "python": "`icon=\"pencil\"` on the action",
+    "lua": "as Python",
+    "c": "`moy_ui_prop(\"icon\", \"pencil\")`"
+   },
+   "as_run": "D03"
+  },
+  "I02": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "an action's `icon=` is a template",
+   "fix": {
+    "python": "a site's `icon=\"{...}\"`, or a name",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": "I03"
+  },
+  "K01": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "an app names a shell role (`home`, `full`, `system`)",
+   "fix": {
+    "python": "a role of the app's (§13.1)",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
+  "K02": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "two actions on one key live together in one unit, or an app action beside a unit action",
+   "fix": {
+    "python": "one key, one action",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": "A03"
+  },
+  "K03": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a bad key: a chord other than `ctrl+LETTER`, an unknown role",
+   "fix": {
+    "python": "`keys=[\"ctrl+f\", \"role:search\"]`",
+    "lua": "`keys = { \"ctrl+f\", \"role:search\" }`",
+    "c": "one `moy_ui_prop(\"keys\", ...)` each"
+   },
+   "as_run": "A03"
+  },
+  "L01": {
+   "stage": [
+    "tree"
+   ],
+   "meaning": "a lender with no `lent` site, or a frame lending to itself",
+   "fix": {
+    "python": "`app.lent(\"bar\")` in the frame",
+    "lua": "`ui.lent(\"bar\")`",
+    "c": "a `lent` node"
+   },
+   "as_run": ""
+  },
+  "L02": {
+   "stage": [
+    "tree"
+   ],
+   "meaning": "two shown `lent` sites of one name in one size class",
+   "fix": {
+    "python": "one site per class",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
+  "L03": {
+   "stage": [
+    "tree"
+   ],
+   "meaning": "two shown lenders on one site",
+   "fix": {
+    "python": "lend to two sites",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": "U08"
+  },
+  "M01": {
+   "stage": [
+    "open",
+    "run"
+   ],
+   "meaning": "C: a handle that is not one",
+   "fix": {
+    "python": "—",
+    "lua": "—",
+    "c": "a handle the build returned"
+   },
+   "as_run": "H01 (data run)"
+  },
+  "M02": {
+   "stage": [
+    "run"
+   ],
+   "meaning": "C: a handed value read when none was handed, or a field of another model",
+   "fix": {
+    "python": "—",
+    "lua": "—",
+    "c": "read it in the handler it is handed to"
+   },
+   "as_run": "A07 (data run)"
+  },
+  "M03": {
+   "stage": [
+    "run"
+   ],
+   "meaning": "C: `put_*`, `put_row` or `rows_end` outside `rows_begin ... rows_end`, or a handle not a field of the model",
+   "fix": {
+    "python": "—",
+    "lua": "—",
+    "c": "`moy_ui_rows_begin(model)` first"
+   },
+   "as_run": "R02 (data run)"
+  },
+  "M04": {
+   "stage": [
+    "run"
+   ],
+   "meaning": "C: fields put after the last `put_row`",
+   "fix": {
+    "python": "—",
+    "lua": "—",
+    "c": "end with `moy_ui_put_row()`"
+   },
+   "as_run": "R03 (data run)"
+  },
+  "N01": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "an unknown kind or prop, a bad prop value, a missing required prop (`progress` with no `max=`), a wrong count of arguments, a function given where its result belongs or the reverse",
+   "fix": {
+    "python": "the near name the message offers",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": "B06 (Lua); N06 (`progress`)"
+  },
+  "N02": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "two siblings with one key",
+   "fix": {
+    "python": "a key of its own: `app.row(\"find_strip\")`",
+    "lua": "`ui.row(\"find_strip\", ...)`",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
+  "N03": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a node or declaration where it may not stand (a `tools` in a `group`, a node after the page's `scroll` outside the `foot`, a label table declared on a unit)",
+   "fix": {
+    "python": "move it: the message names where it may stand",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": "A01 for a misplaced `tools`"
+  },
+  "N04": {
+   "stage": [
+    "build",
+    "read"
+   ],
+   "meaning": "a retired name (§7.9), with its replacement",
+   "fix": {
+    "python": "the replacement",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": "O03 for `disabled=`, N01 for `current=` on a tool"
+  },
+  "N06": {
+   "stage": [
+    "tree"
+   ],
+   "meaning": "an anchor naming no node, a part the node lacks, or a tab its enum lacks",
+   "fix": {
+    "python": "`anchor=\"msgs.cur\"`",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
+  "N07": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "`split`: no weight, or a bare `0`; `panes`: not exactly one child grows",
+   "fix": {
+    "python": "`sizes=[112, \"1*\"]`",
+    "lua": "`sizes = { 112, \"1*\" }`",
+    "c": "`moy_ui_prop(\"sizes\", \"1*\")`"
+   },
+   "as_run": ""
+  },
+  "N08": {
+   "stage": [
+    "read",
+    "run"
+   ],
+   "meaning": "`focus(KEY)` names no node, or more than one, in the handler's unit",
+   "fix": {
+    "python": "a key the unit's nodes have",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": "F01 (units run)"
+  },
+  "O01": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "an action or a control that can be off (`when=` or `row=`) with no `off=`",
+   "fix": {
+    "python": "`off=\"hide\"`",
+    "lua": "`off = \"hide\"`",
+    "c": "`moy_ui_prop(\"off\", \"hide\")`"
+   },
+   "as_run": ""
+  },
+  "O02": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "`off=` with neither `when=` nor `row=`",
+   "fix": {
+    "python": "drop `off=`",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
+  "O04": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "`when=` or `off=` on a node that is neither an action's site nor a two-way control",
+   "fix": {
+    "python": "`when=` on the action",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
+  "P01": {
+   "stage": [
+    "tree",
+    "read",
+    "run"
+   ],
+   "meaning": "a push names no page",
+   "fix": {
+    "python": "`app.page(\"about\", about_page)`",
+    "lua": "`ui.page(\"about\", about_page)`",
+    "c": "a `page` node named `about`"
+   },
+   "as_run": ""
+  },
+  "P02": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a `push=` action declares `takes=`",
+   "fix": {
+    "python": "drop `takes=`",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
+  "P03": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a `push=` action has a handler",
+   "fix": {
+    "python": "`app.action(\"about_open\", \"About\", push=\"about\")`",
+    "lua": "`ui.action(\"about_open\", \"About\", nil, { push = \"about\" })`",
+    "c": "no case for it in `moy_app_action` is needed"
+   },
+   "as_run": ""
+  },
+  "P04": {
+   "stage": [
+    "build",
+    "read",
+    "run"
+   ],
+   "meaning": "a push's argument does not fit the page's `arg=`, or `arg=` names no state",
+   "fix": {
+    "python": "`arg=` naming a `row_of` of the pushed row's model",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
+  "Q01": {
+   "stage": [
+    "read"
+   ],
+   "meaning": "Lua: a global name nothing declares",
+   "fix": {
+    "python": "—",
+    "lua": "`local` it, or declare it",
+    "c": "—"
+   },
+   "as_run": "L01 (Lua run)"
+  },
+  "R01": {
+   "stage": [
+    "run"
+   ],
+   "meaning": "a canvas draw reads state its `reads=` does not list",
+   "fix": {
+    "python": "`reads=[\"tape\", \"fresh\"]`",
+    "lua": "`reads = { \"tape\", \"fresh\" }`",
+    "c": "one `moy_ui_prop(\"reads\", ...)` each"
+   },
+   "as_run": ""
+  },
+  "S01": {
+   "stage": [
+    "build",
+    "read",
+    "run"
+   ],
+   "meaning": "no state with that name",
+   "fix": {
+    "python": "declare it in `app.state(...)`",
+    "lua": "in `ui.state { ... }`",
+    "c": "a state node"
+   },
+   "as_run": ""
+  },
+  "S02": {
+   "stage": [
+    "read",
+    "run"
+   ],
+   "meaning": "a write of the wrong type, of None or nil to a non-optional, or of a key no row has; C: a bool not 0 or 1, an enum index out of range",
+   "fix": {
+    "python": "write the declared type, or declare it `app.opt(...)`",
+    "lua": "as Python, `ui.opt`",
+    "c": "`moy_ui_clear` for absence"
+   },
+   "as_run": "S08 (Lua: mixed key types)"
+  },
+  "S03": {
+   "stage": [
+    "read",
+    "run"
+   ],
+   "meaning": "a write into what is written whole or by verbs: a handed row, a record's field, a document, an event, a model by index, an engine-written field",
+   "fix": {
+    "python": "`s.pick.set(state=\"failed\")`, or the whole record",
+    "lua": "the whole record",
+    "c": "—"
+   },
+   "as_run": ""
+  },
+  "S04": {
+   "stage": [
+    "read",
+    "run"
+   ],
+   "meaning": "a read of a field the row or record does not have",
+   "fix": {
+    "python": "a declared field",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
+  "S05": {
+   "stage": [
+    "read",
+    "run"
+   ],
+   "meaning": "a row of the wrong shape written to a model: a missing non-optional field, an unknown field, two rows with one key, no row with that key, `order` not a permutation",
+   "fix": {
+    "python": "every declared field, keys unique",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": "S04"
+  },
+  "S06": {
+   "stage": [
+    "run"
+   ],
+   "meaning": "a state write outside a handler: in a draw, from a service",
+   "fix": {
+    "python": "`app.post(\"indexed\", data)` from the service's callback",
+    "lua": "`ui.post(\"indexed\", data)`",
+    "c": "`moy_ui_post(hook, arg)`"
+   },
+   "as_run": ""
+  },
+  "S07": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a model with no key field, a key field not text or int, or a field named `key`",
+   "fix": {
+    "python": "`app.model(key=\"id\", id=\"\", ...)`",
+    "lua": "`ui.model { key = \"id\", id = \"\" }`",
+    "c": "`moy_ui_prop(\"key\", \"id\")`"
+   },
+   "as_run": ""
+  },
+  "S08": {
+   "stage": [
+    "read"
+   ],
+   "meaning": "Python: a typed name compared with None",
+   "fix": {
+    "python": "`if s.pick:`",
+    "lua": "—",
+    "c": "—"
+   },
+   "as_run": ""
+  },
+  "S09": {
+   "stage": [
+    "read",
+    "run"
+   ],
+   "meaning": "a write to a derive",
+   "fix": {
+    "python": "write the names it reads",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
+  "S10": {
+   "stage": [
+    "read",
+    "run"
+   ],
+   "meaning": "a write to a value the engine writes (`scroll new=`, `canvas size=`)",
+   "fix": {
+    "python": "read it; the engine writes it",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
+  "S11": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a `row_of` naming no model",
+   "fix": {
+    "python": "`app.row_of(\"nets\")` after `nets=app.model(...)`",
+    "lua": "as Python",
+    "c": "`moy_ui_prop(\"model\", \"nets\")`"
+   },
+   "as_run": "S07"
+  },
+  "S12": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a `doc` with an unknown `lang`",
+   "fix": {
+    "python": "`lang=\"python\"`",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": "S07"
+  },
+  "S13": {
+   "stage": [
+    "build",
+    "read"
+   ],
+   "meaning": "a declaration whose initial value has no type: `None` or `nil`, a list, a function",
+   "fix": {
+    "python": "`app.opt(0)` for a value that may be absent",
+    "lua": "`ui.opt(0)`",
+    "c": "`moy_ui_prop_int(\"opt\", 1)`"
+   },
+   "as_run": "S04 (Lua: a `nil` in `ui.state`)"
+  },
+  "T01": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "template syntax (§3.1)",
+   "fix": {
+    "python": "the message shows the column; `\\:` for a colon in a branch",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
+  "T02": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a name, field, system value or label table that does not exist, with the near one",
+   "fix": {
+    "python": "the near name",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
+  "T03": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a name of the wrong type at a site",
+   "fix": {
+    "python": "the message names the type the site takes",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
+  "T04": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "exhaustiveness: a label table, a switch, rows by kind, a `tabs` or `seg` table",
+   "fix": {
+    "python": "a case or label per value, or `_`",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": "T07, T10 (Lua run)"
+  },
+  "T05": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "`{.field}` or `@current` outside a row",
+   "fix": {
+    "python": "`{sel.field}`",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
+  "T06": {
+   "stage": [
+    "read"
+   ],
+   "meaning": "Python: an enum used as a truth value",
+   "fix": {
+    "python": "`if s.op != \"none\":`",
+    "lua": "—",
+    "c": "—"
+   },
+   "as_run": ""
+  },
+  "U02": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a name declared twice in one key space (two states; a state and an action; a unit and a document; two pages)",
+   "fix": {
+    "python": "rename one",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": "F04 (two pages, data run)"
+  },
+  "U03": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a unit's action named outside every node bound to its unit",
+   "fix": {
+    "python": "`unit=code` on the pane or case",
+    "lua": "`{ unit = code }`",
+    "c": "`moy_ui_prop(\"unit\", \"code\")`"
+   },
+   "as_run": ""
+  },
+  "U05": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a dotted name names nothing in that unit",
+   "fix": {
+    "python": "the near name",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
+  "U06": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a name a unit declares that the app also declares",
+   "fix": {
+    "python": "rename one",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": "U02"
+  },
+  "U07": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "`unit=` on a node that cannot bind",
+   "fix": {
+    "python": "a case, pane, popover or page",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
+  "U08": {
+   "stage": [
+    "tree"
+   ],
+   "meaning": "two units answering one key that some size class shows together",
+   "fix": {
+    "python": "give the key to one of them",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
+  "U10": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a unit declared on a unit",
+   "fix": {
+    "python": "declare it on the app",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
+  "W01": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a two-way control's `on=` names an action or hook that does not take what the control hands (`none` for a state, `row` for a `.field`)",
+   "fix": {
+    "python": "`takes=\"none\"`, reading the state",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
+  "W02": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a `work` step's `budget=` is not an int of 1 to 16 ms",
+   "fix": {
+    "python": "`budget=4`",
+    "lua": "as Python",
+    "c": "`moy_ui_prop_int(\"budget\", 4)`"
+   },
+   "as_run": ""
+  },
+  "Y01": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "a process-1 word (`shell.*`, `geom`, `from_app`, `order`) in an app",
+   "fix": {
+    "python": "an app's own kinds",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": "P01 (shell run)"
+  },
+  "Y02": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "`from_app` of an unknown field",
+   "fix": {
+    "python": "a field of §19.1",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": "P02 (shell run)"
+  },
+  "Y03": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "`shell.windows` over rows without `geom` `x y w h`",
+   "fix": {
+    "python": "`x=shell.geom()` and the rest",
+    "lua": "—",
+    "c": "—"
+   },
+   "as_run": "P02 (shell run)"
+  },
+  "Y04": {
+   "stage": [
+    "build"
+   ],
+   "meaning": "`shell.zone` over rows without `from_app`",
+   "fix": {
+    "python": "`title=shell.from_app(\"title\")`",
+    "lua": "—",
+    "c": "—"
+   },
+   "as_run": "P02 (shell run)"
+  },
+  "Y05": {
+   "stage": [
+    "run"
+   ],
+   "meaning": "a dock into a slot its host does not declare",
+   "fix": {
+    "python": "the host's `slots=`",
+    "lua": "—",
+    "c": "—"
+   },
+   "as_run": "P03 (shell run)"
+  },
+  "Y06": {
+   "stage": [
+    "run"
+   ],
+   "meaning": "after a handler, a model and its orders disagree",
+   "fix": {
+    "python": "drop the key from every order with the row",
+    "lua": "—",
+    "c": "—"
+   },
+   "as_run": "P04 (shell run)"
+  }
+ },
+ "reserved_codes": [
+  "A04",
+  "A05",
+  "A06",
+  "F01",
+  "F02",
+  "F03",
+  "F04",
+  "F05",
+  "F06",
+  "F07",
+  "F08",
+  "U01",
+  "U04",
+  "V01",
+  "V02",
+  "O03",
+  "D03"
+ ],
+ "verbs": {
+  "app": 1,
+  "state": 1,
+  "enum": 1,
+  "record": 1,
+  "model": 1,
+  "row_of": 1,
+  "opt": 1,
+  "labels": 1,
+  "derive": 1,
+  "action": 1,
+  "hook": 1,
+  "page": 1,
+  "unit": 1,
+  "sys": 1,
+  "push": 1,
+  "pop": 1,
+  "focus": 1,
+  "after": 1,
+  "post": 1,
+  "damage": 1,
+  "doc": 2,
+  "image": 2,
+  "load": 2,
+  "work": 2,
+  "pictures": 2
+ },
+ "action_props": {
+  "hint": {
+   "type": "tpl",
+   "level": 1
+  },
+  "when": {
+   "type": "cond",
+   "level": 1
+  },
+  "off": {
+   "type": "word:hide,grey",
+   "level": 1
+  },
+  "takes": {
+   "type": "takes",
+   "level": 1
+  },
+  "row": {
+   "type": "name",
+   "level": 1
+  },
+  "chars": {
+   "type": "text",
+   "level": 1
+  },
+  "keys": {
+   "type": "list",
+   "level": 1
+  },
+  "icon": {
+   "type": "name",
+   "level": 1
+  },
+  "push": {
+   "type": "name",
+   "level": 1
+  }
+ },
+ "hook_props": {
+  "takes": {
+   "type": "takes",
+   "level": 1
+  }
+ },
+ "kinds": {
+  "page": {
+   "head": "name",
+   "level": 1,
+   "section": "7.1",
+   "props": {
+    "title": {
+     "type": "tpl",
+     "level": 1
+    },
+    "arg": {
+     "type": "name",
+     "level": 1
+    },
+    "unit": {
+     "type": "name",
+     "level": 1
+    },
+    "nav": {
+     "type": "word:off",
+     "level": 2,
+     "designed": true
+    }
+   }
+  },
+  "group": {
+   "head": "tpl",
+   "level": 1,
+   "section": "7.1",
+   "props": {
+    "close": {
+     "type": "action|hook",
+     "level": 2
+    },
+    "look": {
+     "type": "word:card",
+     "level": 2,
+     "designed": true
+    }
+   }
+  },
+  "panel": {
+   "head": "key",
+   "level": 1,
+   "section": "7.1",
+   "props": {}
+  },
+  "row": {
+   "head": "key",
+   "level": 1,
+   "section": "7.1",
+   "props": {
+    "close": {
+     "type": "action|hook",
+     "level": 2,
+     "designed": true
+    },
+    "pad": {
+     "type": "int",
+     "level": 2,
+     "designed": true
+    }
+   },
+   "head_optional": true
+  },
+  "scroll": {
+   "head": null,
+   "level": 1,
+   "section": "7.1",
+   "props": {
+    "follow": {
+     "type": "bool",
+     "level": 1
+    },
+    "new": {
+     "type": "name",
+     "level": 1
+    },
+    "snap": {
+     "type": "bool",
+     "level": 2,
+     "designed": true
+    }
+   }
+  },
+  "foot": {
+   "head": null,
+   "level": 1,
+   "section": "7.1",
+   "props": {}
+  },
+  "switch": {
+   "head": "state",
+   "level": 1,
+   "section": "7.1",
+   "props": {}
+  },
+  "tools": {
+   "head": "key",
+   "level": 2,
+   "section": "7.1",
+   "props": {
+    "lend": {
+     "type": "name",
+     "level": 2
+    }
+   }
+  },
+  "lent": {
+   "head": "name",
+   "level": 2,
+   "section": "7.1",
+   "props": {}
+  },
+  "label": {
+   "head": "tpl",
+   "level": 1,
+   "section": "7.2",
+   "props": {
+    "tone": {
+     "type": "tpl",
+     "level": 1
+    },
+    "icon": {
+     "type": "tpl",
+     "level": 1
+    },
+    "face": {
+     "type": "word:ui,title,mono,caption,result",
+     "level": 1
+    },
+    "size": {
+     "type": "word:fit",
+     "level": 1
+    },
+    "wrap": {
+     "type": "word:cut,word",
+     "level": 1,
+     "designed": true
+    },
+    "lines": {
+     "type": "int",
+     "level": 1,
+     "designed": true
+    },
+    "align": {
+     "type": "word:start,center,end",
+     "level": 1,
+     "designed": true
+    }
+   }
+  },
+  "rule": {
+   "head": null,
+   "level": 1,
+   "section": "7.2",
+   "props": {},
+   "designed": true
+  },
+  "info": {
+   "head": "tpl",
+   "level": 1,
+   "section": "7.2",
+   "props": {
+    "value": {
+     "type": "tpl",
+     "level": 1
+    },
+    "icon": {
+     "type": "tpl",
+     "level": 1
+    },
+    "signal": {
+     "type": "tpl",
+     "level": 1
+    },
+    "tag": {
+     "type": "tpl",
+     "level": 1
+    },
+    "tone": {
+     "type": "tpl",
+     "level": 1
+    }
+   }
+  },
+  "status": {
+   "head": "tpl",
+   "level": 2,
+   "section": "7.2",
+   "props": {}
+  },
+  "note": {
+   "head": null,
+   "level": 1,
+   "section": "7.2",
+   "props": {
+    "icon": {
+     "type": "tpl",
+     "level": 1
+    },
+    "lines": {
+     "type": "list:tpl",
+     "level": 1
+    }
+   }
+  },
+  "empty": {
+   "head": "tpl",
+   "level": 1,
+   "section": "7.2",
+   "props": {
+    "icon": {
+     "type": "tpl",
+     "level": 1
+    },
+    "lines": {
+     "type": "list:tpl",
+     "level": 1
+    }
+   }
+  },
+  "bubble": {
+   "head": "tpl",
+   "level": 1,
+   "section": "7.2",
+   "props": {
+    "side": {
+     "type": "tpl",
+     "level": 1
+    },
+    "head": {
+     "type": "tpl",
+     "level": 1
+    },
+    "status": {
+     "type": "tpl",
+     "level": 1
+    },
+    "signal": {
+     "type": "tpl",
+     "level": 1
+    },
+    "tone": {
+     "type": "tpl",
+     "level": 1
+    },
+    "max": {
+     "type": "int",
+     "level": 1
+    },
+    "lines": {
+     "type": "int",
+     "level": 1
+    },
+    "on": {
+     "type": "action",
+     "level": 1
+    },
+    "cut": {
+     "type": "action",
+     "level": 1
+    }
+   }
+  },
+  "toast": {
+   "head": "tpl",
+   "level": 2,
+   "section": "7.2",
+   "props": {
+    "anchor": {
+     "type": "key",
+     "level": 2
+    },
+    "icon": {
+     "type": "tpl",
+     "level": 2
+    }
+   }
+  },
+  "picture": {
+   "head": "state",
+   "level": 2,
+   "section": "7.2",
+   "props": {
+    "side": {
+     "type": "tpl",
+     "level": 2
+    },
+    "icon": {
+     "type": "tpl",
+     "level": 2
+    },
+    "tone": {
+     "type": "tpl",
+     "level": 2
+    }
+   }
+  },
+  "progress": {
+   "head": "state",
+   "level": 2,
+   "section": "7.2",
+   "props": {
+    "max": {
+     "type": "tpl",
+     "level": 2
+    },
+    "label": {
+     "type": "tpl",
+     "level": 2
+    },
+    "look": {
+     "type": "word:count",
+     "level": 2,
+     "designed": true
+    }
+   }
+  },
+  "text_view": {
+   "head": "state",
+   "level": 2,
+   "section": "7.2",
+   "props": {
+    "wrap": {
+     "type": "word:cut,word",
+     "level": 2,
+     "designed": true
+    },
+    "follow": {
+     "type": "bool",
+     "level": 2,
+     "designed": true
+    },
+    "syntax": {
+     "type": "name",
+     "level": 2,
+     "designed": true
+    }
+   },
+   "designed": true
+  },
+  "month": {
+   "head": null,
+   "level": 2,
+   "section": "7.2",
+   "props": {
+    "year": {
+     "type": "name",
+     "level": 2,
+     "designed": true
+    },
+    "month": {
+     "type": "name",
+     "level": 2,
+     "designed": true
+    },
+    "today": {
+     "type": "name",
+     "level": 2,
+     "designed": true
+    },
+    "prev": {
+     "type": "action",
+     "level": 2,
+     "designed": true
+    },
+    "next": {
+     "type": "action",
+     "level": 2,
+     "designed": true
+    }
+   },
+   "designed": true
+  },
+  "button": {
+   "head": "action",
+   "level": 1,
+   "section": "7.3",
+   "props": {
+    "kind": {
+     "type": "word:normal,primary,danger,tonal",
+     "level": 1
+    },
+    "label": {
+     "type": "tpl",
+     "level": 1
+    },
+    "icon": {
+     "type": "tpl",
+     "level": 1
+    },
+    "arg": {
+     "type": "lit",
+     "level": 1
+    },
+    "alone": {
+     "type": "bool",
+     "level": 1
+    },
+    "span": {
+     "type": "int",
+     "level": 1
+    },
+    "focus": {
+     "type": "cond",
+     "level": 1
+    },
+    "marked": {
+     "type": "cond",
+     "level": 2,
+     "designed": true
+    }
+   }
+  },
+  "link": {
+   "head": "action",
+   "level": 1,
+   "section": "7.3",
+   "props": {
+    "label": {
+     "type": "tpl",
+     "level": 1
+    },
+    "value": {
+     "type": "tpl",
+     "level": 1
+    },
+    "icon": {
+     "type": "tpl",
+     "level": 1
+    },
+    "signal": {
+     "type": "tpl",
+     "level": 1
+    },
+    "tag": {
+     "type": "tpl",
+     "level": 1
+    },
+    "tone": {
+     "type": "tpl",
+     "level": 1
+    },
+    "focus": {
+     "type": "cond",
+     "level": 1
+    }
+   }
+  },
+  "tool": {
+   "head": "action",
+   "level": 2,
+   "section": "7.3",
+   "props": {
+    "label": {
+     "type": "tpl",
+     "level": 2
+    },
+    "icon": {
+     "type": "tpl",
+     "level": 2
+    },
+    "arg": {
+     "type": "lit",
+     "level": 2
+    },
+    "marked": {
+     "type": "cond",
+     "level": 2
+    },
+    "fill": {
+     "type": "tpl",
+     "level": 2
+    },
+    "focus": {
+     "type": "cond",
+     "level": 2
+    }
+   }
+  },
+  "toggle": {
+   "head": "state",
+   "level": 1,
+   "section": "7.3",
+   "props": {
+    "on": {
+     "type": "action|hook",
+     "level": 1
+    },
+    "focus": {
+     "type": "cond",
+     "level": 1
+    },
+    "when": {
+     "type": "cond",
+     "level": 1
+    },
+    "off": {
+     "type": "word:hide,grey",
+     "level": 1
+    },
+    "label": {
+     "type": "tpl",
+     "level": 1
+    },
+    "hint": {
+     "type": "tpl",
+     "level": 1
+    }
+   }
+  },
+  "slider": {
+   "head": "state",
+   "level": 1,
+   "section": "7.3",
+   "props": {
+    "on": {
+     "type": "action|hook",
+     "level": 1
+    },
+    "focus": {
+     "type": "cond",
+     "level": 1
+    },
+    "when": {
+     "type": "cond",
+     "level": 1
+    },
+    "off": {
+     "type": "word:hide,grey",
+     "level": 1
+    },
+    "label": {
+     "type": "tpl",
+     "level": 1
+    },
+    "lo": {
+     "type": "int",
+     "level": 1
+    },
+    "hi": {
+     "type": "int",
+     "level": 1
+    },
+    "look": {
+     "type": "word:steps",
+     "level": 2,
+     "designed": true
+    }
+   }
+  },
+  "field": {
+   "head": "state",
+   "level": 1,
+   "section": "7.3",
+   "props": {
+    "on": {
+     "type": "action|hook",
+     "level": 1
+    },
+    "focus": {
+     "type": "cond",
+     "level": 1
+    },
+    "when": {
+     "type": "cond",
+     "level": 1
+    },
+    "off": {
+     "type": "word:hide,grey",
+     "level": 1
+    },
+    "label": {
+     "type": "tpl",
+     "level": 1
+    },
+    "max": {
+     "type": "int",
+     "level": 1
+    },
+    "secret": {
+     "type": "bool",
+     "level": 1
+    },
+    "hint": {
+     "type": "tpl",
+     "level": 1
+    },
+    "grow": {
+     "type": "bool",
+     "level": 1
+    },
+    "commit": {
+     "type": "bool",
+     "level": 1
+    },
+    "changed": {
+     "type": "hook",
+     "level": 2
+    },
+    "input": {
+     "type": "word:text,number,password",
+     "level": 1,
+     "designed": true
+    }
+   }
+  },
+  "seg": {
+   "head": "state",
+   "level": 2,
+   "section": "7.3",
+   "props": {
+    "label": {
+     "type": "tpl",
+     "level": 2
+    },
+    "labels": {
+     "type": "table",
+     "level": 2
+    },
+    "on": {
+     "type": "action|hook",
+     "level": 2
+    },
+    "focus": {
+     "type": "cond",
+     "level": 2
+    },
+    "look": {
+     "type": "word:cycle",
+     "level": 2,
+     "designed": true
+    }
+   }
+  },
+  "tabs": {
+   "head": "state",
+   "level": 2,
+   "section": "7.3",
+   "props": {
+    "labels": {
+     "type": "table",
+     "level": 2
+    },
+    "icons": {
+     "type": "table",
+     "level": 2
+    },
+    "on": {
+     "type": "action|hook",
+     "level": 2
+    },
+    "focus": {
+     "type": "cond",
+     "level": 2
+    }
+   }
+  },
+  "cells": {
+   "head": "state",
+   "level": 2,
+   "section": "7.3",
+   "props": {
+    "count": {
+     "type": "tpl",
+     "level": 2
+    },
+    "first": {
+     "type": "tpl",
+     "level": 2
+    },
+    "cols": {
+     "type": "tpl",
+     "level": 2
+    },
+    "face": {
+     "type": "name",
+     "level": 2
+    },
+    "slide": {
+     "type": "bool",
+     "level": 2
+    },
+    "on": {
+     "type": "action|hook",
+     "level": 2
+    },
+    "focus": {
+     "type": "cond",
+     "level": 2
+    }
+   }
+  },
+  "rows": {
+   "head": "model",
+   "level": 1,
+   "section": "7.4",
+   "props": {
+    "cur": {
+     "type": "name",
+     "level": 1
+    },
+    "current": {
+     "type": "name",
+     "level": 1
+    },
+    "check": {
+     "type": "bool",
+     "level": 1
+    },
+    "empty": {
+     "type": "tpl",
+     "level": 1
+    },
+    "by": {
+     "type": "name",
+     "level": 1
+    },
+    "filter": {
+     "type": "name",
+     "level": 2
+    },
+    "changed": {
+     "type": "hook",
+     "level": 2
+    },
+    "group": {
+     "type": "tpl",
+     "level": 2
+    },
+    "dir": {
+     "type": "word:row",
+     "level": 2,
+     "designed": true
+    }
+   }
+  },
+  "cards": {
+   "head": "model",
+   "level": 2,
+   "section": "7.4",
+   "props": {
+    "cur": {
+     "type": "name",
+     "level": 2
+    },
+    "current": {
+     "type": "name",
+     "level": 2
+    },
+    "w": {
+     "type": "tpl",
+     "level": 2
+    },
+    "h": {
+     "type": "tpl",
+     "level": 2
+    },
+    "cols": {
+     "type": "tpl",
+     "level": 2
+    },
+    "new": {
+     "type": "action",
+     "level": 2
+    },
+    "changed": {
+     "type": "hook",
+     "level": 2
+    },
+    "pad": {
+     "type": "int",
+     "level": 2,
+     "designed": true
+    }
+   }
+  },
+  "card": {
+   "head": "action",
+   "level": 2,
+   "section": "7.4",
+   "props": {
+    "label": {
+     "type": "tpl",
+     "level": 2
+    },
+    "sub": {
+     "type": "tpl",
+     "level": 2
+    },
+    "badge": {
+     "type": "tpl",
+     "level": 2
+    },
+    "image": {
+     "type": "name",
+     "level": 2
+    },
+    "icon": {
+     "type": "tpl",
+     "level": 2
+    },
+    "tone": {
+     "type": "tpl",
+     "level": 2
+    }
+   }
+  },
+  "table": {
+   "head": "model",
+   "level": 2,
+   "section": "7.4",
+   "props": {
+    "cols": {
+     "type": "list",
+     "level": 2
+    },
+    "cur": {
+     "type": "name",
+     "level": 2
+    },
+    "on": {
+     "type": "action|hook",
+     "level": 2
+    },
+    "changed": {
+     "type": "hook",
+     "level": 2
+    },
+    "empty": {
+     "type": "tpl",
+     "level": 2
+    },
+    "focus": {
+     "type": "cond",
+     "level": 2
+    }
+   }
+  },
+  "col": {
+   "head": "tpl",
+   "level": 2,
+   "section": "7.4",
+   "props": {}
+  },
+  "dialog": {
+   "head": "tpl",
+   "level": 1,
+   "section": "7.5",
+   "props": {
+    "buttons": {
+     "type": "list:action",
+     "level": 1
+    },
+    "default": {
+     "type": "action",
+     "level": 1
+    }
+   }
+  },
+  "popover": {
+   "head": "key",
+   "level": 1,
+   "section": "7.5",
+   "props": {
+    "anchor": {
+     "type": "tpl",
+     "level": 1
+    },
+    "w": {
+     "type": "tpl",
+     "level": 1
+    },
+    "close": {
+     "type": "action|hook",
+     "level": 1
+    },
+    "unit": {
+     "type": "name",
+     "level": 1
+    },
+    "wash": {
+     "type": "word:page,view,none",
+     "level": 2,
+     "designed": true
+    },
+    "at": {
+     "type": "name",
+     "level": 2,
+     "designed": true
+    }
+   }
+  },
+  "menu": {
+   "head": "tpl",
+   "level": 2,
+   "section": "7.5",
+   "props": {},
+   "head_optional": true
+  },
+  "item": {
+   "head": "action",
+   "level": 2,
+   "section": "7.5",
+   "props": {
+    "icon": {
+     "type": "tpl",
+     "level": 2
+    }
+   }
+  },
+  "split": {
+   "head": null,
+   "level": 1,
+   "section": "7.6",
+   "props": {
+    "dir": {
+     "type": "word:row,col",
+     "level": 1
+    },
+    "sizes": {
+     "type": "list",
+     "level": 1
+    },
+    "gap": {
+     "type": "int",
+     "level": 1
+    },
+    "pad": {
+     "type": "int",
+     "level": 1
+    }
+   }
+  },
+  "grid": {
+   "head": null,
+   "level": 1,
+   "section": "7.6",
+   "props": {
+    "cols": {
+     "type": "int",
+     "level": 1
+    },
+    "rows": {
+     "type": "int",
+     "level": 1
+    },
+    "gap": {
+     "type": "int",
+     "level": 1
+    },
+    "pad": {
+     "type": "int",
+     "level": 2,
+     "designed": true
+    }
+   }
+  },
+  "panes": {
+   "head": "key",
+   "level": 2,
+   "section": "7.6",
+   "props": {
+    "dir": {
+     "type": "word:row,col",
+     "level": 2
+    },
+    "size": {
+     "type": "name",
+     "level": 2
+    },
+    "start": {
+     "type": "int",
+     "level": 2
+    },
+    "min": {
+     "type": "list",
+     "level": 2
+    },
+    "grow": {
+     "type": "bool",
+     "level": 2
+    },
+    "gap": {
+     "type": "int",
+     "level": 2
+    }
+   }
+  },
+  "pane": {
+   "head": "key",
+   "level": 2,
+   "section": "7.6",
+   "props": {
+    "title": {
+     "type": "tpl",
+     "level": 2
+    },
+    "icon": {
+     "type": "tpl",
+     "level": 2
+    },
+    "tabs": {
+     "type": "name",
+     "level": 2
+    },
+    "labels": {
+     "type": "table",
+     "level": 2
+    },
+    "size": {
+     "type": "name",
+     "level": 2
+    },
+    "start": {
+     "type": "int",
+     "level": 2
+    },
+    "grow": {
+     "type": "bool",
+     "level": 2
+    },
+    "min": {
+     "type": "list",
+     "level": 2
+    },
+    "unit": {
+     "type": "name",
+     "level": 2
+    }
+   }
+  },
+  "slot": {
+   "head": "name",
+   "level": 2,
+   "section": "7.6",
+   "props": {
+    "min": {
+     "type": "list",
+     "level": 2
+    }
+   }
+  },
+  "text_editor": {
+   "head": "state",
+   "level": 2,
+   "section": "7.7",
+   "props": {
+    "find": {
+     "type": "name",
+     "level": 2
+    },
+    "find_on": {
+     "type": "cond",
+     "level": 2
+    },
+    "marks": {
+     "type": "name",
+     "level": 2
+    },
+    "gutter": {
+     "type": "bool",
+     "level": 2
+    },
+    "focus": {
+     "type": "cond",
+     "level": 2
+    }
+   }
+  },
+  "canvas": {
+   "head": "key",
+   "level": 1,
+   "section": "7.7",
+   "props": {
+    "draw": {
+     "type": "fn",
+     "level": 1
+    },
+    "reads": {
+     "type": "list",
+     "level": 2
+    },
+    "size": {
+     "type": "list",
+     "level": 2
+    },
+    "sized": {
+     "type": "hook",
+     "level": 2
+    },
+    "pointer": {
+     "type": "hook",
+     "level": 2
+    },
+    "keys": {
+     "type": "hook",
+     "level": 2
+    },
+    "capture": {
+     "type": "cond",
+     "level": 2
+    },
+    "mark": {
+     "type": "lit",
+     "level": 2
+    },
+    "hint": {
+     "type": "tpl",
+     "level": 2
+    },
+    "focus": {
+     "type": "cond",
+     "level": 2
+    },
+    "h": {
+     "type": "int",
+     "level": 2
+    },
+    "text": {
+     "type": "bool",
+     "level": 2,
+     "designed": true
+    },
+    "actions": {
+     "type": "list",
+     "level": 2,
+     "designed": true
+    },
+    "on": {
+     "type": "action",
+     "level": 2,
+     "designed": true
+    },
+    "ground": {
+     "type": "name",
+     "level": 2,
+     "designed": true
+    }
+   }
+  },
+  "legacy": {
+   "head": "key",
+   "level": 1,
+   "section": "7.7",
+   "props": {
+    "draw": {
+     "type": "fn",
+     "level": 1,
+     "designed": true
+    }
+   },
+   "designed": true
+  }
+ },
+ "takes": {
+  "none": {
+   "level": 1,
+   "params": 0
+  },
+  "row": {
+   "level": 1,
+   "params": 1
+  },
+  "arg": {
+   "level": 1,
+   "params": 1
+  },
+  "char": {
+   "level": 1,
+   "params": 1
+  },
+  "row+arg": {
+   "level": 2,
+   "params": 2,
+   "designed": true
+  },
+  "pointer": {
+   "level": 2,
+   "params": 1
+  },
+  "key": {
+   "level": 2,
+   "params": 1
+  }
+ },
+ "roles": {
+  "confirm": {
+   "owner": "app",
+   "level": 1
+  },
+  "back": {
+   "owner": "app",
+   "level": 1
+  },
+  "more": {
+   "owner": "app",
+   "level": 1
+  },
+  "menu": {
+   "owner": "app",
+   "level": 2,
+   "designed": true
+  },
+  "left": {
+   "owner": "app",
+   "level": 1
+  },
+  "right": {
+   "owner": "app",
+   "level": 1
+  },
+  "up": {
+   "owner": "app",
+   "level": 1
+  },
+  "down": {
+   "owner": "app",
+   "level": 1
+  },
+  "space": {
+   "owner": "app",
+   "level": 2
+  },
+  "search": {
+   "owner": "app",
+   "level": 2
+  },
+  "goto": {
+   "owner": "app",
+   "level": 2
+  },
+  "complete": {
+   "owner": "app",
+   "level": 2
+  },
+  "undo": {
+   "owner": "app",
+   "level": 2
+  },
+  "redo": {
+   "owner": "app",
+   "level": 2
+  },
+  "play": {
+   "owner": "app",
+   "level": 2
+  },
+  "tools": {
+   "owner": "app",
+   "level": 2
+  },
+  "home": {
+   "owner": "shell",
+   "level": "shell"
+  },
+  "full": {
+   "owner": "shell",
+   "level": "shell"
+  },
+  "system": {
+   "owner": "shell",
+   "level": "shell"
+  }
+ },
+ "offs": [
+  "hide",
+  "grey"
+ ],
+ "retired": {
+  "verbs": {
+   "at": "state the engine writes",
+   "peek": "state the engine writes",
+   "scope": "rows by kind, or a switch",
+   "cell": "col (in a table)",
+   "per": "templates",
+   "fmt": "templates",
+   "ref": "templates",
+   "key": "keys=",
+   "rebuild": "templates",
+   "head": "a tools node",
+   "has_symbols": "the engine's glyph fallback"
+  },
+  "kinds": {
+   "text": "label face= size=\"fit\"",
+   "cell": "col"
+  },
+  "props": {
+   "disabled": "when= on the action with off=\"grey\"",
+   "lit": "marked= (on a tool)",
+   "current@tool": "marked=",
+   "keyname@item": "the action's keys=",
+   "key@action": "keys=[...]",
+   "does@action": "hint=",
+   "fixed@split": "weights in sizes",
+   "paint@cards": "an image field",
+   "below@scroll": "new=",
+   "ink": "tone=",
+   "tools@app": "a tools node"
+  },
+  "takes": {
+   "change": "takes=\"none\", reading the state"
+  },
+  "system_values": {
+   "symbols": "the engine's glyph fallback",
+   "w": "size classes",
+   "h": "size classes",
+   "fs": "size classes"
+  }
+ },
+ "app_fields": {
+  "icon": 1,
+  "size": 1,
+  "min": 1,
+  "back": 1,
+  "glass": 2,
+  "slots": 2
+ },
+ "system_values": {
+  "desk": "bool",
+  "handheld": "bool",
+  "wide": "bool",
+  "tall": "bool",
+  "touch": "bool",
+  "input": "enum",
+  "focus": "text",
+  "current": "bool"
+ }
+}
