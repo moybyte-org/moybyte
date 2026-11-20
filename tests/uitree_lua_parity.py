@@ -16,6 +16,15 @@ if ROOT not in sys.path:
     sys.path[:0] = [ROOT, HERE]
 
 FIX = os.path.join(HERE, "fixtures", "uitree_lua")
+
+
+def fixture(name):
+    """A fixture's folder: NAME.moy is a whole cart; NAME.part is a cart's
+    half, staged with files from elsewhere (PAIRS), which no scan of
+    tests/**/*.moy may take for a cart."""
+    whole = os.path.join(FIX, name + ".moy")
+    return whole if os.path.isdir(whole) else os.path.join(FIX, name + ".part")
+
 MESH = os.path.join(HERE, "fixtures", "apps", "moymesh.moy")
 # A frame is a whole number of ms. The host kernel loop's driver clock is one
 # microsecond count for the process, which the loop reads in whole ms, so at
@@ -49,9 +58,9 @@ DESK = {"drag:160,70,160,200": "drag:700,150,700,480", "tap:150,206": "tap:650,5
 
 def _stage(carts, name, extra):
     dst = os.path.join(carts, name + ".moy")
-    shutil.copytree(os.path.join(FIX, name + ".moy"), dst)
+    shutil.copytree(fixture(name), dst)
     for where, f in extra:
-        src = where if os.path.isabs(where) else os.path.join(FIX, where + ".moy")
+        src = where if os.path.isabs(where) else fixture(where)
         shutil.copy(os.path.join(src, f), dst)
     import json
     with open(os.path.join(dst, "manifest.json")) as fh:

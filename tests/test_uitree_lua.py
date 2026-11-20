@@ -274,9 +274,9 @@ def test_the_checker_reports_each_code_at_its_line(case, tmp_path):
 @pytest.mark.parametrize("cart", ["counter", "mesh_thread", "mesh_radio"])
 def test_the_fixtures_check_clean(cart, tmp_path):
     d = os.path.join(str(tmp_path), cart + ".moy")
-    shutil.copytree(os.path.join(FIX, cart + ".moy"), d)
+    shutil.copytree(parity.fixture(cart), d)
     for f in ("mesh.lua", "data.lua"):
-        src = os.path.join(parity.MESH, f) if f == "mesh.lua" else os.path.join(FIX, "mesh_thread.moy", f)
+        src = os.path.join(parity.MESH, f) if f == "mesh.lua" else os.path.join(parity.fixture("mesh_thread"), f)
         if not os.path.exists(os.path.join(d, f)):
             shutil.copy(src, d)
     assert checker.check(d) == []
