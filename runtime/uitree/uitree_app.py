@@ -48,6 +48,9 @@ class Engine(S.Builder):
     """One app's built tree replayed into today's verbs, inside a frame its
     host has begun (`host.begin`), and the commits of its handlers."""
 
+    band = True         # False: the host draws the page's keys (a handheld popover's strip), the page none
+    bare = False        # True: the host painted the page's ground (a popover's card), the page paints none
+
     close_root = None       # what ui.pop() on the first page does: a hosted page's host closes it
 
     def __init__(self, decl, build, host, surface, damage, files=None, gen=False, env=None):
@@ -433,6 +436,8 @@ class Engine(S.Builder):
             _v.at(*body)
         o = self._page_o
         o["id"] = self._page_id()
+        if self.bare:
+            o["bare"] = True
         if self._gen_ok:
             o["gen"] = self._gen_of(self._page_names)
         else:
@@ -449,8 +454,8 @@ class Engine(S.Builder):
             self.focused = next(self._stops(n), None)   # where focus starts: the first stop
         hint = self._hints()
         placed = foot is not None or any(k.kind in ("split", "grid") for k in shown)
-        if not hint:
-            pass                        # nothing on offer: no band, as a page with no keys draws none
+        if not hint or not self.band:
+            pass                        # nothing on offer, or the host draws the keys: no band
         elif not placed:
             _v.hints(hint)
         elif band is not None:          # under the foot, outside the page's ground
@@ -769,6 +774,8 @@ class Engine(S.Builder):
         d = self.dialog_shown()
         if d:
             b = d.l["buttons"]
+            if len(b) == 1:             # its one button is Back's: named once
+                return ("back", b[0].hint_now())
             return ("confirm", b[-1].hint_now(), "back", b[0].hint_now())
         out = []
         pop = self._popover_shown()
@@ -1247,16 +1254,29 @@ class Engine(S.Builder):
                          fix="a picture, a label or a progress; or the %s outside the split" % k.kind)
 
     def _r_menu(self, n, row, rect):
-        items = [k for k in n.kids if _shown(k, row) and k.act.can(row)]
+        """A menu's items in order, a `rows` among them an item per row of
+        its model; an item's toolkit id is its text, so focus on it is the
+        item's (its action names the band's verb)."""
+        items = []
+        for k in n.kids:
+            if k.kind == "rows":
+                for r in self.s._v[k.l["model"]]:
+                    for kk in k.kids:
+                        if _shown(kk, r) and kk.act.can(r):
+                            items.append((kk, r))
+            elif _shown(k, row) and k.act.can(row):
+                items.append((k, row))
         labels = []
-        for k in items:
+        for k, r in items:
             hot = k.act.letters.upper()[:1]
-            labels.append(self._t(k, "label", row) + ("\t" + hot if hot and self._keys_shown() else ""))
+            labels.append(self._t(k, "label", r) + ("\t" + hot if hot and self._keys_shown() else ""))
         got = _v.menu(self._t(n, "caption", row), labels,
-                      [k.p["icon"](row) if "icon" in k.p else k.act.icon for k in items],
-                      kinds=[k.l.get("mkind", "") for k in items])
+                      [k.p["icon"](r) if "icon" in k.p else k.act.icon for k, r in items],
+                      kinds=[k.l.get("mkind", "") for k, _r in items])
+        for i in range(len(items)):
+            self.ids[labels[i][:ID_MAX]] = items[i]
         if got >= 0:
-            self._activate(items[got], None)
+            self._activate(items[got][0], items[got][1])
 
     def _keys_shown(self):
         return _v.hints_width(("back", "Back")) > 0
