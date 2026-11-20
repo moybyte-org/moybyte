@@ -1528,7 +1528,6 @@ class Action:
         self.when = cond(when, Ctx(), where) if when is not None else None
         self.row = row          # a row_of name: the handler gets that row
         self.arity = None       # set by the first site that names it
-        self.sites = []
         self.unit = None        # the unit it belongs to: live only while a node bound to it is shown
         self.takes = "none"
         self.hook = False
@@ -1770,7 +1769,6 @@ def _arity(a, hands, site, where):
             expected="takes=%r (%s), as declared at %s:%s" % (a.takes, _HANDED[a.takes], a.where[0], a.where[1]),
             fix='declare it takes="%s", or a second %s for this site' % (
                 hands, "hook" if a.hook else "action"))
-    a.sites.append(site)
 
 
 def _action(name, hands, site, where, seen=True):
@@ -2179,11 +2177,20 @@ def info(label, value="", **p):
     return _node("info", None, dict(p, label=label, value=value), _caller())
 
 
+class _Site:
+    """A stop's site as an error names it, formatted only when one does."""
+
+    def __init__(self, kind, name, in_row):
+        self.kind, self.name, self.in_row = kind, name, in_row
+
+    def __str__(self):
+        return "ui.%s(%s)%s" % (self.kind, getattr(self.name, "__name__", repr(self.name)),
+                                " in a row" if self.in_row else "")
+
+
 def _stop(kind, name, p, where, n=None):
-    act = _action(name, ("row" if _NOW.app.ctx.rowt is not None else "none") if n is None else n,
-                  "ui.%s(%s)%s" % (kind, getattr(name, "__name__", repr(name)),
-                                   " in a row" if _NOW.app.ctx.rowt is not None else ""),
-                  where)
+    in_row = _NOW.app.ctx.rowt is not None
+    act = _action(name, ("row" if in_row else "none") if n is None else n, _Site(kind, name, in_row), where)
     key = name if "arg" not in p else "%s/%s" % (name, p["arg"])
     return _node(kind, key, p, where, act)
 
