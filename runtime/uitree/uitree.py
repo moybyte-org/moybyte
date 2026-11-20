@@ -1421,7 +1421,7 @@ def _declare(name, label, fn, takes, where, what):
                       expected='takes="none": a two-way control\'s handler reads the state it changed',
                       fix='drop takes=, and read s.NAME in the handler')
     if takes not in TAKES:
-        raise UIError("A02", "ui.%s(%r) takes=%r" % (what, name, takes), where=where,
+        raise UIError("A09", "ui.%s(%r) takes=%r" % (what, name, takes), where=where,
                       expected="one of " + ", ".join(TAKES),
                       fix='takes="none" (the default) or the one thing every site hands it')
     d = _d()
@@ -1471,7 +1471,7 @@ def action(name, label, fn, *, takes="none", key=None, when=None, off=None, hint
         raise UIError("O02", "action %r off=%r: it is never unavailable" % (name, off), where=where,
                       fix="drop off=, or give the condition: when=\"COND\"")
     if off is not None and off not in OFFS:
-        raise UIError("O01", "action %r: off=%r" % (name, off), where=where,
+        raise UIError("A09", "action %r: off=%r" % (name, off), where=where,
                       expected="hide (its nodes go) or grey (they stay, dimmed)", fix='off="hide"')
     for k in keys:
         if not isinstance(k, str) or not (_chord_byte(k) or k.startswith("role:") and k[5:] in ROLES):

@@ -2,7 +2,6 @@
  "about": "Every way a layer differs from contract.json, one line each. tests/test_uitree_contract.py fails on a line missing here and on a line here that no longer holds: delete a line with the fix that closes it. The rulings: spike/uitree_conf/HANDOFF.md.",
  "python": [
   "code not in the table: P05",
-  "code never raised: A09",
   "code never raised: C03",
   "code never raised: D01",
   "code never raised: D04",
