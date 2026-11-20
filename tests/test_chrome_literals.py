@@ -36,7 +36,7 @@ PINNED = {
     "perf_hud.py": (0, 0),
     "scene_editor_ui.py": (5, 0),
     "text_console.py": (0, 0),
-    "update_ui.py": (2, 0),
+    "update_ui.py": (0, 0),
     "wallpaper.py": (2, 0),
     "web_console_ui.py": (3, 0),
     "wm_chrome.py": (1, 0),
