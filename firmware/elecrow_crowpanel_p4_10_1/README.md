@@ -115,15 +115,26 @@ row waits for the module. GPIOs 6-10 and 28 are in the `gpio` lease row and 27
 
 ## Unconfirmed
 
-Everything below is read from documents, not from this unit: the PCB
-revision; the touch orientation (the vendor maps with no swap or mirror: the
-calibration smoke has not run); the ES8311's clocking from GPIO24 and the
-amplifier pin's polarity; the panel clock and blanking on this glass; the
-USB bridge's DTR/RTS rest state (`[serial]` starts from the Waveshare's); the
-SDIO clock and the C6's slave version against the host's ESP-Hosted 2.12.12;
-the BOOT button's pin (35 from the net names).
+Read from documents, not from this unit: the PCB revision; the touch
+orientation (the vendor maps with no swap or mirror; the corner calibration,
+`moy_runtime.run_touch_calibrate`, has not run); the ES8311's clocking from
+GPIO24 and the amplifier pin's polarity (the speaker has not been exercised);
+that the panel is lit and its picture is right (only the framebuffer and the
+scan counters have been read back); the TF slot (no card was in it);
+the USB bridge's DTR/RTS rest state beyond "attaching and `reboot` work with
+the Waveshare's"; the BOOT button's pin (35 from the net names); BLE over the
+C6; the SDIO link under a sustained download at 20 MHz.
 
-## On glass
+## First flash (2026-11-20)
 
-The bring-up record of the first flash is in this file's history; the facts a
-later session needs are above.
+The factory flash was saved first (above). `build.sh`'s image, flashed at
+0x2000 with the board's `[flash]` facts, booted to the desk in 10 to 25
+seconds; the kernel's first light was at 223 ms. Read back over the dev
+channel: the DPI scan at about 66 refreshes a second with no underruns (the
+60 MHz clock over the vendor's blanking), the GT911 answering at 0x5D with a
+touch already read, the C6 on ESP-Hosted 2.12.3 (the component this build
+bundles is 2.12.12) with a Wi-Fi scan returning networks, and `board.py
+elecrow_p4 reboot` returning to the desk. The card slot reported
+`card_init failed: 263` (a timeout) with no card in it, and the carts stayed on
+the internal store. The ESP-NOW link reports down (`moy_c6.ping()` false): the
+C6 runs the stock slave with no shim, which this board does not replace.
