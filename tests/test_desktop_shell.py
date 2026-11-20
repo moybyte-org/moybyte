@@ -852,7 +852,7 @@ def test_tool_bar_does_not_lend_a_zone_during_play(tmp_path):
     owner's draw_zone and drive the tool through several frames; none may fire."""
     ws, drv = _make_tool_ws(tmp_path)
     calls = []
-    for owner in (ws.launcher_layer, ws.settings_layer, ws.editor_app):
+    for owner in (ws.launcher_layer, ws.settings_layer, ws.editor_app.bar_zone):
         orig = owner.draw_zone
 
         def spy(cv, rect, _orig=orig, _owner=owner):

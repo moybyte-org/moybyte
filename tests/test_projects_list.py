@@ -172,7 +172,7 @@ def test_the_one_bar_names_the_open_tab(tmp_path):
             group = gaps.pop(cut - 1)                    # tabs | actions (D-02)
             assert set(gaps[:cut - 1]) == {gaps[0]} and gaps[0] >= 0
             assert group >= 8 * ea._zone_scale()
-            assert [t for t, _g, r in rects if r[2] > r[3]] == [tab]   # the open tab named
+            assert [t for t, _g, r in rects if r[2] > r[3] and t in EA._OPENS] == [tab]   # the open tab named
             assert name
 
 

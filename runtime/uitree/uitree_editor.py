@@ -947,22 +947,26 @@ class BarZone:
     The bar draws its zone into its offscreen strip, outside any frame of
     the page's, so the replay begins no toolkit frame: it lays the shown
     lender's children out and draws each cell on the canvas the bar hands
-    it, through `look`, the host's cells in the bar's look (a tab, an icon,
-    a word, a line of text, a hairline). Taps and the bar's key walk come
-    back through the same layout, so a cached strip and a later tap agree.
+    it, through `look`, the bar's look for a lent row (`bar_layer.ZoneLook`:
+    a tab, an icon, a word, a line of text, a hairline). Taps and the bar's
+    key walk come back through the same layout, so a cached strip and a
+    later tap agree.
 
     The row's rule, the engine's and no app's: its cells pack from the left
     in their order; the run of buttons at its end stands at the zone's right
-    end, END short of it; a hairline closes a run of tabs and opens that end run. It shows
-    its labels (a tab's name, a button's word) where the whole row holds
-    them; else icons, the current tab with its name where that fits at no
-    gaps; else icons alone, LEAST apart. Gaps share the room left, up to
-    GAP, the rest before the end run.
+    end, END short of it; a hairline closes a run of tabs and opens that end
+    run. It shows its labels (a tab's name, a button's word) where the whole
+    row holds them; else the tabs as icons, the current one with its name,
+    and the buttons' words, where that fits at no gaps whichever tab is
+    current; else the same with the buttons as icons; else icons alone,
+    LEAST apart. Gaps share the room left, up to GAP, the rest before the
+    end run.
 
-    `zone_gen` moves when the host's own generation does (`look.zone_gen`:
+    `zone_gen` moves when the host's own generation does (`host.zone_gen`:
     a tab opened, a cart opened) or when a handler moved the page's state
-    since the zone's last pass; the host writes the console's values into
-    the state in `look.head_sync`, which the zone runs at each pass (a strip
+    since the zone's last pass; the host (`look` where none is named)
+    writes the console's values into the state in `host.head_sync`, which
+    the zone runs at each pass (a strip
     re-render, a tap, the bar's key walk), never per frame, and whose
     writes the host's own generation already covers -- so a re-render that
     syncs does not owe another."""
@@ -974,9 +978,10 @@ class BarZone:
     END = 6          # the room after the end run: with the bar's gap, its ink stands
                      # 10 px clear of the status widgets that follow (R4-26)
 
-    def __init__(self, engine, look, site="bar"):
+    def __init__(self, engine, look, site="bar", host=None):
         self.engine = engine
         self.look = look
+        self.host = look if host is None else host
         self.site = site
         self.gen = 0
         self.zone_opened = False
@@ -985,7 +990,7 @@ class BarZone:
 
     @property
     def zone_gen(self):
-        return self.gen + getattr(self.look, "zone_gen", 0)
+        return self.gen + getattr(self.host, "zone_gen", 0)
 
     # -- the lent row -------------------------------------------------------
 
@@ -995,7 +1000,7 @@ class BarZone:
         e._bind()
         if sum(e.s._ver.values()) != self._vers and self._vers >= 0:
             self.gen += 1               # a handler moved what the row reads since its last pass
-        sync = getattr(self.look, "head_sync", None)
+        sync = getattr(self.host, "head_sync", None)
         if sync is not None:
             sync()                      # (what it moves, the host's own zone_gen moved for)
         if e.root is None:
@@ -1055,16 +1060,17 @@ class BarZone:
         e = self.engine
         return it[0] == "tab" and e.s._v[it[1].key] == it[2]
 
-    def _widths(self, items, h, density):
+    def _widths(self, items, h, density, words=False):
         """Each cell's width at `density`: 2 every label, 1 icons with the
-        current tab named, 0 icons alone; a text cell 0 (it takes the rest)."""
+        current tab named (and the buttons' words where `words`), 0 icons
+        alone; a text cell 0 (it takes the rest)."""
         look = self.look
         out = []
         for it in items:
             kind, label, icon = it[0], it[3], it[4]
             if kind == "text":
                 out.append(0)
-            elif self._named(it, density):
+            elif self._named(it, density, words):
                 out.append(look.tab_width(label, icon, h) if kind == "tab"
                            else look.word_width(label, icon, h))
             elif kind == "tab" and self._cur(it):
@@ -1073,13 +1079,24 @@ class BarZone:
                 out.append(h)
         return out
 
-    def _named(self, it, density):
-        """Whether cell `it` shows its label at `density`."""
+    def _named(self, it, density, words=False):
+        """Whether cell `it` shows its label at `density` (`words`: a
+        button its word at density 1)."""
         if not it[3]:
             return False
         if it[0] == "tab":
             return density == 2 or (density == 1 and self._cur(it))
-        return it[0] == "button" and density == 2 and not it[1].l.get("alone")
+        return it[0] == "button" and (density == 2 or (density == 1 and words)) \
+            and not it[1].l.get("alone")
+
+    def _widest(self, items, ws, h):
+        """How much wider the row is with its widest tab named in the
+        current one's place: the buttons keep their words only where every
+        tab open holds them, so a tab switch never takes them away."""
+        cur = [ws[i] for i, it in enumerate(items) if it[0] == "tab" and self._cur(it)]
+        named = [self.look.tab_width(it[3], it[4], h) for it in items
+                 if it[0] == "tab" and it[3]]
+        return max(0, max(named) - cur[0]) if cur and named else 0
 
     def _place(self, items, rect):
         x0, y, w, h = rect
@@ -1093,12 +1110,13 @@ class BarZone:
         if 0 < end < n and end not in lines:
             lines.append(end)
         text = any(it[0] == "text" for it in items)
-        for density in (2, 1, 0):
+        for density, words in ((2, True), (1, True), (1, False), (0, False)):
             # the current tab's name goes before the gaps do: it holds at none
             lg = 0 if density == 1 else self.LEAST * fs
-            ws = self._widths(items, h, density)
+            ws = self._widths(items, h, density, words)
             least = sum(ws) + lg * max(0, n - 1 - len(lines)) + self.GROUP * fs * len(lines)
-            if least <= w or density == 0:
+            if least + (self._widest(items, ws, h) if density == 1 and words else 0) <= w \
+                    or density == 0:
                 break
         spare = max(0, w - least)
         if text:
@@ -1124,7 +1142,7 @@ class BarZone:
                 spare = 0
             if x + cw > x0 + w:
                 break
-            labelled = it[0] == "text" or self._named(it, density)
+            labelled = it[0] == "text" or self._named(it, density, words)
             out.append(((x, y, cw, h), it[0], it[1], it[2], it[3], it[4], labelled))
             x += cw
         return out, hair, density
@@ -1147,10 +1165,11 @@ class BarZone:
                 else:
                     on = node.act is None or node.act.can(None)
                     primary = node.l.get("kind") == "primary"
+                    marked = "marked" in node.p and bool(node.p["marked"](None))
                     if labelled:
-                        look.draw_word(cv, r, label, icon, primary)
+                        look.draw_word(cv, r, label, icon, primary, marked)
                     else:
-                        look.draw_icon(cv, r, icon, on, primary)
+                        look.draw_icon(cv, r, icon, on, primary, marked)
         finally:
             _NOW.app = was
 

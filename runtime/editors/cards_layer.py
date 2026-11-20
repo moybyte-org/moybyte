@@ -27,7 +27,7 @@ construction, the circular-import dodge the other extracted UIs use.
 
 draw() calls ws.bar_layer.draw_status_strip("menu") LAST (chrome over
 content), so the Editor's lent top-bar zone (the tab ladder + PLAY,
-EditorApp.draw_zone) shows on this tab; handle_pointer routes a tap through
+EditorApp.bar_zone) shows on this tab; handle_pointer routes a tap through
 ws.bar_layer.handle_bar_tap("menu", ...) FIRST.
 """
 

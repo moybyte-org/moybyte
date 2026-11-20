@@ -12,8 +12,9 @@
 """The Editor on the desk (docs/media/look_2026-10/EDITOR_LAYOUT.md, concept
 B, and MAXIMISE_VARIANTS.md's Resize): several of its parts at once, as five
 workspaces whose dividers move (`runtime/editors/editor_panes.py` holds the
-geometry). The app's row is the band the bar lends the Editor
-(`EditorApp.draw_zone`): the workspaces, undo, redo and the Play slot.
+geometry). The app's row is the band the bar lends the Editor, the head
+row's desk case (runtime/editors/editor_ui.py): the workspaces, undo, redo
+and Play.
 
 A pane is a card on the Editor's ground with a 32 px header (its icon and
 name, or its tabs, then its tools); the focused one takes the keys and

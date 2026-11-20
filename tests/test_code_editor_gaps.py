@@ -902,7 +902,7 @@ def test_a_disabled_undo_draws_in_the_themes_disabled_ink(tmp_path):
         ws, _drv, _lay, _ed = _look_ws(tmp_path / (theme + variant), theme, variant)
         cv, th = ws.sys_canvas, ws.theme_colors
         cv.rect(0, 0, 24, 24, th["surface"])
-        ws.editor_app._draw_history_icon(cv, "undo", 4, 4, 16, False)
+        ws.editor_app.bar_zone.look._draw_history_icon(cv, "undo", 4, 4, 16, False)
         box = set(_band(cv, 0, 24, 0, 24))
         off = cv._col(ui_draw.disabled_ink(th))
         assert off != cv._col(th["chrome_ink_dim"]), (theme, variant)

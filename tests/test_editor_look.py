@@ -219,7 +219,8 @@ def test_play_carries_as_much_full_ink_as_a_tab_icon(tmp_path, theme, mode):
     least as many pixels of that full ink as the lightest tab icon: its 16 px
     mask's diagonals no longer antialias it to a grey the tabs do not wear,
     which Contrast reads as disabled (design review R3-26)."""
-    from runtime.editor_app import _SET_KIND, ZONE_ITEMS
+    from runtime.bar_layer import SET_KIND as _SET_KIND
+    from runtime.editor_app import ZONE_ITEMS
     ws = _ws(tmp_path, HANDHELD, theme, mode)
     _editor(ws, "code")
     cv, th = ws.sys_canvas, ws.theme_colors
@@ -238,11 +239,11 @@ def test_play_carries_as_much_full_ink_as_a_tab_icon(tmp_path, theme, mode):
 
     tabs = [full(lambda r, k=k: ws.draw_icon(_SET_KIND.get(k, k), r, ink, cv))
             for t, k in ZONE_ITEMS if isinstance(t, str) and not t.startswith("\x00")]
-    play = full(lambda r: ws.editor_app._draw_play(cv, r, ink))
+    play = full(lambda r: ws.editor_app.bar_zone.look._draw_play(cv, r, ink))
     assert play >= min(tabs), (play, tabs)
     bare = full(lambda r: ws.draw_icon("play", r, ink, cv))
     assert bare < min(tabs), ("the set's 16 px play carries full ink of its own now: "
-                              "_draw_play's second pass can go", bare, tabs)
+                              "ZoneLook._draw_play's second pass can go", bare, tabs)
 
 
 def _sprites(ws):

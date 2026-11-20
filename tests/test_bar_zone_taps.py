@@ -19,7 +19,7 @@ import pytest
 
 import test_shell_goldens as g
 
-from runtime import editor_app
+from runtime import bar_layer, editor_app
 
 DESK = "p4_1024x600_cs2_fs1_windowed"
 HANDHELD = "tdeck_320x240_fs1_dark"
@@ -30,9 +30,10 @@ DESKS = (DESK, GUITION_P4)
 _ALL = [tab for tab, _glyph in editor_app.ZONE_ITEMS]
 # glyph (or icon-set slot) -> the zone action it draws
 _ACTION = {glyph: tab for tab, glyph in editor_app.ZONE_ITEMS}
-_ACTION.update({slot: _ACTION[glyph] for glyph, slot in editor_app._SET_KIND.items()})
+_ACTION.update({slot: _ACTION[glyph] for glyph, slot in bar_layer.SET_KIND.items()})
 # The desk Editor's row (look step 30): the five workspaces, undo, redo and Play.
 _WS_BY_LABEL = {label: "ws:" + key for key, label, _icon in editor_app._WORKSPACES}
+_WS_BY_ICON = {icon: "ws:" + key for key, _label, icon in editor_app._WORKSPACES}
 _ALL_WS = list(_WS_BY_LABEL.values()) + _ALL[-3:]
 
 
@@ -134,23 +135,26 @@ def _drawn_in(ws, drv, monkeypatch):
                            editor_app._ui_draw.print_width("Play", fs), h)))
 
     def icon(kind, x, y, cv, *a, **kw):
-        if not inside and kind in _ACTION:
+        desk = ws.editor_desk
+        names = _WS_BY_ICON if desk is not None and desk.active() else _ACTION
+        if not inside and kind in names:
             side = band[0][3]          # the ladder's icons are as tall as its zone
-            got.append((_ACTION[kind], (x, y, side, side)))
+            got.append((names[kind], (x, y, side, side)))
         return real_icon(kind, x, y, cv, *a, **kw)
 
-    owner = app.bar_zone or app
+    owner = app.bar_zone
+    look = owner.look
     real_zone = owner.draw_zone
     real_tab, real_button = editor_app._ui_draw.tab, editor_app._ui_draw.button
-    real_history, real_play, real_bare = app._draw_history_icon, app._draw_play, app._bare_play
+    real_history, real_play, real_bare = look._draw_history_icon, look._draw_play, look._bare_play
     real_icon = ws.icon
     with monkeypatch.context() as m:
         m.setattr(owner, "draw_zone", zone)
         m.setattr(editor_app._ui_draw, "tab", tab)
         m.setattr(editor_app._ui_draw, "button", button)
-        m.setattr(app, "_draw_history_icon", history)
-        m.setattr(app, "_draw_play", play)
-        m.setattr(app, "_bare_play", bare)
+        m.setattr(look, "_draw_history_icon", history)
+        m.setattr(look, "_draw_play", play)
+        m.setattr(look, "_bare_play", bare)
         m.setattr(ws, "icon", icon)
         ws.bar_layer.invalidate()
         _frames(ws, drv, 2)
@@ -192,7 +196,7 @@ def _hit_runs(ws, monkeypatch, drawn, band):
 
         def fires(px):
             del fired[:]
-            (app.bar_zone or app).zone_tap(px, py, band)
+            app.bar_zone.zone_tap(px, py, band)
             return fired == [action]
 
         cx = x + w // 2
@@ -210,7 +214,7 @@ def _tap_floor(ws):
     unit and the chrome scale its declared glass asks for (#203)."""
     from runtime import layout_base
     unit = layout_base.CLASSES[ws.metric_class]["unit"]
-    return editor_app._BAR_ICON * unit * max(1, ws.chrome_floor)
+    return bar_layer._BAR_ICON * unit * max(1, ws.chrome_floor)
 
 
 def _editor(ws, drv, desk, size=None):

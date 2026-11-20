@@ -36,11 +36,11 @@ class _Look:
     def draw_tab(self, cv, r, cur, label, icon, labelled, every):
         self.drawn.append(("tab", r, cur, label if labelled else icon))
 
-    def draw_icon(self, cv, r, icon, on, primary):
-        self.drawn.append(("icon", r, icon, on))
+    def draw_icon(self, cv, r, icon, on, primary, marked=False):
+        self.drawn.append(("icon", r, icon, on, marked))
 
-    def draw_word(self, cv, r, label, icon, primary):
-        self.drawn.append(("word", r, label))
+    def draw_word(self, cv, r, label, icon, primary, marked=False):
+        self.drawn.append(("word", r, label, marked))
 
     def draw_text(self, cv, r, text):
         self.drawn.append(("text", r, text))
@@ -89,6 +89,38 @@ def test_a_wide_zone_shows_the_labels_a_narrow_one_icons():
     look.drawn = []
     z.draw_zone(None, (0, 0, 80, 20))
     assert [d[3] for d in look.drawn if d[0] == "tab"] == ["edit", "code"]
+
+
+def test_between_the_two_the_buttons_keep_their_words_where_every_tab_holds_them():
+    """Where not every label fits, the open tab is named and the buttons
+    keep their words if that fits with ANY tab open, so a tab switch never
+    takes Play's word away; else they are icons."""
+    F, page, look, z = _zone()
+    z.draw_zone(None, (0, 0, 160, 20))
+    assert [d[3] for d in look.drawn if d[0] == "tab"] == ["One", "code"]
+    assert look.drawn[-1][:3] == ("word", look.drawn[-1][1], "Play")
+    page.run(setattr, F.s, "has_three", True)
+    # "Three" is the widest name: with One open the words would fit at 172,
+    # with Three open they would not, so they go on every tab
+    look.drawn = []
+    z.draw_zone(None, (0, 0, 172, 20))
+    assert [d[3] for d in look.drawn if d[0] == "tab"] == ["One", "code", "paint"]
+    assert look.drawn[-1][0] == "icon"
+    look.drawn = []
+    z.draw_zone(None, (0, 0, 180, 20))
+    assert look.drawn[-1][2] == "Play"
+
+
+def test_a_marked_button_is_drawn_marked():
+    F, page, look, z = _zone()
+    page.run(setattr, F.s, "playing", True)
+    for owed in (False, True):
+        page.run(setattr, F.s, "owed", owed)
+        for w in (400, 120):
+            look.drawn = []
+            z.draw_zone(None, (0, 0, w, 20))
+            assert look.drawn[-1][2] == ("Stop" if w == 400 else "stop")
+            assert look.drawn[-1][-1] is owed
 
 
 def test_a_tap_runs_through_the_engine_and_the_generation_follows():

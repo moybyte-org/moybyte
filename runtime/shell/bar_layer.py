@@ -1,5 +1,6 @@
 # Map (grep -n a name to jump there):
 #   -- bar geometry           the bar's constants (console.py imports them back)
+#   ZoneLook                  the look of a row an app lends the bar (BarZone's)
 #   BarLayer                  the theme layout's bars: cells, strips, clock, taps
 #   BarLayer.invalidate       repaint the cached bar strips
 #   BarLayer.bar_rects        where the bars are on a surface; content_rect, what they leave
@@ -225,6 +226,224 @@ STRIP_SELF = {
                    " tick, or after the composite"),
     "shell_cards.py": "the pause card is an overlay: its bar over its scrim",
 }
+
+
+# The slot of a theme's icon set (runtime/toolkit/iconsets.py) a lent row's
+# icon draws where it differs from the IconSheet's kind: the sliders for
+# Config (the gear is Settings', owner 2026-10-19) and the face for Sprites.
+SET_KIND = {"edit": "sliders", "paint": "sprite", "run": "play"}
+
+
+class ZoneLook:
+    """The bar's look for a row an app lends it (`uitree_editor.BarZone`'s
+    `look`): each cell the replay lays out -- a tab, an icon, a word, a line
+    of text, a hairline -- drawn in the bar's vocabulary on the canvas it
+    hands, at the font scale, in the theme's icon set where its look names
+    one. `where` is the strip the row stands on."""
+
+    def __init__(self, ws, where):
+        self.ws = ws
+        self.where = where
+
+    def zone_scale(self):
+        """The FONT scale, which `ui.tab_row`/`ui.button` read off the canvas
+        when they draw into the zone (a chip laid out at the chrome scale
+        and drawn at the font scale opens the wrong tab, #203)."""
+        return max(1, self.ws.layout.fs)
+
+    def tab_pad(self):
+        return _ui_draw.metrics("tab")[_ui_draw.TAB_PAD] * self.zone_scale()
+
+    def tab_width(self, label, icon, h):
+        got = _ui_draw.tab_row_rects((0, 0, 1 << 14, h), [(label, label)], self.zone_scale())
+        return got[0][1][2] if got else h
+
+    def word_width(self, label, icon, h):
+        fs = self.zone_scale()
+        return (_BAR_ICON + 4 + 8) * fs + _ui_draw.print_width(label, fs)
+
+    def draw_tab(self, cv, r, cur, label, icon, labelled, every):
+        """A tab in cell `r`. Where the row names `every` tab, each is a tab
+        chip, the current one on its plate; where it names the current one
+        alone (a narrow zone), that one is the theme's current mark as a pill
+        (`_open_mark`) with its name in the mark's ink, as the home's bar tabs
+        are, and the rest are icons."""
+        ws = self.ws
+        th = ws.theme_colors
+        sets = ws.icon_spec() is not None
+        if labelled and cur and not every:
+            ink = self._open_mark(cv, r)
+            _ui_draw.tab(cv, th, r, False, label, True,
+                         th["chrome_ink"] if ink is None else ink,
+                         ws.icon_image_keyed(icon),
+                         icon_draw=self._set_icon(cv, ink) if sets else None, kind=icon)
+            return
+        if labelled:
+            band_ink = th["ink"] if ws.bar_layer.zone_band_light(self.where) else None
+            draw = self._set_icon(cv, open_kind=icon if cur else None,
+                                  open_ink=_ui_draw.current_ink(cv, th), lead=True) \
+                if sets else None
+            _ui_draw.tab(cv, th, r, cur, label, True, band_ink, ws.icon_image_keyed(icon),
+                         icon_draw=draw, kind=icon)
+            return
+        ink = self._open_mark(cv, r) if cur else None
+        box = _BAR_ICON * self.zone_scale()
+        x = r[0] + (r[2] - box) // 2
+        y = r[1] + (r[3] - box) // 2
+        ws.icon(SET_KIND.get(icon, icon) if sets else icon, x, y, cv, ink=ink)
+
+    def draw_icon(self, cv, r, icon, on, primary, marked=False):
+        """A button as its icon: a plain one in the chrome ink (undo and redo
+        in the disabled ink when off), a primary one (Play, Restart, Stop) in
+        `value`; `marked` wears the dot of a thing owed."""
+        ws = self.ws
+        th = ws.theme_colors
+        box = _BAR_ICON * self.zone_scale()
+        x = r[0] + (r[2] - box) // 2
+        y = r[1] + (r[3] - box) // 2
+        if not primary:
+            self._draw_history_icon(cv, icon, x, y, box, on) if icon in ("undo", "redo") \
+                else ws.icon(icon, x, y, cv)
+        elif icon == "stop":
+            m = 4 * self.zone_scale()
+            cv.rect(x + m, y + m, box - 2 * m, box - 2 * m, th["value"])
+        elif ws.icon_spec() is not None and icon == "run":
+            self._draw_play(cv, (x, y, box, box), th["value"])
+        elif not ws.draw_icon(SET_KIND.get(icon, icon), (x, y, box, box), th["value"], cv):
+            ws.icon(icon, x, y, cv)
+        if marked:
+            self._mark(cv, x, y)
+
+    def draw_word(self, cv, r, label, icon, primary, marked=False):
+        """A button worded: Play the primary button where the theme names no
+        icon set, else its glyph and word bare on the band (`_bare_play`);
+        another its glyph and word bare (`_bare_action`)."""
+        ws = self.ws
+        if icon == "run" and ws.icon_spec() is None:
+            _ui_draw.button(cv, ws.theme_colors, r, label.upper(), kind="primary", glyph="run",
+                            glyph_draw=glyph)
+        elif icon == "run":
+            self._bare_play(cv, r)
+        else:
+            x, y = self._bare_action(cv, r, label, None if icon == "stop" else icon)
+            if marked:
+                self._mark(cv, x, y)
+
+    def draw_text(self, cv, r, text):
+        th = self.ws.theme_colors
+        fs = self.zone_scale()
+        tf = _ui_draw.font("ui")
+        was = _ui_draw.print_font(tf[0])
+        try:
+            cut = _ui_draw.print_cut(text, max(0, r[2] - 4 * fs), fs)
+            cv.print(cut, r[0] + 2 * fs, r[1] + (r[3] - tf[2] * fs) // 2,
+                     th["chrome_ink_dim"], 1)
+        finally:
+            _ui_draw.print_font(was)
+
+    def draw_line(self, cv, x, zone):
+        fs = self.zone_scale()
+        cut = 3 * fs
+        cv.rect(x, zone[1] + cut, fs, zone[3] - 2 * cut, self.ws.theme_colors["border"])
+
+    def _mark(self, cv, x, y):
+        """The dot of a thing owed (Restart's, while an edit waits for it),
+        on the top left corner of the icon at (x, y)."""
+        fs = self.zone_scale()
+        d = 6 * fs
+        cv.rrect(x - 2 * fs, y - 4 * fs, d, d, d // 2, self.ws.theme_colors["value"])
+
+    def _open_mark(self, cv, r):
+        """The open tab's mark on a narrow zone, the home's bar tabs' own:
+        the theme's current mark as a pill. The ink its icon and name take,
+        None for the chrome ink."""
+        fs = self.zone_scale()
+        return _ui_draw.current(cv, self.ws.theme_colors, r, r=5 * fs, fs=fs)
+
+    def _set_icon(self, cv, ink=None, open_kind=None, open_ink=None, lead=False):
+        """A tab's icon_draw: the theme's icon set's slot for a kind, in
+        `ink` (default the chrome ink), and the open tab's kind `open_kind`
+        in `open_ink` where the current mark gives one. `lead` (a labelled
+        chip, whose icon leads its name) moves the icon left by the blank
+        columns before its ink, so the ink starts at the chip's pad as the
+        name ends at it, and the pill's two pads match."""
+        ws = self.ws
+        if ink is None:
+            ink = ws.theme_colors["chrome_ink"]
+        spec = ws.icon_spec() if lead else None
+
+        def draw(kind, r):
+            c = open_ink if open_ink is not None and kind == open_kind else ink
+            slot = SET_KIND.get(kind, kind)
+            span = _iconsets.ink_span(slot, r[2], r[3], spec) if spec is not None else None
+            if span is not None:
+                r = (r[0] - span[0], r[1], r[2], r[3])
+            return ws.draw_icon(slot, r, c, cv)
+        return draw
+
+    def _draw_play(self, cv, rect, ink):
+        """Play, the set's bare glyph, in a stroke as heavy as the tab
+        icons': a smooth set's 16 px mask draws the triangle's 2-unit stroke
+        1.33 px wide, whose diagonals antialias to a grey the tab icons'
+        verticals do not (Contrast's disabled ink is a grey), so below the
+        20 px mask it draws twice, a column apart -- a 2 px stroke (design
+        review R3-26)."""
+        ws = self.ws
+        if not ws.draw_icon("play", rect, ink, cv):
+            return False
+        spec = ws.icon_spec()
+        if spec is not None and spec[0] == "smooth" \
+                and min(rect[2], rect[3]) < _iconsets.SIZES[1]:
+            ws.draw_icon("play", (rect[0] + 1, rect[1], rect[2], rect[3]), ink, cv)
+        return True
+
+    def _bare_play(self, cv, r):
+        """Play under a theme's icon set: the set's glyph and the word, in
+        `value`, on the band with no plate, at the right of `r` (D-03.3)."""
+        ink = self.ws.theme_colors["value"]
+        fs = self.zone_scale()
+        box = _BAR_ICON * fs
+        gap = 4 * fs
+        tw = _ui_draw.print_width("Play", fs)
+        x = r[0] + r[2] - box - gap - tw - 4 * fs
+        self._draw_play(cv, (x, r[1] + (r[3] - box) // 2, box, box), ink)
+        line = _ui_draw.font("ui")[2] * fs
+        cv.print("Play", x + box + gap, r[1] + (r[3] - line) // 2, ink, 1)
+
+    def _bare_action(self, cv, r, word, slot):
+        """A button's glyph and word in `value` with no plate, at the right
+        of `r`, as Play is drawn; Stop's glyph (`slot` None) a square, ■ (no
+        set draws one). Where its icon stands, (x, y)."""
+        ws = self.ws
+        ink = ws.theme_colors["value"]
+        fs = self.zone_scale()
+        box = _BAR_ICON * fs
+        gap = 4 * fs
+        tw = _ui_draw.print_width(word, fs)
+        x = r[0] + r[2] - box - gap - tw - 4 * fs
+        y = r[1] + (r[3] - box) // 2
+        if slot is None:
+            m = 4 * fs
+            cv.rect(x + m, y + m, box - 2 * m, box - 2 * m, ink)
+        elif not ws.draw_icon(slot, (x, y, box, box), ink, cv):
+            glyph(slot, (x, y, box, box), ink, cv)
+        line = _ui_draw.font("ui")[2] * fs
+        cv.print(word, x + box + gap, r[1] + (r[3] - line) // 2, ink, 1)
+        return x, y
+
+    def _draw_history_icon(self, cv, icon, x, y, ic, enabled):
+        """Undo or redo (#88), in the theme's `disabled` ink when the journal
+        has nothing to walk: the theme's icon set's in `ui_draw.disabled_ink`,
+        or, where the theme names no set, the plain glyph in that ink (an
+        IconSheet has no dimmed sprite)."""
+        ws = self.ws
+        if enabled:
+            ws.icon(icon, x, y, cv)
+            return
+        ink = _ui_draw.disabled_ink(ws.theme_colors)
+        if not ws.draw_icon(icon, (x, y, ic, ic), ink, cv):
+            glyph(icon, (x, y, ic, ic), ink, cv)
+
 
 class BarLayer:
     """The shell's bars (#46), migrated out of Workstation as its own surface

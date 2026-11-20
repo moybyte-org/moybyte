@@ -3,7 +3,6 @@
 #   ThemeDoc.commit       what either tab holds, written through the look
 #   ThemeDoc.begin_edit   an edit of the open slot: a smooth one turns to pixels first
 #   ThemeDoc.step         undo and redo, the session's alone
-#   draw_row              the desk row's theme mode: the two tabs, undo, redo (a handheld's is editor_ui's head row)
 #   ConfigLayout          the Config tab's geometry: the code view, its status line, the hints
 #   ConfigLayer           the Config tab: theme.json in the Code tab's view, json mode
 #   SpritesLayout         the Sprites tab's geometry, a handheld's and a desk pane's
@@ -434,66 +433,6 @@ class ThemeDoc:
 def _builtin_names():
     from chrome import THEME_NAMES
     return THEME_NAMES
-
-
-# -- the bar ------------------------------------------------------------------------
-#
-# The bar's theme mode on a handheld is the head row's other case
-# (runtime/editors/editor_ui.py: Done, the two tabs, the theme's name, undo
-# and redo); the desk row's is here.
-
-def row_layout(app, rect):
-    """The desk row's theme mode: the two tabs labelled from the left, undo
-    and redo at the right end. ([(tab, label, icon, rect, labelled)], undo
-    rect, redo rect)."""
-    fs = app._zone_scale()
-    x, y, w, h = rect
-    ic = 16 * fs
-    cell = max(ic, min(h, 32 * fs))
-    redo = (x + w - 6 * fs - cell, y + (h - cell) // 2, cell, cell)
-    undo = (redo[0] - cell - 4 * fs, redo[1], cell, cell)
-    area = (x, y, max(0, undo[0] - 12 * fs - x), h)
-    got = _ui_draw.tab_row_rects(area, [(t, l) for t, l, _i in TABS], fs, 8 * fs)
-    out = []
-    for (t, label, icon), (_t, r, on) in zip(TABS, got):
-        out.append((t, label, icon, r, on))
-    return out, undo, redo
-
-
-def draw_row(app, cv, rect):
-    ws = app.ws
-    th = ws.theme_colors
-    tabs, undo, redo = row_layout(app, rect)
-    band_ink = th["ink"] if ws.bar_layer.zone_band_light("menu") else None
-    sets = ws.icon_spec() is not None
-    draw = None
-    if sets:
-        kind = next((i for t, _l, i, _r, _o in tabs if t == app.tab), None)
-        draw = app._set_icon(cv, open_kind=kind, open_ink=_ui_draw.current_ink(cv, th),
-                             lead=True)
-    icon_for = getattr(ws, "icon_image_keyed", None)
-    for t, label, icon, r, on in tabs:
-        _ui_draw.tab(cv, th, r, t == app.tab, label, on, band_ink,
-                     icon_for(icon) if icon_for is not None else None,
-                     icon_draw=draw, kind=icon)
-    ic = 16 * app._zone_scale()
-    for glyph, r, can in (("undo", undo, ws.history.can_undo()),
-                          ("redo", redo, ws.history.can_redo())):
-        app._draw_history_icon(cv, glyph, r[0] + (r[2] - ic) // 2,
-                               r[1] + (r[3] - ic) // 2, ic, can)
-
-
-def row_tap(app, px, py, rect):
-    tabs, undo, redo = row_layout(app, rect)
-    for t, _l, _i, r, _on in tabs:
-        if r[0] <= px < r[0] + r[2] and r[1] <= py < r[1] + r[3]:
-            app.theme_tab(t)
-            return True
-    for r, fn in ((undo, app.ws.history.undo), (redo, app.ws.history.redo)):
-        if r[0] <= px < r[0] + r[2] and r[1] <= py < r[1] + r[3]:
-            fn()
-            return True
-    return False
 
 
 # -- the hint strips ----------------------------------------------------------------

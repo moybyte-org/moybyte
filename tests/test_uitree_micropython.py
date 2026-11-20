@@ -200,6 +200,27 @@ def pages(loop):
     bl._zone_owner("menu").zone_tap(r[0] + r[2] // 2, r[1] + r[3] // 2, zone)
     _steps(loop, 4)
     shown["head_tab"] = ws.menu_view
+    # the desk's row (editor_ui.py's desk_head): a T-Deck has no desk, so a
+    # stand-in shows its workspaces for one draw and a tap through the zone
+    class Desk:
+        key = "code"
+
+        def switch(self, k):
+            self.key = k
+            return True
+    desk = Desk()
+    ea = ws.editor_app
+    ea._desk = lambda: desk
+    try:
+        owner = bl._zone_owner("menu")
+        owner.draw_zone(ws.sys_canvas, zone)
+        cells = ea.zone_cells(zone)
+        shown["desk_head"] = [c[0] for c in cells]
+        r = [c[2] for c in cells if c[0] == "ws:art"][0]
+        owner.zone_tap(r[0] + r[2] // 2, r[1] + r[3] // 2, zone)
+        shown["desk_ws"] = desk.key
+    finally:
+        del ea._desk
     ws.spine.exit()
     _steps(loop, 4)
     ws.spine.open_app(ws.app("appearance"))
@@ -218,7 +239,8 @@ def pages(loop):
 # and the task manager on each of its tabs
 # Achievements (a badge's popover: shown["badge"]), the task manager on each
 # of its tabs, and the Editor's Code tab and theme mode's Config (the Editor's
-# head row draws in the bar's zone, never a page frame: shown["head"])
+# head row draws in the bar's zone, never a page frame: shown["head"], and its
+# desk case shown["desk_head"])
 BUILDS = ("rows_page", "tz_page", "paired_page", "log_page", "build", "page", "web_page",
           "list_page", "tasks_page", "achievements_page", "code_page", "config_page")
 
@@ -250,5 +272,7 @@ def test_every_ported_page_builds_and_draws_on_the_boards_micropython(tmp_path):
     assert shown["stopped"] and shown["config"], shown
     assert shown["head"][-3:] == ["\x00undo", "\x00redo", None] and "code" in shown["head"], shown
     assert shown["head_tab"] == "paint", shown
+    assert shown["desk_head"][:3] == ["ws:settings", "ws:code", "ws:art"], shown
+    assert shown["desk_ws"] == "art", shown
     missing = [b for b in BUILDS if not painted.get(b)]
     assert not missing, ("pages that never painted", missing, painted, text[-3000:])

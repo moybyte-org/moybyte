@@ -2,8 +2,8 @@
 #   EditorApp            the authoring app: a project across a tab ladder
 #   EditorApp.set_tab    switch tab, building its editor
 #   EditorApp.leave      PLAY: leave the tab, committing it
-#   EditorApp.draw_zone  the tab ladder, UNDO/REDO and PLAY
-#   EditorApp.zone_tap   hit-test the ladder and dispatch
+#   EditorApp.bar_zone   the head row lent to the bar: tabs or workspaces, UNDO/REDO, PLAY
+#   EditorApp._activate_zone_tab  what a cell of the head row asks
 #   EditorApp.save_tab   route one tab's commit to its owner
 #   EditorApp.open_theme  the theme mode: a theme package's Config and Sprites
 """The EDITOR app (Stage 3 of docs/history/shell_ux_technical_plan_v1.md).
@@ -48,14 +48,14 @@ tab's first build, so the shell's start does not load the paint/map cores.
 """
 
 from editors_code import CodeEditor
-from bar_layer import _BAR_ICON, glyph as _bar_glyph
+from bar_layer import ZoneLook
 
 
-# The Editor's head row -- the tabs, UNDO, REDO and PLAY -- is a `uitree` page
-# (runtime/editors/editor_ui.py) lent to the shell's bar on a handheld, which
-# the bar's zone replays (`EditorApp.bar_zone`); its actions land here in
-# `_activate_zone_tab` as these sentinels or a tab's name. The desk Editor's row
-# is drawn here (`_draw_row`).
+# The Editor's head row -- the tabs (on the desk, the workspaces), UNDO, REDO
+# and PLAY -- is a `uitree` page (runtime/editors/editor_ui.py) lent to the
+# shell's bar, which the bar's zone replays (`EditorApp.bar_zone`); its actions
+# land here in `_activate_zone_tab` as these sentinels, a tab's name or a
+# workspace's "ws:KEY".
 #
 # SAVE is GONE (#111, owner decision 2026-07-21): autosave is the only model now --
 # an idle-typing debounce commits mid-edit, and every hard exit (PLAY, a
@@ -71,7 +71,6 @@ _ZONE_REDO = "\x00redo"          # sentinel: REDO -> ws.history.redo() (#88)
 _ZONE_STOP = "\x00stop"          # sentinel: Stop, while a playtest runs (D-23)
 _ZONE_RESTART = "\x00restart"    # sentinel: Restart, beside it
 _OPENS = ("cards", "blocks", "code", "paint", "map", "scene", "music")   # the tabs
-_PLAY_SLOT = 170                # the desk Editor's Play slot, Play or Restart and Stop
 
 # The tabs save_tab() can route a commit to -- and the only ones commit_later
 # will owe. The theme mode's two tabs commit through their ThemeDoc
@@ -82,11 +81,6 @@ COMMIT_TABS = _OPENS
 ZONE_ITEMS = (("cards", "edit"), ("blocks", "blocks"), ("code", "code"), ("paint", "paint"),
               ("map", "map"), ("scene", "scene"), ("music", "music"),
               (_ZONE_UNDO, "undo"), (_ZONE_REDO, "redo"), (None, "run"))
-
-# The slot of a theme's icon set (runtime/toolkit/iconsets.py) a ladder icon draws
-# where it differs from the IconSheet's kind: the sliders for Config (the gear
-# is Settings', owner 2026-10-19) and the face for Sprites.
-_SET_KIND = {"edit": "sliders", "paint": "sprite", "run": "play"}
 
 # The `ws` attribute holding each tab's layout owner -- the object whose
 # `relayout(w, h, fs, cs)` rebuilds that tab's geometry from the live canvas
@@ -132,7 +126,6 @@ def _te():
 
 from editor_panes import WORKSPACES as _WORKSPACES, HOME_TAB as _HOME_TAB
 import moy_carts as _carts
-import iconsets as _iconsets
 import ui as _ui
 import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
@@ -156,7 +149,6 @@ class EditorApp:
     def __init__(self, ws, names=None):
         self.ws = ws
         self._NAMES = names
-        self._row_memo = None         # (inputs, the desk row's layout)
         self.project = None           # the open cart's workspace (set by open())
         # Stage 4 (#46 zoned bar): bumped whenever the active tab ACTUALLY changes --
         # the ONLY thing that varies in the Editor's lent left zone (which icon is
@@ -581,226 +573,6 @@ class EditorApp:
             self.zone_gen += 1
         ws.spine.play(self)     # PLAY: run the cart, caller = the Editor (Stage 3b)
 
-    # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------
-    #
-    # The Editor's tab ladder + UNDO/REDO + PLAY, shown on EVERY tab: the "menu"
-    # strip over each tab's page (the frame's `bar_layer.STRIP_OF`, or the tab's
-    # own call where `STRIP_SELF` names it), + ws.bar_layer.handle_bar_tap("menu",
-    # ...) from handle_pointer, so the bar is identical across the Editor tabs and each
-    # tab's own RUN/SAVE/CLOSE chrome was dissolved into it -- SAVE itself is GONE
-    # now (#111): every hard exit calls save_current() automatically and a tab
-    # switch owes its commit to the next frame (see set_tab/leave above), so
-    # there is no tap-driven affordance left to draw here.
-
-    def draw_zone(self, cv, rect):
-        """The desk Editor's row in the rect the bar lent (theme mode's
-        there too). A handheld's zone is the head row's page
-        (`bar_zone`, editor_ui.py), which the bar asks instead."""
-        ws = self.ws
-        if self.theme is not None:
-            _te().draw_row(self, cv, rect)
-            return
-        self._draw_row(cv, ws.theme_colors, rect, self._desk(), ws.icon_spec() is not None)
-
-    # -- the desk Editor's row (EDITOR_LAYOUT.md's frame) ---------------------
-
-    def _row_layout(self, rect, desk):
-        """The app's row while the desk Editor shows workspaces: the cart's
-        workspaces from the left, labelled, or icons with the current one
-        labelled where the row is short; undo and redo at a fixed place, a
-        hairline, then the Play slot, which never changes width.
-        ([(id, label, kind, rect, labelled)], undo rect, redo rect,
-        hairline x, Play slot). Kept for its inputs: the rect, the scale, the
-        workspace shown and the look (its fonts and metrics measure the
-        labels)."""
-        fs = self._zone_scale()
-        key = (tuple(rect), fs, desk.key, self.ws.look.look_gen,
-               tuple([w[0] for w in self.workspaces()]))
-        got = self._row_memo
-        if got is not None and got[0] == key:
-            return got[1]
-        out = self._row_layout_of(rect, desk, fs)
-        self._row_memo = (key, out)
-        return out
-
-    def _row_layout_of(self, rect, desk, fs):
-        x, y, w, h = rect
-        play_r = (x + w - _PLAY_SLOT * fs, y, _PLAY_SLOT * fs, h)
-        ic = _BAR_ICON * fs
-        cell = max(ic, min(h, 32 * fs))
-        line = play_r[0] - 6 * fs
-        redo_r = (line - 6 * fs - cell, y + (h - cell) // 2, cell, cell)
-        undo_r = (redo_r[0] - cell, redo_r[1], cell, cell)
-        area = (x, y, max(0, undo_r[0] - 12 * fs - x), h)
-        cur = "ws:" + desk.key
-        items = [("ws:" + k, label, kind) for k, label, kind in self.workspaces()]
-        got = _ui_draw.tab_row_rects(area, [(t, l) for t, l, _k in items], fs, 8 * fs)
-        out = []
-        if len(got) == len(items) and got[0][2]:
-            for (t, label, kind), (_t, r, _on) in zip(items, got):
-                out.append((t, label, kind, r, True))
-            return out, undo_r, redo_r, line, play_r
-        pad = _ui_draw.metrics("tab")[_ui_draw.TAB_PAD] * fs
-        xx = x
-        for t, label, kind in items:
-            lw = 0
-            if t == cur:
-                one = _ui_draw.tab_row_rects(area, [(t, label)], fs)
-                if one and one[0][2]:
-                    lw = one[0][1][2]
-            cw = lw or ic + 2 * pad
-            if xx + cw > area[0] + area[2]:
-                break
-            out.append((t, label, kind, (xx, y, cw, h), bool(lw)))
-            xx += cw + 4 * fs
-        return out, undo_r, redo_r, line, play_r
-
-    def _draw_row(self, cv, th, rect, desk, sets):
-        ws = self.ws
-        tabs, undo_r, redo_r, line, play_r = self._row_layout(rect, desk)
-        cur = "ws:" + desk.key
-        band_ink = th["ink"] if ws.bar_layer.zone_band_light("menu") else None
-        draw = None
-        if sets:
-            kind = next((k for t, _l, k, _r, _o in tabs if t == cur), None)
-            draw = self._set_icon(cv, open_kind=kind,
-                                  open_ink=_ui_draw.current_ink(cv, th), lead=True)
-        icon_for = getattr(ws, "icon_image_keyed", None)
-        for t, label, kind, r, on in tabs:
-            _ui_draw.tab(cv, th, r, t == cur, label, on, band_ink,
-                         icon_for(kind) if icon_for is not None else None,
-                         icon_draw=draw, kind=kind)
-        ic = _BAR_ICON * self._zone_scale()
-        can_u, can_r = ws.history.can_both()
-        for glyph, r, can in (("undo", undo_r, can_u), ("redo", redo_r, can_r)):
-            self._draw_history_icon(cv, glyph, r[0] + (r[2] - ic) // 2,
-                                    r[1] + (r[3] - ic) // 2, ic, can)
-        fs = self._zone_scale()
-        cv.rect(line, rect[1] + 8 * fs, fs, rect[3] - 16 * fs, th["border"])
-        if self.playing():
-            restart_r, stop_r = self._run_rects(play_r)
-            self._bare_action(cv, restart_r, "Restart", "rotate")
-            if self.restart_owed:
-                d = 6 * fs
-                cv.rrect(restart_r[0] + 10 * fs, restart_r[1] + 8 * fs, d, d, d // 2,
-                         th["value"])
-            self._bare_action(cv, stop_r, "Stop", None)
-        elif sets:
-            self._bare_play(cv, play_r)
-        else:
-            _ui_draw.button(cv, th, play_r, "PLAY", kind="primary", glyph="run",
-                            glyph_draw=_bar_glyph)
-
-    def _row_tap(self, px, py, rect, desk):
-        tabs, undo_r, redo_r, _line, play_r = self._row_layout(rect, desk)
-        if _in(px, py, play_r):
-            if self.playing():
-                restart_r, _stop = self._run_rects(play_r)
-                return self._activate_zone_tab(
-                    _ZONE_RESTART if _in(px, py, restart_r) else _ZONE_STOP)
-            return self._activate_zone_tab(None)
-        for t, _l, _k, r, _on in tabs:
-            if _in(px, py, r):
-                return self._activate_zone_tab(t)
-        if _in(px, py, undo_r):
-            return self._activate_zone_tab(_ZONE_UNDO)
-        if _in(px, py, redo_r):
-            return self._activate_zone_tab(_ZONE_REDO)
-        return False
-
-    def _open_mark(self, cv, r):
-        """The open tab's mark on the narrow bar, the home's bar tabs' own: the
-        theme's current mark as a pill. The ink its icon and name take, None
-        for the chrome ink."""
-        fs = self._zone_scale()
-        return _ui_draw.current(cv, self.ws.theme_colors, r, r=5 * fs, fs=fs)
-
-    def _set_icon(self, cv, ink=None, open_kind=None, open_ink=None, lead=False):
-        """A tab's icon_draw: the theme's icon set's slot for a ladder kind,
-        in `ink` (default the chrome ink), and the open tab's kind
-        `open_kind` in `open_ink` where the current mark gives one. `lead`
-        (a labelled chip, whose icon leads its name) moves the icon left by
-        the blank columns before its ink, so the ink starts at the chip's
-        pad as the name ends at it, and the pill's two pads match."""
-        ws = self.ws
-        if ink is None:
-            ink = ws.theme_colors["chrome_ink"]
-        spec = ws.icon_spec() if lead else None
-
-        def draw(kind, r):
-            c = open_ink if open_ink is not None and kind == open_kind else ink
-            slot = _SET_KIND.get(kind, kind)
-            span = _iconsets.ink_span(slot, r[2], r[3], spec) if spec is not None else None
-            if span is not None:
-                r = (r[0] - span[0], r[1], r[2], r[3])
-            return ws.draw_icon(slot, r, c, cv)
-        return draw
-
-    def _draw_play(self, cv, rect, ink):
-        """Play, the set's bare glyph, in a stroke as heavy as the tab
-        icons': a smooth set's 16 px mask draws the triangle's 2-unit stroke
-        1.33 px wide, whose diagonals antialias to a grey the tab icons'
-        verticals do not (Contrast's disabled ink is a grey), so below the
-        20 px mask it draws twice, a column apart -- a 2 px stroke (design
-        review R3-26)."""
-        ws = self.ws
-        if not ws.draw_icon("play", rect, ink, cv):
-            return False
-        spec = ws.icon_spec()
-        if spec is not None and spec[0] == "smooth" \
-                and min(rect[2], rect[3]) < _iconsets.SIZES[1]:
-            ws.draw_icon("play", (rect[0] + 1, rect[1], rect[2], rect[3]), ink, cv)
-        return True
-
-    def _bare_play(self, cv, r):
-        """The shelf's Play under a theme's icon set: the set's glyph and the
-        word, in `value`, on the band with no plate, at the right of `r`
-        (the zone's right end, D-03.3)."""
-        ws = self.ws
-        ink = ws.theme_colors["value"]
-        fs = self._zone_scale()
-        box = _BAR_ICON * fs
-        gap = 4 * fs
-        tw = _ui_draw.print_width("Play", fs)
-        x = r[0] + r[2] - box - gap - tw - 4 * fs
-        self._draw_play(cv, (x, r[1] + (r[3] - box) // 2, box, box), ink)
-        line = _ui_draw.font("ui")[2] * fs
-        cv.print("Play", x + box + gap, r[1] + (r[3] - line) // 2, ink, 1)
-
-    def _run_rects(self, play_r):
-        """Restart's and Stop's rects in Play's place while a playtest runs,
-        Stop at the zone's right end."""
-        w = play_r[2] // 2
-        return ((play_r[0], play_r[1], w, play_r[3]),
-                (play_r[0] + w, play_r[1], play_r[2] - w, play_r[3]))
-
-    def _bare_action(self, cv, r, word, slot):
-        """Restart or Stop on the shelf, as Play is drawn: the glyph and the
-        word in `value` with no plate, at the right of `r`. Stop's glyph is a
-        square, ■ (no set draws one)."""
-        ws = self.ws
-        ink = ws.theme_colors["value"]
-        fs = self._zone_scale()
-        box = _BAR_ICON * fs
-        gap = 4 * fs
-        tw = _ui_draw.print_width(word, fs)
-        x = r[0] + r[2] - box - gap - tw - 4 * fs
-        y = r[1] + (r[3] - box) // 2
-        if slot is None:
-            m = 4 * fs
-            cv.rect(x + m, y + m, box - 2 * m, box - 2 * m, ink)
-        elif not ws.draw_icon(slot, (x, y, box, box), ink, cv):
-            _bar_glyph(slot, (x, y, box, box), ink, cv)
-        line = _ui_draw.font("ui")[2] * fs
-        cv.print(word, x + box + gap, r[1] + (r[3] - line) // 2, ink, 1)
-
-    def zone_need(self, h):
-        """The narrowest zone at band height `h` for the head row
-        (`uitree_editor.BarZone.zone_need`): the bar gives a zone this
-        narrower than its status widgets' room (`BarLayer._make_room`), so
-        no shipped bar drops a tab, undo, redo or Play."""
-        return self._head().zone_need(h)
-
     def _offers(self, tab):
         """Whether the open cart has `tab`: the one rule for what the Editor
         offers, read by the ladder, the chips, `set_tab`, the desk's panes
@@ -849,21 +621,6 @@ class EditorApp:
                 out.append((k, label, kind))
         return out
 
-    def _draw_history_icon(self, cv, glyph, x, y, ic, enabled):
-        """Draw the UNDO/REDO bar icon (#88), in the theme's `disabled` ink when
-        the journal has nothing to walk. `enabled` draws it like any other bar
-        icon; disabled draws the theme's icon set's in `ui_draw.disabled_ink`,
-        or, where the theme names no set, the plain _glyph bitmap in that ink --
-        an IconSheet has no 'dimmed' sprite variant, so the fallback vocabulary
-        carries the color instead."""
-        ws = self.ws
-        if enabled:
-            ws.icon(glyph, x, y, cv)
-            return
-        ink = _ui_draw.disabled_ink(ws.theme_colors)
-        if not ws.draw_icon(glyph, (x, y, ic, ic), ink, cv):
-            _bar_glyph(glyph, (x, y, ic, ic), ink, cv)
-
     def _zone_scale(self):
         """The scale the shelf zone is laid out on: the FONT scale, which is also
         what `ui.tab_row`/`ui.button` read off the canvas when they draw into it.
@@ -897,18 +654,6 @@ class EditorApp:
         if r is None:
             return None
         return (bar[1][0] + r[0], bar[1][1] + r[1], r[2], r[3])
-
-    def zone_targets(self, rect):
-        """Nothing on the desk, whose rows are the workspaces' own (a
-        handheld's targets are the head row's, `bar_zone`)."""
-        return []
-
-    def zone_tap(self, px, py, rect):
-        """A tap on the desk Editor's row, `rect` the zone the bar lent and
-        (px, py) in its coordinates."""
-        if self.theme is not None:
-            return _te().row_tap(self, px, py, rect)
-        return self._row_tap(px, py, rect, self._desk())
 
     def _activate_zone_tab(self, tab):
         ws = self.ws
@@ -961,11 +706,10 @@ class EditorApp:
 
     @property
     def bar_zone(self):
-        """The bar's zone on a handheld: the head row's page replayed
-        (`uitree_editor.BarZone`), this app its look and host; None on the
-        desk, whose row is the desk Editor's (`draw_zone`)."""
-        if self._desk() is not None:
-            return None
+        """The bar's zone: the head row's page replayed
+        (`uitree_editor.BarZone`) in the bar's look for a lent row
+        (`bar_layer.ZoneLook`), this app its host; on the desk its
+        workspaces in the tabs' place."""
         return self._head()
 
     def _head(self):
@@ -976,24 +720,26 @@ class EditorApp:
             editor_ui._host[0] = self
             page = uitree_editor.Page(editor_ui.head, _ui_draw.AppHost(), _HeadDamage(self.ws))
             page.open(hook="none")
-            z = self._head_zone = uitree_editor.BarZone(page, self)
+            z = self._head_zone = uitree_editor.BarZone(page, ZoneLook(self.ws, "menu"),
+                                                        host=self)
         return z
 
     def zone_cells(self, rect):
         """The head row's cells in zone `rect`, as the Editor names them:
-        [(tab, icon, rect)], a tab's name, an action's sentinel
-        (`_ZONE_UNDO`...), None for Play; theme mode's Done its key."""
+        [(tab, icon, rect)], a tab's name, a desk workspace's "ws:KEY", an
+        action's sentinel (`_ZONE_UNDO`...), None for Play; theme mode's
+        Done its key."""
         out = []
         for c in self._head()._layout(rect)[0]:
             if c[1] == "tab":
-                out.append((c[3], c[5], c[0]))
+                out.append(("ws:" + c[3] if c[2].key == "space" else c[3], c[5], c[0]))
             elif c[1] == "button":
                 out.append((self._HEAD_TAB.get(c[2].key, c[2].key), c[5], c[0]))
         return out
 
     def open_zone_tab(self, name):
-        """What the head row's actions ask: a tab, undo, redo, play,
-        restart or stop."""
+        """What the head row's actions ask: a tab, a desk workspace
+        ("ws:KEY"), undo, redo, play, restart or stop."""
         return self._activate_zone_tab(self._HEAD_TAB.get(name, name))
 
     def head_sync(self):
@@ -1028,97 +774,19 @@ class EditorApp:
         p = bool(self.playing())
         if hs.playing != p:
             hs.playing = p
-
-    # the head row's cells in the bar's look (BarZone's `look`)
-
-    def zone_scale(self):
-        return self._zone_scale()
-
-    def tab_pad(self):
-        return _ui_draw.metrics("tab")[_ui_draw.TAB_PAD] * self._zone_scale()
-
-    def tab_width(self, label, icon, h):
-        got = _ui_draw.tab_row_rects((0, 0, 1 << 14, h), [(label, label)], self._zone_scale())
-        return got[0][1][2] if got else h
-
-    def word_width(self, label, icon, h):
-        fs = self._zone_scale()
-        return (_BAR_ICON + 4 + 8) * fs + _ui_draw.print_width(label, fs)
-
-    def draw_tab(self, cv, r, cur, label, icon, labelled, every):
-        """A head-row tab in cell `r`. Where the row names `every` tab, each
-        is a tab chip, the current one on its plate; where it names the
-        current one alone (the narrow bar), that one is the theme's current
-        mark as a pill (`_open_mark`) with its name in the mark's ink, as
-        the home's bar tabs are, and the rest are icons."""
-        ws = self.ws
-        th = ws.theme_colors
-        sets = ws.icon_spec() is not None
-        if labelled and cur and not every:
-            ink = self._open_mark(cv, r)
-            _ui_draw.tab(cv, th, r, False, label, True,
-                         th["chrome_ink"] if ink is None else ink,
-                         ws.icon_image_keyed(icon),
-                         icon_draw=self._set_icon(cv, ink) if sets else None, kind=icon)
+        if hs.restart_owed != self.restart_owed:
+            hs.restart_owed = self.restart_owed
+        desk = self._desk()
+        if hs.desk != (desk is not None):
+            hs.desk = desk is not None
+        if desk is None:
             return
-        if labelled:
-            band_ink = th["ink"] if ws.bar_layer.zone_band_light("menu") else None
-            draw = self._set_icon(cv, open_kind=icon if cur else None,
-                                  open_ink=_ui_draw.current_ink(cv, th), lead=True) \
-                if sets else None
-            _ui_draw.tab(cv, th, r, cur, label, True, band_ink, ws.icon_image_keyed(icon),
-                         icon_draw=draw, kind=icon)
-            return
-        ink = self._open_mark(cv, r) if cur else None
-        box = _BAR_ICON * self._zone_scale()
-        x = r[0] + (r[2] - box) // 2
-        y = r[1] + (r[3] - box) // 2
-        ws.icon(_SET_KIND.get(icon, icon) if sets else icon, x, y, cv, ink=ink)
-
-    def draw_icon(self, cv, r, icon, on, primary):
-        ws = self.ws
-        th = ws.theme_colors
-        box = _BAR_ICON * self._zone_scale()
-        x = r[0] + (r[2] - box) // 2
-        y = r[1] + (r[3] - box) // 2
-        if not primary:
-            self._draw_history_icon(cv, icon, x, y, box, on) if icon in ("undo", "redo") \
-                else ws.icon(icon, x, y, cv)
-            return
-        if icon == "stop":
-            m = 4 * self._zone_scale()
-            cv.rect(x + m, y + m, box - 2 * m, box - 2 * m, th["value"])
-        elif ws.icon_spec() is not None and icon == "run":
-            self._draw_play(cv, (x, y, box, box), th["value"])
-        elif not ws.draw_icon(_SET_KIND.get(icon, icon), (x, y, box, box), th["value"], cv):
-            ws.icon(icon, x, y, cv)
-
-    def draw_word(self, cv, r, label, icon, primary):
-        ws = self.ws
-        if icon == "run" and ws.icon_spec() is None:
-            _ui_draw.button(cv, ws.theme_colors, r, label.upper(), kind="primary", glyph="run",
-                            glyph_draw=_bar_glyph)
-        elif icon == "run":
-            self._bare_play(cv, r)
-        else:
-            self._bare_action(cv, r, label, None if icon == "stop" else icon)
-
-    def draw_text(self, cv, r, text):
-        th = self.ws.theme_colors
-        fs = self._zone_scale()
-        tf = _ui_draw.font("ui")
-        was = _ui_draw.print_font(tf[0])
-        try:
-            cut = _ui_draw.print_cut(text, max(0, r[2] - 4 * fs), fs)
-            cv.print(cut, r[0] + 2 * fs, r[1] + (r[3] - tf[2] * fs) // 2,
-                     th["chrome_ink_dim"], 1)
-        finally:
-            _ui_draw.print_font(was)
-
-    def draw_line(self, cv, x, zone):
-        fs = self._zone_scale()
-        cut = 3 * fs
-        cv.rect(x, zone[1] + cut, fs, zone[3] - 2 * cut, self.ws.theme_colors["border"])
+        if desk.key in editor_ui.KEYS and hs.space != desk.key:
+            hs.space = desk.key
+        have = [k for k, _l, _i in self.workspaces()]
+        for k in editor_ui.KEYS:
+            if getattr(hs, "has_space_" + k) != (k in have):
+                setattr(hs, "has_space_" + k, k in have)
 
     def playing(self):
         """Whether a playtest runs beside the Editor (the desk): Play then

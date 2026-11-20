@@ -2,7 +2,7 @@
 other tabs, UNDO, REDO and PLAY.
 
 The ladder draws the theme's icon set where its look names one, and the set's
-own slots for a few tabs (`editor_app._SET_KIND`: Config's sliders, Sprites'
+own slots for a few tabs (`bar_layer.SET_KIND`: Config's sliders, Sprites'
 face, Play's bare glyph), which the bar's IconSheet does not hold. An image
 that carries no set's files draws the shell's own icons instead
 (`iconsets.carried`), every one of them, where drawing the set's slots it

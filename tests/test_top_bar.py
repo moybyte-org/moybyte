@@ -1021,7 +1021,7 @@ def test_draw_zone_never_invoked_while_player_is_top_of_stack(tmp_path):
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     calls = []
-    for owner in (ws.launcher_layer, ws.settings_layer, ws.editor_app):
+    for owner in (ws.launcher_layer, ws.settings_layer, ws.editor_app.bar_zone):
         orig = owner.draw_zone
 
         def spy(cv, rect, _orig=orig, _owner=owner):

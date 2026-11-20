@@ -98,7 +98,7 @@ class HistoryRouter:
     journal walk they fall through to.
 
     UI TRIGGER, resolved by owner decision (#88, 2026-07-18): shared UNDO/REDO
-    icons in the Editor's lent top-bar zone (`EditorApp.draw_zone`), reachable
+    icons in the Editor's lent top-bar zone (`EditorApp.bar_zone`), reachable
     from every tab, on top of the code editor's Ctrl+Z / Ctrl+Y host shortcut
     (`code_layer`). Both drive the SAME `undo()`/`redo()` below, so neither
     affordance can drift from the other."""
