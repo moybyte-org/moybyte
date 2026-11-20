@@ -16,6 +16,7 @@ import uitree_check  # noqa: E402
 # Every module written against uitree. A port adds its module here.
 PORTED = (
     "uitree_counter",
+    "uitree_roles",
     "perms_ui",
     "settings_ui",
     "uitree_focus",

@@ -260,7 +260,9 @@ class Engine(S.Builder):
             rect = _v.page(n.p["title"](None))
         hint = self._hints()
         placed = any(k.kind in ("split", "grid", "foot") for k in shown)
-        if not placed:
+        if not hint:
+            pass                        # nothing on offer: no band, as a page with no keys draws none
+        elif not placed:
             _v.hints(hint)
         elif not self.desk and _v.hints_width(hint) > 0:
             band, rect = _v.cut_bottom(rect, 20 * self.fs)
@@ -455,17 +457,36 @@ class Engine(S.Builder):
                 return i
         return None
 
+    def role_action(self, role):
+        """The declared action answering `role:ROLE` (one per key, K02)."""
+        k = "role:" + role
+        for a in self.actions.values():
+            if k in a.keys:
+                return a
+        return None
+
+    def role(self, role):
+        """A host that routes its own keys (kernel chrome) presses ROLE: the
+        action answering it runs now, as one commit, when it is on offer.
+        True when one ran."""
+        a = self.role_action(role)
+        if a is None or not a.can():
+            return False
+        self.run_action(a, self.args_for(a), "role %s" % role)
+        self._damage.all()
+        return True
+
     def _hints(self):
         f = self.focused
         d = self.dialog_shown()
         if d:
             b = d.l["buttons"]
-            return ("confirm", b[-1].hint, "back", b[0].hint)
+            return ("confirm", b[-1].hint_now(), "back", b[0].hint_now())
         out = []
         if f is not None:
             node, row = f
             act = node.act if node.kind != "cards" else node.l.get("new")
-            h = act.hint if act is not None and act.can() else None
+            h = act.hint_now() if act is not None and act.can() else None
             if node.kind == "field" and node.l.get("commit"):
                 return ("confirm", "Done", "cancel", "Cancel")
             if node.kind in ("seg", "slider"):
@@ -476,10 +497,19 @@ class Engine(S.Builder):
                 h = self._t(node, "hint", None)
             if h:
                 out += ["confirm", h]
+        else:
+            a = self.role_action("confirm")
+            h = a.hint_now() if a is not None and a.can() else ""
+            if h:
+                out += ["confirm", h]
         for a in self.actions.values():
             if a.key and a.key.isalpha() and a.can():
-                out += [a.key.upper(), a.hint]
-        return tuple(out + ["back", "Back"])
+                out += [a.key.upper(), a.hint_now()]
+        a = self.role_action("back") if len(self.pages) == 1 else None
+        if a is None:
+            return tuple(out + ["back", "Back"])
+        h = a.hint_now() if a.can() else ""
+        return tuple(out + ["back", h] if h else out)
 
     def dialog_shown(self):
         for k in self.root.kids if self.root else ():
@@ -998,7 +1028,12 @@ class Engine(S.Builder):
                 if c in a.chars and a.can():
                     self.q.append((a, (c,), "typed %r" % c))
                     break
-        if self._ui.keys(i) or self.q:
+        took = self._ui.keys(i)
+        if self.focused is None and not self.dialog_shown() and i.pressed("a"):     # no node takes it
+            a = self.role_action("confirm")
+            if a is not None and a.can():
+                self.q.append((a, self.args_for(a), "role confirm"))
+        if took or self.q:
             self._damage.all()
         return True
 
@@ -1050,6 +1085,11 @@ class Engine(S.Builder):
             was, _NOW.app = _NOW.app, self
             S._trace("page", "back", "page %d, focus back to %r" % (len(self.pages), back_to))
             _NOW.app = was
+            return True
+        a = self.role_action("back")
+        if a is not None and a.can():
+            self.q.append((a, self.args_for(a), "role back"))
+            self._damage.all()
             return True
         return False
 

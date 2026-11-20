@@ -1306,6 +1306,11 @@ class Action:
         self.unit = None        # the unit it belongs to: live only while a node bound to it is shown
         self.takes = "none"
         self.hook = False
+        self.hint_g = None      # a hint that is a template over the state
+
+    def hint_now(self):
+        """The hints band's verb now: `hint=` evaluated when it is a template."""
+        return self.hint if self.hint_g is None else _text(self.hint_g(None))
 
     def cur_row(self):
         st = _st()
@@ -1375,7 +1380,9 @@ def _params(fn):
 # EXT-3. The chords and roles an action answers to besides its letter: a
 # chord is "ctrl+<letter>" (a desk keyboard's), a role is one of ROLES,
 # which the engine maps to each board's key (the T-Deck's has no Ctrl).
-ROLES = ("search", "goto", "complete", "undo", "redo", "play", "more", "tools")
+# `confirm` is a confirm that no focused node takes; `back` is the page's
+# back once no overlay or pushed page takes it (spec §13.3, an app's back=).
+ROLES = ("search", "goto", "complete", "undo", "redo", "play", "more", "tools", "confirm", "back")
 
 
 def _chord_byte(k):
@@ -1475,6 +1482,8 @@ def action(name, label, fn, *, takes="none", key=None, when=None, off=None, hint
         raise UIError("K03", "action %r: key= is one letter" % name, where=where, found=repr(key),
                       fix='key="m"; a role or a chord goes in keys=')
     a = Action(name, label, fn, key, when, hint, row, where)
+    if "{" in a.hint:
+        a.hint_g = tmpl(a.hint, Ctx(), where, "hint").g
     a.takes = takes
     a.unit = unit
     a.push = push

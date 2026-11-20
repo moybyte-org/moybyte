@@ -89,3 +89,31 @@ def test_focus_lands_in_the_frame_that_first_draws_its_node(config, tmp_path):
     assert back, log                                  # the pushed page drew no "extra"
     after = log[back[-1] + 1:]
     assert after and after[0] == (True, "extra"), log
+
+
+def test_a_page_with_no_stop_answers_confirm_and_back_through_its_role_actions(tmp_path):
+    """A on a page where no node takes it runs the `role:confirm` action, B
+    the `role:back` one before the shell's back; the band names their hints,
+    templates over the state, and draws no band when both are ""."""
+    import uitree as S
+    import uitree_roles as R
+    cls = R.layer()
+    seen = {}
+
+    def opened(ws):
+        seen["app"] = P.host(ws, cls)
+
+    fs = P.frames("tdeck_320x240_fs1_dark", opened, ["k:a", "back"], str(tmp_path / "carts"))
+    eng = seen["app"].engine
+    trace = eng.trace_text()
+    assert (R.s.sent, R.s.left) == (1, 1), trace
+    assert "from role confirm" in trace and "from role back" in trace, trace
+    S._NOW.app = eng
+    try:
+        assert eng._hints() == ("confirm", "Send", "back", "Cancel")
+        eng.run_action(eng.actions["quiet"], (), "test")
+        assert eng._hints() == ()
+    finally:
+        S._NOW.app = None
+    assert eng.role("back") and R.s.left == 2           # a host routing its own keys
+    assert fs[1].buf == fs[0].buf                        # the page drew nothing new
