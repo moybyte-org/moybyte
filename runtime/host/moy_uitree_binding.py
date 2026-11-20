@@ -43,6 +43,7 @@ _SIGS = (
     ("uit_node", [_P, _I, _S, _I], _I),
     ("uit_prop", [_P, _I, _S, _S, _S], _I),
     ("uit_node_action", [_P, _I, _I], _I),
+    ("uit_on_draw", [_P, _P, _P], None),
     ("uit_build_end", [_P], _I),
     ("uit_open", [_P], None),
     ("uit_want_focus", [_P, _S], None),
@@ -77,6 +78,9 @@ def b(s):
     return s.encode("utf-8") if isinstance(s, str) else s
 
 
+_DRAW = c.CFUNCTYPE(None, c.c_void_p, c.c_int, c.c_int, c.c_int, c.c_int, c.c_int)
+
+
 class Engine:
     """One engine (`uit_t`), with the methods the MicroPython face's
     `moy_uitree.Engine` has, name for name: the front end
@@ -93,6 +97,7 @@ class Engine:
         self._e = L.uit_new()
         self._ev = (c.c_int32 * 3)()
         self._buf = c.create_string_buffer(512)
+        self._draw = self._cb = self._raised = None
 
     def __del__(self):
         e, self._e = getattr(self, "_e", None), None
@@ -198,7 +203,24 @@ class Engine:
         L.moy_ui_sink_row(c.byref(sink), int(hd), 0 if look is None else int(look))
         r = L.uit_frame(self._e, p, c.byref(sink), x, y, w, h, flags, fs, inp)
         del buf
+        if self._raised is not None:
+            x, self._raised = self._raised, None
+            raise x
         return r
+
+    def on_draw(self, fn):
+        """A canvas's draw, `fn(node, x, y, w, h)`, called inside the frame;
+        what it raises is raised by the frame's call."""
+        self._draw = fn
+        self._cb = None if fn is None else _DRAW(self._tramp)
+        self._L.uit_on_draw(self._e, self._cb, None)
+
+    def _tramp(self, _ud, node, x, y, w, h):
+        if self._raised is None:
+            try:
+                self._draw(node, x, y, w, h)
+            except BaseException as e:      # noqa: B036 -- ctypes would print and drop it
+                self._raised = e
 
     def next(self):
         """The next event: (kind, a, b, c, text), or None."""

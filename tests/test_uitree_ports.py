@@ -355,6 +355,12 @@ LOG_RING = tuple((1000000 + 250000 * n, (6, 4, 3, 7)[n % 4], ("shell", "kernel",
      "TypeError: unsupported types for +: 'int', 'NoneType'"),)
 
 
+def _open_web_console(ws):
+    from test_shell_goldens import _GoldenWebHost
+    ws.webhost = _GoldenWebHost()
+    ws.web.toggle()
+
+
 def _open_log(ws):
     import moy_log
     moy_log.init(16384)
@@ -386,6 +392,7 @@ SURFACES = {
     "settings_rows": P.Surface(lambda ws: ws.open_settings()),
     "settings_rows_full": P.Surface(_open_rows_full),
     "settings_log": P.Surface(_open_log),
+    "web_console": P.Surface(_open_web_console),
     "settings_wifi": P.Surface(_open_wifi()),
     "settings_wifi_none": P.Surface(_open_wifi(False)),
     "wifi_popover": P.Surface(_open_wifi_popover),
@@ -497,6 +504,10 @@ RUNS = (
       11: WIFI_RING_IN_VIEW}),
     ("wifi_popover-tdeck", "wifi_popover", "tdeck_320x240_fs1_dark",
      ["k:down", "k:a", "f:2", "k:down", "k:a", "t:abc", "enter", "f:2", "back"]),
+    # the web console's page: the QR its canvas draws beside the address, the
+    # keys stepped over it (Turn off on a desk, where it is a button)
+    ("web_console-tdeck", "web_console", "tdeck_320x240_fs1_dark", ["f:2", "k:down"]),
+    ("web_console-desk", "web_console", "p4_1024x600_fs2_windowed", ["f:2", "k:down", "k:up"]),
     ("editor_code-tdeck", "editor_code", "tdeck_320x240_fs1_dark", CODE_SCRIPT, P.BEHAVIOUR),
     ("editor_code-desk", "editor_code", "p4_1024x600_fs2_windowed", CODE_DESK_SCRIPT, P.BEHAVIOUR),
     ("editor_code-big", "editor_code", "big_800x480_fs3_dark", CODE_SCRIPT, P.BEHAVIOUR),
@@ -530,7 +541,8 @@ C_RUNS = ("settings_rows-tdeck", "settings_rows-desk", "settings_rows_layout-tde
           "settings_permissions-tdeck", "settings_permissions-desk",
           "update_sd-tdeck", "update_sd-desk", "update_sd_none-tdeck", "update_online-tdeck",
           "update_online-big", "update_c6-desk", "settings_log-tdeck", "settings_log-desk",
-          "wifi_popover-desk", "wifi_popover-tdeck", "settings_rows_full-desk")
+          "wifi_popover-desk", "wifi_popover-tdeck", "settings_rows_full-desk",
+          "web_console-tdeck", "web_console-desk")
 
 
 @pytest.mark.parametrize("name", C_RUNS)

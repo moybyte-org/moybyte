@@ -1,0 +1,23 @@
+{
+ "surface": "web_console",
+ "config": "tdeck_320x240_fs1_dark",
+ "commit": "fdbeb7327",
+ "script": [
+  "f:2",
+  "k:down"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "0e63fd50ec82b643a8b77faf7df430d25cb185e3ef7222f8a358edd888a450f5"
+  ],
+  [
+   "f:2",
+   "0e63fd50ec82b643a8b77faf7df430d25cb185e3ef7222f8a358edd888a450f5"
+  ],
+  [
+   "k:down",
+   "0e63fd50ec82b643a8b77faf7df430d25cb185e3ef7222f8a358edd888a450f5"
+  ]
+ ]
+}

@@ -18,6 +18,8 @@ void moy_ui_mp_sink(moy_ui_sink_t *s, mp_obj_t cv, mp_obj_t look);
 typedef struct {
     mp_obj_base_t base;
     uit_t *e;
+    mp_obj_t draw;              // on_draw's function: (node, x, y, w, h)
+    mp_obj_t raised;            // what it raised inside a frame, raised again after it
 } eng_obj_t;
 
 static uit_t *eng(mp_obj_t self)
@@ -58,6 +60,7 @@ static mp_obj_t eng_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_
     (void)args;
     eng_obj_t *o = mp_obj_malloc_with_finaliser(eng_obj_t, type);
     o->e = uit_new();
+    o->draw = o->raised = MP_OBJ_NULL;
     if (o->e == NULL)
         mp_raise_type(&mp_type_MemoryError);
     return MP_OBJ_FROM_PTR(o);
@@ -242,8 +245,41 @@ static mp_obj_t eng_frame(size_t n, const mp_obj_t *a)
     moy_ui_mp_sink(&s, a[2], a[3]);
     int r = uit_frame(e, c, &s, mp_obj_get_int(a[4]), mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
                       mp_obj_get_int(a[7]), mp_obj_get_int(a[8]), mp_obj_get_int(a[9]), mp_obj_get_int(a[10]));
+    eng_obj_t *o = MP_OBJ_TO_PTR(a[0]);
+    if (o->raised != MP_OBJ_NULL) {
+        mp_obj_t x = o->raised;
+        o->raised = MP_OBJ_NULL;
+        nlr_raise(x);
+    }
     return mp_obj_new_int(r);
 }
+
+// A canvas's draw, called inside the frame: what it raises is kept and raised once the frame
+// is out of the engine's C.
+static void draw_tramp(void *ud, int node, int x, int y, int w, int h)
+{
+    eng_obj_t *o = ud;
+    if (o->draw == MP_OBJ_NULL || o->raised != MP_OBJ_NULL)
+        return;
+    mp_obj_t args[5] = {MP_OBJ_NEW_SMALL_INT(node), MP_OBJ_NEW_SMALL_INT(x), MP_OBJ_NEW_SMALL_INT(y),
+                        MP_OBJ_NEW_SMALL_INT(w), MP_OBJ_NEW_SMALL_INT(h)};
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        mp_call_function_n_kw(o->draw, 5, 0, args);
+        nlr_pop();
+    } else {
+        o->raised = MP_OBJ_FROM_PTR(nlr.ret_val);
+    }
+}
+
+static mp_obj_t eng_on_draw(mp_obj_t self, mp_obj_t fn)
+{
+    eng_obj_t *o = MP_OBJ_TO_PTR(self);
+    o->draw = fn == mp_const_none ? MP_OBJ_NULL : fn;
+    uit_on_draw(eng(self), o->draw == MP_OBJ_NULL ? NULL : draw_tramp, o);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(eng_on_draw_obj, eng_on_draw);
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(eng_frame_obj, 11, 11, eng_frame);
 
 static char evbuf[512];
@@ -381,6 +417,7 @@ static const mp_rom_map_elem_t eng_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_node), MP_ROM_PTR(&eng_node_obj) },
     { MP_ROM_QSTR(MP_QSTR_prop), MP_ROM_PTR(&eng_prop_obj) },
     { MP_ROM_QSTR(MP_QSTR_node_action), MP_ROM_PTR(&eng_node_action_obj) },
+    { MP_ROM_QSTR(MP_QSTR_on_draw), MP_ROM_PTR(&eng_on_draw_obj) },
     { MP_ROM_QSTR(MP_QSTR_build_end), MP_ROM_PTR(&eng_build_end_obj) },
     { MP_ROM_QSTR(MP_QSTR_open), MP_ROM_PTR(&eng_open_obj) },
     { MP_ROM_QSTR(MP_QSTR_want_focus), MP_ROM_PTR(&eng_want_focus_obj) },

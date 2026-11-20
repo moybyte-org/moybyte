@@ -1,0 +1,28 @@
+{
+ "surface": "web_console",
+ "config": "p4_1024x600_fs2_windowed",
+ "commit": "fdbeb7327",
+ "script": [
+  "f:2",
+  "k:down",
+  "k:up"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "7afaf3ca4989c06d3889de52a8ac2238678096b89b20608259179199f30fc829"
+  ],
+  [
+   "f:2",
+   "7afaf3ca4989c06d3889de52a8ac2238678096b89b20608259179199f30fc829"
+  ],
+  [
+   "k:down",
+   "7afaf3ca4989c06d3889de52a8ac2238678096b89b20608259179199f30fc829"
+  ],
+  [
+   "k:up",
+   "7afaf3ca4989c06d3889de52a8ac2238678096b89b20608259179199f30fc829"
+  ]
+ ]
+}

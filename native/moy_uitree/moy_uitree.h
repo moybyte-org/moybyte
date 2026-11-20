@@ -37,7 +37,7 @@ enum { UIT_BOOL = 1, UIT_INT, UIT_NUM, UIT_TEXT, UIT_ENUM, UIT_ROWOF, UIT_MODEL 
 enum {
     UIT_PAGE = 1, UIT_GROUP, UIT_LABEL, UIT_INFO, UIT_LINK, UIT_BUTTON, UIT_TOGGLE,
     UIT_ROWS, UIT_DIALOG, UIT_SEG, UIT_SLIDER, UIT_FIELD, UIT_EMPTY, UIT_PROGRESS, UIT_TEXT_VIEW,
-    UIT_SCROLL, UIT_MENU, UIT_ITEM, UIT_SPLIT, UIT_KINDS
+    UIT_SCROLL, UIT_MENU, UIT_ITEM, UIT_SPLIT, UIT_CANVAS, UIT_KINDS
 };
 
 // Events (`uit_next`).
@@ -130,6 +130,11 @@ void uit_want_focus(uit_t *e, const char *key);
 // redraw of the whole page.
 int uit_frame(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int x, int y, int w, int h,
               int flags, int fs, int input);
+// A canvas's draw: the walk calls it inside the frame, in the page's order,
+// with the canvas's node and the rect it draws in; the front end binds what
+// each node draws (a Python function, a Lua one, C).
+typedef void (*uit_draw_fn)(void *ud, int node, int x, int y, int w, int h);
+void uit_on_draw(uit_t *e, uit_draw_fn fn, void *ud);
 // The next event: its kind; its words into ev[0..2], its text (the source)
 // into buf.
 int uit_next(uit_t *e, int32_t ev[3], char *buf, size_t cap);

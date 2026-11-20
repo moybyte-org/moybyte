@@ -584,7 +584,7 @@ int uit_model_of(uit_t *e, int node)
 const char *const uit_kind_names[UIT_KINDS] = {"", "page", "group", "label", "info", "link", "button",
                                                "toggle", "rows", "dialog", "seg", "slider", "field",
                                                "empty", "progress", "text_view", "scroll", "menu",
-                                               "item", "split"};
+                                               "item", "split", "canvas"};
 
 static const char *TONES[] = {"ink", "dim", "value", "danger"};
 static const char *BKINDS[] = {"normal", "primary", "tonal", "danger", "toggle"};
@@ -726,6 +726,12 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         else
             N->btn = (uint16_t)i, N->nbtn |= LT_LINES;
         return add_prop(e, node, name, src, repr, PK_LIT, i);
+    }
+    if (kind == UIT_CANVAS && (!strcmp(name, "draw") || !strcmp(name, "h"))) {
+        // draw= names the front end's function (uit_on_draw); h= its height where it is a row
+        if (name[0] == 'h')
+            N->btn = (uint16_t)strtol(src, NULL, 10);
+        return add_prop(e, node, name, src, repr, PK_LIT, 0);
     }
     if (kind == UIT_SPLIT && (!strcmp(name, "pad") || !strcmp(name, "gap") || !strcmp(name, "align"))) {
         static const char *const GAPS[] = {"s", "m", "l", "0"}, *const ALIGNS[] = {"start", "center", "end"};
@@ -916,6 +922,12 @@ int uit_build_end(uit_t *e)
     e->fresh = 1;
     gen_of_build(e);
     return e->nnodes ? 0 : uit_fail(e, UIT_E_ARG, "a build with no page");
+}
+
+void uit_on_draw(uit_t *e, uit_draw_fn fn, void *ud)
+{
+    e->draw_fn = fn;
+    e->draw_ud = ud;
 }
 
 void uit_open(uit_t *e)

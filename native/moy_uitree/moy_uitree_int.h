@@ -242,6 +242,8 @@ struct uit {
     int16_t tvl_slot;
     uint16_t tvl_ver;
     const char *tvl_s;
+    uit_draw_fn draw_fn;        // a canvas's draw, the front end's
+    void *draw_ud;
     int32_t rect[4];            // the page's room for its placed rows (`self.rect`)
     uint8_t in_cell;            // drawing a split's column: a button takes its natural width
     uint8_t tv_stop, tv_stop_now;   // a text view that runs on drew last frame / this frame (the band's PgUp PgDn)

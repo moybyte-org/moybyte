@@ -44,7 +44,8 @@ INPUTS = ("keys", "tdeck", "pad", "touch")
 _KINDS = {"page": 1, "group": 2, "label": 3, "info": 4, "link": 5, "button": 6, "toggle": 7,
           "rows": 8, "dialog": 9, "seg": 10, "slider": 11, "field": 12, "empty": 13,
           "progress": 14, "text_view": 15,
-          "scroll": 16, "menu": 17, "item": 18, "split": 19}
+          "scroll": 16, "menu": 17, "item": 18, "split": 19,
+          "canvas": 20}
 _HEAD = {"rows": ("model",), "dialog": ("buttons",)}
 _KIND_NAMES = dict((v, k) for k, v in _KINDS.items())
 _KIND_NAMES[len(_KINDS) + 1] = "cycle"          # UIT_KINDS: a seg of the cycle look
@@ -86,6 +87,7 @@ class CEngine(Engine):
         self._x = _New()
         self.direct = BUILD == "direct"
         self._slot, self._names, self._types, self._pushed = {}, [], [], {}
+        self._draws, self._drawing = {}, False
         self._declare()
 
     def _ck(self, r, what, where=None):
@@ -279,6 +281,10 @@ class CEngine(Engine):
         for a refusal."""
         x = self._x
         x.build_begin(self._page_id())
+        draws = self._draws = {}
+        if not self._drawing:
+            x.on_draw(self._draw)
+            self._drawing = True
         cnode, cprop, cact, aidx, fail = x.node, x.prop, x.node_action, self._aidx, self._fail
         kinds, bound, heads, lits_only, action = _KINDS, _BOUND, _HEAD, _LIT_ONLY, S.Action
 
@@ -316,6 +322,12 @@ class CEngine(Engine):
             head = heads.get(nk, ())
             for k, src in n.src.items():
                 if k in head:
+                    continue
+                if k == "draw" and nk == "canvas":         # the front end's function: called inside the frame
+                    draws[me] = src
+                    r = cprop(me, "draw", getattr(src, "__name__", "draw"), None)
+                    if r < 0:
+                        fail(r, "canvas %s draw=" % n.key, n.where)
                     continue
                 rep = None
                 if k in l:
@@ -358,6 +370,16 @@ class CEngine(Engine):
                 node(k, me)
         node(root, -1)
         self._ck(x.build_end(), "the build")
+
+    def _draw(self, node, x, y, w, h):
+        """A canvas's draw, called by the walk inside the frame at its rect."""
+        now = S._NOW
+        was = now.app, now.frame
+        now.app, now.frame = self, True
+        try:
+            self._draws[node](self.cv, x, y, w, h)
+        finally:
+            now.app, now.frame = was
 
     # -- the frame -------------------------------------------------------------------
 

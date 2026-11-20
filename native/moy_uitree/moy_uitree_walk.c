@@ -1055,6 +1055,11 @@ static void draw_split(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k,
         int32_t cell[4] = {across ? r[0] + at : r[0], across ? r[1] : r[1] + at, across ? sz : r[2],
                            across ? r[3] : sz};
         at += sz + gap;
+        if (NODE(g)->kind == UIT_CANVAS) {
+            if (e->draw_fn)             // a cell of its own that only draws: drawn into the cell
+                e->draw_fn(e->draw_ud, g, cell[0], cell[1], cell[2], cell[3]);
+            continue;
+        }
         if (NODE(g)->kind != UIT_GROUP) {
             draw(e, c, s, g, model, row);
             continue;
@@ -1286,6 +1291,18 @@ static void draw(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int m
     case UIT_SPLIT:
         draw_split(e, c, s, k, model, row);
         break;
+    case UIT_CANVAS: {
+        // a row of the page that only draws: no stop, no ring
+        const char *key = uit_str(e, N->key);
+        int32_t one = 1, r[5];
+        moy_ui_over_none(&o);
+        moy_ui_over_text(&o, MOY_UI_OV_ID, span_of(key, strlen(key)));
+        moy_ui_over_put(&o, MOY_UI_OV_DISABLED, &one);
+        moy_ui_api_part(c, s, span_of(key, strlen(key)), 0, N->btn, &o, r);
+        if (e->draw_fn)
+            e->draw_fn(e->draw_ud, k, r[0], r[1], r[2], r[3]);
+        break;
+    }
     case UIT_SCROLL: {
         const char *key = uit_str(e, N->key);
         moy_ui_api_scroll(c, s, span_of(key, strlen(key)), NULL);
