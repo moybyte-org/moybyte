@@ -3050,6 +3050,21 @@ void moy_ui_api_page(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
     moy_ui_box_t ct = b;
     clip_t k;
     int drew = 0;
+    // a page's id is its title, or `o.id` where two pages share one
+    moy_ui_span_t pid = o->id.p != NULL ? o->id : title;
+    uint32_t page_id = mua_hash(pid.p, pid.n, PAGE_SALT);
+    if (c->n_nest == 0 && mua_armed(c) && c->fl.stage == 0) {
+        // a shift planned over last frame's page draws only about its R:
+        // a page last frame did not hold (a page pushed, one popped to)
+        // draws whole
+        int held = 0;
+        for (int j = 0; j < c->n_prev && !held; j++) {
+            held = (c->prev[j].flags & STOP_PAGE) && c->prev[j].id == page_id;
+        }
+        if (!held) {
+            c->fl.on = 0;
+        }
+    }
     if (c->n_nest == 0) {
         // the title is the bar's, never drawn in the page (rows scroll under no head)
         size_t tn = title.n < MOY_UI_API_TIP - 1 ? title.n : MOY_UI_API_TIP - 1;
@@ -3073,9 +3088,7 @@ void moy_ui_api_page(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
         moy_ui_page_ground(s, b, head, c->fs, mua_ground_of(c), &ct);
         memcpy(&row->st[MOY_ST_CX0], saved, sizeof(saved));
     }
-    // a page's id is its title, or `o.id` where two pages share one
-    moy_ui_span_t pid = o->id.p != NULL ? o->id : title;
-    open_page(c, mua_hash(pid.p, pid.n, PAGE_SALT), ct, o->nav == 0 ? STOP_NAV_OFF : 0, o, ct);
+    open_page(c, page_id, ct, o->nav == 0 ? STOP_NAV_OFF : 0, o, ct);
     mua_snap_open(c, s, o);
     if (content != NULL) {
         *content = ct;
@@ -3937,6 +3950,29 @@ int moy_ui_api_measure(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy_ui
     out[2] = w < r.w ? w : r.w;
     out[3] = h;
     out[4] = c->has_at ? 0 : h + stack_gap(c);
+    return 1;
+}
+
+int moy_ui_api_dock(moy_ui_ctx_t *c, int h, int32_t out[4]) {
+    if (h <= 0 || c->page.h <= 0) {
+        return 0;
+    }
+    if (h > c->page.h) {
+        h = c->page.h;
+    }
+    moy_ui_box_t b = {c->page.x, (int16_t)(c->page.y + c->page.h - h), c->page.w, (int16_t)h};
+    c->page.h = (int16_t)(c->page.h - h);
+    if (c->page_stop != NO_PAGE) {
+        c->cur[c->page_stop].b.h = c->page.h;
+    }
+    moy_ui_keep_t *k = mua_page_keep(c);
+    if (k != NULL) {
+        k->foot = (int16_t)(k->foot + h);
+    }
+    out[0] = b.x;
+    out[1] = b.y;
+    out[2] = b.w;
+    out[3] = b.h;
     return 1;
 }
 
