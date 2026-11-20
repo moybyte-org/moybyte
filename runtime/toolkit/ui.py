@@ -216,6 +216,7 @@ _OVER_KEYS = (
     ('follow', 2, 4, 0),
     ('secret', 2, 4, 1),
     ('fit', 2, 4, 2),
+    ('bare', 2, 4, 3),
 )
 (_K_COLOUR, _K_TRI, _K_FLAG, _K_WASH, _K_AXIS, _K_INT, _K_INDEX, _K_PAIR, _K_QUAD,
  _K_TEXT, _K_TEXTS) = range(11)

@@ -48,6 +48,7 @@ enum {
     MOY_UI_OV_FOLLOW,
     MOY_UI_OV_SECRET,
     MOY_UI_OV_FIT,
+    MOY_UI_OV_BARE,
     MOY_UI_OV_COUNT
 };
 
@@ -132,6 +133,7 @@ enum {
 #define MOY_UI_O2_FOLLOW 0x1
 #define MOY_UI_O2_SECRET 0x2
 #define MOY_UI_O2_FIT 0x4
+#define MOY_UI_O2_BARE 0x8
 
 typedef struct {
     const char *name;
@@ -179,6 +181,7 @@ typedef struct {
     {"follow", MOY_UI_KIND_FLAG, MOY_UI_AT_FLAGS2, 0}, \
     {"secret", MOY_UI_KIND_FLAG, MOY_UI_AT_FLAGS2, 1}, \
     {"fit", MOY_UI_KIND_FLAG, MOY_UI_AT_FLAGS2, 2}, \
+    {"bare", MOY_UI_KIND_FLAG, MOY_UI_AT_FLAGS2, 3}, \
 }
 
 #endif

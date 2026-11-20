@@ -165,7 +165,7 @@ for i in range(len(ui_draw._TOKENS)):
 def probe(key, verb, ex, base):
     o = dict(base)
     o[key] = ex
-    ui.page("Probe")
+    ui.page("Probe", o if verb == "page" else None)
     got = None
     if verb == "label":
         ui.label("Probe", o)

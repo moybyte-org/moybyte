@@ -238,6 +238,9 @@ void moy_ui_over_put(moy_ui_over_t *o, int k, const int32_t *v) {
         case MOY_UI_OV_FIT:
             o->flags2 = v[0] ? o->flags2 | MOY_UI_O2_FIT : o->flags2 & ~MOY_UI_O2_FIT;
             break;
+        case MOY_UI_OV_BARE:
+            o->flags2 = v[0] ? o->flags2 | MOY_UI_O2_BARE : o->flags2 & ~MOY_UI_O2_BARE;
+            break;
         default: break;
     }
 }
@@ -3075,9 +3078,13 @@ void moy_ui_api_page(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
     }
     static const uint8_t untitled[1] = {0};
     moy_ui_span_t head = {untitled, 0};
-    EACH_PIECE(c, k, s, b) {
-        moy_ui_page_ground(s, b, head, c->fs, mua_ground_of(c), &ct);
-        drew = 1;
+    if (o->flags2 & MOY_UI_O2_BARE) {
+        drew = 1;           // its host painted its ground: untitled, its content is its box
+    } else {
+        EACH_PIECE(c, k, s, b) {
+            moy_ui_page_ground(s, b, head, c->fs, mua_ground_of(c), &ct);
+            drew = 1;
+        }
     }
     if (!drew) {
         // nothing of it is drawn this frame: its content rect all the same
