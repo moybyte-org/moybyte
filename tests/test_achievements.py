@@ -142,6 +142,39 @@ def test_toast_renders(tmp_path):
     assert probe.distinct_pixels_in(drv.rgb888(), 3) > 4        # not a blank frame
 
 
+def _count_line(page):
+    """The page's count row as it reads now."""
+    def find(n):
+        if n.kind == "progress":
+            return n
+        for k in n.kids:
+            got = find(k)
+            if got is not None:
+                return got
+        return None
+    return find(page.page.root).p["label"](None)
+
+
+def test_the_count_line_says_none_some_and_all(tmp_path):
+    """The count row's words: none found, some, every one."""
+    import achievements_ui
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.ach.seed({})
+    ws.open_settings()
+    sl = ws.settings_layer
+    sl.open_page("achievements")
+    drv.frame(1 / 30)
+    page = sl.achievements
+    assert _count_line(page) == "None found yet"
+    s = achievements_ui.s
+
+    def every():
+        s.found, s.none, s.every = s.total, False, True
+    page.page.run(every, action="every")
+    assert _count_line(page) == "All 15 found!"
+
+
 def test_the_achievements_page_opens_from_about(tmp_path):
     """About's Achievements row says the count and opens the page, a page
     of Settings: its cards by game, the console's own first, a secret named
@@ -161,18 +194,24 @@ def test_the_achievements_page_opens_from_about(tmp_path):
     assert sl.page == "achievements" and sl.page_title() == "Achievements"
     drv.frame(1 / 30)
     page = sl.achievements
-    titles = {c.title for _cap, rows in page._groups for _g, _o, cards in rows for c in cards}
+    rows = page.page.s._v["badges"]
+    titles = {r._f["title"] for r in rows}
     assert "First Steps" in titles and "Secret" in titles and "Secret Coder" not in titles
-    assert [g[0] for g in page._groups] == ["Moybyte", "Harpoon Pop"]
-    assert page._head == "1 of 15 found"
+    groups = []
+    for r in rows:
+        if r._f["group"] not in groups:
+            groups.append(r._f["group"])
+    assert groups == ["Moybyte", "Harpoon Pop"]
+    assert (page.page.s._v["found"], page.page.s._v["total"]) == (1, 15)
+    assert _count_line(page) == "1 of 15 found"
     import settings_rows
     assert settings_rows.s.ach_words == "1 of 15"
-    page._focus = "Badge system first_open"
+    page.focus("system first_open")
     drv.frame(1 / 30)
     _press(drv, "a")
-    assert page.pop is not None and page._pop_lines[1] == "Found 12 October"
+    assert page.popover() is not None and page.popover()[3] == "Found 12 October"
     sl.back()
-    assert page.pop is None and sl.page == "achievements"
+    assert page.popover() is None and sl.page == "achievements"
     sl.back()
     assert sl.page is None
 
@@ -189,10 +228,10 @@ def test_a_goal_says_how_far(tmp_path):
     sl.open_page("achievements")
     ws.frame(1 / 30)
     page = sl.achievements
-    card = page._by_id["Badge system play_five"]
-    assert card.sub == "3 of 5" and card.goal == 5
-    page._open(card)
-    assert page._pop_lines == ("Play 5 carts", "3 of 5")
+    card = next(r._f for r in page.page.s._v["badges"] if r._f["id"] == "system play_five")
+    assert card["sub"] == "3 of 5" and card["goal"] == 5 and card["value"] == 3
+    page.open_badge("system play_five")
+    assert page.popover()[2:] == ("Play 5 carts", "3 of 5")
     ws.frame(1 / 30)
 
 

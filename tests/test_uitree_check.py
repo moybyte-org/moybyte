@@ -28,6 +28,7 @@ PORTED = (
     "web_console_ui",
     "about_ui",
     "tasks_ui",
+    "achievements_ui",
 )
 
 

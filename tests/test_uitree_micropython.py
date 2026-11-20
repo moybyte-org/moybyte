@@ -108,8 +108,14 @@ def pages(loop):
     _steps(loop, 20)
     shown["rows"] = ws.wm.top_kind()
     sl = ws.settings_layer
-    for p in ("tz", "paired", "log", "permissions", "licences"):
+    for p in ("tz", "paired", "log", "permissions", "licences", "achievements"):
         sl.open_page(p)
+        if p == "achievements":
+            _steps(loop)
+            sl.achievements.open_badge("system first_open")     # a badge's popover
+            _steps(loop)
+            shown["badge"] = sl.achievements.popover()[1]
+            sl.achievements.back()
         if p == "licences":
             _steps(loop)
             sl.licences.read("MicroPython")     # its text: a prose view, dragged
@@ -155,9 +161,10 @@ def pages(loop):
 # each ported page's build function, by name: Settings' rows, its tz, paired,
 # System log and App permissions pages, the update screen, the web console, and
 # Licences' list (a licence's text is a page pushed over it: shown["licence"]),
+# Achievements (a badge's popover: shown["badge"]),
 # and the task manager on each of its tabs
 BUILDS = ("rows_page", "tz_page", "paired_page", "log_page", "build", "page", "web_page",
-          "list_page", "tasks_page")
+          "list_page", "tasks_page", "achievements_page")
 
 
 def test_every_ported_page_builds_and_draws_on_the_boards_micropython(tmp_path):
@@ -172,8 +179,9 @@ def test_every_ported_page_builds_and_draws_on_the_boards_micropython(tmp_path):
     shown, painted = info["shown"], info["painted"]
     assert not info["errors"], (info["errors"][:3], text[-3000:])
     assert shown["rows"] == "settings", shown
-    assert [shown[p] for p in ("tz", "paired", "log", "permissions", "licences")] == \
-        ["tz", "paired", "log", "permissions", "licences"], shown
+    assert [shown[p] for p in ("tz", "paired", "log", "permissions", "licences", "achievements")] == \
+        ["tz", "paired", "log", "permissions", "licences", "achievements"], shown
+    assert shown["badge"] == "First Steps", shown
     assert shown["licence"] == "MicroPython", shown
     for how in ("open_update", "open_update_online", "open_update_c6", "open_update_none"):
         assert shown[how] == "update", (how, shown)

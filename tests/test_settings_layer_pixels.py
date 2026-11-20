@@ -343,13 +343,13 @@ def capture(cfg, carts_dir):
     sl.open_page("achievements")
     out["ach_page"] = page(sl._sub)
     pg = sl.achievements
-    pg._open(pg._by_id["Badge system first_open"])
+    pg.open_badge("system first_open")
     out["ach_popover"] = page(sl._sub)
     pg.back()
-    pg._focus = "Badge moybyte.harpoon_pop high_tide"
+    pg.focus("moybyte.harpoon_pop high_tide")
     sl._draw_page()
     sl._draw_page()
-    pg._open(pg._by_id["Badge moybyte.harpoon_pop high_tide"])
+    pg.open_badge("moybyte.harpoon_pop high_tide")
     out["ach_goal"] = page(sl._sub)
     sl.close_page()
     sl.open_page("licences")

@@ -305,10 +305,10 @@ def _achievements(config, state, focus, pop=False, scroll=False):
         sl = ws.settings_layer
         sl.open_page("achievements")
         page = sl.achievements
-        page._focus = "Badge system " + focus
+        page.focus("system " + focus)
         _settle(g, ws, 3)
         if pop:
-            page._open(page._by_id["Badge system " + focus])
+            page.open_badge("system " + focus)
     return setup
 
 

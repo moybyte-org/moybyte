@@ -377,7 +377,7 @@ class SettingsLayer(Layer):
         self._rect = (0, 0, 0, 0)     # the layout's content rect, as the page takes it
         self._dt = 0.0                # the frame's dt, for a hosted page's clock
         self.achievements = AchievementsPage(
-            ws.app_context("achievements", AchievementsPage.NEEDS))
+            ws.app_context("achievements", AchievementsPage.NEEDS), self._sub)
         _pctx = ws.app_context("permissions", PermsPage.NEEDS + ("damage",))
         self.licences = LicencesPage(ws.app_context("licences", LicencesPage.NEEDS), self._sub)
         self.syslog = LogPage(self._sub, _pctx.damage, ws)
@@ -1477,6 +1477,8 @@ class SettingsLayer(Layer):
             return True
         if view == "licences" and self.licences.keys(i):
             return True
+        if view == "achievements" and self.achievements.keys(i):
+            return True
         if view is None:
             self.rows.keys(i)
         else:
@@ -1591,7 +1593,7 @@ class SettingsLayer(Layer):
         self.achievements.open()
 
     def _ach_draw(self):
-        self.achievements.draw(self._content())
+        self.achievements.draw(self._content(), self._dt)
 
     def _lic_open(self, _pid=None):
         self.licences.open()
