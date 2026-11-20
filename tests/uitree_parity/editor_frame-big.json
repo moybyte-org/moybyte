@@ -1,0 +1,88 @@
+{
+ "surface": "editor_frame",
+ "config": "big_800x480_fs3_dark",
+ "commit": "53a7c71fb",
+ "script": [
+  "zone:3",
+  "zone:4",
+  "zone:5",
+  "zone:6",
+  "zone:0",
+  "zone:1",
+  "zone:2",
+  "t:x",
+  "zone:7",
+  "zone:8",
+  "zone:7",
+  "zone:9"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "2fd6d847ad372c7cba7e79c13f08e260a7ec4c8998b85ad8446fe4f42775dc16"
+  ],
+  [
+   "zone:3",
+   "fd70814eb86b01817c2048c7cb99a90dd7073e69921dd6431fa15fb0e9d90b63"
+  ],
+  [
+   "zone:4",
+   "f5af46da5dba458ee8fec2984af8e91da05e95ccab0d5abcddb32de8008a4566"
+  ],
+  [
+   "zone:5",
+   "0b58fc09db1729a092ee208e24a205f2596fa3f2472015d3b322fc8ff2a384e5"
+  ],
+  [
+   "zone:6",
+   "7da12002326d33781690b21b9f0f5058b67c0e482a50163e267a6cf5218c63b7"
+  ],
+  [
+   "zone:0",
+   "cc42b72b62fb0cd81ac798bf7520190dff84d73493e1e6c0fdb41e4541878168"
+  ],
+  [
+   "zone:1",
+   "16141c8673e5529ff44ecd9435f8eb6153b4ba93e5dad32bdc1579abcd5e1952"
+  ],
+  [
+   "zone:2",
+   "2fd6d847ad372c7cba7e79c13f08e260a7ec4c8998b85ad8446fe4f42775dc16"
+  ],
+  [
+   "t:x",
+   "57d38fcd7b4ea833731f6f74e19dd210846c313e1e991357b050599b80d0f685"
+  ],
+  [
+   "zone:7",
+   "3698293e8a6611a5091c12bbe3dd0ea76482780be19c1f78ef7745376329a8d0"
+  ],
+  [
+   "zone:8",
+   "57d38fcd7b4ea833731f6f74e19dd210846c313e1e991357b050599b80d0f685"
+  ],
+  [
+   "zone:7",
+   "3698293e8a6611a5091c12bbe3dd0ea76482780be19c1f78ef7745376329a8d0"
+  ],
+  [
+   "zone:9",
+   "8d3e080360553271ef7c86a9eac652b6c39431d3e7de042143b19e495e4fe0e4"
+  ]
+ ],
+ "states": [
+  "tab=code text=9a76021a7296 undo=False redo=False playing=False top=menu",
+  "tab=paint text=9a76021a7296 undo=False redo=False playing=False top=menu",
+  "tab=map text=9a76021a7296 undo=False redo=False playing=False top=menu",
+  "tab=scene text=9a76021a7296 undo=False redo=False playing=False top=menu",
+  "tab=music text=9a76021a7296 undo=False redo=False playing=False top=menu",
+  "tab=cards text=9a76021a7296 undo=False redo=False playing=False top=menu",
+  "tab=blocks text=9a76021a7296 undo=False redo=False playing=False top=menu",
+  "tab=code text=9a76021a7296 undo=False redo=False playing=False top=menu",
+  "tab=code text=11ef1c98cfae undo=True redo=False playing=False top=menu",
+  "tab=code text=9a76021a7296 undo=False redo=True playing=False top=menu",
+  "tab=code text=11ef1c98cfae undo=True redo=False playing=False top=menu",
+  "tab=code text=9a76021a7296 undo=False redo=True playing=False top=menu",
+  "tab=code text=9a76021a7296 undo=False redo=True playing=False top=desktop"
+ ]
+}

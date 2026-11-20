@@ -114,8 +114,23 @@ def _step(ws, driver, step):
         for _ in range(int(arg)):
             ws.mark_dirty()
             driver.frame(DT)
+    elif op == "zone":
+        _zone_tap(ws, driver, int(arg))
     else:
-        raise ValueError("parity step %r: one of k:NAME t:TEXT enter del back f:N" % step)
+        raise ValueError("parity step %r: one of k:NAME t:TEXT enter del back f:N zone:N" % step)
+
+
+def _zone_tap(ws, driver, i):
+    """A tap on the Editor bar zone's target `i` (its owner's `zone_targets`,
+    left to right: the tabs, undo, redo, Play), at its centre."""
+    bl = ws.bar_layer
+    bar = bl.cell("menu", "zone")[0]
+    zone = bl.lent_zone("menu", bar)
+    r = bl._zone_owner("menu").zone_targets(zone)[i]
+    driver.touch(bar[1][0] + r[0] + r[2] // 2, bar[1][1] + r[1] + r[3] // 2)
+    driver.frame(DT)
+    driver.touch_up()
+    driver.frame(DT)
 
 
 def frames(config, surface, script, carts_dir=None):

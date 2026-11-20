@@ -272,6 +272,16 @@ def _code_probe(ws):
         ws.code_err_row, ws.editor_app.tab)
 
 
+def _frame_probe(ws):
+    """The Editor frame's state in a line: the open tab, the text's digest,
+    what undo and redo would do, whether a playtest runs, the top surface."""
+    import hashlib
+    ea, ed = ws.editor_app, ws.editor
+    text = hashlib.sha1(ed.text().encode()).hexdigest()[:12] if ed is not None else "-"
+    return "tab=%s text=%s undo=%s redo=%s playing=%s top=%s" % (
+        ea.tab, text, ws.history.can_undo(), ws.history.can_redo(), ea.playing(), ws.wm.top_kind())
+
+
 def _open_editor(tab):
     def open_(ws):
         import test_shell_goldens as G
@@ -292,6 +302,13 @@ CODE_SCRIPT = ["k:down", "k:down", "k:right", "k:right", "t:x", "enter", "t:\x06
 CODE_DESK_SCRIPT = ["k:down", "k:down", "k:right", "k:right", "t:x", "enter", "t:\x06", "t:spr",
                     "enter", "t:\x06", "t:\x07", "t:dr", "enter", "k:down", "t:sp", "t:\x05", "enter",
                     "t:\x1a", "t:\x1a", "k:up"]
+
+# The Editor's frame on a handheld, through its bar zone's targets (left to
+# right: Cards, Blocks, Code, Paint, Map, Scene, Music, undo, redo, Play):
+# each tab opened by a tap, a typed edit taken back and given again by the
+# zone's undo and redo, then Play
+FRAME_SCRIPT = ["zone:3", "zone:4", "zone:5", "zone:6", "zone:0", "zone:1", "zone:2", "t:x",
+                "zone:7", "zone:8", "zone:7", "zone:9"]
 
 # The System log's ring: (t_us, level, process, text) on a pinned clock, more
 # lines than a handheld's page holds, a traceback's lines under its record.
@@ -318,6 +335,7 @@ def _open_log(ws):
 # name -> what a run opens
 SURFACES = {
     "editor_code": P.Surface(_open_editor("code"), probe=_code_probe),
+    "editor_frame": P.Surface(_open_editor("code"), probe=_frame_probe),
     "settings_permissions": P.Surface(_open_settings_page("permissions"), _perms_carts),
     "settings_tz": P.Surface(_open_tz),
     "settings_paired": P.Surface(_open_paired(BROWSERS, True)),
@@ -443,6 +461,8 @@ RUNS = (
     ("editor_code-tdeck", "editor_code", "tdeck_320x240_fs1_dark", CODE_SCRIPT, P.BEHAVIOUR),
     ("editor_code-desk", "editor_code", "p4_1024x600_fs2_windowed", CODE_DESK_SCRIPT, P.BEHAVIOUR),
     ("editor_code-big", "editor_code", "big_800x480_fs3_dark", CODE_SCRIPT, P.BEHAVIOUR),
+    ("editor_frame-tdeck", "editor_frame", "tdeck_320x240_fs1_dark", FRAME_SCRIPT, P.BEHAVIOUR),
+    ("editor_frame-big", "editor_frame", "big_800x480_fs3_dark", FRAME_SCRIPT, P.BEHAVIOUR),
 )
 
 
