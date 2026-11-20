@@ -764,9 +764,9 @@ def commit(app):
     if settle is not None:
         settle(app)
     derive_commit(app)
-    done = getattr(app, "committed", None)     # an engine holding state of its own takes the commit's writes
+    done = getattr(type(app), "committed", None)    # an engine holding state of its own takes the commit's writes
     if done is not None:
-        done()
+        done(app)
 
 
 def derive_commit(app):

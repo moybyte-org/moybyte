@@ -350,7 +350,7 @@ class Engine(uitree_app.Engine):
         # one stop over the body, no well: the body is drawn
         _v.at(*rect)
         _v.part(n.key, 0, 0, {"id": n.key, "bare": True})
-        self.ids[n.key] = (n, None)
+        self._id(n.key, self._slot(n, None).pair)
         self.legacies[n.key] = (n, rect)
 
     def legacy_moved(self):
@@ -555,7 +555,7 @@ class Engine(uitree_app.Engine):
     def _r_canvas(self, n, row, rect):
         _v.at(*rect)
         x, y, w, h, _st = _v.part(n.key, 0, 0, {"id": n.key})
-        self.ids[n.key] = (n, None)
+        self._id(n.key, self._slot(n, None).pair)
         self.canvases[n.key] = (n, (x, y, w, h))
         self.cv.clip(x, y, w, h)
         if "ground" in n.l:
@@ -668,7 +668,7 @@ class Engine(uitree_app.Engine):
         cur = vals.index(self.s._v[key])
         _v.at(*rect)
         got = _v.tabs(key, [tab[v] for v in vals], cur)
-        self.ids[key] = (n, None)
+        self._id(key, self._slot(n, None).pair)
         x = rect[0]
         for v in vals:
             tw = _v.text_size(tab[v])[0] + (28 if self.desk else 14 * self.fs)
@@ -1252,7 +1252,7 @@ class Engine(uitree_app.Engine):
         v[3] = lh
         v[4] = x0
         v[5] = max(1, into[1])
-        self.ids[key] = pair
+        self._id(key, pair)
         self.anchors[key] = r
 
     def _part_anchor(self, name):
@@ -1339,7 +1339,7 @@ class Engine(uitree_app.Engine):
         for r in model:
             t = self._menu_text(link, r)
             texts.append(t)
-            self.ids[t] = (link, r)
+            self._id(t, (link, r))
         got = _v.menu("", texts)
         if got >= 0:
             self._activate(link, model[got])
