@@ -188,3 +188,16 @@ def test_a_lines_view_that_follows_opens_at_its_foot_and_scrolls_a_new_line_in(t
     assert moved, "a new line moves the view"
     step = next(d for d in range(8, 24) if all(rows[1][y] == rows[0][y + d] for y in range(30, 180)))
     assert step in (13, 14, 15, 16), step
+
+
+def test_a_canvas_that_is_a_splits_cell_draws_into_that_cell(tmp_path):
+    """§7 split: each kid is a cell; a canvas there is handed its cell's
+    rect, not a row stacked at the page's top."""
+    import uitree_app
+    import uitree_kinds as K
+    K.DRAWN.clear()
+    cls = uitree_app.app_layer("uitree_split", "Split", K.split_page)
+    fs = P.frames("tdeck_320x240_fs1_dark", lambda ws: P.host(ws, cls), ["f:1"], str(tmp_path / "carts"))
+    x, y, w, h = K.DRAWN[-1]
+    assert x < 20 and 100 < w < fs[0].w * 2 // 5 + 4, (x, w)
+    assert h > 120, h

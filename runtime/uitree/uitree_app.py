@@ -990,6 +990,11 @@ class Engine(S.Builder):
                 _v.scroll()
                 _v.at(*self.rect)
                 continue
+            if k.kind == "canvas":      # a cell of its own: the canvas fills it
+                _v.at(*r)
+                self._r_canvas(k, row, r)
+                _v.at(*self.rect)
+                continue
             getattr(self, "_r_" + k.kind)(k, row, r)
 
     def _r_grid(self, n, row, rect):

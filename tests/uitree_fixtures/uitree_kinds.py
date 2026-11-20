@@ -71,3 +71,19 @@ def log_page():
     """A page that is one lines view, kept at its foot as lines arrive."""
     with ui.page("Log"):
         ui.text_view("log", follow=True)
+
+
+DRAWN = []                      # the rects split_page's canvas was handed, frame by frame
+
+
+def draw_pad(cv, x, y, w, h):
+    DRAWN.append((x, y, w, h))
+
+
+def split_page():
+    """A canvas that is a split's cell, beside a column."""
+    with ui.page("Split"):
+        with ui.split("row", sizes=(2, 3)):
+            ui.canvas("pad", draw_pad)
+            with ui.group(""):
+                ui.label("beside")
