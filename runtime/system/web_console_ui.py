@@ -124,6 +124,11 @@ class WebConsoleUI:
     def on_enter(self):
         self.host.reset()
 
+    def close(self):
+        """The screen is left: the page's visit is over (`Engine.close`)."""
+        if self._pg is not None:
+            self._pg.close()
+
     # -- input ---------------------------------------------------------------
 
     def handle_input(self, i):

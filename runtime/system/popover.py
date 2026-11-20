@@ -238,6 +238,8 @@ class WifiPanel:
 
     def closed(self):
         self.ws.settings_layer.wifi_leave()
+        if self.page is not None:
+            self.page.close()
 
 
 class PowerRows:

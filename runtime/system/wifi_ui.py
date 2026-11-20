@@ -195,6 +195,9 @@ class WifiPage:
         self.nets = self.known = self.pick = self.ssid = self.ip = None
         self.engine.open()
 
+    def close(self):
+        self.engine.close()
+
     def draw(self, cv, th, rect, desk, dt):
         self.engine.band = desk or not self.popover     # a handheld's popover strip says its keys
         self.engine.run(poll, self, action="wifi_poll")

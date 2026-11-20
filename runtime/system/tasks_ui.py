@@ -328,6 +328,11 @@ class TasksLayer(Layer):
         """No cart is the task manager: it opens from the system menu."""
         return False
 
+    def close(self):
+        """Left by any route: the page's visit is over (`Engine.close`)."""
+        if self._pg is not None:
+            self._pg.close()
+
     def leave(self):
         """Back where it was opened from (`Workstation.close_tasks`)."""
         self.ws.close_tasks()

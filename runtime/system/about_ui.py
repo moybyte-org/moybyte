@@ -162,6 +162,10 @@ class LicencesPage:
     def open(self):
         self._page().open()
 
+    def close(self):
+        if self.page is not None:
+            self.page.close()
+
     def text_open(self):
         """A handheld's text page is up over the list."""
         return self.page is not None and len(self.page.pages) > 1

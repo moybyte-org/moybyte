@@ -101,11 +101,11 @@ typedef struct {
     int16_t ref, f;
 } ref_t;
 
-static const char *SYS_NAMES[] = {"", "desk", "handheld", "wide", "tall", "touch"};
+static const char *const SYS_NAMES[] = {"", "desk", "handheld", "wide", "tall", "touch"};
 // every system value the spec names, and the retired ones (N04)
-static const char *SYS_ALL[] = {"desk", "handheld", "wide", "tall", "current", "focus", "touch", "input"};
-static const char *SYS_RETIRED[] = {"symbols", "w", "h", "fs"};
-static const char *INPUT_NAMES[] = {"keys", "tdeck", "pad", "touch"};
+static const char *const SYS_ALL[] = {"desk", "handheld", "wide", "tall", "current", "focus", "touch", "input"};
+static const char *const SYS_RETIRED[] = {"symbols", "w", "h", "fs"};
+static const char *const INPUT_NAMES[] = {"keys", "tdeck", "pad", "touch"};
 
 static int is_word(const char *s, size_t n, const char *w)
 {

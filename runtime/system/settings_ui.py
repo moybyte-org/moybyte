@@ -130,5 +130,8 @@ class SettingsPages:
         page, hook = self.pages[name]
         page.open(hook=hook)
 
+    def close(self, name):
+        self.pages[name][0].close()
+
     def draw(self, name, cv, th, rect, desk, dt):
         self.pages[name][0].paint(dt, cv, th, rect, desk)

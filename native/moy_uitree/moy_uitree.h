@@ -69,6 +69,12 @@ typedef struct uit uit_t;
 
 uit_t *uit_new(void);
 void uit_free(uit_t *e);
+// The visit is over: what it made (state values, ids, orders, drafts,
+// events, the trace, the scratch) is freed, and the declarations and the
+// lowered page are cut to what they hold; the focus stays. The page is drawn
+// again with no build once every state is pushed again: after a uit_open (a
+// new visit), or as it was (a host that drew it again without one).
+void uit_close(uit_t *e);
 // The last error's text (a refused name, a source and where it stopped).
 const char *uit_error(const uit_t *e);
 // The spec's code of the last error when it was UIT_E_CHECK ("T02"), else "".
@@ -121,7 +127,8 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
 // The node's action (a link, a button; a dialog's buttons one call each).
 int uit_node_action(uit_t *e, int node, int action);
 int uit_build_end(uit_t *e);
-// The app opens (again): no focus, list cursor, row order or event carried over.
+// The app opens (again): no focus, list cursor, row order or event carried
+// over; a page the store keeps from the last visit draws as a fresh build.
 void uit_open(uit_t *e);
 // Focus goes to node `key` (or ROWKEY/KEY) in the next frame (a push's
 // return, ui.focus); NULL clears it.
@@ -176,5 +183,9 @@ int uit_leave(uit_t *e);
 int uit_dump(uit_t *e, char *buf, size_t cap);
 // Bytes the store holds: nodes, templates, ops, the pool, state.
 int uit_stats(const uit_t *e, int32_t out[8]);
+// Every engine's blocks together: [0] bytes live, [1] the most live since the
+// last uit_mem_peak_reset, [2] blocks live. A block's count is what was asked.
+void uit_mem(uint32_t out[3]);
+void uit_mem_peak_reset(void);
 
 #endif

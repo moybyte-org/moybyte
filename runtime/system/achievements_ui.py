@@ -215,6 +215,10 @@ class AchievementsPage:
         self._groups = self._ctx.notify.groups()
         self._page().open()
 
+    def close(self):
+        if self.page is not None:
+            self.page.close()
+
     def back(self):
         """Esc, B or the bar's way back: an open popover closes onto its
         badge. False where none was open (Settings then leaves the page)."""

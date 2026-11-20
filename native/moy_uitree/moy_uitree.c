@@ -6,6 +6,73 @@
 #include <string.h>
 
 #include "moy_uitree_int.h"
+#include "moy_kmem.h"
+
+// -- the engine's memory ---------------------------------------------------------
+// A block carries the size it was asked for in front of it, which is what
+// uit_mem counts. PSRAM first; internal SRAM only when PSRAM has none.
+
+#define UIT_HEAD 8u
+#define UIT_PLACE (MOY_KMEM_PSRAM | MOY_KMEM_INTERNAL_OK)
+
+static uint32_t mem_live, mem_peak, mem_blocks;
+
+static void *mem_took(char *b, size_t n)
+{
+    memcpy(b, &n, sizeof n);
+    mem_live += (uint32_t)n;
+    mem_blocks++;
+    if (mem_live > mem_peak)
+        mem_peak = mem_live;
+    return b + UIT_HEAD;
+}
+
+static size_t mem_size(void *p)
+{
+    size_t n;
+    memcpy(&n, (char *)p - UIT_HEAD, sizeof n);
+    return n;
+}
+
+void *uit_malloc(size_t n)
+{
+    char *b = moy_kalloc(n + UIT_HEAD, UIT_PLACE);
+    return b ? mem_took(b, n) : NULL;
+}
+
+void *uit_realloc(void *p, size_t n)
+{
+    if (!p)
+        return uit_malloc(n);
+    size_t was = mem_size(p);
+    char *b = moy_krealloc((char *)p - UIT_HEAD, n + UIT_HEAD, UIT_PLACE);
+    if (!b)
+        return NULL;
+    mem_live -= (uint32_t)was;
+    mem_blocks--;
+    return mem_took(b, n);
+}
+
+void uit_mfree(void *p)
+{
+    if (!p)
+        return;
+    mem_live -= (uint32_t)mem_size(p);
+    mem_blocks--;
+    moy_kfree((char *)p - UIT_HEAD);
+}
+
+void uit_mem(uint32_t out[3])
+{
+    out[0] = mem_live;
+    out[1] = mem_peak;
+    out[2] = mem_blocks;
+}
+
+void uit_mem_peak_reset(void)
+{
+    mem_peak = mem_live;
+}
 
 static size_t text_len(const char *s, size_t max)
 {
@@ -182,6 +249,92 @@ static void free_drew(uit_t *e)
         UIT_FREE(e->drew[i].val);
     }
     e->ndrew = 0;
+}
+
+// A block cut to `n` elements (none: freed), its capacity with it.
+static void shrink(void **p, int *cap, int n, size_t size)
+{
+    if (n == *cap)
+        return;
+    if (n == 0) {
+        UIT_FREE(*p);
+        *p = NULL;
+        *cap = 0;
+        return;
+    }
+    void *q = UIT_REALLOC(*p, (size_t)n * size);
+    if (q) {
+        *p = q;
+        *cap = n;
+    }
+}
+#define UIT_SHRINK(e, arr, n, cap) shrink((void **)&(e)->arr, &(e)->cap, (e)->n, sizeof(*(e)->arr))
+
+static void buf_fit(uit_buf_t *b)
+{
+    if (!b->p || b->n + 1 >= b->cap)
+        return;
+    char *p = UIT_REALLOC(b->p, b->n + 1);
+    if (p) {
+        b->p = p;
+        b->cap = b->n + 1;
+    }
+}
+
+void uit_close(uit_t *e)
+{
+    free_drew(e);
+    for (int i = 0; i < e->nslots; i++) {
+        uit_slot_t *S = &e->slots[i];
+        UIT_FREE(S->s);
+        UIT_FREE(S->cells);
+        UIT_FREE(S->at);
+        UIT_FREE(S->sync);
+        S->sync = NULL;
+        S->sync_set = 0;
+        S->s = S->cells = NULL;
+        S->at = NULL;
+        S->sn = S->scap = S->cells_n = 0;
+        S->nrows = 0;
+        S->i = 0;
+        S->f = 0;
+    }
+    for (int i = 0; i < e->norders; i++) {
+        UIT_FREE(e->orders[i].key);
+        UIT_FREE(e->orders[i].keys);
+    }
+    for (int i = 0; i < e->ndrafts; i++) {
+        UIT_FREE(e->drafts[i].key);
+        UIT_FREE(e->drafts[i].buf);
+    }
+    e->norders = e->ndrafts = 0;
+    e->nids = e->nprev = e->nevs = e->evat = e->tvl_n = 0;
+    e->edits = 0;
+    e->tvl_slot = -1;
+    UIT_SHRINK(e, orders, norders, corders);
+    UIT_SHRINK(e, drafts, ndrafts, cdrafts);
+    UIT_SHRINK(e, ids, nids, cids);
+    UIT_SHRINK(e, prev, nprev, cprev);
+    UIT_SHRINK(e, evs, nevs, cevs);
+    UIT_SHRINK(e, drew, ndrew, cdrew);
+    shrink((void **)&e->tvl, &e->tvl_cap, 0, sizeof *e->tvl);
+    uit_buf_free(&e->scratch);
+    uit_buf_free(&e->evtext);
+    uit_buf_free(&e->trace);
+    uit_buf_free(&e->cells);
+    e->trace_at = 0;
+    // what stays, cut to what it holds: the declarations and the lowered page
+    UIT_SHRINK(e, slots, nslots, cslots);
+    UIT_SHRINK(e, acts, nacts, cacts);
+    UIT_SHRINK(e, tmpls, ntmpls, ctmpls);
+    UIT_SHRINK(e, ops, nops, cops);
+    UIT_SHRINK(e, conds, nconds, cconds);
+    UIT_SHRINK(e, terms, nterms, cterms);
+    UIT_SHRINK(e, nodes, nnodes, cnodes);
+    UIT_SHRINK(e, props, nprops, cprops);
+    UIT_SHRINK(e, btns, nbtns, cbtns);
+    UIT_SHRINK(e, labels, nlabels, clabels);
+    buf_fit(&e->pool);
 }
 
 void uit_free(uit_t *e)
@@ -605,8 +758,8 @@ const char *const uit_kind_names[UIT_KINDS] = {"", "page", "group", "label", "in
                                                "table", "col", "foot", "cards", "card", "picture",
                                                "popover"};
 
-static const char *TONES[] = {"ink", "dim", "value", "danger"};
-static const char *BKINDS[] = {"normal", "primary", "tonal", "danger", "toggle"};
+static const char *const TONES[] = {"ink", "dim", "value", "danger"};
+static const char *const BKINDS[] = {"normal", "primary", "tonal", "danger", "toggle"};
 
 static int lit_index(const char *v, const char *const *tab, int n)
 {
@@ -1108,6 +1261,10 @@ void uit_open(uit_t *e)
     e->nevs = e->evat = 0;
     e->evtext.n = 0;
     free_drew(e);
+    if (e->nnodes) {            // the page the store keeps draws as a fresh build's
+        e->gen++;
+        e->fresh = 1;
+    }
 }
 
 void uit_want_focus(uit_t *e, const char *key)

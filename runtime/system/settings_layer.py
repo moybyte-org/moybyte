@@ -450,6 +450,7 @@ class SettingsLayer(Layer):
         leave = _PAGES[page][2]
         if leave is not None:
             leave(self)
+        self._close_engine(page)
         self._want = _PAGES[page][4]
         self._name_bar(self.page_title() or "Settings")
         self.ws.mark_dirty()
@@ -1228,6 +1229,19 @@ class SettingsLayer(Layer):
         the Wi-Fi panel's radio lease ends with the visit."""
         self.commit_name()
         self._drop("wifi")
+        self.rows.close()
+        for page in _PAGES:
+            self._close_engine(page)
+
+    def _close_engine(self, page):
+        """Page `page`'s visit is over: its engine keeps its built page and
+        lets the rest go (`Engine.close`)."""
+        if page in ("tz", "paired"):
+            self.pages.close(page)
+        else:
+            holder = _ENGINES.get(page)
+            if holder is not None:
+                getattr(self, holder).close()
 
     def level(self, key):
         """A level row's (value, lowest, highest): the stored value, else the
@@ -1515,6 +1529,9 @@ _PAGES = {
     "permissions": ("about", _L._perms_open, None, _L._perms_draw, "permissions", None),
 }
 del _L
+# The pages over the rows drawn by a uitree engine: name -> the attribute holding it.
+_ENGINES = {"wifi": "wifi", "achievements": "achievements", "licences": "licences", "log": "syslog",
+            "permissions": "permits"}
 
 
 def board_name():

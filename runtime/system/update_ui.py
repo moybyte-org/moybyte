@@ -222,6 +222,8 @@ class UpdateUI:
         addon = getattr(self.ws, "addon", None)
         if addon is not None:
             addon.start(retry=True)                 # it yielded to this screen
+        if self._pg is not None:
+            self._pg.close()
         self.ws.wm.goto("settings")   # Stage 6e: pop the update screen, back to Settings
         self.ws.mark_dirty()
 

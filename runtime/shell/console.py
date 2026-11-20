@@ -1760,6 +1760,7 @@ class Workstation:
         game resumed), or `home`."""
         self.frame_state.dirty = True
         layer = self.tasks_layer
+        layer.close()
         _ck = getattr(self.wm, "close_window_kind", None)
         if _ck is not None and self.wm.desk_open():
             _ck(layer.id)
@@ -2560,13 +2561,14 @@ class Workstation:
     def leave_every_surface(self):
         """Every surface that can hold an edit is left (`leave_surface`): each
         registered app, Settings (a Name still typed, its radio lease), the
-        run (a cart app's editor handles) and the Editor where it holds the
+        task manager (its page's visit), the run (a cart app's editor handles) and the Editor where it holds the
         run's project or the theme's icons. Going home and the hand-off to an
         update take it; each `close()` is change-gated, so a surface with
         nothing pending costs nothing."""
         for app in self.app_layers:
             self.leave_surface(app.id)
         self.leave_surface(self.settings_layer.id)
+        self.leave_surface(self.tasks_layer.id)
         self.leave_surface("desktop")
         ed = getattr(self, "editor_app", None)
         if ed is not None and (self.text.editing_icons or ed.project is self.run.project):

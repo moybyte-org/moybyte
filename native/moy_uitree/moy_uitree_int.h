@@ -4,12 +4,17 @@
 
 #include "moy_uitree.h"
 
-#ifndef UIT_MALLOC
-#include <stdlib.h>
-#define UIT_MALLOC malloc
-#define UIT_REALLOC realloc
-#define UIT_FREE free
-#endif
+// Every block the engine holds comes from these three (moy_uitree.c), which
+// count it (uit_mem) and take it from native/moy_kernel's allocator: PSRAM on
+// a board, the C library's malloc on the host. ESP-IDF's own malloc serves a
+// block under the always-internal threshold (8 KB on an S3) from internal
+// SRAM, and an engine's store is many small blocks.
+void *uit_malloc(size_t n);
+void *uit_realloc(void *p, size_t n);
+void uit_mfree(void *p);
+#define UIT_MALLOC uit_malloc
+#define UIT_REALLOC uit_realloc
+#define UIT_FREE uit_mfree
 
 // A refusal's words: the prose on the host, whose checker prints it; on a
 // board (UIT_TERSE) the names involved alone, the code (the error's number,

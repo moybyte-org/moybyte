@@ -47,6 +47,7 @@ _SIGS = (
     ("uit_on_draw", [_P, _P, _P], None),
     ("uit_build_end", [_P], _I),
     ("uit_open", [_P], None),
+    ("uit_close", [_P], None),
     ("uit_want_focus", [_P, _S], None),
     ("uit_frame", [_P, _P, _P, _I, _I, _I, _I, _I, _I, _I], _I),
     ("uit_next", [_P, _I32, c.c_char_p, _Z], _I),
@@ -58,6 +59,8 @@ _SIGS = (
     ("uit_unfocused", [_P], _I),
     ("uit_dump", [_P, c.c_char_p, _Z], _I),
     ("uit_stats", [_P, _I32], _I),
+    ("uit_mem", [c.POINTER(c.c_uint32)], None),
+    ("uit_mem_peak_reset", [], None),
     ("moy_ui_api_ctx", [_P, _Z], _P),
 )
 
@@ -78,6 +81,18 @@ def lib():
 
 def b(s):
     return s.encode("utf-8") if isinstance(s, str) else s
+
+
+def mem():
+    """(bytes live, the most live since peak_reset(), blocks live): every
+    engine's together, as the MicroPython module's `mem()`."""
+    out = (c.c_uint32 * 3)()
+    lib().uit_mem(out)
+    return tuple(out)
+
+
+def peak_reset():
+    lib().uit_mem_peak_reset()
 
 
 _DRAW = c.CFUNCTYPE(None, c.c_void_p, c.c_int, c.c_int, c.c_int, c.c_int, c.c_int)
@@ -105,6 +120,11 @@ class Engine:
         e, self._e = getattr(self, "_e", None), None
         if e:
             self._L.uit_free(e)
+
+    free = __del__
+
+    def close(self):
+        self._L.uit_close(self._e)
 
     def error(self):
         return self._L.uit_error(self._e).decode("utf-8", "replace")

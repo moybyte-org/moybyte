@@ -69,6 +69,10 @@ class LogPage:
         if self.engine is not None:
             self.engine.open()
 
+    def close(self):
+        if self.engine is not None:
+            self.engine.close()
+
     def title(self):
         if self.pid is not None:
             return "Log: %s" % (_log.name(self.pid) or self.pid)

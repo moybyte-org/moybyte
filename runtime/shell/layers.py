@@ -335,6 +335,9 @@ class _WebConsoleLayer(Layer):
         lay = ws.layout
         ws.web.ui.draw((lay.cx, lay.cy, lay.cw, lay.ch), dt)
 
+    def close(self):
+        self.ws.web.ui.close()
+
     def handle_input(self, i):
         return self.ws.web.ui.handle_input(i)
 

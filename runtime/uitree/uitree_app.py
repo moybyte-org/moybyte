@@ -333,6 +333,16 @@ class Engine(S.Builder):
             self.run(hook.fn, *((arg,) if hook.takes == "arg" else ()), action="opened")
         S.commit(self)
 
+    def close(self):
+        """The visit is over (its host left the page): the built tree is let
+        go, built again at the next frame; the next open resets the rest."""
+        self.root = None
+
+    def forget(self):
+        """Everything the page holds for a visit let go (the C engine's store
+        too): as `close` here."""
+        self.close()
+
     def fire(self, act, args, n, row):
         self.fired_id = n.key if row is None else "%s/%s" % (row._f[row._m.key], n.key)
         if not S.TRACING:               # the source only names the action's trace line
@@ -2255,6 +2265,9 @@ class App(AppLayer):
 
     def relayout(self, w, h, fs, cs=None):
         self.engine.root = None
+
+    def close(self):
+        self.engine.close()
 
     def draw(self, dt):
         cv = self._surf.canvas()

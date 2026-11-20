@@ -86,11 +86,49 @@ class CEngine(Engine):
     def _c_init(self):
         if _New is None:
             raise EngineGap("on a tier with no moy_uitree")
-        self._x = _New()
-        self.direct = BUILD == "direct"
+        self._x = None          # the store: made at the first open (`_made`), so a page never opened holds none
+        self._shut = False      # closed (`close`): the store keeps its lowered page and no visit
+        self._lowered = None    # the page function whose tree the store holds
         self._slot, self._names, self._types, self._pushed = {}, [], [], {}
+        self.direct = BUILD == "direct"
         self._draws, self._drawing = {}, False
-        self._declare()
+
+    def _made(self):
+        """The store, made and declared at the first way in that needs it."""
+        x = self._x
+        if x is None:
+            self._x = x = _New()
+            self._slot, self._names, self._types, self._pushed = {}, [], [], {}
+            self._drawing = False
+            self._bind()            # the module's state holds this engine's values before any is pushed
+            self._declare()
+        return x
+
+    def close(self):
+        """The visit is over (its host left the page): the store frees what
+        the visit made and keeps the declarations and the lowered page, so
+        the next open draws with no build. The state's values stay Python's
+        and are pushed again at that open."""
+        Engine.close(self)
+        if self._x is not None:
+            self._x.close()
+            self._pushed = {}
+            self._shut = True
+
+    def forget(self):
+        """The store let go whole: the next open makes and builds it again."""
+        Engine.forget(self)
+        x, self._x = self._x, None
+        if x is not None:
+            x.free()
+        self._lowered, self._shut, self._draws = None, False, {}
+
+    def _resume(self):
+        """A frame or a call on a closed page with no open first: the visit
+        goes on from the state as Python holds it, its focus kept, no hook run."""
+        self._shut = False
+        self._bind()
+        self.committed()
 
     def _ck(self, r, what, where=None):
         if r < 0:
@@ -196,6 +234,8 @@ class CEngine(Engine):
 
     def committed(self):
         """The end of a commit: each slot whose version moved, pushed."""
+        if self._x is None or self._shut:
+            return              # pushed at the open (or the frame) that comes next
         ver, pushed = self.s._ver, self._pushed
         for name in self._names:
             if pushed.get(name) != ver.get(name, 0):
@@ -283,9 +323,11 @@ class CEngine(Engine):
         """The page built and checked by the reference's Builder, lowered into
         the store, and the Python tree let go: `root` is then `LOWERED`."""
         if self.root is None:
+            self._made()
             self._build()
             self.lower(self.root)
             self.root = LOWERED
+            self._lowered = self.pages[-1]
 
     def lower(self, root):
         """The checked tree into the store: one node call a node, one prop call
@@ -410,6 +452,8 @@ class CEngine(Engine):
         self.content = content
         self.desk = desk
         self.fs = fs = max(1, getattr(cv, "font_scale", 1))
+        if self._shut:
+            self._resume()
         self._ready()
         x = self._x
         if self.want_focus is not None:
@@ -447,16 +491,26 @@ class CEngine(Engine):
     # -- asked between frames ----------------------------------------------------------
 
     def open(self, arg=None, hook="opened"):
-        self._x.open()
+        """A visit: the page the store holds is the first page's, kept from
+        the last visit (a build reads no state, B01), else built at the first
+        frame; the hook's state pushed at the commit that ends the open."""
+        x = self._made()
+        x.open()
+        self._shut = False
+        self._pushed = {}
         Engine.open(self, arg, hook)
+        if self._lowered is not None and self._lowered is self.pages[0]:
+            self.root = LOWERED
+
+    def _visiting(self):
+        return self._x is not None and not self._shut and self.root is not None
 
     def dialog_shown(self):
-        return self.root is not None and self._x.dialog() >= 0
+        return self._visiting() and self._x.dialog() >= 0
 
     def _focus_key(self):
         """The id focus is on after the last frame ("" none): the engine's."""
-        x = getattr(self, "_x", None)
-        return x.focused() if x is not None else ""
+        return self._x.focused() if self._visiting() else ""
 
     def _no_set(self, v):
         pass                    # the Builder's initial ""; the engine keeps the key
@@ -464,10 +518,12 @@ class CEngine(Engine):
     focus_key = property(_focus_key, _no_set)
 
     def draft(self, key):
-        return self._x.draft(key)
+        return self._x.draft(key) if self._visiting() else None
 
     def stop_kinds(self):
         out, i = {}, 0
+        if not self._visiting():
+            return out
         while True:
             got = self._x.stop(i)
             if got is None:
@@ -478,6 +534,8 @@ class CEngine(Engine):
     def leave(self):
         """Every way out of the page: each drawn commit field's draft is
         written, in C; its writes pulled and its changed= run here."""
+        if not self._visiting():
+            return
         self._bind()
         self._x.leave()
         self._drain()
@@ -487,6 +545,10 @@ class CEngine(Engine):
         S.commit(self)
 
     def keys(self, i, damage=True):
+        if self._x is None:
+            self._made()
+        if self._shut:
+            self._resume()
         self._bind()
         ch = getattr(i, "typed", 0)
         a = self._x.letter(ch) if ch else -1
@@ -507,7 +569,7 @@ class CEngine(Engine):
 
     def dump(self):
         """The tree as the engine holds it (the reference's snapshot)."""
-        return self._x.dump()
+        return self._made().dump()
 
     snapshot = dump
 
@@ -518,20 +580,22 @@ class CEngine(Engine):
         """Back: a shown dialog's first button (in C), else the page under this
         one, else the app's back role or its declared back action."""
         self._bind()
-        if self.root is not None and self._x.dialog() >= 0:
-            got = self._x.back_dialog()
-            if got != -1:
-                act = self._acts[got[0]]
-                self.q.append((act, self.args_for(act), "back on dialog %r" % got[1]))
-            self._damage.all()
-            return True
-        got = self._x.back_popover() if self.root is not None else -2
-        if got != -2:                   # a popover: Back is its close=
-            if got != -1:
-                act = self._acts[got[0]]
-                self.q.append((act, self.args_for(act), "back on popover %r" % got[1]))
-            self._damage.all()
-            return True
+        x = self._made()
+        if self._visiting():
+            if x.dialog() >= 0:
+                got = x.back_dialog()
+                if got != -1:
+                    act = self._acts[got[0]]
+                    self.q.append((act, self.args_for(act), "back on dialog %r" % got[1]))
+                self._damage.all()
+                return True
+            got = x.back_popover()
+            if got != -2:                   # a popover: Back is its close=
+                if got != -1:
+                    act = self._acts[got[0]]
+                    self.q.append((act, self.args_for(act), "back on popover %r" % got[1]))
+                self._damage.all()
+                return True
         if len(self.pages) > 1:
             self.pages.pop()
             self.root = None
@@ -545,7 +609,7 @@ class CEngine(Engine):
         ad = self.decl.app
         if a is None and ad is not None and ad.back != "pages":
             a, why = self.actions[ad.back], "the app's back"
-        if a is not None and self._x.can(self._aidx[a.name], -1):
+        if a is not None and x.can(self._aidx[a.name], -1):
             self.q.append((a, self.args_for(a), why))
             self._damage.all()
             return True
@@ -553,7 +617,7 @@ class CEngine(Engine):
 
     def stats(self):
         return dict(zip(("nodes", "node_bytes", "tmpl_bytes", "cond_bytes", "pool_bytes", "prop_bytes",
-                         "state_bytes", "engine_bytes"), self._x.stats()))
+                         "state_bytes", "engine_bytes"), self._made().stats()))
 
 
 class CPage(CEngine, Page):

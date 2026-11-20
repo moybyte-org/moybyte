@@ -71,6 +71,7 @@ static mp_obj_t eng_del(mp_obj_t self)
     eng_obj_t *o = MP_OBJ_TO_PTR(self);
     uit_free(o->e);
     o->e = NULL;
+    o->draw = o->raised = MP_OBJ_NULL;
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(eng_del_obj, eng_del);
@@ -234,6 +235,13 @@ static mp_obj_t eng_open(mp_obj_t self)
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(eng_open_obj, eng_open);
 
+static mp_obj_t eng_close(mp_obj_t self)
+{
+    uit_close(eng(self));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(eng_close_obj, eng_close);
+
 static mp_obj_t eng_want_focus(mp_obj_t self, mp_obj_t key)
 {
     uit_want_focus(eng(self), CSTR(key));
@@ -288,11 +296,14 @@ static mp_obj_t eng_on_draw(mp_obj_t self, mp_obj_t fn)
 static MP_DEFINE_CONST_FUN_OBJ_2(eng_on_draw_obj, eng_on_draw);
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(eng_frame_obj, 11, 11, eng_frame);
 
-static char evbuf[512];
+// An event's, a trace line's or an id's text: on the VM task's stack for the
+// call, so the module keeps no static RAM.
+#define EVBUF 512
 
 // next() -> (kind, a, b, c, text), or None
 static mp_obj_t eng_next(mp_obj_t self)
 {
+    char evbuf[EVBUF];
     int32_t ev[3];
     int k = uit_next(eng(self), ev, evbuf, sizeof evbuf);
     if (k == UIT_EV_NONE)
@@ -305,6 +316,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(eng_next_obj, eng_next);
 
 static mp_obj_t eng_trace_next(mp_obj_t self)
 {
+    char evbuf[EVBUF];
     int n = uit_trace_next(eng(self), evbuf, sizeof evbuf);
     return n < 0 ? mp_const_none : mp_obj_new_str(evbuf, (size_t)n);
 }
@@ -324,6 +336,7 @@ static MP_DEFINE_CONST_FUN_OBJ_2(eng_letter_obj, eng_letter);
 
 static mp_obj_t eng_back_dialog(mp_obj_t self)
 {
+    char evbuf[EVBUF];
     int a = uit_back_dialog(eng(self), evbuf, sizeof evbuf);
     if (a < 0)
         return MP_OBJ_NEW_SMALL_INT(a);
@@ -334,6 +347,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(eng_back_dialog_obj, eng_back_dialog);
 
 static mp_obj_t eng_back_popover(mp_obj_t self)
 {
+    char evbuf[EVBUF];
     int a = uit_back_popover(eng(self), evbuf, sizeof evbuf);
     if (a < 0)
         return MP_OBJ_NEW_SMALL_INT(a);
@@ -356,6 +370,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(eng_unfocused_obj, eng_unfocused);
 
 static mp_obj_t eng_focused(mp_obj_t self)
 {
+    char evbuf[EVBUF];
     int n = uit_focused(eng(self), evbuf, sizeof evbuf);
     return n ? mp_obj_new_str(evbuf, (size_t)n) : MP_OBJ_NEW_QSTR(MP_QSTR_);
 }
@@ -363,6 +378,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(eng_focused_obj, eng_focused);
 
 static mp_obj_t eng_stop(mp_obj_t self, mp_obj_t i)
 {
+    char evbuf[EVBUF];
     int k = uit_stop(eng(self), mp_obj_get_int(i), evbuf, sizeof evbuf);
     if (k < 0)
         return mp_const_none;
@@ -438,6 +454,8 @@ static const mp_rom_map_elem_t eng_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_on_draw), MP_ROM_PTR(&eng_on_draw_obj) },
     { MP_ROM_QSTR(MP_QSTR_build_end), MP_ROM_PTR(&eng_build_end_obj) },
     { MP_ROM_QSTR(MP_QSTR_open), MP_ROM_PTR(&eng_open_obj) },
+    { MP_ROM_QSTR(MP_QSTR_close), MP_ROM_PTR(&eng_close_obj) },
+    { MP_ROM_QSTR(MP_QSTR_free), MP_ROM_PTR(&eng_del_obj) },
     { MP_ROM_QSTR(MP_QSTR_want_focus), MP_ROM_PTR(&eng_want_focus_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame), MP_ROM_PTR(&eng_frame_obj) },
     { MP_ROM_QSTR(MP_QSTR_next), MP_ROM_PTR(&eng_next_obj) },
@@ -456,9 +474,30 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &eng_locals
     );
 
+// mem() -> (bytes live, the most live since peak_reset(), blocks live): every
+// engine's together (uit_mem).
+static mp_obj_t uit_mod_mem(void)
+{
+    uint32_t m[3];
+    uit_mem(m);
+    mp_obj_t t[3] = {mp_obj_new_int_from_uint(m[0]), mp_obj_new_int_from_uint(m[1]),
+                     mp_obj_new_int_from_uint(m[2])};
+    return mp_obj_new_tuple(3, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(uit_mod_mem_obj, uit_mod_mem);
+
+static mp_obj_t uit_mod_peak_reset(void)
+{
+    uit_mem_peak_reset();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(uit_mod_peak_reset_obj, uit_mod_peak_reset);
+
 static const mp_rom_map_elem_t uit_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_uitree) },
     { MP_ROM_QSTR(MP_QSTR_Engine), MP_ROM_PTR(&eng_type) },
+    { MP_ROM_QSTR(MP_QSTR_mem), MP_ROM_PTR(&uit_mod_mem_obj) },
+    { MP_ROM_QSTR(MP_QSTR_peak_reset), MP_ROM_PTR(&uit_mod_peak_reset_obj) },
 };
 static MP_DEFINE_CONST_DICT(uit_globals, uit_globals_table);
 

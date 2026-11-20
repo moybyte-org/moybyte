@@ -391,6 +391,9 @@ class RowsPage:
     def leave(self):
         self.engine.leave()
 
+    def close(self):
+        self.engine.close()
+
     def draft(self, key):
         """A commit field's text typed and not yet written, or None."""
         return self.engine.draft(key)

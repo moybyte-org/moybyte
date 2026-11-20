@@ -82,6 +82,9 @@ class PermsPage:
     def open(self):
         self.page.open()
 
+    def close(self):
+        self.page.close()
+
     def title(self):
         return TITLE
 
