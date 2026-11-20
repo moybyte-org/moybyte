@@ -1,0 +1,18 @@
+{
+ "surface": "update_sd_none",
+ "config": "tdeck_320x240_fs1_dark",
+ "commit": "cca7d4717",
+ "script": [
+  "k:a"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "39443411117f0aa7ed82e944c06cb16c90ea25847ef78ba5fa516be1c0f2d550"
+  ],
+  [
+   "k:a",
+   "199f162bcefcf9c604056cf092ea09452451920c2f022194350e08172e606c70"
+  ]
+ ]
+}

@@ -20,6 +20,7 @@ PORTED = (
     "perms_ui",
     "settings_ui",
     "uitree_focus",
+    "update_ui",
 )
 
 

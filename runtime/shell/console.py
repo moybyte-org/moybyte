@@ -858,7 +858,7 @@ class Workstation:
         # screen == "update" branches and from _activate_settings_action. The
         # transient screen state (_upd_phase/_upd_msg/_upd_bin/...) lives on it;
         # the queries + channel config above/below stay here.
-        self.update_ui = UpdateUI(self, NAMES, _err_text)
+        self.update_ui = UpdateUI(self, _err_text)
         # WASM MODE (#197): the pin, the paired url, the connection screen and
         # the parked flag, all on one object (web_console.py). The webhost above
         # stays a flat Workstation attribute -- the kernel loop's service upcall

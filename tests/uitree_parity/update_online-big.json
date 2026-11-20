@@ -1,0 +1,23 @@
+{
+ "surface": "update_online",
+ "config": "big_800x480_fs3_dark",
+ "commit": "cca7d4717",
+ "script": [
+  "k:a",
+  "k:b"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "cbbe429eda039636eeefb05c55000f1009613a20e6e6f153e6781a464c0c708e"
+  ],
+  [
+   "k:a",
+   "5fd9fc6d1c8649622b385db79b925420fead03e3352d5fc2204430af65d38c9d"
+  ],
+  [
+   "k:b",
+   "9f1398cdbfabcdbc9a2d1968f2a6458284771f260531fd3948c8dd6b6c4bdc36"
+  ]
+ ]
+}

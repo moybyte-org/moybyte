@@ -1,0 +1,18 @@
+{
+ "surface": "update_c6",
+ "config": "p4_1024x600_fs2_windowed",
+ "commit": "cca7d4717",
+ "script": [
+  "k:b"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "1333f0aa362a21e5a1410d74a843297ee99b0d5e14aa29e481ee72845e44f5fc"
+  ],
+  [
+   "k:b",
+   "524332667cb89b2574f5a18a603bdc017f45388df794a131b1eb66220c660a91"
+  ]
+ ]
+}

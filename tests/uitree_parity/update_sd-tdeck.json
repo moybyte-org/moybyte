@@ -1,0 +1,28 @@
+{
+ "surface": "update_sd",
+ "config": "tdeck_320x240_fs1_dark",
+ "commit": "cca7d4717",
+ "script": [
+  "k:a",
+  "f:3",
+  "k:b"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "6a8e53bebce7c73c3917044ffe9908ace33cb1c0e65cf6ecabc64a78f7d6fd2a"
+  ],
+  [
+   "k:a",
+   "41d8e63fbede7c8fadfa01cf3ec5bc20ae727023febadccf1293e92c95a279b9"
+  ],
+  [
+   "f:3",
+   "51d196b8bb3437aee2a9731f2f13b3bb0162f2fa6239dbabea02d3de8f2da1b1"
+  ],
+  [
+   "k:b",
+   "199f162bcefcf9c604056cf092ea09452451920c2f022194350e08172e606c70"
+  ]
+ ]
+}

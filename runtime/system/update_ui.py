@@ -23,6 +23,13 @@ The split follows the same discipline as the console's other sub-UIs:
     (which advances the SD/WiFi install one chunk between panel flushes), and
     the drawing. It owns the screen's transient state (_upd_phase / _upd_msg /
     _upd_bin / _online_manifest / _check_armed / _upd_at).
+  * The page (`page`, a `uitree` build at the foot of this file) -- the
+    phase's lines under a group caption, a download's or a flash's progress
+    as a `ui.progress` row, and A's and B's verbs in the hints: two actions
+    on the confirm and back roles (`go`, `leave`), each hint "" where its
+    key names nothing. UpdateUI hands it the phase's lines through its
+    `show` hook when they change, routes its own keys and taps to the two
+    roles (`Engine.role`), and draws the bar's ground and the X around it.
 
 Dependency profile (the facade lens, runtime/shell/system_api.py) -- through its
 `self.ws` back-reference:
@@ -35,7 +42,7 @@ Dependency profile (the facade lens, runtime/shell/system_api.py) -- through its
                              genuinely privileged capability the screen needs; it
                              is injected onto Workstation by moy_runtime.run_desktop.
 
-`NAMES` / `err_text` are injected at construction (same circular-import
+`err_text` is injected at construction (same circular-import
 reason as BlockEditorUI: console.py builds the one UpdateUI a Workstation holds);
 the rect hit-test is `ui.rect_in`, imported directly.
 `_ticks_ms` / `_ticks_diff` are duplicated here (they only wrap `time`; the same
@@ -45,6 +52,8 @@ method bodies stay byte-for-byte identical to the pre-extraction versions.
 
 
 import ui as _ui
+import uitree as ui
+import layout_base as _lb
 from ui_draw import AppHost
 from bar_layer import mini_btn as _bar_mini_btn
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
@@ -58,11 +67,10 @@ def _dots():
 
 
 class UpdateUI:
-    def __init__(self, ws, names, err_text):
+    def __init__(self, ws, err_text):
         self.ws = ws
         self._host = AppHost()        # the page's context; it takes no input
         # Injected instead of imported back from console.py (see module docstring).
-        self._NAMES = names
         self._err_text = err_text
         # Update-screen transient state (was Workstation's; _updater_ok/_online_ok
         # stay there -- they back the queries, not the screen).
@@ -75,12 +83,23 @@ class UpdateUI:
         # Updates row says is ready; None after one found nothing newer.
         self.offered = None
         self._check_armed = False     # one-frame gate so CHECKING... draws before the blocking fetch
+        _owner[0] = self
+        self._pg = None               # the page's engine, made when the screen first opens or draws
+        self._shown = None            # the screen the page shows (`_screen`)
+
+    def _page(self):
+        if self._pg is None:
+            import uitree_app
+            self._pg = uitree_app.Page(page, self._host, _Damage(self.ws))
+            self._pg.open()
+        return self._pg
 
     def open_update(self):
         """Open the firmware-update screen: scan SD for an image to install. Lands on
         the "confirm" phase when one is found, else "error" with a friendly reason."""
         self.ws.wm.goto("update")     # Stage 6e: push the update screen onto the back-stack
         self.ws.mark_dirty()
+        self._page().open()
         self._upd_bin = None
         self._upd_msg = ""
         u = self.ws.updater
@@ -106,6 +125,7 @@ class UpdateUI:
         drawing and B cancels it."""
         self.ws.wm.goto("update")     # Stage 6e: push the update screen onto the back-stack
         self.ws.mark_dirty()
+        self._page().open()
         self._upd_bin = None
         self._upd_msg = ""
         self._online_manifest = None
@@ -127,6 +147,7 @@ class UpdateUI:
         over SDIO -> reboot; the backend module's header carries the design."""
         self.ws.wm.goto("update")
         self.ws.mark_dirty()
+        self._page().open()
         self._upd_bin = None
         self._upd_msg = ""
         if getattr(self.ws, "c6_updater", None) is None:
@@ -234,36 +255,16 @@ class UpdateUI:
             self._upd_msg = self._err_text(exc)[:30]
 
     def _update_input(self, i):
-        ph = self._upd_phase
+        """The screen's keys: Home leaves (but past the point of no return);
+        A and B are the page's confirm and back."""
         if i.pressed("home") or i.pressed("stop"):
-            if ph != "done":                   # "done" is past the point of no return
+            if self._upd_phase != "done":
                 self._exit_update()
                 self.ws.home.home_key()
-            return
-        if ph == "confirm":
-            if i.pressed("a") or i.pressed("run"):
-                self._confirm_update()
-            elif i.pressed("b"):
-                self._exit_update()
-        elif ph == "confirm_online":
-            if i.pressed("a") or i.pressed("run"):
-                self._start_download()
-            elif i.pressed("b"):
-                self._exit_update()
-        elif ph == "c6_confirm":
-            if i.pressed("a") or i.pressed("run"):
-                self._start_c6_download()
-            elif i.pressed("b"):
-                self._exit_update()
-        elif ph in ("install", "downloading", "checking",
-                    "c6_checking", "c6_downloading", "c6_flashing"):
-            if i.pressed("b"):                 # abort: nothing was activated yet
-                self._exit_update()
-        elif ph in ("error", "uptodate", "updated", "rolledback", "nopublish",
-                    "handed", "c6_uptodate"):
-            if i.pressed("b") or i.pressed("a"):
-                self._exit_update()
-        # "done": ignore input -- _pump_update reboots into the new image shortly.
+        elif i.pressed("a") or i.pressed("run"):
+            self._page().role("confirm")
+        elif i.pressed("b"):
+            self._page().role("back")
 
     def _update_pointer(self, px, py, click):
         if not click:
@@ -272,16 +273,7 @@ class UpdateUI:
             if self._upd_phase != "done":
                 self._exit_update()
             return
-        ph = self._upd_phase
-        if ph == "confirm":
-            self._confirm_update()             # tap anywhere (besides X) = install
-        elif ph == "confirm_online":
-            self._start_download()             # tap anywhere (besides X) = download
-        elif ph == "c6_confirm":
-            self._start_c6_download()
-        elif ph in ("error", "uptodate", "updated", "rolledback", "nopublish",
-                    "handed", "c6_uptodate"):
-            self._exit_update()
+        self._page().role("confirm")              # a tap anywhere else is A
 
     def _start_c6_download(self):
         cu = getattr(self.ws, "c6_updater", None)
@@ -479,61 +471,46 @@ class UpdateUI:
         except Exception as exc:  # noqa: BLE001
             print("Moybyte pre-reboot commit failed:", exc)
 
-    def _draw_update(self, dt):
-        """The firmware-update screen: confirm / progress / done / error, a
-        page of the public UI API's rows (runtime/toolkit/ui.py) filling the content
-        rect: what the phase says, a download's or a flash's progress as a
-        `ui.progress` row, and its keys as hints. Its keys and taps are
-        `_update_input` / `_update_pointer`'s, so the page takes no input."""
-        NAMES = self._NAMES
-        ws = self.ws
-        cv = ws.sys_canvas
-        th = ws.theme_colors
-        lay = ws.layout
-        out = []
-        keys = []
-
-        def say(text, _col=None):
-            if text[1:4] == " = " and text[0] in "AB":     # a key: a hint
-                keys.extend(("confirm" if text[0] == "A" else "back", text[4:5] + text[5:].lower()))
-            else:
-                out.append(text)
-
-        u = ws.updater
+    def _screen(self):
+        """What the phase says: the group's caption, its lines (a download's
+        or a flash's progress as `BAR`, its fraction beside it), and the
+        verbs A and B name in the hints, "" where a key names none."""
+        u = self.ws.updater
         slot = u.slot() if u is not None else "?"
         vlabel = u.version_label() if u is not None else "v0"
         phase = self._upd_phase
+        out = []
+        say = out.append
+        go = leave = ""
         if phase == "checking":
-            say("CHECKING ONLINE...", th["accent"])
+            say("CHECKING ONLINE...")
             beta = self.ws.toggles.ota_channel() == "unstable"
-            say("channel: %s" % ("BETA" if beta else "STABLE"),
-                       NAMES["orange"] if beta else th["play"])
-            say("running: %s %s" % (slot, vlabel), th["ink_dim"])
+            say("channel: %s" % ("BETA" if beta else "STABLE"))
+            say("running: %s %s" % (slot, vlabel))
             if getattr(u, "joining", False):
-                say("joining WiFi" + _dots(), th["ink"])
-            say("B = BACK", th["accent"])
+                say("joining WiFi" + _dots())
+            leave = "Back"
         elif phase == "nopublish":
             beta = self.ws.toggles.ota_channel() == "unstable"
-            say("NOTHING NEW YET", th["play"])
-            say("no %s build for" % ("BETA" if beta else "STABLE"),
-                       th["ink"])
-            say("this console yet.", th["ink"])
-            say("running %s" % vlabel, th["ink_dim"])
-            say("B = BACK", th["accent"])
+            say("NOTHING NEW YET")
+            say("no %s build for" % ("BETA" if beta else "STABLE"))
+            say("this console yet.")
+            say("running %s" % vlabel)
+            leave = "Back"
         elif phase == "handed":
             # The browser asked a console WITH GLASS to update. It gave the
             # glass back and opened this same screen THERE, so the only useful
             # thing to say here is where to look -- and that this page has
             # stopped being that console's screen.
-            say("ON THE CONSOLE NOW", th["play"])
-            say("It took the update", th["ink"])
-            say("onto its own screen.", th["ink"])
-            say("Finish it there.", th["ink_dim"])
-            say("B = BACK", th["accent"])
+            say("ON THE CONSOLE NOW")
+            say("It took the update")
+            say("onto its own screen.")
+            say("Finish it there.")
+            leave = "Back"
         elif phase == "uptodate":
-            say("UP TO DATE", th["play"])
-            say("firmware %s" % vlabel, th["ink"])
-            say("B = BACK", th["accent"])
+            say("UP TO DATE")
+            say("firmware %s" % vlabel)
+            leave = "Back"
         elif phase == "confirm_online" and self._online_manifest:
             m = self._online_manifest
             newv = int(m.get("version", 0) or 0)
@@ -541,37 +518,29 @@ class UpdateUI:
             run_ch = u.channel() if u is not None else "stable"
             tgt_ch = m.get("channel") or self.ws.toggles.ota_channel()
             label = str(m.get("label") or ("v%d" % newv))
-            switch = tgt_ch != run_ch
-            beta = tgt_ch == "unstable"
-            tgt_name = "BETA" if beta else "STABLE"
             # Leading with the switch is deliberate: a kid who flipped the
             # channel by accident should meet that fact here, on the screen that
             # asks them to commit, rather than discover it after a reboot.
-            say(
-                       "SWITCH TO %s" % tgt_name if switch else "UPDATE AVAILABLE",
-                       th["ink_dim"])
-            # Always from -> to. The switch case used to show only the target, so
-            # the one screen where the move matters most was the one that never
-            # said what you were leaving -- which is what an accidental flip
-            # needs to see.
-            say("%s ->" % vlabel[:20], th["ink_dim"])
-            say(label[:22], NAMES["orange"] if beta else th["play"])
+            say("SWITCH TO %s" % ("BETA" if tgt_ch == "unstable" else "STABLE")
+                if tgt_ch != run_ch else "UPDATE AVAILABLE")
+            # Always from -> to: what an accidental flip needs to see is what
+            # it is leaving.
+            say("%s ->" % vlabel[:20])
+            say(label[:22])
             if kb:
-                say("%d KB download" % kb, th["ink"])
-            say("A = DOWNLOAD", th["accent"])
-            say("B = CANCEL", th["ink_dim"])
+                say("%d KB download" % kb)
+            go, leave = "Download", "Cancel"
         elif phase == "downloading":
             done = u.dl_done if u is not None else 0
             total = u.dl_total if (u is not None and u.dl_total) else 0
-            say("DOWNLOADING...", th["accent"])
-            frac = (done / total) if total else 0.0
-            out.append(("bar", frac))
+            say("DOWNLOADING...")
+            say(BAR)
+            say((done / total) if total else 0.0)
             if total:
-                say("%d / %d KB" % (done // 1024, total // 1024),
-                           th["ink"])
+                say("%d / %d KB" % (done // 1024, total // 1024))
             else:
-                say("%d KB" % (done // 1024), th["ink"])
-            say("B = CANCEL", th["ink_dim"])
+                say("%d KB" % (done // 1024))
+            leave = "Cancel"
         elif phase == "confirm" and self._upd_bin:
             path, size = self._upd_bin
             if self._in_slot():
@@ -579,110 +548,185 @@ class UpdateUI:
                 name = str((self._online_manifest or {}).get("label") or "firmware")
             else:
                 head, name = "FOUND ON SD:", path.rsplit("/", 1)[-1]
-            say(head, th["ink_dim"])
-            say(name[:24], th["play"])
-            say("%d KB" % (size // 1024), th["ink"])
-            say("running: %s" % slot, th["ink_dim"])
-            say("A = INSTALL", th["accent"])
-            say("B = CANCEL", th["ink_dim"])
+            say(head)
+            say(name[:24])
+            say("%d KB" % (size // 1024))
+            say("running: %s" % slot)
+            go, leave = "Install", "Cancel"
         elif phase == "install":
             done = u.done if u is not None else 0
             total = u.total if (u is not None and u.total) else 1
-            say("FLASHING...", th["accent"])
-            out.append(("bar", done / total))
-            say("%d / %d KB" % (done // 1024,
-                                             (u.total // 1024) if u else 0), th["ink"])
-            say("DO NOT POWER OFF", th["danger"])
+            say("FLASHING...")
+            say(BAR)
+            say(done / total)
+            say("%d / %d KB" % (done // 1024, (u.total // 1024) if u else 0))
+            say("DO NOT POWER OFF")
         elif phase == "done":
-            out.append("UPDATED!")
-            say("rebooting...", th["ink"])
+            say("UPDATED!")
+            say("rebooting...")
         elif phase == "c6_checking":
-            say("CHECKING C6 RADIO...", th["accent"])
             cu = getattr(self.ws, "c6_updater", None)
             iv = cu.installed if cu is not None else None
-            say("radio: %s" % (
-                ("shim v%d" % iv) if iv else "no espnow shim"), th["ink_dim"])
+            say("CHECKING C6 RADIO...")
+            say("radio: %s" % (("shim v%d" % iv) if iv else "no espnow shim"))
             if getattr(u, "joining", False):
-                say("joining WiFi" + _dots(), th["ink"])
-            say("B = BACK", th["accent"])
+                say("joining WiFi" + _dots())
+            leave = "Back"
         elif phase == "c6_confirm":
             cu = getattr(self.ws, "c6_updater", None)
             c6 = (cu.offer or {}) if cu is not None else {}
             iv = cu.installed if cu is not None else None
-            say("UPGRADE C6 RADIO", th["ink_dim"])
-            say("%s ->" % (("shim v%d" % iv) if iv else "no espnow"),
-                       th["ink_dim"])
-            say("shim v%d (%s)" % (
-                int(c6.get("version") or 0),
-                str(c6.get("hosted") or "?")[:12]), th["play"])
+            say("UPGRADE C6 RADIO")
+            say("%s ->" % (("shim v%d" % iv) if iv else "no espnow"))
+            say("shim v%d (%s)" % (int(c6.get("version") or 0), str(c6.get("hosted") or "?")[:12]))
             kb = int(c6.get("size") or 0) // 1024
             if kb:
-                say("%d KB download" % kb, th["ink"])
-            say("A = UPGRADE", th["accent"])
-            say("B = CANCEL", th["ink_dim"])
+                say("%d KB download" % kb)
+            go, leave = "Upgrade", "Cancel"
         elif phase == "c6_uptodate":
             cu = getattr(self.ws, "c6_updater", None)
             iv = cu.installed if cu is not None else None
-            say("C6 RADIO UP TO DATE", th["play"])
-            say(("shim v%d" % iv) if iv else "?", th["ink"])
-            say("B = BACK", th["accent"])
+            say("C6 RADIO UP TO DATE")
+            say(("shim v%d" % iv) if iv else "?")
+            leave = "Back"
         elif phase == "c6_downloading":
             cu = getattr(self.ws, "c6_updater", None)
             done = cu.dl_done if cu is not None else 0
             total = cu.dl_total if (cu is not None and cu.dl_total) else 0
-            say("DOWNLOADING C6...", th["accent"])
-            frac = (done / total) if total else 0.0
-            out.append(("bar", frac))
-            say("%d / %d KB" % (done // 1024, total // 1024), th["ink"])
-            say("B = CANCEL", th["ink_dim"])
+            say("DOWNLOADING C6...")
+            say(BAR)
+            say((done / total) if total else 0.0)
+            say("%d / %d KB" % (done // 1024, total // 1024))
+            leave = "Cancel"
         elif phase == "c6_flashing":
             cu = getattr(self.ws, "c6_updater", None)
             done = cu.fl_done if cu is not None else 0
             total = cu.fl_total if (cu is not None and cu.fl_total) else 1
-            say("FLASHING C6 RADIO...", th["accent"])
-            out.append(("bar", done / total))
-            say("%d / %d KB" % (done // 1024, total // 1024), th["ink"])
-            say("DO NOT POWER OFF", th["danger"])
+            say("FLASHING C6 RADIO...")
+            say(BAR)
+            say(done / total)
+            say("%d / %d KB" % (done // 1024, total // 1024))
+            say("DO NOT POWER OFF")
         elif phase == "c6_done":
-            out.append("C6 UPDATED!")
-            say("restarting...", th["ink"])
+            say("C6 UPDATED!")
+            say("restarting...")
         elif phase == "updated":
             # The verdict from the PREVIOUS boot: the slot we were pointed at is
             # the one now running. This is the only place the machine ever says
             # the update truly took -- "done" above is a hope, this is a fact.
-            out.append("IT WORKED!")
-            say("new firmware:", th["ink_dim"])
-            say((self._upd_msg or "?")[:26], th["ink"])
-            say("B = BACK", th["accent"])
+            say("IT WORKED!")
+            say("new firmware:")
+            say((self._upd_msg or "?")[:26])
+            leave = "Back"
         elif phase == "rolledback":
             # Voice: the machine did the right thing and should say so plainly.
             # Nothing was lost, the kid did nothing wrong, and the old firmware
             # is exactly the one they had -- so the tone is reassurance, not alarm.
-            say("The new one didn't", th["danger"])
-            say("start up.", th["danger"])
-            say("I put your old one", th["ink"])
-            say("back. Nothing lost.", th["ink"])
-            say((self._upd_msg or "?")[:26], th["ink_dim"])
-            say("B = BACK", th["accent"])
+            say("The new one didn't")
+            say("start up.")
+            say("I put your old one")
+            say("back. Nothing lost.")
+            say((self._upd_msg or "?")[:26])
+            leave = "Back"
         else:  # error
             # Voice: the rollback design means a failed update truly leaves the
             # running firmware untouched -- "Nothing changed." states that trust.
-            say("Update didn't finish.", th["danger"])
-            say("Nothing changed.", th["ink"])
-            say((self._upd_msg or "?")[:26], th["ink_dim"])
-            say("B = BACK", th["accent"])
+            say("Update didn't finish.")
+            say("Nothing changed.")
+            say((self._upd_msg or "?")[:26])
+            leave = "Back"
+        cap = "C6 radio" if phase and phase.startswith("c6_") else "Firmware update"
+        return cap, tuple(out), go, leave
+
+    def _draw_update(self, dt):
+        """The firmware-update screen: the bar's ground, the page (`page`,
+        the phase's lines handed to its `show` hook when they change) in the
+        content rect, and the X in the title row."""
+        ws = self.ws
+        cv = ws.sys_canvas
+        th = ws.theme_colors
+        lay = ws.layout
+        screen = self._screen()
+        if screen != self._shown:
+            self._shown = screen
+            pg = self._page()
+            pg.run_action(pg.actions["show"], (screen,), "the update screen")
         cv.rect(0, 0, lay.w, lay.h, th["bar"])      # the screen has no bar of its own
-        self._host.begin(cv, th, (lay.cx, lay.cy, lay.cw, lay.ch))
-        _ui.page("")
-        if keys:
-            _ui.hints(keys)
-        _ui.group("C6 radio" if phase.startswith("c6_") else "Firmware update")
-        for item in out:
-            if type(item) is tuple:
-                _ui.progress("Done", int(max(0.0, min(1.0, item[1])) * 1000), 1000)
-            else:
-                _ui.label(item)
-        _ui.group()
+        rect = (lay.cx, lay.cy, lay.cw, lay.ch)
+        self._host.begin(cv, th, rect)
+        self._page().paint(dt, cv, th, rect, _lb.metric_class() == _lb.DESK)
         if not ws.draw_icon("close", lay.set_back, th["ink"], cv):    # the theme's set, else
             _bar_mini_btn("X", lay.set_back, th["danger"], cv, lay.tap_box(lay.set_back, 18, 14))
 
+
+class _Damage:
+    """The page's damage: the console's one dirty flag."""
+
+    def __init__(self, ws):
+        self.ws = ws
+
+    def all(self):
+        self.ws.mark_dirty()
+
+
+# -- the page -------------------------------------------------------------------
+
+BAR = None                      # in a screen's lines: the progress bar, its fraction next
+
+s = ui.state(cap="", head=ui.model(key="n", n="", text=""), bar=False, frac=0,
+             tail=ui.model(key="n", n="", text=""), go="", leave="")
+
+_owner = [None]                 # the UpdateUI whose screen the page is
+
+# B leaves these; A leaves the last seven too
+_LEAVE_ANY = ("error", "uptodate", "updated", "rolledback", "nopublish", "handed", "c6_uptodate")
+_LEAVES = ("confirm", "confirm_online", "c6_confirm", "install", "downloading", "checking",
+           "c6_checking", "c6_downloading", "c6_flashing") + _LEAVE_ANY
+
+
+def show(screen):
+    cap, lines, go_, leave_ = screen
+    s.cap, s.go, s.leave = cap, go_, leave_
+    at = lines.index(BAR) if BAR in lines else len(lines)
+    s.bar = at < len(lines)
+    s.frac = int(max(0.0, min(1.0, lines[at + 1])) * 1000) if s.bar else 0
+    s.head = [{"n": str(i), "text": t} for i, t in enumerate(lines[:at])]
+    s.tail = [{"n": str(i), "text": t} for i, t in enumerate(lines[at + 2:])]
+
+
+def go():
+    """A, or a tap anywhere but the X: what the phase offers, else leave
+    where A leaves."""
+    u = _owner[0]
+    ph = u._upd_phase
+    if ph == "confirm":
+        u._confirm_update()
+    elif ph == "confirm_online":
+        u._start_download()
+    elif ph == "c6_confirm":
+        u._start_c6_download()
+    elif ph in _LEAVE_ANY:
+        u._exit_update()
+
+
+def leave():
+    """B: back to Settings, dropping an install or download under way;
+    "done" is past the point of no return."""
+    u = _owner[0]
+    if u._upd_phase in _LEAVES:
+        u._exit_update()
+
+
+ui.hook("show", show, takes="arg")
+ui.action("go", "Go", go, keys=("role:confirm",), hint="{go}")
+ui.action("leave", "Back", leave, keys=("role:back",), hint="{leave}")
+
+
+def page():
+    with ui.page(""):
+        with ui.group("{cap}"):
+            with ui.rows("head"):
+                ui.label("{.text}")
+            ui.progress("frac", max=1000, label="Done", shown="bar")
+            with ui.rows("tail"):
+                ui.label("{.text}")

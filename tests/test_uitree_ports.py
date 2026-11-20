@@ -88,6 +88,91 @@ def _open_paired(kids, key):
     return open_
 
 
+class Updater:
+    """The firmware updater the update screen drives, a 64 KB chunk a frame:
+    an image found on the card, a manifest online one version up."""
+    error = ""
+    boot_verdict = None
+    joining = False
+    CHUNK = 64 * 1024
+
+    def __init__(self, found=True):
+        self.found = found
+        self.done = self.total = self.dl_done = self.dl_total = 0
+
+    def slot(self):
+        return "ota_0"
+
+    def version(self):
+        return 7
+
+    def version_label(self):
+        return "v0.7"
+
+    def channel(self):
+        return "stable"
+
+    def available(self):
+        return True
+
+    def online_available(self):
+        return True
+
+    def find_bin(self):
+        return ("/sd/update/moybyte.bin", 3000 * 1024) if self.found else None
+
+    def begin(self, path):
+        self.done, self.total = 0, 3000 * 1024
+
+    def step(self):
+        self.done = min(self.total, self.done + self.CHUNK)
+        return self.done < self.total
+
+    def check_online(self, channel):
+        return {"version": 8, "size": 3000 * 1024, "channel": "stable", "label": "v0.8"}
+
+    def offers(self, manifest, channel):
+        return True
+
+    def begin_download(self, manifest):
+        self.dl_done, self.dl_total = 0, 3000 * 1024
+
+    def download_step(self):
+        self.dl_done = min(self.dl_total, self.dl_done + self.CHUNK)
+        return self.dl_done < self.dl_total
+
+    def staged_in_slot(self):
+        return False
+
+    def cancel(self):
+        self.done = 0
+
+    def download_cancel(self):
+        self.dl_done = 0
+
+
+class C6Updater:
+    """The P4's C6 radio upgrade, offering shim 4 over shim 3."""
+    installed = 3
+    error = ""
+    offer = {"version": 4, "hosted": "esp-hosted", "size": 1470 * 1024}
+
+    def check(self, channel):
+        return "offer"
+
+    def cancel(self):
+        pass
+
+
+def _open_update(how, found=True):
+    def open_(ws):
+        ws.updater = Updater(found)
+        ws.c6_updater = C6Updater()
+        ws.open_settings()
+        getattr(ws.update_ui, how)()
+    return open_
+
+
 def _open_tz(ws):
     ws.toggles.set_time_zone("CET-1CEST,M3.5.0,M10.5.0/3", persist=False)
     ws.open_settings()
@@ -100,6 +185,10 @@ SURFACES = {
     "settings_tz": P.Surface(_open_tz),
     "settings_paired": P.Surface(_open_paired(BROWSERS, True)),
     "settings_paired_none": P.Surface(_open_paired({}, False)),
+    "update_sd": P.Surface(_open_update("open_update")),
+    "update_sd_none": P.Surface(_open_update("open_update", found=False)),
+    "update_online": P.Surface(_open_update("open_update_online")),
+    "update_c6": P.Surface(_open_update("open_update_c6")),
 }
 
 # A step a port draws differently from its record on purpose: its cause,
@@ -128,6 +217,17 @@ RUNS = (
      ["k:down", "k:down", "k:a", "f:2", "k:down", "k:a", "f:2"], {6: NO_FALSE_HINT, 7: NO_FALSE_HINT}),
     ("settings_paired_none-big", "settings_paired_none", "big_800x480_fs3_dark", ["k:down", "back"],
      {0: NO_FALSE_HINT, 1: NO_FALSE_HINT}),
+    # the image on the card: A installs it a chunk a frame, B stops the
+    # flash and goes back to Settings
+    ("update_sd-tdeck", "update_sd", "tdeck_320x240_fs1_dark", ["k:a", "f:3", "k:b"]),
+    ("update_sd-desk", "update_sd", "p4_1024x600_fs2_windowed", ["k:a", "f:3", "k:b"]),
+    # none on the card: the error, which A leaves as B does
+    ("update_sd_none-tdeck", "update_sd_none", "tdeck_320x240_fs1_dark", ["k:a"]),
+    # the check finds one: A downloads it, B cancels
+    ("update_online-tdeck", "update_online", "tdeck_320x240_fs1_dark", ["k:a", "f:2", "k:b"]),
+    ("update_online-big", "update_online", "big_800x480_fs3_dark", ["k:a", "k:b"]),
+    # the C6's offer, which B declines
+    ("update_c6-desk", "update_c6", "p4_1024x600_fs2_windowed", ["k:b"]),
 )
 
 
