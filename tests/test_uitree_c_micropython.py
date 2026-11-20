@@ -179,8 +179,7 @@ def test_the_c_engine_on_the_boards_micropython_draws_the_reference(tmp_path):
         assert f["same"] == f["frames"], (name, f["same"], f["frames"])
     for k, v in sorted(info["cost"].items()):
         print(k, json.dumps(v))
-    # The frame's one call into C allocates nothing; the 16 bytes are the
-    # reference Engine's frame start (`_start`, its clock), which both run.
+    # A still frame of a page on the C engine allocates nothing.
     for name in ("long", "counter"):
-        assert info["cost"][name + "_c"]["paint_alloc_median"] <= 16, info["cost"][name + "_c"]
+        assert info["cost"][name + "_c"]["paint_alloc_median"] == 0, info["cost"][name + "_c"]
 
