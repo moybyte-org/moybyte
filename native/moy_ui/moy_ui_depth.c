@@ -376,6 +376,14 @@ static void open_dd(const moy_ui_sink_t *s, dd_t *d, int crossing) {
     d->look = s->look;
 }
 
+// A focus mark drawn where it shows: one under an empty clip (a card
+// measuring where it puts its picture) draws nothing and is not counted.
+static void count_mark(const dd_t *d) {
+    if (d->t.cx0 < d->t.cx1 && d->t.cy0 < d->t.cy1) {
+        __atomic_fetch_add(&s_marks_drawn, 1u, __ATOMIC_RELAXED);
+    }
+}
+
 static uint16_t tok(const dd_t *d, int token) {
     return d->row->pal[moy_ui_pidx(d->cart, moy_ui_token(d->look, token))];
 }
@@ -958,7 +966,7 @@ int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int r, int
             }
             km_draw(&d, &ring, x, y, w, h, r, 0, f, km_ci(&d, cm, -1), 255);
             if (flags & MOY_UI_MARK_COUNT) {
-                __atomic_fetch_add(&s_marks_drawn, 1u, __ATOMIC_RELAXED);
+                count_mark(&d);
             }
         }
         return MOY_UI_OK;
@@ -975,7 +983,7 @@ int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int r, int
             }
         } else {
             if (!(flags & (MOY_UI_MARK_AGAIN | MOY_UI_MARK_SELECTED))) {
-                __atomic_fetch_add(&s_marks_drawn, 1u, __ATOMIC_RELAXED);
+                count_mark(&d);
             }
             tint(&d, x, y, w, h, r, c, m->plate_alpha, NULL);
         }
@@ -1011,7 +1019,7 @@ int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int r, int
         return MOY_UI_OK;
     }
     if (!(flags & (MOY_UI_MARK_AGAIN | MOY_UI_MARK_SELECTED))) {
-        __atomic_fetch_add(&s_marks_drawn, 1u, __ATOMIC_RELAXED);
+        count_mark(&d);
     }
     int under = both && on->mark == MOY_UI_MK_FILL ? km_ci(&d, on, -1) : -1;
     int ci = km_ci(&d, k, under);
