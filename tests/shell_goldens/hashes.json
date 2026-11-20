@@ -35,10 +35,10 @@
     "settings_achievements": "47002244161869d1a374013671d499f687ec04ac6d4beb45040e71069da44cdd",
     "settings_licence": "10f4bcf65224d12054a7d0ea03de7311b2060d9817a3288952b448338097a5c4",
     "settings_licences": "8c992b0496b59e54af786b8bea5ec7ebd50369d1dfb50eaafcdbf5f88b67b60f",
-    "settings_log": "d08cfaf3e4303e401be88351baaa48f120e8370f13688d8e172c96a2d8d6ecf1",
+    "settings_log": "5313c2b985a31e255347a7c08d7ada7747336aded1b2b35468c04b26dc2895c1",
     "settings_permissions": "c53f8df5357c58f1328d4725917cb033a50478ec5cedd06f85d9015919b5bfb9",
     "unlock_banner": "c34899175a23523d42090ed1df6660305ed3d9c1d07e1851a5ca3ba99c45d9cf",
-    "web_console": "cc8c51487b7027e776ca2109462a11224014b7372b04b476fe197e8d6f521dd5"
+    "web_console": "63aa719c8180fde391f521bd6da53450fdfe19e97ca46842c39798e17be4bd72"
   },
   "guition_480x320_fs1_dark": {
     "about": "514a530acb8fc886eaa9e40ae60fe2deae91186530e579be48220805a0542260",
@@ -143,7 +143,7 @@
     "settings_log": "9d341296ac4b2cbe1b9054c66ea6f3a1fd76dcb7ff2d8e57813a809b099169b8",
     "settings_permissions": "96cc9c8f4b9ba495bcfff26428938cd38026bd2fa4ec409b5e5c84fc852e7244",
     "unlock_banner": "336c302d5937373130ac2422f01b4960a5a2398820f7f6fe4dd3320939c85d7f",
-    "web_console": "317f487a0594b77aa06078f5dae2bd9bf333e2ef76e312fdd90499cb9697ee8d"
+    "web_console": "85ab2503beaddd27599d8b8f756e95b705f168c5542d7ceb6b4b864f4858a44d"
   },
   "guition_tapfloor_dark": {
     "about": "38b973edf5fad2fb738ec5ebf291e1d7123136e6931e397bc258cdf0f39d4b3b",
@@ -229,7 +229,7 @@
     "settings_log": "8d7423961a7cf818da1b7b04c5d419d2ab203687e5cff759c3011f73bfd74e2a",
     "settings_permissions": "c2bd82a84695ebf10514386ed797fc696b039586fd585736d218043390690bfe",
     "unlock_banner": "41f01a380e46dcbe8193735f9d787fba273334d2aa67143eb3fd5a03b77de3a4",
-    "web_console": "4865c70d2ce2eee9d2efa680febbd06c127aa0c5f9af94533584b00ae170cef8"
+    "web_console": "1f6f470f682bd7ac7974102d5e5475ec7b07918c27ce4b34e9c4e8a06e43b12f"
   },
   "p4_1024x600_cs2_fs1_console": {
     "about": "3966c1e6dbc6592b5c6e48a472f9ff54ef36c6e2ef9102bd1da332f2cf068261",
@@ -270,7 +270,7 @@
     "settings_log": "717a0d76e351e62d0a727302bd3ca103453c0b0deeb535e8575ee150886bc526",
     "settings_permissions": "ec8465b81062a28d65a84f2759cafe75b738c81ecbaaf9b81038f703d770b5d9",
     "unlock_banner": "507dc338d91a64985f98ff73ddc01540debcaf3d280fd35b0678d5b3ecd46469",
-    "web_console": "9e4533d68a71f7b6ceed18e2053ac58f1a20ba64f952f1f7cad24194ded45ab3"
+    "web_console": "edd24865bdf5d1608b3832dc51c26c985dc78980432b53dc2d878c2c32388fd8"
   },
   "p4_1024x600_cs2_fs1_contrast_light": {
     "about": "969487f75afd4234e2c8e7577c4c6ff8677ad26cda1f1a9a19adadb6ba8c9010",
@@ -315,7 +315,7 @@
     "settings_log": "314a22656ae92ff4749507ab5fa14e58bfc6d5d2035c86d287819854268f6418",
     "settings_permissions": "96e6f1928b4b11ba258fd5a7269b457125a48928861a162db2b06b5e38c35da6",
     "unlock_banner": "f50c9975c66d3069e2ce70b23e0963212150a6dcb0313624a4bfc30724f2fd66",
-    "web_console": "f15636c00d8d4e7baf98fcb95b95c8ad04fc45732b2e2358eeb13872dbd2bad6"
+    "web_console": "bc3f967a5857de15b55b8f7e7c84076ec813f97f2457b58702503a48483e424b"
   },
   "p4_1024x600_cs2_fs1_gnomebar": {
     "about": "891ef9ee07618d0e5c4f906573a88e280e90ccb7899fb0083291a2dfb551cf71",
@@ -360,7 +360,7 @@
     "settings_log": "d396fbafc8403c3a8f28f243145efcd126fb7ae93da772df4b391eebe70ce212",
     "settings_permissions": "0c6a52f3620377fc04ab2fcbb785fc7ef2393076e8af82fed71090dff2c5d73f",
     "unlock_banner": "7f0119e936727797d3d5e7e22cb7bfcc81e59849ae7c363b0ce98889066944d3",
-    "web_console": "f88e8093f6eec45da242ffdba8923a8dffe662696ebd9ed103b4367996bf2ff8"
+    "web_console": "fc31e256632b39ddd6b192e4755e84714bd98edd676af27cbcb3f232ab479c4d"
   },
   "p4_1024x600_cs2_fs1_homegrid": {
     "launcher": "7eec0ca9209e91cfa708aacc602b2505263b74ad1d14e447c9a47f7ad3d9a1bd",
@@ -417,7 +417,7 @@
     "settings_log": "0b0c67641b400c037803ea2e976aaa55e973f95de5776e87dea76092db5fb16b",
     "settings_permissions": "0a11607698b6e7526a6332fd312267c8e7e32d4ae33a451103e6d41c2b9d76b9",
     "unlock_banner": "32c2febf56034216034ba7a747556e6bb1bbc960b0e58ccd6a8eb25c62facf3f",
-    "web_console": "5821538b0f731aef4e66973daaedea43120865226c6e3cbe07e946f9e0439b11"
+    "web_console": "48c839e4d1081335986652ed8bf03cdd29cff30172aff694a159cd67e08958b7"
   },
   "p4_1024x600_cs2_fs1_moy_menus": {
     "pause": "6fc368493523786ad0f6064ea4bc3eeb3289807291364434a82324e9490cf8b3",
@@ -467,7 +467,7 @@
     "settings_log": "717a0d76e351e62d0a727302bd3ca103453c0b0deeb535e8575ee150886bc526",
     "settings_permissions": "ec8465b81062a28d65a84f2759cafe75b738c81ecbaaf9b81038f703d770b5d9",
     "unlock_banner": "507dc338d91a64985f98ff73ddc01540debcaf3d280fd35b0678d5b3ecd46469",
-    "web_console": "9e4533d68a71f7b6ceed18e2053ac58f1a20ba64f952f1f7cad24194ded45ab3"
+    "web_console": "edd24865bdf5d1608b3832dc51c26c985dc78980432b53dc2d878c2c32388fd8"
   },
   "p4_1024x600_cs2_fs1_music": {
     "music_desk": "4de2d17d9c79732b4c1cd3214da7c7feea4ecc95d46af7ca7a2b2c77a4b6e4fe",
@@ -542,7 +542,7 @@
     "settings_log": "a1be54120db597f759c449da688a8a3c065549664f4b4b908aa0a363493c2f3d",
     "settings_permissions": "02fabab1f9c681de8b049769c4e3982497271085a2f00ecb060ff4764e4993b0",
     "unlock_banner": "5fc0ac14a1710e399c116f1a53aeb708e984fbc49ad98e5c697fb0127c6f4c00",
-    "web_console": "06325f479eac5d726c444d88ba8b6ae0a40272efe47d2ac62bf338c9b75a26b7"
+    "web_console": "39b43e8ae7056e0b127d741492d49517b14887ebc4c35dd71f44a8c4b488236f"
   },
   "p4_1024x600_cs2_fs1_win95bar": {
     "about": "13574c058c194921873b3a665400338001b95f980c868230cddac00b2fcc3c16",
@@ -587,7 +587,7 @@
     "settings_log": "800258a686a758c44a838d82287dab418a76f11337bfedc47138824c741335ec",
     "settings_permissions": "fac9237db424e46a5bcb92740855fb9d581ed17e194b756e3f7c01ba96c141ea",
     "unlock_banner": "e3c0e7b7e31a440bccc9536ab16b0a8190c8c1ba20d196130e6b0c1a2d7947e2",
-    "web_console": "1f8a039cc69fddaeb9994ceaeb0773a3f07c306f68ed9451a2299f1d2ef537f7"
+    "web_console": "65ef9dd437a10d542e8f06df1052c0706fc7d4c26a7ed75bd643d4c737a0b424"
   },
   "p4_1024x600_cs2_fs1_windowed": {
     "about": "3966c1e6dbc6592b5c6e48a472f9ff54ef36c6e2ef9102bd1da332f2cf068261",
@@ -641,7 +641,7 @@
     "settings_log": "717a0d76e351e62d0a727302bd3ca103453c0b0deeb535e8575ee150886bc526",
     "settings_permissions": "ec8465b81062a28d65a84f2759cafe75b738c81ecbaaf9b81038f703d770b5d9",
     "unlock_banner": "507dc338d91a64985f98ff73ddc01540debcaf3d280fd35b0678d5b3ecd46469",
-    "web_console": "9e4533d68a71f7b6ceed18e2053ac58f1a20ba64f952f1f7cad24194ded45ab3"
+    "web_console": "edd24865bdf5d1608b3832dc51c26c985dc78980432b53dc2d878c2c32388fd8"
   },
   "p4_1024x600_fs2_desk_popovers": {
     "music_desk_menu": "c48d4bf3af435efb90111419454a2f7e0c44eb3683ea4fd36ae01576a1b55a55",
@@ -696,7 +696,7 @@
     "settings_log": "e190c895413e94880bf645cf3e42b277d30ca353b470abb98b23b229cbd4933a",
     "settings_permissions": "43966a2a1fe69925fd3c98cea53215a6a0ad6cc47459c1bce97abc702e6dc869",
     "unlock_banner": "b46a4c41d1735adaa86ced37f65d795036754e121a76b19e6a6635ec08c79182",
-    "web_console": "1dd5890dd28114386b76ef4974bfb90299616bdcc200ce128b828078f907d6e8"
+    "web_console": "7afaf3ca4989c06d3889de52a8ac2238678096b89b20608259179199f30fc829"
   },
   "p4_1024x600_fs2_windowed_light": {
     "about": "ab327be4e1589d17e6c4de07756f5c6d98c4bce387294be156f70aedd2bebf55",
@@ -741,7 +741,7 @@
     "settings_log": "9de746037b7f82077ad6c379591933c4fc9c0c64f3bf976f4c1b8905da4b3845",
     "settings_permissions": "67a01bd2422b7456dda3414338f9a8f19cd4349acf001a445fc61f4e4f072df0",
     "unlock_banner": "3b6059cf4bff39ef1d28b527f9fff02456564f9717c7c3f967d391a387931bb9",
-    "web_console": "a9d7d1df384120f1155aabbcf55bccde4641a7c0c9909c1f7143362e55df0cf0"
+    "web_console": "f90951a6ca37e913d1985f54807d775126fe4fb0e9dac95449043c850d8644be"
   },
   "p4_1024x600_render2_moy_day": {
     "about": "dd0cc04c1d5fc795ec22be75d4fb3d8149e5e0edb1ce8309ea87c62c2e318108",
@@ -786,7 +786,7 @@
     "settings_log": "71ee110115a53e1d05a39da726b7e479b5ac174386d217f1558cba4b12f3495b",
     "settings_permissions": "8bad37f474d608265e426d786baaf748b7b2676611c892e7cac3ce5b2282d7fb",
     "unlock_banner": "0cc7a75fd756451759d6d78a4189131a272fb6f1065b342b5627269752faa7a6",
-    "web_console": "c4df3e4feacfcb807b6d95c72c98a433e504611f75c25f0ddb6b81210810f66e"
+    "web_console": "32403c0ad2393ec99c5a337e4ab14166a2d4400f2e69145bb06e0bc63c44c5c8"
   },
   "tdeck_320x240_fs1_blocks": {
     "about": "6a1100a65c9569f52812c293f22c0fa43efc192bed15549c4c63501cc7855707",
