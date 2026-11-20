@@ -61,6 +61,8 @@ PY = {
             + "        ui.label(\"{e|map L}\")\n", 6),
     "T05": (H + "s = ui.state(n=0)\n" + PAGE + "        ui.label(\"{.x}\")\n", 5),
     "U02": (H + NOTHING + "s = ui.state(go=0)\nui.action(\"go\", \"Go\", nothing)\n", 5),
+    "D01": (H + "s = ui.state(n=0)\nui.app(\"T\", icon=\"calc\")\nui.app(\"T2\", icon=\"calc\")\n", 4),
+    "D02": (H + "s = ui.state(n=0)\nui.app(\"T\", icon=\"calc\", size=3)\n", 3),
     "A09": (H + NOTHING + "s = ui.state(n=0)\nui.action(\"go\", \"Go\", nothing, takes=\"all\")\n", 5),
 }
 
@@ -68,7 +70,9 @@ PY = {
 NO_PAIR = {
     "N08": "Lua raises it in a frame (cased on the console in tests/test_uitree_lua.py), Python at run for "
            "two shown nodes of one key: no checker run reaches either",
-    "D02": "Python raises it for a window's size outside an app declaration: Python has no `app` (§19.1)",
+    "D04": "Lua's checker raises it for a cart with no app declaration; Python's at hosting "
+           "(uitree_app.app_layer with no title), which its checker never reaches: a Python module "
+           "is not an app until something hosts it",
     "N03": "the two layers raise it for different misplacements (Python: a node after the page's scroll; "
            "Lua: rows in rows); no one mistake reaches both",
     "P01": "Python's checker raises it for a module with no page function, Lua's for a push naming no page: "

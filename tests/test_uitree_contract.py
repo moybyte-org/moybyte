@@ -71,7 +71,7 @@ def python_facts():
         verbs.add("sys")
     return {"codes": _codes(PY_FILES), "kinds": kinds, "common": {"shown"}, "action": action, "hook": hook,
             "page": kinds["page"], "takes": set(U.TAKES), "roles": set(U.ROLES), "shell_roles": set(),
-            "verbs": verbs, "retired_live": retired_live, "app": None}
+            "verbs": verbs, "retired_live": retired_live, "app": set(U.APP_FIELDS)}
 
 
 def lua_facts():

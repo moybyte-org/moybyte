@@ -183,3 +183,33 @@ def test_the_display_kinds_check_their_props():
     assert bad(lambda: ui.note("one line")) == "N01"
     assert bad(lambda: ui.text_view("log")) == "T03"
     assert bad(lambda: ui.text_view("n")) == "T03"
+
+
+def test_the_app_declaration_names_its_title_and_fields_once():
+    """§19.1: one `ui.app(...)` at the top level; an unknown field or a
+    second declaration is D01, a malformed size D02; an app hosted with no
+    declaration and no title is D04, and back= names an action."""
+    import uitree_app
+    ui.state(n=3)
+    ui.action("leave", "Leave", nothing)
+    assert _code(lambda: ui.app("T", x=3)) == "D01"
+    assert _code(lambda: ui.app("T", size=3)) == "D02"
+    assert _code(lambda: ui.app("T", size=("9/8", 1))) == "D02"
+    assert _code(lambda: ui.app("T", glass="always")) == "D01"
+    d = ui.app("Count {n}", size=("7/8", 320), back="leave")
+    assert _code(lambda: ui.app("Again")) == "D01"
+    assert d.title() == "Count 3" and d.size == ("7/8", 320)
+
+    def page():
+        with ui.page("P"):
+            ui.label("x")
+    assert uitree_app.app_layer("t", None, page).TITLE == "Count 3"
+    class _Damage:
+        def all(self):
+            pass
+    eng = uitree_app.Page(page, None, _Damage())
+    assert eng.back() and eng.q[-1][0].name == "leave" and eng.q[-1][2] == "the app's back"
+    d.back = "nope"
+    assert _code(lambda: uitree_app.app_layer("t", None, page)) == "A01"
+    ui._d().app = None
+    assert _code(lambda: uitree_app.app_layer("t", None, page)) == "D04"

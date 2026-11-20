@@ -3,8 +3,6 @@
  "python": [
   "code not in the table: P05",
   "code never raised: C03",
-  "code never raised: D01",
-  "code never raised: D04",
   "code never raised: D05",
   "code never raised: D06",
   "code never raised: G01",
@@ -93,7 +91,6 @@
   "takes missing: L2 row+arg",
   "role missing: L2 menu",
   "role missing: L2 space",
-  "verb missing: L1 app",
   "verb missing: L1 bubble",
   "verb missing: L2 cells",
   "verb missing: L1 damage",

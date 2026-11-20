@@ -757,6 +757,7 @@ class Decl:
         self.labels = {}
         self.works = {}
         self.posts = []
+        self.app = None         # its `ui.app(...)` declaration (§19.1), where it is an app
 
 
 _DECLS = {}             # module name -> its Decl, made by its ui.state(...)
@@ -822,6 +823,73 @@ def state(**decl):
 
 def _st():
     return _d().state
+
+
+class AppDecl:
+    """An app's `ui.app(...)` (§19.1): its title (a template over the state),
+    and the fields the console reads to place and name it."""
+
+    def __init__(self, title, g, fields, where):
+        self.title_src, self.title_g, self.where = title, g, where
+        self.icon = fields.get("icon", "")
+        self.size = fields.get("size")
+        self.min = fields.get("min")
+        self.back = fields.get("back", "pages")
+        self.glass = fields.get("glass", "never")
+        self.slots = tuple(fields.get("slots", ()))
+
+    def title(self):
+        return _text(self.title_g(None))
+
+
+APP_FIELDS = ("icon", "size", "min", "back", "glass", "slots")
+GLASS = ("never", "may", "first")
+
+
+def _frac(v):
+    if type(v) is int:
+        return v > 0
+    if not isinstance(v, str) or v.count("/") != 1:
+        return False
+    a, b = v.split("/")
+    return a.isdigit() and b.isdigit() and 0 < int(a) <= int(b)
+
+
+def app(title, **fields):
+    """The app's declaration (§19.1), once, at the top level: its title (a
+    template over the state: the bar's zone, the strip, the chip), `icon=`,
+    `size=` (w, h: desk units or a fraction of the glass, "7/8"), `min=`
+    (w, h), `back=` ("pages", or an action run where no page is left to
+    pop), `glass=` (never, may, first) and `slots=`."""
+    where = _caller()
+    _declaring("app")
+    d = _d()
+    if d.app is not None:
+        raise UIError("D01", "a second ui.app declaration", where=where,
+                      found="the first at %s:%s" % d.app.where, fix="one ui.app(...) an app")
+    for k in fields:
+        if k not in APP_FIELDS:
+            raise UIError("D01", "ui.app has no field %r" % k, where=where, expected=", ".join(APP_FIELDS),
+                          fix="drop it: where a window stands is the console's" if k in (
+                              "x", "y", "place", "z", "focus", "show") else
+                          'a tools node in the tree' if k == "tools" else "drop it")
+    for k in ("size", "min"):
+        v = fields.get(k)
+        if v is not None and not (isinstance(v, tuple) and len(v) == 2 and all(
+                _frac(x) if k == "size" else type(x) is int and x > 0 for x in v)):
+            raise UIError("D02", "ui.app %s=%r" % (k, v), where=where,
+                          expected="(w, h), each a size in desk units%s" % (
+                              ' or a fraction of the glass ("7/8")' if k == "size" else ""),
+                          fix='%s=(480, 320)' % k if k == "min" else 'size=("7/8", "7/8")')
+    if fields.get("glass", "never") not in GLASS:
+        raise UIError("D01", "ui.app glass=%r" % (fields["glass"],), where=where, expected=", ".join(GLASS),
+                      fix='glass="may"')
+    b = fields.get("back", "pages")
+    if not isinstance(b, str) or not re.fullmatch(r"[a-z_][a-z0-9_]*", b):
+        raise UIError("D01", "ui.app back=%r" % (b,), where=where,
+                      expected='"pages", or the name of an action', fix='back="pages"')
+    d.app = AppDecl(title, tmpl(title, Ctx(), where, "title").g, fields, where)
+    return d.app
 
 
 def labels(name, table):
@@ -2755,7 +2823,7 @@ NODE_CALLS = ("page", "group", "label", "info", "link", "button", "item", "card"
               "field", "seg", "table", "col", "rows", "cards", "picture", "progress", "empty", "dialog",
               "popover", "menu", "split", "grid", "panel", "canvas", "foot", "scroll", "rule", "note",
               "text_view", "switch", "tabs", "panes", "pane", "text_editor", "slot", "row", "tools", "lent", "status")
-DECL_CALLS = ("action", "hook", "labels", "work", "derive")
+DECL_CALLS = ("action", "hook", "labels", "work", "derive", "app")
 COMMAND_CALLS = ("push", "pop", "focus", "after", "post")
 for _n in NODE_CALLS:
     globals()[_n] = _collecting(globals()[_n], True)

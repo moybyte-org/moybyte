@@ -1243,9 +1243,12 @@ class Engine(S.Builder):
             S._trace("page", "back", "page %d, focus back to %r" % (len(self.pages), back_to))
             _NOW.app = was
             return True
-        a = self.role_action("back")
+        a, why = self.role_action("back"), "role back"
+        ad = self.decl.app
+        if a is None and ad is not None and ad.back != "pages":
+            a, why = self.actions[ad.back], "the app's back"
         if a is not None and a.can():
-            self.q.append((a, self.args_for(a), "role back"))
+            self.q.append((a, self.args_for(a), why))
             self._damage.all()
             return True
         return False
@@ -1318,10 +1321,20 @@ class App(AppLayer):
 
 def app_layer(id, title, build, is_app=None, needs=()):
     """The AppLayer class of an app whose screen is `build` (the module's
-    root page): what its manifest's `entry` names."""
+    root page): what its manifest's `entry` names. Its title is the
+    module's `ui.app(...)` declaration's (§19.1), else `title`."""
     if not callable(build):
         raise S.UIError("N01", "app_layer(%r): build is not a function" % id,
                         fix="pass the module's page function itself: app_layer(%r, %r, build)" % (id, title))
+    ad = S.decl_of(build.__module__).app
+    if ad is None and title is None:
+        raise S.UIError("D04", "app %r has no ui.app declaration" % id, where=(build.__module__, 0),
+                        fix='ui.app("Title", icon="...") at the top of %s' % build.__module__)
+    if ad is not None:
+        if ad.back != "pages" and ad.back not in S.decl_of(build.__module__).actions:
+            raise S.UIError("A01", "ui.app back=%r names no action" % ad.back, where=ad.where,
+                            fix='declare ui.action(%r, ...), or back="pages"' % ad.back)
+        title = ad.title()
     return type(title.replace(" ", "") + "App", (App,), {
         "id": id, "TITLE": title, "BUILD": (build,), "IS_APP": (is_app,) if is_app else None,
         "NEEDS": App.NEEDS + tuple(needs)})

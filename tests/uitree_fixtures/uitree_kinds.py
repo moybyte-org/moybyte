@@ -28,6 +28,7 @@ def opened():
     s.log = [{"n": 0, "line": "line 0"}]
 
 
+ui.app("Kinds", icon="check", min=(160, 120))
 ui.hook("opened", opened)
 ui.action("mark", "Mark", mark, keys=("m",), icon="check")
 ui.action("left", "Less", left, keys=("role:left",))
@@ -63,4 +64,4 @@ def keypad():
 
 def layer():
     import uitree_app
-    return uitree_app.app_layer("uitree_kinds", "Kinds", build)
+    return uitree_app.app_layer("uitree_kinds", None, build)
