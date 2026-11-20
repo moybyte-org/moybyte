@@ -361,6 +361,34 @@ def _open_web_console(ws):
     ws.web.toggle()
 
 
+def _open_tasks(ws):
+    """The task manager over two services, one crashed, and two
+    notifications one of them posted (its banner taken down)."""
+    from runtime import scheduler as S
+    from runtime import notifications as N
+    from runtime import moybyte
+    import moy_log
+    ws.procs.account = lambda now: None
+    if ws.windowed_chrome:
+        ws.home.open_desk()
+    S.SCHED.start({"id": "moybyte.weather", "title": "Weather", "permissions": [],
+                   "src": "raise ValueError('no network')\n"})
+    pid = S.SCHED.start({"id": "moybyte.mesh", "title": "Mesh", "permissions": ["notifications"],
+                         "src": "import moybyte\nmoybyte.every(60000, lambda: None)\n"})
+    N.NOTES.reset()
+    was = moy_log.current()
+    moy_log.current(pid)
+    try:
+        moybyte.notify("Weather", "Rain from 4 pm", "warn", (), N.LOW)
+        moybyte.notify("Ana: are you coming?", "We start at eight, by the lake.",
+                       "heart", ("default", "Open", "reply", "Reply"))
+    finally:
+        moy_log.current(was)
+    N.NOTES.dismiss()
+    ws.procs.gen += 1
+    ws.open_tasks()
+
+
 def _open_log(ws):
     import moy_log
     moy_log.init(16384)
@@ -393,6 +421,7 @@ SURFACES = {
     "settings_rows_full": P.Surface(_open_rows_full),
     "settings_log": P.Surface(_open_log),
     "web_console": P.Surface(_open_web_console),
+    "tasks": P.Surface(_open_tasks),
     "settings_wifi": P.Surface(_open_wifi()),
     "settings_wifi_none": P.Surface(_open_wifi(False)),
     "wifi_popover": P.Surface(_open_wifi_popover),
@@ -508,6 +537,12 @@ RUNS = (
     # keys stepped over it (Turn off on a desk, where it is a button)
     ("web_console-tdeck", "web_console", "tdeck_320x240_fs1_dark", ["f:2", "k:down"]),
     ("web_console-desk", "web_console", "p4_1024x600_fs2_windowed", ["f:2", "k:down", "k:up"]),
+    # the task manager: a row stepped, the tab strip's next tab, its list
+    # stepped, a notification cleared from the foot that shares its width
+    ("tasks-tdeck", "tasks", "tdeck_320x240_fs1_dark",
+     ["k:down", "k:up", "k:up", "k:right", "k:down", "k:down", "k:down", "k:a", "f:2"]),
+    ("tasks-desk", "tasks", "p4_1024x600_fs2_windowed",
+     ["k:down", "k:up", "k:up", "k:right", "k:down", "k:down", "k:down", "k:right", "k:a", "f:2"]),
     ("editor_code-tdeck", "editor_code", "tdeck_320x240_fs1_dark", CODE_SCRIPT, P.BEHAVIOUR),
     ("editor_code-desk", "editor_code", "p4_1024x600_fs2_windowed", CODE_DESK_SCRIPT, P.BEHAVIOUR),
     ("editor_code-big", "editor_code", "big_800x480_fs3_dark", CODE_SCRIPT, P.BEHAVIOUR),
