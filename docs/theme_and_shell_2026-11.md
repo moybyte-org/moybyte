@@ -1514,7 +1514,7 @@ and a game moved out so is its own window, which outlives the Editor; while
 it lasts the Editor's workspaces have no Game tab, the panes left taking its
 room, and when it closes the Game tab comes back
 (`WindowedWM.play_in_window`, the path an orphaned docked game takes back to
-its window; `editor_panes.without`).
+its window; the workspaces' `game` state, runtime/editors/editor_ui.py).
 
 **The way back** goes one level, wherever something is beneath the surface
 (owner, 2026-10-13; its shape 2026-10-18, `docs/history/look_2026-10.md` step 27a):

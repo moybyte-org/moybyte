@@ -253,6 +253,30 @@ def pages(loop):
         ui.end()
     hs = LA._SURF[id(None)]
     shown["legacy"] = [hs.draws, list(hs.rects[-1]), list(lp.legacies["list"][1])]
+    # the desk's workspaces (editor_ui.SPACES): each page placed over a
+    # 1024 desk's panes area at its starting state, its bodies drawn by a
+    # stand-in desk
+    import editor_ui
+
+    class PaneDesk:
+        def __init__(self):
+            self.drawn = []
+
+        def pane_body(self, key, dt):
+            self.drawn.append(key)
+    pd = PaneDesk()
+    editor_ui._desk[0] = pd
+    spaces = {}
+    for key in ("settings", "code", "art", "world", "sound", "theme"):
+        sp = uitree_editor.Page(editor_ui.SPACES[key], lh, Damage())
+        sp.unit = 1
+        sp.place((6, 46, 1012, 548))
+        del pd.drawn[:]
+        sp.draw_hosted(cv, th, 0.033)
+        spaces[key] = [[[n.key, list(r), list(pa)] for n, r, pa in sp.arranged[0]],
+                       [[list(pa), i, a, list(r)] for pa, i, a, r in sp.arranged[1]],
+                       list(pd.drawn), list(sp.minimum())]
+    shown["spaces"] = spaces
     print("RESULT " + json.dumps({"painted": painted, "shown": shown, "errors": errors}))
 '''
 
@@ -301,5 +325,16 @@ def test_every_ported_page_builds_and_draws_on_the_boards_micropython(tmp_path):
     assert shown["desk_ws"] == "art", shown
     draws, drew_at, laid_at = shown["legacy"]
     assert draws == 3 and drew_at == laid_at, shown["legacy"]
+    # the desk's workspaces place on the board as on the host
+    spaces = shown["spaces"]
+    assert spaces["code"][0] == [["code", [6, 46, 666, 548], [0]],
+                                 ["game", [678, 46, 340, 282], [1, 0]],
+                                 ["side", [678, 334, 340, 260], [1, 1]]], spaces["code"]
+    assert spaces["code"][1] == [[[], 0, "h", [672, 46, 6, 548]],
+                                 [[1], 0, "v", [678, 328, 340, 6]]], spaces["code"]
+    assert spaces["code"][2] == ["code", "game", "side"], spaces["code"]
+    assert spaces["art"][3] == [320 + 6 + 320, 272 + 6 + 48], spaces["art"]
+    assert [len(spaces[k][2]) for k in ("settings", "art", "world", "sound", "theme")] == \
+        [2, 3, 3, 4, 2], spaces
     missing = [b for b in BUILDS if not painted.get(b)]
     assert not missing, ("pages that never painted", missing, painted, text[-3000:])

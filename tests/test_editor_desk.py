@@ -22,112 +22,158 @@ FULL_800 = (6, 46, 788, 428)
 DT = 1 / 30
 
 
-def _rects(key, area, **kw):
-    return [(pane, r) for pane, r, _p in P.Arrangement(key, area, **kw).place()[0]]
+@pytest.fixture(scope="module")
+def placer(tmp_path_factory):
+    """A desk whose workspace pages place at any area, for any cart shape."""
+    ws = host_app.build_workstation(str(tmp_path_factory.mktemp("placer")), sys_size=(1024, 600),
+                                    panel_diagonal_in=7.0, font_scale=1, windowed=True)
+    ws.home.open_desk()
+    ws.open_in_editor(install_shape(ws, "sky_run"))
+    return ws.editor_desk
+
+
+def _page(d, key, area, blocks=False, game=True, **held):
+    """Workspace `key`'s page placed over `area` from its start, then with
+    the held sizes `held` (state name -> pixels): (page, {contents: rect})."""
+    from runtime import editor_ui
+    d._blocks = lambda: blocks
+    d.shows_game = lambda: game
+    page = d._page(key)
+    page.mem = None                              # every held size absent
+    d._place(key, area, 1)
+    if held:
+        page._bind()
+        for nm, v in held.items():
+            editor_ui.s._v[nm] = v
+        d._place(key, area, 1)
+    return page, {pane: r for pane, r, _p in d._place(key, area, 1)[0]}
+
+
+def _rects(d, key, area, **kw):
+    return list(_page(d, key, area, **kw)[1].items())
 
 
 # -- the starting arrangements --------------------------------------------------------
 
-def test_the_workspaces_start_as_drawn_at_1024_full_screen():
-    assert _rects("settings", FULL_1024) == [
+def test_the_workspaces_start_as_drawn_at_1024_full_screen(placer):
+    d = placer
+    assert _rects(d, "settings", FULL_1024) == [
         (("cards",), (6, 46, 360, 548)), (("game",), (372, 46, 646, 548))]
-    assert _rects("code", FULL_1024) == [
+    assert _rects(d, "code", FULL_1024) == [
         (("code",), (6, 46, 666, 548)), (("game",), (678, 46, 340, 282)),
         (("sprites", "sounds", "maps", "log"), (678, 334, 340, 260))]
-    assert _rects("art", FULL_1024) == [
+    assert _rects(d, "art", FULL_1024) == [
         (("paint",), (6, 46, 400, 548)), (("map", "game"), (412, 46, 606, 380)),
         (("sheet",), (412, 432, 606, 162))]
-    assert _rects("world", FULL_1024)[1:] == [
+    assert _rects(d, "world", FULL_1024)[1:] == [
         (("game",), (678, 46, 340, 282)), (("actor", "stamps"), (678, 334, 340, 260))]
-    assert _rects("sound", FULL_1024) == [
+    assert _rects(d, "sound", FULL_1024) == [
         (("sounds",), (6, 46, 200, 548)), (("music",), (212, 46, 460, 548)),
         (("game",), (678, 46, 340, 282)), (("song",), (678, 334, 340, 260))]
-    assert _rects("code", FULL_1024, blocks=True) == [
+    assert _rects(d, "code", FULL_1024, blocks=True) == [
         (("palette",), (6, 46, 200, 548)), (("blocks",), (212, 46, 460, 548)),
         (("scene", "game"), (678, 46, 340, 282)), (("made",), (678, 334, 340, 260))]
 
 
-def test_under_a_title_strip_the_scrolling_pane_gives_the_difference():
+def test_with_no_game_the_panes_left_hold_its_room(placer):
+    """The game in a window of its own: a pane left empty goes, a split
+    left one child is that child, and the last one left takes the rest."""
+    d = placer
+    assert _rects(d, "settings", FULL_1024, game=False) == [(("cards",), FULL_1024)]
+    assert _rects(d, "code", FULL_1024, game=False) == [
+        (("code",), (6, 46, 666, 548)), (("sprites", "sounds", "maps", "log"), (678, 46, 340, 548))]
+    assert _rects(d, "code", FULL_800, game=False)[1][0] == ("sprites", "sounds", "maps", "log")
+
+
+def test_under_a_title_strip_the_scrolling_pane_gives_the_difference(placer):
     """EDITOR_LAYOUT.md's pictures: Art's Map 336 tall over the Sheet's 162;
     the Reference 216 under the Run slot's 282."""
-    assert _rects("art", STRIP_1024)[1:] == [
+    d = placer
+    assert _rects(d, "art", STRIP_1024)[1:] == [
         (("map", "game"), (412, 90, 606, 336)), (("sheet",), (412, 432, 606, 162))]
-    assert _rects("code", STRIP_1024)[2][1] == (678, 378, 340, 216)
+    assert _rects(d, "code", STRIP_1024)[2][1] == (678, 378, 340, 216)
 
 
-def test_at_800_one_tabbed_pane_stands_at_the_right():
-    assert _rects("code", FULL_800) == [
+def test_at_800_one_tabbed_pane_stands_at_the_right(placer):
+    d = placer
+    assert _rects(d, "code", FULL_800) == [
         (("code",), (6, 46, 442, 428)),
         (("game", "sprites", "sounds", "maps", "log"), (454, 46, 340, 428))]
     # full screen gives Sprite 330 (MAXIMISE_VARIANTS.md); a restored 800 its 320
-    assert _rects("art", FULL_800)[0] == (("paint",), (6, 46, 330, 428))
-    assert _rects("art", (6, 90, 788, 384))[0] == (("paint",), (6, 90, 320, 384))
-    assert _rects("sound", FULL_800)[1][0] == ("game", "song")
+    assert _rects(d, "art", FULL_800)[0] == (("paint",), (6, 46, 330, 428))
+    assert _rects(d, "art", (6, 90, 788, 384))[0] == (("paint",), (6, 90, 320, 384))
+    assert _rects(d, "sound", FULL_800)[1][0] == ("game", "song")
 
 
 # -- the dividers ---------------------------------------------------------------------
 
-def test_a_divider_stops_at_its_neighbours_minimum_and_moves_only_its_two_panes():
-    arr = P.Arrangement("code", FULL_1024)
-    assert arr.drag((), 0, 2000) == 1           # stopped at the Run slot's minimum
-    panes = _place(arr)
+def test_a_held_size_yields_to_its_neighbours_minimum(placer):
+    d = placer
+    _page_, panes = _page(d, "code", FULL_1024, z_right=0)
     assert panes[("code",)] == (6, 46, 686, 548)
     assert panes[("game",)][2] == P.GAME_MIN[0]          # the game at 1x, 320 wide
     # the right column's own split kept the Run slot's height
     assert panes[("game",)][3] == 282
-    assert arr.drag((), 0, 0) == 0               # Code scrolls: its floor only
-    assert _place(arr)[("code",)][2] == P.FLOOR[0]
+    _page_, panes = _page(d, "code", FULL_1024, z_right=2000)
+    assert panes[("code",)][2] == P.FLOOR[0]             # Code scrolls: its floor only
 
 
-def test_a_canvas_pane_keeps_the_t_decks_page():
-    arr = P.Arrangement("art", FULL_1024)
-    arr.drag((), 0, 0)
-    assert _place(arr)[("paint",)][2] == P.CANVAS_MIN[0]
-    arr.drag((1,), 0, 0)                         # the Map over the Sheet
-    assert _place(arr)[("map", "game")][3] == P.GAME_MIN[1]
+def test_a_canvas_pane_keeps_the_t_decks_page(placer):
+    d = placer
+    assert _page(d, "art", FULL_1024, z_paint=0)[1][("paint",)][2] == P.CANVAS_MIN[0]
+    # the Map over the Sheet, the Game its tab: the larger least height
+    assert _page(d, "art", FULL_1024, z_sheet=2000)[1][("map", "game")][3] == P.GAME_MIN[1]
 
 
-def test_reset_puts_a_divider_back_and_ctrl_0_all_of_them():
-    arr = P.Arrangement("art", FULL_1024)
-    start = _place(arr)
-    arr.drag((), 0, 500)
-    arr.drag((1,), 0, 300)
-    arr.reset((), 0)
-    got = _place(arr)
-    assert got[("paint",)] == start[("paint",)]
-    assert got[("sheet",)] != start[("sheet",)]
-    arr.reset()
-    assert _place(arr) == start
+def test_ctrl_0_puts_every_divider_back(placer):
+    d = placer
+    page, start = _page(d, "art", FULL_1024)
+    page, moved = _page(d, "art", FULL_1024, z_paint=500, z_sheet=300)
+    assert moved != start
+    page.reset_sizes()
+    assert {p: r for p, r, _ in d._place("art", FULL_1024, 1)[0]} == start
 
 
-def test_the_board_remembers_the_sizes_and_reads_a_foreign_state_as_absent():
-    arr = P.Arrangement("sound", FULL_1024)
-    arr.drag((), 0, 260)
-    saved = arr.state()
-    again = P.Arrangement("sound", FULL_1024)
-    assert again.restore(saved)
-    assert _place(again) == _place(arr)
-    other = P.Arrangement("art", FULL_1024)
-    assert not other.restore(saved)
-    assert not other.restore([[[], ["x"]]])
-    assert not other.restore("junk")
+def test_the_board_remembers_the_sizes_and_reads_a_foreign_state_as_absent(placer):
+    d = placer
+    page, held = _page(d, "sound", FULL_1024, z_sounds=260)
+    saved = [[list(sp[8]), list(sp[2])] for sp in sorted(page.splits.values(), key=lambda sp: sp[8])]
+    d.ws.system.set("editor_panes", {d._mem_key("sound", FULL_1024): saved,
+                                     d._mem_key("art", FULL_1024): saved})
+    page.mem = None
+    assert {p: r for p, r, _ in d._place("sound", FULL_1024, 1)[0]} == held
+    other = d._page("art")
+    other.mem = None
+    start = _page(d, "art", FULL_1024)[1]
+    other.mem = None
+    d.ws.system.set("editor_panes", {d._mem_key("art", FULL_1024): saved})
+    assert {p: r for p, r, _ in d._place("art", FULL_1024, 1)[0]} == start
+    for junk in ([[[], ["x"]]], "junk"):
+        other.mem = None
+        d.ws.system.set("editor_panes", {d._mem_key("art", FULL_1024): junk})
+        assert {p: r for p, r, _ in d._place("art", FULL_1024, 1)[0]} == start
+    d.ws.system.set("editor_panes", {})
 
 
-def test_ctrl_alt_arrows_reach_the_right_and_bottom_dividers():
-    arr = P.Arrangement("code", FULL_1024)
-    panes = {pane: path for pane, _r, path in arr.place()[0]}
-    assert arr.edges(panes[("code",)]) == [((), 0, "h")]
-    assert arr.edges(panes[("game",)]) == [((1,), 0, "v")]
-    assert arr.edges(panes[("sprites", "sounds", "maps", "log")]) == []
+def test_ctrl_alt_arrows_reach_the_right_and_bottom_dividers(placer):
+    d = placer
+    for pane, code, moved in (("code", 0x111, ("code",)), ("game", 0x113, ("game",)),
+                              ("side", 0x111, None), ("side", 0x113, None)):
+        page, start = _page(d, "code", FULL_1024)
+        page.pane_cur = pane
+        gen = page.size_gen
+        page.nudge(code)
+        got = {p: r for p, r, _ in d._place("code", FULL_1024, 1)[0]}
+        if moved is None:
+            assert page.size_gen == gen and got == start
+        else:
+            assert got[moved][2:] != start[moved][2:]
 
 
-def test_a_workspaces_minimum_is_its_panes_with_their_gutters():
-    assert P.Arrangement("art", FULL_1024).minimum() == (320 + 6 + 320, 272 + 6 + 48)
-    assert P.Arrangement("sound", FULL_1024).minimum()[0] == 64 + 6 + 320 + 6 + 320
-
-
-def _place(arr):
-    return {pane: r for pane, r, _p in arr.place()[0]}
+def test_a_workspaces_minimum_is_its_panes_with_their_gutters(placer):
+    d = placer
+    assert _page(d, "art", FULL_1024)[0].minimum() == (320 + 6 + 320, 272 + 6 + 48)
+    assert _page(d, "sound", FULL_1024)[0].minimum()[0] == 64 + 6 + 320 + 6 + 320
 
 
 # -- on the desk ----------------------------------------------------------------------
@@ -1615,17 +1661,10 @@ def test_select_start_plays_and_restarts_and_start_alone_is_the_console_key(desk
 
 def test_quiet_frames_warm_the_other_workspaces_and_a_switch_draws_the_same(tmp_path, monkeypatch):
     """`EditorDesk.warm_step` (the console's quiet frames): every workspace
-    not on show gets its arrangement placed and its tab panes laid out ahead,
+    not on show gets its page placed and its tab panes laid out ahead,
     one a frame, so its first switch builds none of it -- and draws the same
     panes it draws unwarmed."""
     made = []
-    real = P.Arrangement
-
-    class Counted(real):
-        def __init__(self, *a, **k):
-            made.append(a[0])
-            real.__init__(self, *a, **k)
-
     shots = {}
     for warm in (True, False):
         ws = host_app.build_workstation(str(tmp_path / str(warm)), sys_size=(1024, 600),
@@ -1639,7 +1678,12 @@ def test_quiet_frames_warm_the_other_workspaces_and_a_switch_draws_the_same(tmp_
         _painted(ws, drv, 12)
         if warm:
             assert sorted(sig[0] for sig in d._warm) == ["art", "code", "sound", "world"]
-        monkeypatch.setattr(P, "Arrangement", Counted)
+        real = d._place
+
+        def counted(key, area, u, real=real):
+            made.append(key)
+            return real(key, area, u)
+        d._place = counted
         del made[:]
         for key in ("code", "art", "world", "sound"):
             d.switch(key)
@@ -1647,6 +1691,5 @@ def test_quiet_frames_warm_the_other_workspaces_and_a_switch_draws_the_same(tmp_
             buf = ws.wm.windows["menu"].buf
             shots[(warm, key)] = bytes(buf._buf[2 * buf.w * 46:])
         assert made == ([] if warm else ["code", "art", "world", "sound"])
-        monkeypatch.setattr(P, "Arrangement", real)
     for key in ("code", "art", "world", "sound"):
         assert shots[(True, key)] == shots[(False, key)], key

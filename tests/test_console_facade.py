@@ -383,7 +383,6 @@ def test_the_absent_list_stays_absent_and_stays_used(tmp_path):
 # that shares the word.
 _KIND_OWNERS = {
     "runtime/editors/editor_desk.py": "the Editor's workspace key",
-    "runtime/editors/editor_panes.py": "the Editor's workspace key",
 }
 _SHELL_KINDS = ("settings", "tasks")
 

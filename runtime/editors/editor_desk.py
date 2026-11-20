@@ -11,8 +11,9 @@
 #   EditorDesk.handle_pointer  the row, the dividers, a pane's header and its content
 """The Editor on the desk (docs/media/look_2026-10/EDITOR_LAYOUT.md, concept
 B, and MAXIMISE_VARIANTS.md's Resize): several of its parts at once, as five
-workspaces whose dividers move (`runtime/editors/editor_panes.py` holds the
-geometry). The app's row is the band the bar lends the Editor, the head
+workspaces whose dividers move: each a page of panes
+(runtime/editors/editor_ui.py's `SPACES`, laid out by the Editor engine)
+whose bodies this layer draws. The app's row is the band the bar lends the Editor, the head
 row's desk case (runtime/editors/editor_ui.py): the workspaces, undo, redo
 and Play.
 
@@ -121,6 +122,16 @@ _NO_LAG = (0, 0, 0, 0)           # a split frame's target lagging nothing
 _PB_MIDDLE = 2
 
 
+class _Damage:
+    """A workspace page's word that the desk owes a frame."""
+
+    def __init__(self, ws):
+        self.ws = ws
+
+    def all(self):
+        self.ws.mark_dirty()
+
+
 class EditorDesk(Layer):
     """The desk Editor's content layer (the "menu" window's, while `active`)."""
 
@@ -133,14 +144,14 @@ class EditorDesk(Layer):
         self._focus = {}                # workspace -> the focused pane's index
         self._tabs = {}                 # pane -> its open tab's index
         self.grown = None               # the pane grown over the workspace
-        self._arr = None                # the Arrangement on show
-        self._placed = None             # its (panes, dividers)
+        self._pages = {}                # workspace -> its page (editor_ui.SPACES)
+        self._placed = None             # the one on show placed: (panes, dividers)
+        self._placed_for = (None, None, 0, True, 0, None)   # ...for (key, area, unit, game,
+                                                            # focused pane, grown pane)
         self._lay = {}                  # (tab, w, h, fs, cs) -> the pane's layout
         self._drag = None               # a divider held: (path, i, axis, at, stop, live)
         self._on_div = False            # the pointer went down on a divider: the frame's
-        self._splits = None             # (placed, [(path, axis, rect, mins, id)]): the splits
         self._split_out = [0] * (4 * 8 + 4)
-        self._split_o = {"drag": True}
         self._one = [0]                 # the split of one pane alone over the area
         self._one_o = {"focus": 0}
         self._press = None              # the pane a press went down in
@@ -165,7 +176,7 @@ class EditorDesk(Layer):
         self._back_tab = {}             # a pane's tab before Play took it to Game
         self._fresh = 0                 # this frame's key event, where it is new
         self._tools_x = {}              # pane index -> its header tools' left edge
-        self._warm = {}                 # sig -> (Arrangement, placed) built ahead
+        self._warm = {}                 # sig -> placed, built ahead
         self._warm_for = None           # what the workspaces were warmed for
         self._warm_left = []            # ...and those still to warm
         self._warm_due = False          # a quiet frame has warming to do
@@ -216,7 +227,6 @@ class EditorDesk(Layer):
         else:
             return
         self.grown = None
-        self._arr = None
         self._placed = None
         self._shown = None
 
@@ -233,7 +243,7 @@ class EditorDesk(Layer):
         """The least window the workspace on show holds, at the font scale
         (as a registered app's minimum is): its panes' minimums, the gutters
         round them, the band and the window's strip."""
-        mw, mh = self.arrangement().minimum()
+        mw, mh = self.minimum()
         u = self._unit()
         fs = max(1, self.ws.look.effective_font_scale())
         g = 2 * P.GUTTER * u
@@ -255,29 +265,121 @@ class EditorDesk(Layer):
         """The workspace keys the open cart has, in the row's order."""
         return [k for k, _l, _i in self.ws.editor_app.workspaces()]
 
-    def arrangement(self):
-        """The workspace on show at the surface's size, its dividers as the
-        board remembers them for this project and size."""
-        area = self._area()
-        u = self._unit()
-        arr = self._arr
-        game = self.shows_game()
-        if (arr is not None and arr.key == self.key and arr.area == area and arr.unit == u
-                and arr.game == game):
-            return arr
-        got = self._warm.pop(self._warm_sig(self.key, area, u), None) if self._warm else None
-        if got is not None:
-            self._arr, self._placed = got
-            return got[0]
-        arr = self._new_arrangement(self.key, area, u)
-        self._arr = arr
-        self._placed = None
-        return arr
+    def _page(self, key=None):
+        """Workspace `key`'s page (editor_ui.SPACES): its panes, each body a
+        legacy node this desk draws (`pane_body`)."""
+        key = key or self.key
+        page = self._pages.get(key)
+        if page is None:
+            import editor_ui
+            import uitree_editor
+            editor_ui._desk[0] = self
+            page = uitree_editor.Page(editor_ui.SPACES[key], self._host, _Damage(self.ws))
+            self._pages[key] = page
+        return page
 
-    def _new_arrangement(self, key, area, u):
-        arr = P.Arrangement(key, area, u, self._blocks(), self.shows_game(), self.lacks())
-        arr.restore(self._saved().get(self._mem_key(arr)))
-        return arr
+    def _sync(self, page, area, u):
+        """What the workspace's shape and starting sizes follow, written
+        into its page's state: the area (`big`, the 1024 arrangement; the
+        right column 660 at 1240x760 units and over, its Run slot 512; the
+        Sprite 330 where the area is 420 units tall, else 320) and the cart
+        (its tabs, blocks, the Game while no window holds it)."""
+        import editor_ui
+        st = editor_ui.s
+        page._bind()
+        w, h = area[2], area[3]
+        big = P.wide(w)
+        col = 660 if w >= 1240 * u and h >= 760 * u else 340
+        offers = self.ws.editor_app._offers
+        vals = (("big", big), ("by_blocks", self._blocks()), ("game", self.shows_game()),
+                ("col_w", col), ("run_h", 512 if col == 660 else 282),
+                ("art_w", 400 if big else 330 if h >= 420 * u else 320),
+                ("set_w", 360 if big else 300), ("theme_w", 352 if big else 260),
+                ("grown", self._grown_key(page)))
+        for nm, v in vals:
+            self._put(st, nm, v)
+        for tab in _OPENED:
+            self._put(st, "has_" + tab, bool(offers(tab)))
+
+    @staticmethod
+    def _put(st, nm, v):
+        if st._v[nm] != v:
+            st._v[nm] = v
+            st._ver[nm] += 1
+
+    def _grown_key(self, page):
+        g = self.grown
+        if g is None:
+            return None
+        for node, _r, _p in page.arranged[0]:
+            if self._contents(page, node) == g:
+                return node.key
+        return None
+
+    @staticmethod
+    def _contents(page, node):
+        """The contents a pane of the page shows: its tabs on offer, else
+        its one."""
+        page._bind()
+        got = page._offered(node)
+        return (node.key,) if got is None else got
+
+    def _place(self, key, area, u):
+        """Workspace `key` placed over `area`: its page synced and laid out,
+        its held sizes the board's for this project and size where they are
+        new; (panes, dividers) in reading order, each pane as (contents,
+        rect, path), each divider as (path, index, "h" | "v", rect)."""
+        page = self._page(key)
+        page.unit = u
+        mem = self._mem_key(key, area)
+        if getattr(page, "mem", None) != mem:
+            self._sync(page, area, u)
+            self._restore(page, area, mem)
+        self._sync(page, area, u)
+        page.place(area)
+        arr = page.arranged[0]
+        if arr:
+            # the pane the keys reach: the one a pane alone stands for
+            want = arr[min(self._focus.get(key, 0), len(arr) - 1)][0].key
+            if page.pane_cur != want:
+                page.pane_cur = want
+                if page.alone_pane is not None:
+                    page.place(area)
+        got = ([(self._contents(page, n), r, p) for n, r, p in page.arranged[0]],
+               list(page.arranged[1]))
+        page.desk_keys = [n.key for n, _r, _p in page.arranged[0]]
+        return got
+
+    def _restore(self, page, area, mem):
+        """The page's held sizes the board's for `mem`: every one absent,
+        then each split's sizes where it still fits the tree (a remembered
+        layout of another tree, or a hand-edited one, reads as absent)."""
+        import editor_ui
+        st = editor_ui.s
+        for nm in editor_ui.SIZES:
+            self._put(st, nm, None)
+        page.mem = mem
+        page.place(area)
+        saved = self._saved().get(mem)
+        if not isinstance(saved, list):
+            return
+        by = {}
+        for sp in page.splits.values():
+            by[sp[8]] = sp
+        got = []
+        for item in saved:
+            if not (isinstance(item, list) and len(item) == 2):
+                return
+            path, sizes = tuple(item[0]), item[1]
+            sp = by.get(path)
+            if sp is None or not isinstance(sizes, list) or len(sizes) != len(sp[1]) \
+                    or not all(isinstance(v, int) and v >= 0 for v in sizes):
+                return
+            got.append((sp[1], sizes))
+        for kids, sizes in got:
+            for k, v in zip(kids, sizes):
+                if "size" in k.l and not k.l.get("grow"):
+                    self._put(st, k.l["size"], v)
 
     def shows_game(self):
         """Whether the workspaces hold the Game tab: not while the game
@@ -294,12 +396,13 @@ class EditorDesk(Layer):
 
     def warm_step(self):
         """On a quiet frame, one workspace not on show made ready as its first
-        switch would make it -- its arrangement restored and placed, each of
-        its tab panes' layouts built at the pane's size -- so the switch only
-        draws. One a call, in the Editor window's layout context; nothing
-        once every workspace is ready for this cart and size, and nothing
-        while a pane stands alone or a divider is held. Each is taken by
-        `arrangement` once, as a fresh one would have been made."""
+        switch would make it -- its page synced, its sizes restored and
+        placed, each of its tab panes' layouts built at the pane's size -- so
+        the switch only draws. One a call, in the Editor window's layout
+        context; nothing once every workspace is ready for this cart and
+        size, and nothing while a pane stands alone or a divider is held.
+        Each is taken by `placed` once, as a fresh placement would have
+        been made."""
         if not self._warm_due or self._drag is not None:
             return
         if not self.active() or self.key not in P.KEYS:
@@ -327,12 +430,11 @@ class EditorDesk(Layer):
             sig = self._warm_sig(key, area, u)
             if key == self.key or sig in self._warm:
                 continue
-            arr = self._new_arrangement(key, area, u)
-            mw, mh = arr.minimum()
-            if area[2] < mw or area[3] < mh:
+            placed = self._place(key, area, u)
+            page = self._page(key)
+            if page.alone_pane is not None:
                 continue                      # one pane at a time here
-            placed = arr.place()
-            self._warm[sig] = (arr, placed)
+            self._warm[sig] = placed
             for pane, r, _path in placed[0]:
                 for c in pane:
                     tab = P.CONTENTS[c][2]
@@ -341,28 +443,56 @@ class EditorDesk(Layer):
             return
 
     def placed(self):
-        arr = self.arrangement()
-        if self._placed is None:
-            self._placed = arr.place()
-        return self._placed
+        """The workspace on show at the surface's size, as its page placed
+        it: (panes, dividers) (`_place`)."""
+        area = self._area()
+        u = self._unit()
+        game = self.shows_game()
+        fi = self._focus.get(self.key, 0)
+        got = self._placed
+        f = self._placed_for
+        if got is not None and f[0] == self.key and f[1] == area and f[2] == u and f[3] == game \
+                and f[4] == fi and f[5] == self.grown:
+            return got
+        warm = self._warm.pop(self._warm_sig(self.key, area, u), None) if self._warm else None
+        got = self._placed = warm if warm is not None else self._place(self.key, area, u)
+        self._placed_for = (self.key, area, u, game, fi, self.grown)
+        return got
 
-    def _mem_key(self, arr):
+    def minimum(self):
+        """The least panes area the workspace on show holds (w, h)."""
+        self.placed()
+        return self._page().minimum()
+
+    def _mem_key(self, key, area):
         cart = self.ws.cart or {}
         return "%s|%s|%dx%d%s" % (cart.get("path") or cart.get("title") or "",
-                                  arr.key, arr.area[2], arr.area[3],
-                                  "" if arr.game else "|nogame")
+                                  key, area[2], area[3],
+                                  "" if self.shows_game() else "|nogame")
 
     def _saved(self):
         got = self.ws.system.get("editor_panes", None)
         return got if isinstance(got, dict) else {}
 
     def _remember(self):
-        arr = self._arr
-        if arr is None:
+        """The held sizes of the workspace on show kept on the board, per
+        project, workspace and size: [[path, sizes], ...] a split."""
+        page = self._pages.get(self.key)
+        if page is None or not page.splits:
             return
+        self._placed = None
+        self.placed()
+        rows = sorted((sp[8], sp[2]) for sp in page.splits.values())
         got = dict(self._saved())
-        got[self._mem_key(arr)] = arr.state()
+        got[page.mem] = [[list(p), list(sz)] for p, sz in rows]
         self.ws.system.set("editor_panes", got)
+
+    def _sizes_moved(self):
+        """A held size changed in the page's hands (a divider, Ctrl+0,
+        Ctrl+Alt+arrows): placed again, remembered, drawn."""
+        self._placed = None
+        self._remember()
+        self.ws.mark_dirty()
 
     # -- workspaces and focus ---------------------------------------------------
 
@@ -394,7 +524,6 @@ class EditorDesk(Layer):
         self.key = key
         app.zone_gen += 1               # the row marks the workspace on show
         self.grown = None
-        self._arr = None
         self._placed = None
         self._shown = None
         self._land()
@@ -469,7 +598,6 @@ class EditorDesk(Layer):
                 self.key = k
                 self.ws.editor_app.zone_gen += 1
                 self.grown = None
-                self._arr = None
                 self._placed = None
                 self._shown = None
             for n, (pane, _r, _p) in enumerate(self.panes()):
@@ -485,11 +613,11 @@ class EditorDesk(Layer):
         """The pane shown over the whole panes area, or None: the grown one,
         else the focused one where the area is under the workspace's least
         size (one pane at a time)."""
-        if self.grown is not None:
-            return self.grown
-        _x, _y, w, h = self._area()
-        mw, mh = self.arrangement().minimum()
-        return self.focused()[0] if w < mw or h < mh else None
+        self.placed()
+        page = self._page()
+        if page.alone_pane is None:
+            return None
+        return self._contents(page, page.alone_pane)
 
     def grow(self, pane=None):
         """Grow a pane over the workspace, or back (Ctrl+Shift+Enter, Esc,
@@ -934,30 +1062,16 @@ class EditorDesk(Layer):
         lay = ws.layout
         u = self._unit()
         panes, divs = self.placed()
-        fi = self._focus.get(self.key, 0)
         alone = self.alone()
         self._ground(cv, th["panel"], lay, panes, divs, alone, u)
-        shown = []
+        shown = self._shown_panes()
         self._cursors = []
         self._still_at = None
-        for n, (pane, r, path) in enumerate(panes):
-            if alone is not None:
-                if pane != alone:
-                    continue
-                r = self._area()
-            shown.append((n, pane, r))
-            c = self.tab_of(pane)
-            body = self._body(r, u, pane)
-            tab = P.CONTENTS[c][2]
-            filled = (body[1] if tab in _FILLS_BODY and c not in _ON_VERBS
-                      and ws.layer_of(tab) is not None else 0)
-            self._card(cv, th, r, n == fi, u, filled)
-            if tab is not None and c not in _ON_VERBS:
-                self._tab_pane(tab, body, dt, moves=pane == self._moves)
-            elif c == "game":
-                self._game(cv, th, body, u)
-            elif c == "maps":
-                Parts.drawn_before(self, c, cv, th, body, u)
+        # each pane's card and body, through its page's legacy nodes
+        self._drawing = shown
+        import editor_ui
+        editor_ui._desk[0] = self
+        self._page().draw_hosted(cv, th, dt)
         self._frame(cv, th, shown, u)
         if self._loupe is not None and not ws.pointer.down:
             self._loupe = None
@@ -965,6 +1079,33 @@ class EditorDesk(Layer):
             self._draw_loupe(cv, th, u)
         ws.bar_layer.draw_status_strip("menu")
         self._dock()
+
+    def pane_body(self, key, dt):
+        """The body of the page's pane `key` (its legacy node's draw): its
+        card, then its tab's surface, the Run slot or the Map's parts."""
+        ws = self.ws
+        cv = ws.sys_canvas
+        th = ws.theme_colors
+        u = self._unit()
+        n = self._page().desk_keys.index(key)
+        r = pane = None
+        for m, p, rr in self._drawing:
+            if m == n:
+                pane, r = p, rr
+        if pane is None:
+            return
+        c = self.tab_of(pane)
+        body = self._body(r, u, pane)
+        tab = P.CONTENTS[c][2]
+        filled = (body[1] if tab in _FILLS_BODY and c not in _ON_VERBS
+                  and ws.layer_of(tab) is not None else 0)
+        self._card(cv, th, r, n == self._focus.get(self.key, 0), u, filled)
+        if tab is not None and c not in _ON_VERBS:
+            self._tab_pane(tab, body, dt, moves=pane == self._moves)
+        elif c == "game":
+            self._game(cv, th, body, u)
+        elif c == "maps":
+            Parts.drawn_before(self, c, cv, th, body, u)
 
     def _ground(self, cv, col, lay, panes, divs, alone, u):
         """The Editor's ground where the cards leave it showing: the margin
@@ -1077,7 +1218,7 @@ class EditorDesk(Layer):
                    elsewhere=not self._part_focused())
         self._loupe = None              # a Sheet's part held says where (`_sheet`)
         if self.alone() is None:
-            self._dividers(u)
+            self._draw_splits(u)
         else:
             # the pane alone over the panes area is a split of one, which
             # the keys reach (`_split_frame`)
@@ -1412,77 +1553,37 @@ class EditorDesk(Layer):
             return "made by your blocks"
         return ""
 
-    def _split_nodes(self):
-        placed = self.placed()
-        got = self._splits
-        if got is None or got[0] is not placed:
-            got = self._splits = (placed, [
-                (path, axis, rect, mins, "split %r" % (path,))
-                for path, axis, rect, mins in self.arrangement().splits()])
-        return got[1]
-
-    def _keys_path(self):
-        """The path of the pane the keys reach: a prompt's, else the
+    def _keys_pane(self):
+        """The key of the page's pane the keys reach: a prompt's, else the
         focused one."""
         got = self._prompt()
+        keys = self._page().desk_keys
         if got is not None:
-            for pane, _r, path in self.panes():
+            for n, (pane, _r, _path) in enumerate(self.panes()):
                 if pane == got[2]:
-                    return path
-        return self.focused()[2]
+                    return keys[n]
+        return keys[min(self._focus.get(self.key, 0), len(keys) - 1)]
 
-    def _dividers(self, u):
-        """The workspace's splits on the desk's verbs (`ui.split`), one a
-        node of its tree: their dividers drawn, a press on one held and its
-        line dragged, the release laying out the panes beside it
-        (`Arrangement.drag`) and a double tap putting it back. Each split's
-        focus is its child the keys reach (`_keys_path`), where that child
-        is a pane: the engine's split frame and directional moves start
-        there."""
-        ws = self.ws
-        mouse = bool(getattr(ws.pointer, "hovers", False))
-        o = self._split_o
-        o["gap"] = P.GUTTER * u
-        o["hit"] = None if mouse else (P.HANDLE_HIT[0] * u, P.HANDLE_HIT[1] * u)
-        o["handle"] = (P.HANDLE[0] * u, P.HANDLE[1] * u)
-        o["line"] = 2 * u
-        o["slop"] = 0 if mouse else P.DRAG_SLOP * u
-        out = self._split_out
-        arr = self.arrangement()
-        held = None
-        self._flash = None
-        keys = self._keys_path()
-        for path, axis, rect, mins, sid in self._split_nodes():
-            sizes = list(arr.sizes[path])
-            o["mins"] = mins
-            d = len(path)
-            o["focus"] = keys[d] if len(keys) == d + 1 and keys[:d] == path else -1
-            ui.at(*rect)
-            ui.split(sid, "x" if axis == "h" else "y", sizes, o, out)
-            n = len(sizes)
-            i, at, stop, bits = out[4 * n], out[4 * n + 1], out[4 * n + 2], out[4 * n + 3]
-            if i < 0:
-                continue
-            if bits & ui.LET_GO:
-                if bits & ui.LIVE:
-                    arr.drag(path, i, sizes[i])
-                elif self._double(("div", path, i), _ticks_ms()):
-                    arr.reset(path, i)
-                else:
-                    continue
-                self._placed = None
-                self._remember()
-                ws.mark_dirty()
-                continue
-            held = (path, i, axis, at, stop, bool(bits & ui.LIVE))
-            if held[5] and stop >= 0:
-                child = arr.node(path)[1][i + stop]
-                pane = self._first_pane(child)
-                label = P.CONTENTS[pane[0]][0]
-                mw, mh = P.pane_min(pane, u)
-                self._flash = (pane, "%s stops at its minimum, %d %s" % (
-                    label, mw if axis == "h" else mh, "wide" if axis == "h" else "tall"))
+    def _draw_splits(self, u):
+        """The workspace's dividers, its page's (`draw_splits`), on the
+        desk's verbs: drawn, a press on one held and its line dragged, the
+        release writing the sizes beside it and a double tap putting them
+        back. Each split's focus is its child pane the keys reach (the
+        engine's split frame and the pad's moves start there)."""
+        page = self._page()
+        page.mouse = bool(getattr(self.ws.pointer, "hovers", False))
+        page.pane_cur = self._keys_pane()
+        page.clock = _ticks_ms()
+        gen = page.size_gen
+        page.draw_splits()
+        held = page.div_held
         self._drag = held
+        self._flash = None
+        if page.flash is not None and held is not None:
+            pane, why = page.flash
+            self._flash = (self._contents(page, pane), why)
+        if page.size_gen != gen:
+            self._sizes_moved()
 
     def _game(self, cv, th, r, u):
         """The Run slot: the game's frame at the largest whole scale the pane
@@ -1889,10 +1990,9 @@ class EditorDesk(Layer):
                 ws.wm.close_player()
             return True
         if ctrl and code == ord("0"):
-            self.arrangement().reset()
-            self._placed = None
-            self._remember()
-            ws.mark_dirty()
+            self.placed()
+            self._page().reset_sizes()
+            self._sizes_moved()
             return True
         return False
 
@@ -1935,17 +2035,15 @@ class EditorDesk(Layer):
 
     def _nudge(self, code):
         """Ctrl+Alt+arrows: the focused pane's right (left and right) or
-        bottom (up and down) divider moves 8 px."""
-        arr = self.arrangement()
-        pane, _r, path = self.focused()
-        axis = "h" if code in (_LEFT, _RIGHT) else "v"
-        step = (P.KEY_STEP * self._unit()) * (-1 if code in (_LEFT, _UP) else 1)
-        for p, i, a in arr.edges(path):
-            if a == axis:
-                arr.drag(p, i, arr.sizes[p][i] + step)
-                self._placed = None
-                self._remember()
-                self.ws.mark_dirty()
+        bottom (up and down) divider moves 8 units (its page's `nudge`)."""
+        self.placed()
+        page = self._page()
+        keys = page.desk_keys
+        page.pane_cur = keys[min(self._focus.get(self.key, 0), len(keys) - 1)]
+        gen = page.size_gen
+        page.nudge(code)
+        if page.size_gen != gen:
+            self._sizes_moved()
         return True
 
     def handle_pointer(self, px, py, click):
@@ -2062,8 +2160,3 @@ class EditorDesk(Layer):
             return True
         return False
 
-    @staticmethod
-    def _first_pane(node):
-        while not P.is_pane(node):
-            node = node[1][0]
-        return node
