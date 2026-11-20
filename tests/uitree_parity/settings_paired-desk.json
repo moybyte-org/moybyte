@@ -1,0 +1,48 @@
+{
+ "surface": "settings_paired",
+ "config": "p4_1024x600_fs2_windowed",
+ "commit": "30d44f7de",
+ "script": [
+  "k:down",
+  "k:down",
+  "k:a",
+  "f:2",
+  "k:down",
+  "k:a",
+  "f:2"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "84bf287de94da2d15bc52ef50e846b783d2d959b37496846094ca0fa009704b6"
+  ],
+  [
+   "k:down",
+   "4dd93c093b5acb70801a100f2019a5672929475a5dd9bebca9a92290548d589d"
+  ],
+  [
+   "k:down",
+   "0c107a2c9196f2a9d49a9b1cb92b5888b5d5355330ae7ff059b4375b8c8c0aca"
+  ],
+  [
+   "k:a",
+   "d7202b676e1eca73f1d216b79e21a302791625fc754dd720e2c76bc9555fd784"
+  ],
+  [
+   "f:2",
+   "d7202b676e1eca73f1d216b79e21a302791625fc754dd720e2c76bc9555fd784"
+  ],
+  [
+   "k:down",
+   "d7202b676e1eca73f1d216b79e21a302791625fc754dd720e2c76bc9555fd784"
+  ],
+  [
+   "k:a",
+   "56f2c6957999113c959e4a4b5be9bb95504e56e4c7b80fbbac15ed3f86b417a0"
+  ],
+  [
+   "f:2",
+   "56f2c6957999113c959e4a4b5be9bb95504e56e4c7b80fbbac15ed3f86b417a0"
+  ]
+ ]
+}

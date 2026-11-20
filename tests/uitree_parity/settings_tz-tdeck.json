@@ -1,0 +1,58 @@
+{
+ "surface": "settings_tz",
+ "config": "tdeck_320x240_fs1_dark",
+ "commit": "30d44f7de",
+ "script": [
+  "k:down",
+  "k:down",
+  "k:up",
+  "k:a",
+  "f:2",
+  "k:a",
+  "k:up",
+  "k:up",
+  "back"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "ce7c1f8f680984e57c59565a5d84122ded873447066be4f71e414e84f29b5640"
+  ],
+  [
+   "k:down",
+   "a1f7b45f69d927de18ef0fe20af6efef0612d37a37d17ad0f93b34da7d82d1f7"
+  ],
+  [
+   "k:down",
+   "05a0502dc32a03d4784c9267f1b7ad4e4e0085cef61f7d6b774365536988e1e9"
+  ],
+  [
+   "k:up",
+   "cdce82c36310e19271767d7cc090daf40df2f26ce2557ebf948f8a6952de4f97"
+  ],
+  [
+   "k:a",
+   "172b041cbb9fb2f0c50224d2976d7db1c2b94d8c1fca913f480f209d2339e4cf"
+  ],
+  [
+   "f:2",
+   "172b041cbb9fb2f0c50224d2976d7db1c2b94d8c1fca913f480f209d2339e4cf"
+  ],
+  [
+   "k:a",
+   "daecbc43a103f6b6c6a1dfa5b0cac6af3b7c6b9b5f734607932cc9f0240903c3"
+  ],
+  [
+   "k:up",
+   "44b1f396efd858142a244660e4fe1bb886f8db646312b5ed0d5d871734ea3a3b"
+  ],
+  [
+   "k:up",
+   "58d3bab1865534118d26bbb6719046901eab27a62c0beeab86dc8e54680daa97"
+  ],
+  [
+   "back",
+   "172b041cbb9fb2f0c50224d2976d7db1c2b94d8c1fca913f480f209d2339e4cf"
+  ]
+ ]
+}

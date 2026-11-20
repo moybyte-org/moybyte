@@ -52,6 +52,7 @@ from achievements_ui import AchievementsPage
 from about_ui import LicencesPage, version_words, board_words
 from log_ui import LogPage
 from perms_ui import PermsPage
+from settings_ui import SettingsPages
 from layers import Layer
 from audio_session import console_volume
 import wallclock as _wc
@@ -394,14 +395,10 @@ class SettingsLayer(Layer):
         self._toggle_gates = [False] * len(SETTINGS_TOGGLES)
         # The pages open over the rows, the shown one last (`_PAGES`).
         self._stack = []
-        self._tz_words = None         # the Time zone picker's words, made at its first open
-        # Paired browsers: the web console's keys (WebHost.browsers), read at
-        # each visit and each change, never per frame.
+        # Paired browsers' row: the web console's keys (WebHost.browsers),
+        # counted at each opening of Settings and each close of their page
         self._usb_seen = -1
-        self._paired = ()
         self._paired_words = "None"
-        self._paired_fp = None
-        self._tz_fresh = False        # opened this frame: focus goes to the list
         # About's pages (docs/history/look_2026-10.md step 32): Achievements, and
         # Licences with a licence's text a page under it
         self._ach_n = -1              # the badges the Achievements row last said
@@ -415,6 +412,7 @@ class SettingsLayer(Layer):
         self.syslog = LogPage()
         _pctx = ws.app_context("permissions", PermsPage.NEEDS + ("damage",))
         self.permits = PermsPage(_pctx, self._sub, _pctx.damage)
+        self.pages = SettingsPages(ws, self._sub, _pctx.damage, self._drop)
         self.back_title = "Settings"
         self._name = None             # the Name being typed, until it is stored
         # The rows page's gen (docs/history/scroll_and_text_2026-10.md §3.3), moved by
@@ -1069,95 +1067,35 @@ class SettingsLayer(Layer):
             self._drop("crash")
         _ui.group()
 
-    # -- the Time zone picker ---------------------------------------------------
+    # -- Time zone and Paired browsers: uitree pages (settings_ui.py) -------------
 
     def _tz_open(self, _pid=None):
-        self._tz_fresh = True
+        self.pages.open("tz")
 
     def _tz_page(self):
-        """The zones, west to east, each beside its standard offset: the one
-        in force wears the current mark, and choosing one sets it and goes
-        back."""
-        rows = self._tz_words
-        if rows is None:
-            rows = self._tz_words = [
-                (place, _wc.utc_label(_wc.parse(tz)[1]), {"id": "tz%d" % k, "current": False})
-                for k, (place, tz) in enumerate(_wc.ZONES)]
-        now = _wc.zone()
-        _ui.page("")
-        _ui.hints(("confirm", "Use", "back", "Back"))
-        _ui.group("Time zone")
-        if self._tz_fresh:
-            self._tz_fresh = False
-            for k in range(len(rows)):
-                if _wc.ZONES[k][1] == now:
-                    _ui.focus(rows[k][2]["id"])     # the page opens on it
-        got = None
-        for k in range(len(rows)):
-            place, off, o = rows[k]
-            o["current"] = _wc.ZONES[k][1] == now
-            if _ui.link(place, off, o):
-                got = k
-        _ui.group()
-        if got is not None:
-            self.ws.toggles.set_time_zone(_wc.ZONES[got][1])
-            self._drop("tz")
-
-    # -- Paired browsers ---------------------------------------------------------------
+        self._hosted("tz")
 
     def _read_paired(self):
-        """The paired browsers as the page lists them, (kid, name, seen), and
-        the row's count; the SSH host key's fingerprint beside them."""
+        """The Paired browsers row's count."""
         web = getattr(self.ws, "webhost", None)
-        rows = ()
+        n = 0
         if web is not None:
             try:
-                rows = tuple((kid, name or "A browser", _day(seen))
-                             for kid, _created, seen, name in web.browsers())
-            except Exception as exc:  # noqa: BLE001 -- a list is not worth a crash
+                n = len(web.browsers())
+            except Exception as exc:  # noqa: BLE001 -- a count is not worth a crash
                 print("SETTINGS paired browsers:", exc)
-        self._paired = rows
-        self._paired_words = str(len(rows)) if rows else "None"
-        self._paired_fp = _ssh.fingerprint(self.ws)
+        self._paired_words = str(n) if n else "None"
 
     def _paired_open(self, _pid=None):
-        self._read_paired()
-
-    def _forget(self, kid):
-        web = getattr(self.ws, "webhost", None)
-        if web is not None:
-            web.forget(kid)
-        self._read_paired()
-        self.ws.mark_dirty()
+        self.pages.open("paired")
 
     def _paired_page(self):
-        """Each browser this console paired, by its name and the day it was
-        last seen: choosing one forgets it (its key, its open sessions). Under
-        them, the SSH host key's fingerprint, for checking a first SSH
-        connection reached this console."""
-        _x, _y, w, _h = _ui.page("")
-        _ui.hints(("confirm", "Remove", "back", "Back"))
-        _ui.group("Paired browsers")
-        gone = None
-        if not self._paired:
-            _ui.label("None. Scan the code on Web console to pair one.")
-        for kid, name, seen in self._paired:
-            if _ui.link(name, "Seen " + seen, {"id": "pb" + kid}):
-                gone = kid
-        if len(self._paired) > 1 and _ui.button("Remove all", "danger"):
-            gone = "all"
-        _ui.group()
-        _ui.group("SSH host key")
-        fp = self._paired_fp
-        if fp is None:
-            _ui.label("Made at SSH's first start (set a password: passwd)")
-        else:
-            n = max(8, (w - 32) // max(1, self.ws.layout.font_w))
-            for at in range(0, len(fp), n):
-                _ui.label(fp[at:at + n])
-        _ui.group()
-        if gone is not None:
-            self._forget(gone)
+        self._hosted("paired")
+
+    def _hosted(self, name):
+        ws = self.ws
+        self.pages.draw(name, ws.sys_canvas, ws.theme_colors, self._content(),
+                        _lb.metric_class() == _lb.DESK, self._dt)
 
     # -- the USB drive page (runtime/system/usb_drive.py) ----------------------
 
@@ -2008,12 +1946,6 @@ _PAGES = {
     "permissions": ("about", _L._perms_open, None, _L._perms_draw, "App permissions", None),
 }
 del _L
-
-
-def _day(t):
-    """`t` (Unix seconds, as wallclock takes them) as the day it fell on."""
-    y, m, d = _wc.localtime(t)[:3]
-    return "%d-%02d-%02d" % (y, m, d)
 
 
 def board_name():

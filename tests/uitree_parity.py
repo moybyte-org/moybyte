@@ -225,12 +225,21 @@ def load(name):
     return json.loads((RECORDS / (name + ".json")).read_text(encoding="utf-8"))
 
 
-def check_recorded(name, surface, carts_dir=None):
+def check_recorded(name, surface, carts_dir=None, moved=None):
     """Run the port through the recorded script; raise at the first step
-    whose frame is not the recorded one."""
+    whose frame is not the recorded one. `moved` names the steps the port
+    draws differently on purpose, {step index: the cause}: each must still
+    differ, so an entry goes when its cause does."""
     body = load(name)
+    moved = moved or {}
     fs = frames(body["config"], surface, body["script"], carts_dir)
     for i, (f, (step, want)) in enumerate(zip(fs, body["frames"])):
+        if i in moved:
+            if f.digest() == want:
+                raise AssertionError("PARITY %s: step %d (%r) is listed as moved (%s) and draws its "
+                                     "recorded frame again: drop it from the run's moved steps"
+                                     % (name, i, step, moved[i]))
+            continue
         if f.digest() != want:
             sys.path.insert(0, str(ROOT / "tools"))
             import pngwrite
@@ -295,7 +304,7 @@ def _run(name):
 
 def record_at(name, commit):
     """Record run `name` of tests/test_uitree_ports.py RUNS from the old code at `commit`."""
-    _n, surface_name, config, script = _run(name)
+    _n, surface_name, config, script = _run(name)[:4]
     sha = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--short=9", commit],
                          capture_output=True, text=True, check=True).stdout.strip()
     fs = frames_at(sha, surface_name, config, script)

@@ -1,0 +1,23 @@
+{
+ "surface": "settings_paired_none",
+ "config": "big_800x480_fs3_dark",
+ "commit": "30d44f7de",
+ "script": [
+  "k:down",
+  "back"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "89f2571bd12c77bd9079905ded2f7ce134ae7cee09c565e54cdf4322f2185cdf"
+  ],
+  [
+   "k:down",
+   "89f2571bd12c77bd9079905ded2f7ce134ae7cee09c565e54cdf4322f2185cdf"
+  ],
+  [
+   "back",
+   "a3f877bc7e6c83a56c29284ad714de3c78f09ba7f15e2661e0b2eb9c1a1e9488"
+  ]
+ ]
+}

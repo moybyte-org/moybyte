@@ -13,14 +13,28 @@ Every mistake is a `UIError`: a code, the app's file and line, what was
 expected, what was found and the fix. There are no warnings.
 """
 import collections
-import difflib
 import re
-import inspect
-import os
 import sys
+
+# The host's introspection, and the one place a board goes without it. A
+# board's MicroPython has no frames, signatures or fuzzy matching: there an
+# error's file:line reads ?:0, a handler's parameter count is not checked at
+# its declaration, a misspelt name gets no "did you mean", and a service's
+# post outside a handler goes to the app declared last. Every error code is
+# raised on both; tools/uitree_check.py runs the full checks on the host.
+try:
+    import difflib
+    import inspect
+    _frame = sys._getframe
+except (ImportError, AttributeError):
+    difflib = inspect = _frame = None
 
 # the layer's own files: an error's file:line is the first frame outside them
 _SKIP = ("uitree.py", "uitree_app.py", "uitree_editor.py", "uitree_doc.py", "uitree_pics.py")
+
+
+def _base(path):
+    return path.rsplit("/", 1)[-1]
 
 
 class UIError(Exception):
@@ -28,7 +42,7 @@ class UIError(Exception):
         self.code, self.what = code, what
         self.expected, self.found, self.fix = expected, found, fix
         self.where = where or _caller()
-        Exception.__init__(self, self.text())
+        super().__init__(self.text())
 
     def text(self):
         out = ["error[%s] %s:%s: %s" % (self.code, self.where[0], self.where[1], self.what)]
@@ -42,16 +56,20 @@ class UIError(Exception):
 def _caller():
     if _NOW.where is not None:          # a description loaded from data: its file and line
         return _NOW.where
-    f = sys._getframe(1)
+    if _frame is None:
+        return "?", 0
+    f = _frame(1)
     while f is not None:
         fn = f.f_code.co_filename
-        if os.path.basename(fn) not in _SKIP and "contextlib" not in fn:
-            return os.path.basename(fn), f.f_lineno
+        if _base(fn) not in _SKIP and "contextlib" not in fn:
+            return _base(fn), f.f_lineno
         f = f.f_back
     return "?", 0
 
 
 def _near(k, names):
+    if difflib is None:
+        return ""
     m = difflib.get_close_matches(k, list(names), 2, 0.6)
     return " or ".join(repr(x) for x in m)
 
@@ -707,22 +725,31 @@ class Decl:
 
 
 _DECLS = {}             # module name -> its Decl, made by its ui.state(...)
+_DECLARING = [None]     # the Decl the last ui.state(...) made: a board's only way to the declaring module
 
 
 def _caller_module():
-    """The module whose code made the call (the first frame outside this layer)."""
-    f = sys._getframe(1)
+    """The module whose code made the call (the first frame outside this
+    layer); None where there are no frames (a board)."""
+    if _frame is None:
+        return None
+    f = _frame(1)
     while f is not None:
-        if os.path.basename(f.f_code.co_filename) not in _SKIP and "contextlib" not in f.f_code.co_filename:
+        if _base(f.f_code.co_filename) not in _SKIP and "contextlib" not in f.f_code.co_filename:
             return f.f_globals.get("__name__")
         f = f.f_back
     return None
 
 
 def decl_of(module):
-    """The declaration a module made with ui.state(...): what an engine hosts."""
+    """The declaration a module made with ui.state(...): what an engine hosts.
+    Found by the module's state object, which needs no frames."""
     name = module if isinstance(module, str) else module.__name__
+    mod = sys.modules.get(name) if isinstance(module, str) else module
     d = _DECLS.get(name)
+    if d is None and mod is not None:
+        held = [v for v in mod.__dict__.values() if isinstance(v, State)]
+        d = next((x for x in _DECLS.values() if any(x.state is v for v in held)), None)
     if d is None:
         raise UIError("S01", "module %s declares no state" % name, where=(name, 0),
                       expected="an app module calls s = ui.state(...) once, before its actions",
@@ -731,11 +758,16 @@ def decl_of(module):
 
 
 def _d():
-    """The declaration in force: the app running, else the calling module's."""
+    """The declaration in force: the app running, else the calling module's
+    (on a board, the one declared last)."""
     if _NOW.app is not None:
         return _NOW.app.decl
-    name = _caller_module()
-    d = _DECLS.get(name)
+    if _frame is None:
+        d = _DECLARING[0]
+        name = "this module"
+    else:
+        name = _caller_module()
+        d = _DECLS.get(name)
     if d is None:
         raise UIError("S01", "no state declared in %s" % name,
                       expected="s = ui.state(...) before any other ui call of the module",
@@ -747,7 +779,8 @@ def state(**decl):
     """Declare the module's state (once): the start of an app's declaration."""
     name = _caller_module()
     d = Decl(name, State(decl))
-    _DECLS[name] = d
+    _DECLS[name if name is not None else id(d)] = d
+    _DECLARING[0] = d
     return d.state
 
 
@@ -883,7 +916,7 @@ def _truth(t, name, where):
                   fix="compare it: %s=%s" % (name, t.values[0] if isinstance(t, Enum) else "..."))
 
 
-STATS = collections.Counter()
+STATS = {"bare_nonbool": 0}
 
 
 def cond(src, ctx, where):
@@ -1045,10 +1078,21 @@ def tmpl(src, ctx, where, prop=None):
                       found="%r (%s)" % (src, _pyt(src)),
                       fix='"{name}" to show a state name' if not callable(src) else
                       "name an action, never a function", where=where)
-    parts, lit, i = [], "", 0
-    while i < len(src):
+    key = (src, _st(), ctx.rowt, ctx.current, prop)
+    if DEPS is None:                    # a derive's compile records what it reads: never cached
+        hit = _TMPLS.get(key)
+        if hit is not None:
+            return hit
+    parts, lit, i, n = [], "", 0, len(src)
+    while i < n:
+        a, z = src.find("{", i), src.find("}", i)
+        j = n if a < 0 and z < 0 else (a if z < 0 else (z if a < 0 else min(a, z)))
+        if j > i:                       # a literal run, taken in one slice
+            lit += src[i:j]
+            i = j
+            continue
         c = src[i]
-        if c in "{}" and src[i + 1:i + 2] == c:
+        if src[i + 1:i + 2] == c:
             lit += c
             i += 2
             continue
@@ -1075,7 +1119,7 @@ def tmpl(src, ctx, where, prop=None):
         parts.append(lit)
     if len(parts) == 1 and isinstance(parts[0], tuple):
         t, g = parts[0]
-        return Tmpl(src, t, g)
+        return _keep(key, Tmpl(src, t, g))
     for p in parts:
         if isinstance(p, tuple) and (p[0] is BOOL or isinstance(p[0], (Model, Record))):
             raise UIError("T03", "template %r: %s in a text" % (src, p[0]), where=where,
@@ -1085,7 +1129,18 @@ def tmpl(src, ctx, where, prop=None):
 
     def g(row):
         return "".join(x if isinstance(x, str) else _text(x(row)) for x in gs)
-    return Tmpl(src, TEXT, g)
+    return _keep(key, Tmpl(src, TEXT, g))
+
+
+# Templates compiled once: a page's build runs at each open, and its
+# templates are the same text over the same declared types every time.
+_TMPLS = {}
+
+
+def _keep(key, t):
+    if DEPS is None:
+        _TMPLS[key] = t
+    return t
 
 
 def _text(v):
@@ -1270,6 +1325,8 @@ def live_units(root, lenders=None):
 
 
 def _params(fn):
+    if inspect is None:
+        return None
     try:
         sig = inspect.signature(fn)
     except (TypeError, ValueError):
@@ -1502,7 +1559,7 @@ _C = {"shown": "cond"}
 SCHEMA = {
     "page": {"title": "text"},
     "group": dict(_C, caption="text", close="action0"),
-    "label": dict(_C, text="text", tone="lit"),
+    "label": dict(_C, text="text", tone="lit", wrap="lit"),
     "info": dict(_C, label="text", value="text", icon="text", signal="int"),
     "link": dict(_C, value="text", label="text", icon="text", signal="int", disabled="cond",
                  focus="cond"),
@@ -1550,7 +1607,7 @@ SCHEMA = {
     "status": dict(_C, text="text"),
 }
 TWO_WAY = ("toggle", "slider", "field", "tabs", "seg")
-CHOICES = {"dir": ("row", "col"), "kind": ("normal", "primary", "danger", "tonal")}
+CHOICES = {"dir": ("row", "col"), "kind": ("normal", "primary", "danger", "tonal"), "wrap": ("char",)}
 
 
 def _b():
@@ -2123,10 +2180,23 @@ def push(build):
 
 
 def pop():
+    """From a handler: the page on top closes, and focus returns to the node
+    that pushed it. On the first page of a page its host shows (a Settings
+    page), the host closes it."""
     a = _NOW.app
+    if a is None or _NOW.building:
+        raise UIError("N03", "ui.pop outside a handler", fix="pop from a handler")
     if len(a.pages) > 1:
         a.pages.pop()
         a.root = None
+        a.want_focus = a.openers.pop() if getattr(a, "openers", None) else None
+        _trace("page", "pop", "page %d, focus back to %r" % (len(a.pages), a.want_focus))
+        return
+    if a.close_root is None:
+        raise UIError("P05", "ui.pop() on the app's first page", fix="Back leaves the app; pop() closes a "
+                      "page ui.push() opened")
+    _trace("page", "pop", "the host closes the page")
+    a.close_root()
 
 
 # the theme and font, asked of the engine (the checker answers for one look)
@@ -2170,11 +2240,18 @@ at = _removed("at", "placement is ui.split, ui.grid, ui.foot")
 
 # -- the build, shared by the app and the checker -----------------------------
 
+class _AnyColour(dict):
+    """The checker's theme: every colour asked is 0."""
+
+    def __missing__(self, k):
+        return 0
+
+
 class Builder:
     """Runs a page's build: typed, keyed, every name resolved."""
 
     QUERIES = {"has_symbols": lambda: True, "text_size": lambda t, sc=1: (6 * sc * len(t), 8 * sc),
-               "colors": lambda: collections.defaultdict(int), "fade": lambda r, top: None}
+               "colors": lambda: _AnyColour(), "fade": lambda r, top: None}
 
     def query(self, name, *a):
         return self.QUERIES[name](*a)
@@ -2189,7 +2266,7 @@ class Builder:
         self.classes = ()
         self.focus_key = ""
         self.want_focus = None
-        self.trace = collections.deque(maxlen=200)
+        self.trace = collections.deque((), 200)
 
     def _build(self):
         was = _NOW.app
@@ -2206,7 +2283,7 @@ class Builder:
         if self.root is None:
             raise UIError("N03", "build() made no page", fix="start it with `with ui.page(title):`",
                           where=(getattr(self.pages[-1], "__code__", None) and (
-                              os.path.basename(self.pages[-1].__code__.co_filename),
+                              _base(self.pages[-1].__code__.co_filename),
                               self.pages[-1].__code__.co_firstlineno)) or ("?", 0))
         _anchors(self.root)
         self.builds += 1

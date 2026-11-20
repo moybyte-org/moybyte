@@ -317,9 +317,9 @@ def check(target, snap=False):
 def main(argv):
     snap = "--snap" in argv
     targets = [a for a in argv if a != "--snap"]
-    if not targets:
+    if not targets or any(a in ("-h", "--help") for a in argv):
         print(__doc__)
-        return 2
+        return 0 if targets else 2
     bad = 0
     for t in targets:
         r = check(t, snap)

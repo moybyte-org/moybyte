@@ -41,6 +41,8 @@ class Engine(S.Builder):
     """One app's built tree replayed into today's verbs, inside a frame its
     host has begun (`host.begin`), and the commits of its handlers."""
 
+    close_root = None       # what ui.pop() on the first page does: a hosted page's host closes it
+
     def __init__(self, decl, build, host, surface, damage, files=None):
         self.decl = decl
         self._ui, self._surf, self._damage = host, surface, damage
@@ -139,14 +141,19 @@ class Engine(S.Builder):
             return self.th
         return getattr(_v, name)(*a)
 
-    def open(self, arg=None):
-        """The app opens: its first page, and its `opened` hook run once,
-        handed the launch argument when it takes=\"arg\"."""
+    def open(self, arg=None, hook="opened"):
+        """The app opens: its first page, and its `opened` hook (or the hook
+        a hosted page names) run once, handed the launch argument when it
+        takes=\"arg\"."""
         self.pages = self.pages[:1]
         self.openers = []
         self._ui.reset()
         self.root = None
-        hook = self.actions.get("opened")
+        self.want_focus = None          # a fresh visit: no focus, cur or row order carried over
+        self._sync, self.ids, self.focused, self.drawn = {}, {}, None, {}
+        self.__dict__.pop("_orders", None)
+        self._lists_now = self._lists_before = set()
+        hook = self.actions.get(hook)
         if hook is not None and hook.hook:
             self.run(hook.fn, *((arg,) if hook.takes == "arg" else ()), action="opened")
         S.commit(self)
@@ -247,13 +254,17 @@ class Engine(S.Builder):
                      if "focus" in node.p and node.p["focus"](row)][:1]
             self.fresh = False
         back = getattr(self, "_lists_now", set()) - getattr(self, "_lists_before", set())
+        lists = {}
         for k, lst in self.curs:
             if self._sync.get(k, self) != self.s._v[k] or (lst.key in back and self.s._v[k]):
                 want.append((self.s._v[k], k))      # a list shown again: focus on its cur
+                lists[k] = lst
         for key, k in want:
             if k is None and key == self.want_focus and key in self.dups:
                 self._focus_named(prev)
             fid = key if k is None and key in prev else self._id_in(prev, key)
+            if not fid and k is not None and key != "":
+                fid = self._row_stop_id(lists[k], key)  # a row not drawn yet: its id, so focus lands this frame
             if fid:
                 _v.focus(fid)
                 moved = True
@@ -277,6 +288,15 @@ class Engine(S.Builder):
                 v = "" if row is None else row._f[row._m.key]
                 if self.s._v[ck] != v:
                     self.cur_moved(lst, v, "focus")
+
+    def _row_stop_id(self, lst, rowkey):
+        """The id the first focus stop of row `rowkey` of `lst` will draw under."""
+        if not any(r._f[r._m.key] == rowkey for r in self.s._v[lst.l["model"]]):
+            return None
+        for k in lst.kids:
+            if k.kind in ("link", "button", "toggle", "slider", "field", "item", "card"):
+                return ("%s/%s" % (rowkey, k.key))[:ID_MAX]
+        return None
 
     def _focus_named(self, prev):
         """G15: a handler's ui.focus(KEY) names a node; through a fragment used
@@ -464,7 +484,15 @@ class Engine(S.Builder):
 
     def _r_label(self, n, row, rect):
         tone = n.l.get("tone")
-        _v.label(self._t(n, "text", row), {"ink": tone} if tone else None)
+        text = self._t(n, "text", row)
+        o = {"ink": tone} if tone else None
+        if n.l.get("wrap") == "char":   # lines of what fits a group's card, cut anywhere
+            import ui_draw as _ud
+            per = max(8, (self.rect[2] - 32) // max(1, _ud.font("ui")[1] * self.fs))
+            for at in range(0, len(text), per):
+                _v.label(text[at:at + per], o)
+            return
+        _v.label(text, o)
 
     def _r_info(self, n, row, rect):
         _v.info(self._t(n, "label", row), self._t(n, "value", row), self._o(n, row))
@@ -976,5 +1004,6 @@ class Page(Engine):
     the keys to it; `paint` replays the page into its content rect. It goes
     with the old engine."""
 
-    def __init__(self, build, host, damage, files=None):
+    def __init__(self, build, host, damage, files=None, close=None):
         Engine.__init__(self, S.decl_of(build.__module__), build, host, None, damage, files)
+        self.close_root = close

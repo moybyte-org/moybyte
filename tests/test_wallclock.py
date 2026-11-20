@@ -199,7 +199,7 @@ def test_the_settings_row_opens_the_picker_and_a_pick_sets_the_zone(tmp_path):
     pick = [k for k, (p, _tz) in enumerate(wc.ZONES) if p == "Tokyo"][0]
     real = settings_layer._ui.link
     settings_layer._ui.link = lambda label, value=None, o=None: \
-        (o or {}).get("id") == "tz%d" % pick or real(label, value, o)
+        (o or {}).get("id") == wc.ZONES[pick][1] + "/use" or real(label, value, o)
     try:
         sl._draw_page()
     finally:

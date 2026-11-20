@@ -842,8 +842,11 @@ def test_settings_lists_the_paired_browsers_and_forgets_one(tmp_path, monkeypatc
     assert "".join(t for t in said if t.startswith("SHA256:") or t.isalnum()) \
         .startswith("SHA256:"), said
     kid = page.keys[page.board][0]
-    sl._forget(kid)
+    import settings_ui
+    hosted = sl.pages.pages["paired"][0]
+    hosted.run_action(hosted.actions["forget"], (settings_ui.s.browsers.get(kid),), "test")
     assert [k[0] for k in nb.web_keys()] == [other.keys[other.board][0]]
+    sl.back()
     assert sl._paired_words == "1"
     with pytest.raises(Refused):
         page.sign_in()
