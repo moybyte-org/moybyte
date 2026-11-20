@@ -1181,13 +1181,15 @@ def grid(id=None, w=0, h=0, o=None):
     on the page's ground between the caption and the group's rows. `o`'s
     `cols` spreads that many columns across the rect, the gaps taking the
     rest, `margin` keeps that many pixels at either side, `foot` sets a
-    card's foot under its picture, `top` the room over its first row and
+    card's foot under its picture (-1 none), `top` the room over its first row and
     `wrap` breaks a title wider than its card onto a second line where the
-    foot holds it."""
+    foot holds it; `wrap` "fit" breaks it whatever the foot, its row as
+    tall as its tallest card (with no `cols`: the columns the grid fits)."""
     t = _T
-    if o and o.get("cols"):
-        _C.api_grid_spread(t[0], o["cols"], o.get("foot") or 0, o.get("top") or 0,
-                           o.get("margin") or 0, 1 if o.get("wrap") else 0)
+    if o and (o.get("cols") or o.get("wrap")):
+        wrap = o.get("wrap")
+        _C.api_grid_spread(t[0], o.get("cols") or 0, o.get("foot") or 0, o.get("top") or 0,
+                           o.get("margin") or 0, 2 if wrap == "fit" else 1 if wrap else 0)
     _C.api_grid(t[0], t[1], t[2], "" if id is None else id, w, h, _over(o))
 
 

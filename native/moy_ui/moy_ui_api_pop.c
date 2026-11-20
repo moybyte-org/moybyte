@@ -594,10 +594,10 @@ void moy_ui_api_card_mark(moy_ui_ctx_t *c, moy_ui_span_t badge, int tone,
 
 void moy_ui_api_grid_spread(moy_ui_ctx_t *c, int cols, int foot, int top, int margin,
                             int wrap) {
-    c->spread.wrap = (uint8_t)(wrap != 0);
+    c->spread.wrap = (uint8_t)(wrap < 0 ? 0 : wrap > 2 ? 2 : wrap);
     c->spread.margin = (int16_t)(margin < 0 ? 0 : margin);
     c->spread.cols = (uint8_t)(cols < 0 ? 0 : cols > 255 ? 255 : cols);
-    c->spread.foot = (int16_t)(foot < 0 ? 0 : foot);
+    c->spread.foot = (int16_t)(foot < 0 ? -1 : foot);
     c->spread.top = (int16_t)(top < 0 ? 0 : top);
 }
 
@@ -773,7 +773,7 @@ void mua_grid_end(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
     mua_card_finish(c, s);
     if (c->grid_open == 1) {
         if (c->grid_i > 0) {
-            c->y = (int16_t)(c->grid_y + c->grid_row);
+            c->y = (int16_t)(c->grid_y + c->grid_row + c->grid_tall);
         }
         moy_ui_keep_t *k = mua_page_keep(c);
         if (k != NULL) {
@@ -814,7 +814,7 @@ void moy_ui_api_grid(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
     } else {
         area = c->page;
         c->grid_open = 1;
-        c->y = (int16_t)(c->y + (c->spread.cols > 0 && c->spread.top > 0
+        c->y = (int16_t)(c->y + (c->spread.top > 0
                                      ? c->spread.top * c->fs
                                      : mua_pmetric(c, MOY_UI_M_VALUE_ROW_GRID_TOP)));
         c->grid_y = c->y;
@@ -834,13 +834,14 @@ void moy_ui_api_grid(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
         c->grid_cols = (uint8_t)cols;
         c->grid_x = (int16_t)(area.x + m);
         c->grid_pitch = (int16_t)(cols > 1 ? (area.w - 2 * m - w) / (cols - 1) : w);
-        if (c->spread.foot > 0) {
-            foot = c->spread.foot * c->fs;
-        }
         c->spread.cols = 0;
-        c->spread.foot = c->spread.top = c->spread.margin = 0;
     }
+    if (c->spread.foot != 0) {
+        foot = c->spread.foot < 0 ? 0 : c->spread.foot * c->fs;
+    }
+    c->spread.foot = c->spread.top = c->spread.margin = 0;
     c->grid_wrap = c->spread.wrap;
+    c->grid_tall = 0;
     c->spread.wrap = 0;
     c->grid_w = (int16_t)w;
     c->grid_h = (int16_t)h;
@@ -860,10 +861,20 @@ void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
     }
     int col = c->grid_i % c->grid_cols;
     if (col == 0 && c->grid_i > 0) {
-        c->grid_y = (int16_t)(c->grid_y + c->grid_row);
+        c->grid_y = (int16_t)(c->grid_y + c->grid_row + c->grid_tall);
+        c->grid_tall = 0;
     }
-    if (col == 0 && c->grid_open == 1) {
-        c->y = (int16_t)(c->grid_y + c->grid_row);
+    int pad = mua_pmetric(c, MOY_UI_M_VALUE_ROW_CARD_PAD), top = mua_pmetric(c, MOY_UI_M_VALUE_ROW_CARD_TOP);
+    // a fitted grid's row is as tall as its tallest card: a title broken
+    // onto a second line grows its card and its row by that line
+    int tall = c->grid_wrap == 2 ? moy_ui_card_wrap(s, c->grid_w + 2 * pad, title, c->fs,
+                                                    mua_ground_of(c)) : 0;
+    int grew = tall > c->grid_tall;
+    if (grew) {
+        c->grid_tall = (uint8_t)(tall > 255 ? 255 : tall);
+    }
+    if ((col == 0 || grew) && c->grid_open == 1) {
+        c->y = (int16_t)(c->grid_y + c->grid_row + c->grid_tall);
         moy_ui_keep_t *k = mua_page_keep(c);
         if (k != NULL) {
             k->rows = c->y;
@@ -873,13 +884,12 @@ void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
         c->grid_i++;
     }
     c->icon_slot = c->icon_glyph = -1;
-    int pad = mua_pmetric(c, MOY_UI_M_VALUE_ROW_CARD_PAD), top = mua_pmetric(c, MOY_UI_M_VALUE_ROW_CARD_TOP);
     int stacked = c->grid_open == 1;
     int y = stacked ? c->page.y + c->grid_y - c->scroll : c->grid_y;
     moy_ui_box_t pic = {(int16_t)(c->grid_x + col * c->grid_pitch), (int16_t)(y + top), c->grid_w,
                         c->grid_h};
     moy_ui_box_t b = {(int16_t)(pic.x - pad), (int16_t)y, (int16_t)(pic.w + 2 * pad),
-                      (int16_t)(c->grid_row - mua_pmetric(c, MOY_UI_M_VALUE_ROW_GRID_GAP))};
+                      (int16_t)(c->grid_row + tall - mua_pmetric(c, MOY_UI_M_VALUE_ROW_GRID_GAP))};
     int st = 0, moved = 0;
     c->at_last = (uint8_t)!stacked;
     if (o->disabled != 1) {

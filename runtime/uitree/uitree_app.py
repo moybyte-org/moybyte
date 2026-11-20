@@ -198,6 +198,7 @@ class Engine(S.Builder):
         self.drafts = {}
         self._orders = {}
         self._lists_now = self._lists_before = set()
+        self._lists_ever = set()
         hook = self.actions.get(hook)
         if hook is not None and hook.hook:
             self.run(hook.fn, *((arg,) if hook.takes == "arg" else ()), action="opened")
@@ -266,13 +267,21 @@ class Engine(S.Builder):
         page's gen (the sum of the versions of the states it reads) moves
         whenever one may: no canvas, picture or text editor, and no template
         naming @focus, @input or @touch. A text view's lines are its state's
-        and its scroll the toolkit's own region."""
-        if n.kind in self.GEN_UNSAFE:
+        and its scroll the toolkit's own region; cards or a picture with no
+        image draw only their state (an icon on a tile)."""
+        if n.kind in ("cards", "picture") and not self._images(n):
+            pass
+        elif n.kind in self.GEN_UNSAFE:
             return False
         for v in n.src.values():
             if isinstance(v, str) and ("@focus" in v or "@input" in v or "@touch" in v):
                 return False
         return all(self._gen_safe(k) for k in n.kids)
+
+    @staticmethod
+    def _images(n):
+        """Whether `n` (cards or a picture) draws an image, decoded late."""
+        return "image" in n.p or any("image" in k.p for k in n.kids)
 
     def _names_in(self, v, out):
         """Add to `out` the state names the prop value `v` reads: each word
@@ -309,14 +318,20 @@ class Engine(S.Builder):
             self._reads(k, out, cur)
 
     def _cell_gens(self, root):
-        """Each region of a split (a group in it) carries a gen of its own,
-        over the states only its rows read; the page's gen counts the rest,
+        """Each region of a split (a group in it) and each cards' region
+        carries a gen of its own, over the states only its rows read; the
+        page's gen counts the rest,
         so a cell whose state moved leaves the page and its other cells held.
         A state any action, any node outside a cell or a hint reads stays the
         page's; one only a list's cur= names is focus, which no gen counts."""
         cells, rest = [], set()
 
         def walk(n):
+            if n.kind == "cards":
+                names = set()
+                self._reads(n, names, False)
+                cells.append((n, names))
+                return
             if n.kind == "split":
                 for k in n.kids:
                     if k.kind == "group":
@@ -460,7 +475,10 @@ class Engine(S.Builder):
             want += [(i, None) for i, (node, row) in prev.items()
                      if "focus" in node.p and node.p["focus"](row)][:1]
             self.fresh = False
-        back = getattr(self, "_lists_now", set()) - getattr(self, "_lists_before", set())
+        # a list shown again: drawn last frame, not the frame before, and
+        # drawn some frame before that (its first showing is no return)
+        before = getattr(self, "_lists_before", set())
+        back = (getattr(self, "_lists_now", set()) - before) & getattr(self, "_lists_ever", set())
         lists = {}
         for k, lst in self.curs:
             if self._sync.get(k, self) != self.s._v[k] or (lst.key in back and self.s._v[k]):
@@ -484,6 +502,7 @@ class Engine(S.Builder):
                     self.want_focus = None
         self.rect = rect
         self.dups = set()
+        self._lists_ever = getattr(self, "_lists_ever", set()) | before
         self._lists_before = getattr(self, "_lists_now", set())
         self._lists_now = set()
         self.tv_stop = False            # a text view that is a stop draws this frame (the band's next)
@@ -557,6 +576,8 @@ class Engine(S.Builder):
                 for r in self.s._v[k.l["model"]]:
                     if k.kind == "rows":
                         yield from self._stops(k, r)
+                    elif k.kind == "cards":
+                        yield from self._stops(k, r)    # its cards: one a row
                     else:
                         yield (k, r)
                         break
@@ -742,6 +763,13 @@ class Engine(S.Builder):
             b = d.l["buttons"]
             return ("confirm", b[-1].hint_now(), "back", b[0].hint_now())
         out = []
+        pop = self._popover_shown()
+        if pop is not None:
+            # a popover: Back closes it; what lies under it takes no keys
+            if f is not None and self._holds(pop, f[0]) and f[0].act is not None and f[0].act.can():
+                out += ["confirm", f[0].act.hint_now()]
+            close = pop.l.get("close")
+            return tuple(out + ["back", close.hint_now() if close is not None else "Close"])
         if f is not None:
             node, row = f
             act = node.act if node.kind != "cards" else node.l.get("new")
@@ -773,6 +801,16 @@ class Engine(S.Builder):
             return tuple(out + ["back", "Back"])
         h = a.hint_now() if a.can() else ""
         return tuple(out + ["back", h] if h else out)
+
+    def _popover_shown(self):
+        for k in self.root.kids if self.root else ():
+            if k.kind == "popover" and _shown(k, None):
+                return k
+        return None
+
+    @staticmethod
+    def _holds(n, node):
+        return n is node or any(Engine._holds(k, node) for k in n.kids)
 
     def dialog_shown(self):
         for k in self.root.kids if self.root else ():
@@ -846,7 +884,7 @@ class Engine(S.Builder):
         """A label's rows as the toolkit's labels: (text, options) each."""
         tone = n.l.get("tone")
         text = self._t(n, "text", row)
-        o = {"ink": tone} if tone else None
+        o = None if not tone else {"tone": tone} if tone in ("dim", "value", "danger") else {"ink": tone}
         face, wrap, align = n.l.get("face"), n.l.get("wrap"), n.l.get("align")
         if face or wrap == "word" or align in ("center", "end") or "lines" in n.l:
             o = {"tone": tone} if tone in ("dim", "value", "danger") else dict(o or {})
@@ -1118,7 +1156,7 @@ class Engine(S.Builder):
                            % (btns[pick].name, n.p["title"](None))))
 
     def _r_popover(self, n, row, rect):
-        w = n.p["w"](row) if "w" in n.p else 200
+        w = self._size(n.p["w"](row) if "w" in n.p else 200)
         if "anchor" in n.p:
             want = n.p["anchor"](row)
             if want.endswith(".cur"):         # a list's current row: its node
@@ -1256,13 +1294,27 @@ class Engine(S.Builder):
             _v.face()
             bottom = ty - (10 if self.desk else 8 * self.fs)
 
+    def _size(self, v):
+        """A size a build gives (w=, h=, side=): the handheld's at its font
+        scale, the desk's as given."""
+        return v if self.desk else v * self.fs
+
     def _r_cards(self, n, row, rect):
-        _v.scroll(n.key)
+        cg = self._cells.get(n) if self._gen_ok else None
+        if cg is not None:
+            cg[0]["gen"] = self._gen_of(cg[1])
+            _v.scroll(n.key, cg[0])
+        else:
+            _v.scroll(n.key)
         subs = any("sub" in k.p for k in n.kids)
-        _v.grid(n.key, n.p["w"](None), n.p["h"](None), {"cols": n.p["cols"](None) if "cols" in n.p else 0,
-                "margin": 16 if self.desk else 8, "foot": (30 if self.desk else 26) + (6 if subs else 0),
-                "top": 4})
+        go = {"cols": n.p["cols"](None) if "cols" in n.p else 0, "margin": 16 if self.desk else 8,
+              "foot": ((52 if subs else 30) if self.desk else 26 + (6 if subs else 0)), "top": 4,
+              "wrap": "fit"}
+        w, h = self._size(n.p["w"](None)), self._size(n.p["h"](None))
         new = n.l.get("new")
+        grid = "group" not in n.l or new is not None
+        if grid:
+            _v.grid(n.key, w, h, go)
         if new is not None:
             self.ids["new"] = (n, None)
             if _v.card(new.label, "", {"id": "new", "icon": "new"})[4] & _v.ACTIVATED:
@@ -1271,7 +1323,18 @@ class Engine(S.Builder):
         self._lists_now.add(n.key)
         model = self.s._v[n.l["model"]]
         self._after_removal(n, [r._f[r._m.key] for r in model])
+        cap = None
         for r in model:
+            if "group" in n.l:          # a caption where it changes, a grid of its own under it
+                c = n.l["group"](r)
+                if c != cap:
+                    if grid:
+                        _v.grid()
+                    if cap is not None:
+                        _v.group()
+                    _v.group(c)
+                    _v.grid(n.key + " " + c, w, h, go)
+                    grid, cap = True, c
             for k in n.kids:
                 o = self._o(k, r)
                 if lst.src.get("current") and self.s._v[lst.src["current"]] == r._f[r._m.key]:
@@ -1280,7 +1343,9 @@ class Engine(S.Builder):
                 if badge:
                     o["badge"] = badge
                 tone = self._t(k, "tone", r) if "tone" in k.p else ""
-                if tone:
+                if tone == "locked":
+                    o["locked"] = True
+                elif tone:
                     o["tone"] = tone
                 pic = k.p["image"](r) if "image" in k.p else None
                 got = None
@@ -1304,23 +1369,28 @@ class Engine(S.Builder):
                         self.cv.clip()
                 if r_[4] & _v.ACTIVATED:
                     self._activate(k, r)
-        _v.grid()
+        if grid:
+            _v.grid()
+        if cap is not None:
+            _v.group()
         _v.end()
         _v.scroll()
 
     def _r_picture(self, n, row, rect):
         """One image at its own place: a card with no words, its picture the
         image's or, while it has none, the icon on a tinted tile."""
-        side = n.p["side"](row) if "side" in n.p else 64
-        pic = n.p["image"](row)
+        side = self._size(n.p["side"](row) if "side" in n.p else 64)
+        pic = n.p["image"](row) if "image" in n.p else None
         got = self.pics.peek(pic, side, side) if pic is not None else None
         o = {"disabled": True}
         if got is None and "icon" in n.p:
             o["icon"] = n.p["icon"](row)
         tone = self._t(n, "tone", row) if "tone" in n.p else ""
-        if tone:
+        if tone == "locked":
+            o["locked"] = True
+        elif tone:
             o["tone"] = tone
-        _v.grid("pic " + str(n.src["image"]), side, side, {"cols": 1, "foot": 0, "top": 4,
+        _v.grid("pic " + str(n.src.get("image", "")), side, side, {"cols": 1, "foot": -1, "top": 4,
                                                              "margin": 16 if self.desk else 8})
         r = _v.card("", "", o)
         if r[2] and got is not None:

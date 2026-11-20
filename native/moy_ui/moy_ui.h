@@ -951,6 +951,9 @@ int moy_ui_table_row(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_tgeo_t
 int moy_ui_card(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_box_t pic, moy_ui_span_t title,
                 moy_ui_span_t sub, int flags, int fs, int desk, int tone, moy_ui_box_t *content,
                 uint16_t *gnd);
+// The pixels a card `bw` wide adds under its picture for `title`: the
+// second line's step where F_WRAP breaks it, else 0. Measures, draws nothing.
+int moy_ui_card_wrap(const moy_ui_sink_t *s, int bw, moy_ui_span_t title, int fs, int desk);
 // After the app drew into `content`: its corners cut to the card radius over
 // `gnd` and its ring, then a lifted picture's rim (F_FOCUS) round `pic`.
 int moy_ui_card_end(const moy_ui_sink_t *s, moy_ui_box_t pic, moy_ui_box_t content, int flags,

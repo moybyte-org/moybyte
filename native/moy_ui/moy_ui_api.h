@@ -731,6 +731,9 @@ typedef struct {
     moy_ui_box_t fin_pic, fin_content;
     int16_t fin_slot, fin_glyph;
     int8_t fin_tone;
+    // what a row of a fitted grid (wrap 2) adds to its height for its
+    // tallest card
+    uint8_t grid_tall;
     // The next card's badge and tone (moy_ui_api_card_mark), the next
     // grid's spread (moy_ui_api_grid_spread) and the next label's text
     // options (moy_ui_api_text): each cleared once used and by begin.
@@ -1067,7 +1070,10 @@ void moy_ui_api_menu_danger(moy_ui_ctx_t *c, uint32_t rows);
 // `cols` columns spread across its rect, the gaps taking the rest; `foot`
 // the card's foot under its picture, `top` the room over its first row and
 // `margin` its rect's at either side, in pixels at the scale, 0 the style's;
-// `wrap` its cards' titles take two lines where their foot holds them).
+// `wrap` 1 its cards' titles take two lines where their foot holds them,
+// 2 each row also grows by the second line where a card's title takes it;
+// `cols` 0 keeps the columns the grid fits, its `foot` and `top` still
+// taken; `foot` below 0 is none).
 void moy_ui_api_text(moy_ui_ctx_t *c, int lines, int centre, int tone, int role);
 void moy_ui_api_card_mark(moy_ui_ctx_t *c, moy_ui_span_t badge, int tone,
                           moy_ui_span_t blank);

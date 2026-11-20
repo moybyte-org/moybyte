@@ -17,8 +17,7 @@ typedef struct {
     int look, run, fs, desk, win, tap, card;
 } pd_t;
 
-static void open_pd(const moy_ui_sink_t *s, pd_t *d, int fs, int desk) {
-    moy_ui_count_call();
+static void fill_pd(const moy_ui_sink_t *s, pd_t *d, int fs, int desk) {
     moy_canvas_row_t *row = (moy_canvas_row_t *)s->dst;
     const int32_t *st = row->st;
     d->s = s;
@@ -39,6 +38,11 @@ static void open_pd(const moy_ui_sink_t *s, pd_t *d, int fs, int desk) {
     d->tap = !d->desk && (desk & MOY_UI_TAP) != 0;
     d->win = (desk & MOY_UI_WINDOW) ? 1 : (desk & MOY_UI_PANEL) ? 2 : 0;
     d->card = !d->desk && (desk & MOY_UI_ON_CARD) != 0;
+}
+
+static void open_pd(const moy_ui_sink_t *s, pd_t *d, int fs, int desk) {
+    moy_ui_count_call();
+    fill_pd(s, d, fs, desk);
 }
 
 static int metric(int kind, int slot) {
@@ -1237,6 +1241,23 @@ int moy_ui_card(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_box_t pic, moy_ui
         centred_cut(&d, &fsub, sub, b.x, b.w, sy, sh, room, pal(&d, dim), sc);
     }
     return MOY_UI_OK;
+}
+
+int moy_ui_card_wrap(const moy_ui_sink_t *s, int bw, moy_ui_span_t title, int fs, int desk) {
+    pd_t d;
+    fill_pd(s, &d, fs, desk);
+    int sc = tscale(s);
+    pf_t ft = font_of(&d, MOY_UI_FONT_UI);
+    int room = bw - 2 * d.fs;
+    if (!title.n || room <= 0 || tw(&ft, title.p, title.n, sc) <= room) {
+        return 0;
+    }
+    for (size_t i = 1; i < title.n; i++) {
+        if (title.p[i] == ' ' && tw(&ft, title.p, i, sc) <= room) {
+            return pm(&d, MOY_UI_M_VALUE_ROW_CARD_TITLE, 1) - (d.desk ? 4 : 2) * d.fs;
+        }
+    }
+    return 0;
 }
 
 // The integer square root of v.

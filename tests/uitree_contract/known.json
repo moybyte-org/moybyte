@@ -60,6 +60,7 @@
   "prop missing: L2 group.look",
   "prop missing: L1 info.tag",
   "prop missing: L1 info.tone",
+  "prop not in the table: cards.group",
   "prop not in the table: foot.look",
   "prop not in the table: item.label",
   "prop not in the table: item.mkind",

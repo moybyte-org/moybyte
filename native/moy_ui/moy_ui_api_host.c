@@ -648,7 +648,8 @@ int moy_ui_api_keep(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, i
         mua_card_finish(c, s);
         int col = c->grid_i % c->grid_cols;
         if (col == 0 && c->grid_i > 0) {
-            c->grid_y = (int16_t)(c->grid_y + c->grid_row);
+            c->grid_y = (int16_t)(c->grid_y + c->grid_row + c->grid_tall);
+            c->grid_tall = 0;
         }
         if (col == 0 && c->grid_open == 1) {
             c->y = (int16_t)(c->grid_y + c->grid_row);

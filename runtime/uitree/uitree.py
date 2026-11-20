@@ -1784,7 +1784,7 @@ SCHEMA = {
     "table": dict(_C, cur="lit", cols="lit", changed="action1", on="action1", empty="text", hint="text", focus="cond"),
     "col": dict(_C, text="text"),
     "cards": dict(_C, cur="lit", current="lit", w="int", h="int", cols="int", new="action0",
-                  changed="action1"),
+                  changed="action1", group="lit"),
     "card": dict(_C, label="text", sub="text", badge="text", image="image", icon="text", tone="text"),
     # G9, G13: a picture of its own (an image state, its fallback icon), a
     # progress bar (max= is required), a page that says why there is nothing
@@ -2229,8 +2229,13 @@ def cards(model_name, **p):
     return _list("cards", model_name, p, _caller())
 
 
-def picture(image, **p):
-    return _node("picture", None, dict(p, image=image), _caller())
+def picture(image=None, **p):
+    """One picture at its own place: image state `image`'s, its `icon` on a
+    tinted tile while it has none; with no image, the icon's tile alone
+    (`tone="locked"` veils it, a lock on its corner)."""
+    if image is not None:
+        p["image"] = image
+    return _node("picture", None, p, _caller())
 
 
 def progress(value, **p):
