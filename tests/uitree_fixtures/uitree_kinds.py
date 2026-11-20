@@ -33,7 +33,7 @@ ui.hook("opened", opened)
 ui.action("mark", "Mark", mark, keys=("m",), icon="check")
 ui.action("left", "Less", left, keys=("role:left",))
 ui.action("right", "More", right, keys=("role:right",))
-ui.action("grow", "Add a line", grow)
+ui.action("grow", "Add a line", grow, keys=("g",))
 
 
 def build():
@@ -65,3 +65,9 @@ def keypad():
 def layer():
     import uitree_app
     return uitree_app.app_layer("uitree_kinds", None, build)
+
+
+def log_page():
+    """A page that is one lines view, kept at its foot as lines arrive."""
+    with ui.page("Log"):
+        ui.text_view("log", follow=True)

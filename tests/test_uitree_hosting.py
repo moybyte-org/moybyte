@@ -156,3 +156,30 @@ def test_the_display_kinds_draw_and_letters_and_arrows_fire_their_actions(tmp_pa
     assert "from button 'grow'" in trace, trace
     assert fs[1].buf != fs[0].buf and fs[2].buf != fs[1].buf, "the letter and the arrow drew"
     assert eng._page_id() == "1 build"
+
+
+def test_a_lines_view_that_follows_opens_at_its_foot_and_scrolls_a_new_line_in(tmp_path):
+    """§7.2 text_view follow=True: the first frame already shows the last
+    line (the view is aimed before it draws), and a line that arrives moves
+    the view by one line, the rest of it unchanged."""
+    import uitree as S
+    import uitree_app
+    import uitree_kinds as K
+    d = S.decl_of("uitree_kinds")
+    was = d.actions["opened"].fn
+
+    def opened():
+        K.s.log = [{"n": i, "line": "line %d" % i} for i in range(40)]
+    d.actions["opened"].fn = opened
+    try:
+        cls = uitree_app.app_layer("uitree_log", "Log", K.log_page)
+        fs = P.frames("tdeck_320x240_fs1_dark", lambda ws: P.host(ws, cls), ["t:g", "f:30"],
+                      str(tmp_path / "carts"))
+    finally:
+        d.actions["opened"].fn = was
+    w = fs[0].w * 2
+    rows = [[f.buf[y * w:(y + 1) * w] for y in range(fs[0].h)] for f in (fs[0], fs[-1])]
+    moved = [y for y in range(1, 200) if rows[1][y] != rows[0][y]]
+    assert moved, "a new line moves the view"
+    step = next(d for d in range(8, 24) if all(rows[1][y] == rows[0][y + d] for y in range(30, 180)))
+    assert step in (13, 14, 15, 16), step
