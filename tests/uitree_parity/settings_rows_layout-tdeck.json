@@ -1,0 +1,43 @@
+{
+ "surface": "settings_rows",
+ "config": "tdeck_320x240_fs1_homegrid",
+ "commit": "b92e1c3f9",
+ "script": [
+  "k:down",
+  "k:down",
+  "k:down",
+  "k:right",
+  "k:left",
+  "k:down"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "f5eef6d3df92b1102a926b3c77b46253e3b875fd39946b5f886614e1397af9aa"
+  ],
+  [
+   "k:down",
+   "fd9db92bdbe11bc47c01f0aa5e0d9aece271ee3b23018c9a45fad0590050e784"
+  ],
+  [
+   "k:down",
+   "632442bf407598c8fa1e53f85fb4edc27c83687cc62c145de5ffb9e84baf5460"
+  ],
+  [
+   "k:down",
+   "5a5ce434fe55e61278c8a23475a5a5f759de10e1c067a11109840c01eb055c62"
+  ],
+  [
+   "k:right",
+   "d1ebbf9a2eef0ed2671ebfe73039d75b1083005f63d5a8704933dd6d284daeca"
+  ],
+  [
+   "k:left",
+   "5a5ce434fe55e61278c8a23475a5a5f759de10e1c067a11109840c01eb055c62"
+  ],
+  [
+   "k:down",
+   "f2487cbc189fe1918cfb5e26d9019b6c0104cbba6ce83534b6e914ce7325a90e"
+  ]
+ ]
+}

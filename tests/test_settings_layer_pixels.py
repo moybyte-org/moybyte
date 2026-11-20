@@ -252,14 +252,18 @@ def capture(cfg, carts_dir):
         sl._draw_page()
         return _shot(ws, sl._draw_page)
 
-    from runtime.settings_layer import say
     sl._draw_page()
-    for _caption, rows in sl._grouped():
-        for key, label, _kind in rows:
-            out["row_" + key] = page(focus=say(label))
-    out["row_achievements"] = page(focus="Achievements")
+
+    def order(n):                                       # the page's nodes, top to bottom
+        yield n.key
+        for k in n.kids:
+            yield from order(k)
+    at = {k: i for i, k in enumerate(order(sl.rows.engine.root))}
+    for key, _label, _kind in sorted(sl._settings_rows(), key=lambda r: at[r[0]]):
+        out["row_" + key] = page(focus=key)             # a row's node is keyed by its row key
+    out["row_achievements"] = page(focus="achievements")
     ws.wifi = _Wifi(False)
-    out["row_wifi_off"] = page(focus="Wi-Fi")
+    out["row_wifi_off"] = page(focus="wifi")
     ws.wifi = _Wifi(True)
 
     sl.open_page("wifi")
@@ -298,7 +302,7 @@ def capture(cfg, carts_dir):
                           lambda: True, dev_channel=True)
     ws.usb_drive = drive
     sl._draw_page()
-    out["row_usb_drive"] = page(focus=say("USB DRIVE"))
+    out["row_usb_drive"] = page(focus="usb_drive")
     sl.open_page("usb")
     out["usb_off"] = page(sl._sub, "Turn on")
     drive.why = _usb.NO_CARD
@@ -576,7 +580,8 @@ def test_under_touch_the_name_row_reads_the_default_name_over_its_note(tmp_path,
             drv.frame(_DT)
     finally:
         ui.info = real
-    assert ("Name", settings_layer._ssh.default_name()) in infos, infos
+    import ssh_service
+    assert ("Name", ssh_service.default_name()) in infos, infos
     cv = ws.sys_canvas
     buf = bytes(cv._buf)
 
@@ -584,7 +589,7 @@ def test_under_touch_the_name_row_reads_the_default_name_over_its_note(tmp_path,
         # as the canvas stores it, the form `_col` answers
         return buf[2 * (y * cv.w + x)] | buf[2 * (y * cv.w + x) + 1] << 8
     dim = cv._col(ws.theme_colors["ink_dim"])
-    play = ws.settings_layer._host.box("Steady")       # the next group's first row
+    play = ws.settings_layer._host.box("steady")       # the next group's first row
     assert play is not None
     mid = cv.w // 2
     card = px(mid, play[1] + 2)

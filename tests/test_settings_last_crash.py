@@ -73,7 +73,7 @@ def test_a_core_dump_in_flash_is_on_the_page_and_the_row_without_a_record(
     monkeypatch.setattr(settings_layer, "clear_core_dump", lambda: cleared.append(1) or True)
     ws, drv = _open(tmp_path)
     sl = ws.settings_layer
-    assert sl._value("crash", "crash") == "Dump"
+    assert sl.crash_word() == "Dump"
     sl.open_page("crash")
     drv.frame(DT)                       # the dump's line and its button draw
     assert crash_lines(None, 40960)[-1] == "CORE DUMP 40 KB IN FLASH"

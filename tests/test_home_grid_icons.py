@@ -141,14 +141,14 @@ def test_the_home_style_row_steps_through_auto_and_the_arrangements(tmp_path):
     rows = [r[0] for r in sl._settings_rows()]
     sl.set_msel = rows.index("home_style")
     assert rows[rows.index("font_scale") + 1] == "home_style"
-    assert sl._value("home_style", "home") == 0
+    assert ws.look.home_style() is None
     steps = (("carousel", Carousel), ("grid", Launcher), ("icons", IconHome),
              (None, Carousel))
     for i, (style, cls) in enumerate(steps):
         sl.settings_adjust(1)
         assert ws.system.get("home_style") == style
         assert type(ws.launcher) is cls
-        assert sl._value("home_style", "home") == (i + 1) % 4
+        assert ws.look.home_style() == style
     sl.settings_adjust(-1)
     assert ws.system.get("home_style") == "icons" and type(ws.launcher) is IconHome
 

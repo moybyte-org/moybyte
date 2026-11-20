@@ -253,7 +253,7 @@ def test_a_field_on_a_page_draws_its_row(tmp_path, monkeypatch, bufs):
     p.held_key(ord("e"))
     p.held_key(_BS, 16)
     p.type("ah")
-    assert p.a.settings_layer._name == p.b.settings_layer._name
+    assert p.a.settings_layer.rows.draft("name") == p.b.settings_layer.rows.draft("name")
     assert p.rows() >= 0.8 * len(p.kinds), p.kinds
 
 

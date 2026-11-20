@@ -179,6 +179,42 @@ def _open_tz(ws):
     ws.settings_layer.open_page("tz")
 
 
+class _Updater:
+    def available(self):
+        return True
+
+    def online_available(self):
+        return True
+
+
+class _Ble:
+    """A Bluetooth keyboard service as Settings reads it."""
+    settings_capable = True
+
+    def __init__(self, state):
+        self.state = state
+
+    def settings_status(self):
+        return True, self.state, None, None, None
+
+
+def _open_rows_full(ws):
+    """Every row a board can add: the Bluetooth keyboard (scanning, so
+    nothing types and the Name is read-only), the idle ladder, the web
+    console and its browsers, both update flows, the channel and the C6."""
+    from runtime import idle_ladder
+    from runtime import moy_loop as L
+    ws.use_inputs([("touch", "touch"), ("ble", "keys")])
+    ws.keyboard = _Ble("scanning")
+    L.trace_init(30, False, 1000)
+    ws.idle_ladder = idle_ladder.IdleLadder(ws, L, 300)
+    ws.webhost = Webhost(BROWSERS)
+    ws.updater = _Updater()
+    ws.c6_updater = object()
+    ws.settings_layer._free = lambda: "84.5 GB free"     # the store's, not this machine's disk
+    ws.open_settings()
+
+
 # name -> what a run opens
 SURFACES = {
     "settings_permissions": P.Surface(_open_settings_page("permissions"), _perms_carts),
@@ -189,12 +225,18 @@ SURFACES = {
     "update_sd_none": P.Surface(_open_update("open_update", found=False)),
     "update_online": P.Surface(_open_update("open_update_online")),
     "update_c6": P.Surface(_open_update("open_update_c6")),
+    "settings_rows": P.Surface(lambda ws: ws.open_settings()),
+    "settings_rows_full": P.Surface(_open_rows_full),
 }
 
 # A step a port draws differently from its record on purpose: its cause,
 # said once and named by each run that has it.
 NO_FALSE_HINT = ("the old page named Remove in its hints with nothing to remove; the port's hints "
                  "name only what the focused node does")
+
+STALE_TOGGLE_HINT = ("the old rows page drew its hints before its rows, so the frame a toggle "
+                     "turned still offered the turn it had just made (Turn off on a toggle now off); "
+                     "the port's hints are the toggle's as it now is")
 
 # (record name, surface, golden configuration, script[, {step: cause}])
 RUNS = (
@@ -228,6 +270,28 @@ RUNS = (
     ("update_online-big", "update_online", "big_800x480_fs3_dark", ["k:a", "k:b"]),
     # the C6's offer, which B declines
     ("update_c6-desk", "update_c6", "p4_1024x600_fs2_windowed", ["k:b"]),
+    # every kind of row: a link, Text size and Home style cycled there and
+    # back, Volume down to its mute and up, the Name typed and stored by
+    # Enter (focus goes to the row above) and by leaving it, a toggle turned
+    # on and off, the page scrolled to About and a page opened from it and
+    # closed
+    ("settings_rows-tdeck", "settings_rows", "tdeck_320x240_fs1_dark",
+     ["k:down", "k:down", "k:right", "k:left", "k:down", "k:right", "k:down", "k:left", "k:left",
+      "k:left", "k:left", "k:left", "k:left", "k:left", "k:right", "k:down", "k:down", "k:down",
+      "t:Bo", "enter", "k:down", "t:x", "k:down", "k:a", "k:a", "k:down", "k:down", "k:down",
+      "k:down", "k:down", "k:down", "k:a", "f:2", "back", "k:up", "k:up"],
+     {24: STALE_TOGGLE_HINT, 25: STALE_TOGGLE_HINT}),
+    ("settings_rows-desk", "settings_rows", "p4_1024x600_fs2_windowed",
+     ["k:down", "k:down", "k:right", "k:down", "k:down", "k:left", "k:down", "k:down", "k:down",
+      "t:Al", "k:down", "k:a", "k:down", "k:down", "k:down", "k:down", "k:down", "k:down", "k:down"]),
+    # the Layout row a theme package adds, stepped there and back
+    ("settings_rows_layout-tdeck", "settings_rows", "tdeck_320x240_fs1_homegrid",
+     ["k:down", "k:down", "k:down", "k:right", "k:left", "k:down"]),
+    # every board-only row, and the read-only Name with its note
+    ("settings_rows_full-tdeck", "settings_rows_full", "tdeck_320x240_fs1_dark",
+     ["k:down"] * 24 + ["k:right", "k:up", "k:up"]),
+    ("settings_rows_full-desk", "settings_rows_full", "p4_1024x600_fs2_windowed",
+     ["k:down"] * 22 + ["k:a", "k:down", "k:right"]),
 )
 
 

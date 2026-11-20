@@ -145,7 +145,7 @@ def test_a_fields_hints_read_done_and_cancel_with_each_inputs_keys():
     from runtime import settings_layer
     from runtime import chrome
     th = chrome.theme_colors("night")
-    assert settings_layer._HINTS["field"] == ("confirm", "Done", "cancel", "Cancel")
+    assert settings_layer._HINT_TYPE == ("confirm", "Done", "cancel", "Cancel")
     for kind, keys in (("tdeck", "Mic"), ("keys", "Esc"), ("pad", "B")):
         assert _strip(th, ("cancel", "Cancel"), kind) == _strip(th, (keys, "Cancel"), kind)
     assert _strip(th, ("confirm", "Done", "cancel", "Cancel"), "tdeck")[0] \

@@ -99,7 +99,7 @@ def test_a_shell_apps_field_types_and_mic_gives_it_back(tmp_path, app_id):
 
 
 def _focus_name(ws, drv):
-    ws.settings_layer._want = "Name"
+    ws.settings_layer._want = "name"
     ws.mark_dirty()                  # the next frame draws, and focuses it
     _frames(drv)
 
@@ -114,10 +114,10 @@ def test_settings_name_types_and_mic_gives_it_back(tmp_path):
     assert ws.input.text_mode
     name = str(ws.system.get("name", "") or "")
     _type(drv, "zq")
-    assert sl._name == name + "zq"
+    assert sl.rows.draft("name") == name + "zq"
     assert ws.input_policy.cancel()
     _frames(drv)
-    assert sl._name in (None, name) and not ws.sysmenu.open
+    assert sl.rows.draft("name") in (None, name) and not ws.sysmenu.open
     assert not ws.input.text_mode
 
 
@@ -220,7 +220,7 @@ def _settings_name(ws, drv):
     _frames(drv)
     _focus_name(ws, drv)
     _type(drv, "kq")
-    assert ws.settings_layer._name is not None
+    assert ws.settings_layer.rows.draft("name") is not None
     return lambda: str(ws.system.get("name", "")).endswith("kq")
 
 

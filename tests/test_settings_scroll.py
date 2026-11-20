@@ -83,7 +83,7 @@ def test_every_row_is_reachable_by_keyboard(tmp_path):
     drv = _drv(ws)
     sl = ws.settings_layer
     top = _band(ws)
-    assert sl._focused == "Wi-Fi"
+    assert sl._focused == "wifi"
     seen = [sl._focused]
     for _ in range(40):
         drv.press("down")
@@ -92,14 +92,14 @@ def test_every_row_is_reachable_by_keyboard(tmp_path):
         if sl._focused == seen[-1]:
             break
         seen.append(sl._focused)
-    assert "Update online" in seen, "the update rows below the fold are reached"
-    assert seen[-1] == "System log", "About's System log link is the last stop"
+    assert "update_online" in seen, "the update rows below the fold are reached"
+    assert seen[-1] == "log", "About's System log link is the last stop"
     assert _band(ws) != top, "the page scrolled to keep focus in view"
     for _ in range(len(seen) - 1):      # one more goes on to the bar
         drv.press("up")
         drv.frame(_DT)
         drv.frame(_DT)
-    assert sl._focused == "Wi-Fi"
+    assert sl._focused == "wifi"
     _settle(ws, drv)
     assert _band(ws) == top, "back at the top, the page is as it opened"
 
@@ -112,7 +112,7 @@ def test_set_msel_reads_and_moves_the_focused_row(tmp_path):
     i = [r[0] for r in rows].index("font_scale")
     sl.set_msel = i
     drv.frame(_DT)
-    assert sl._focused == "Text size" and sl.set_msel == i
+    assert sl._focused == "font_scale" and sl.set_msel == i
 
 
 def test_a_drag_scrolls_the_page_and_is_no_tap(tmp_path):

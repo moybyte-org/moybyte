@@ -275,12 +275,13 @@ def test_settings_shows_volume_brightness_and_name(tmp_path):
     after Text size (owner call 2026-10-17: the rows stay on the page)."""
     ws, drv = _settings_page(tmp_path)
     sl = ws.settings_layer
-    general = dict(sl._grouped())["General"]
-    keys = [r[0] for r in general]
+    general = next(g for g in sl.rows.engine.root.kids if g.src.get("caption") == "General")
+    nodes = {n.key: n for n in general.kids}
+    keys = [n.key for n in general.kids]
     assert keys.index("font_scale") < keys.index("volume") < keys.index("brightness") \
         < keys.index("name")
-    assert sl._kinds["Volume"] == sl._kinds["Brightness"] == "slider"
-    assert sl._kinds["Name"] == "field"
+    assert nodes["volume"].kind == nodes["brightness"].kind == "slider"
+    assert nodes["name"].kind == "field"
 
 
 def test_the_volume_row_sets_the_console_level(tmp_path):
@@ -295,7 +296,7 @@ def test_the_volume_row_sets_the_console_level(tmp_path):
     try:
         ws, drv = _settings_page(tmp_path)
         _focus_row(ws, drv, "volume")
-        assert ws.settings_layer._focused == "Volume"
+        assert ws.settings_layer._focused == "volume"
         start = ws.settings_layer.level("volume")[0]
         drv.press("left")
         drv.frame(1 / 30)
@@ -332,8 +333,8 @@ def test_volume_is_a_stepped_bar_with_the_muted_icon_at_zero(tmp_path, monkeypat
     ws.mark_dirty()
     drv.frame(1 / 30)
     assert ("mute", True) in icons, "the theme's set draws the muted speaker"
-    assert sliders["Volume"] == (0, 7, {"steps": True})
-    assert sliders["Brightness"] == (0, 7, {"steps": True})
+    for label in ("Volume", "Brightness"):
+        assert sliders[label][:2] == (0, 7) and sliders[label][2]["steps"] is True
     ws.settings_layer.set_level("volume", 4)
     icons.clear()
     ws.mark_dirty()
@@ -363,7 +364,7 @@ def test_brightness_and_name_are_stored(tmp_path):
 def _type_name(ws, drv, text):
     """Focus the Name row and type `text` into it, a frame pair a key."""
     _focus_row(ws, drv, "name")
-    assert ws.settings_layer._focused == "Name" and ws.input.text_mode
+    assert ws.settings_layer._focused == "name" and ws.input.text_mode
     for ch in text:
         drv.type_char(ord(ch))
         drv.frame(1 / 30)
@@ -389,7 +390,7 @@ def test_the_name_is_stored_on_enter_not_a_keystroke_at_a_time(tmp_path):
     drv.frame(1 / 30)
     assert writes.count("name") == 1
     assert _stored_name(tmp_path) == "Kit"
-    assert ws.settings_layer._focused != "Name", "Enter is Done: focus leaves the field"
+    assert ws.settings_layer._focused != "name", "Enter is Done: focus leaves the field"
 
 
 def test_focus_leaving_the_name_field_stores_it(tmp_path):
@@ -399,7 +400,7 @@ def test_focus_leaving_the_name_field_stores_it(tmp_path):
     drv.press("up")
     drv.frame(1 / 30)
     drv.frame(1 / 30)
-    assert ws.settings_layer._focused != "Name"
+    assert ws.settings_layer._focused != "name"
     assert _stored_name(tmp_path) == "Rae"
     assert not ws.input.text_mode
 

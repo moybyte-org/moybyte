@@ -1324,7 +1324,7 @@ def _game_and_settings(tmp_path):
     sl.set_msel = sl.row_index("name")
     drv.frame(1 / 30)
     drv.frame(1 / 30)
-    assert ws.wm.focus_key == "settings" and sl._focused == "Name"
+    assert ws.wm.focus_key == "settings" and sl._focused == "name"
     assert ws.input.text_mode
     drv.type_char(ord("K"))
     drv.frame(1 / 30)
@@ -1368,7 +1368,7 @@ def test_text_mode_follows_the_focused_window(tmp_path):
     assert ws.wm.stack.top() == "settings", "a click pops nothing"
     _click_window(ws, drv, "settings")
     assert ws.wm.focus_key == "settings"
-    assert ws.settings_layer._focused == "Name"
+    assert ws.settings_layer._focused == "name"
     assert ws.input.text_mode, "Settings' field has focus again: text mode"
     ws.wm.chip_tap("desktop")                 # a chip moves focus the same way
     drv.frame(1 / 30)

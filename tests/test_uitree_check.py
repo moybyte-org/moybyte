@@ -21,6 +21,7 @@ PORTED = (
     "settings_ui",
     "uitree_focus",
     "update_ui",
+    "settings_rows",
 )
 
 

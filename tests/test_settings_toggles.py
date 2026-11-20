@@ -54,6 +54,7 @@ OWNERS = {
     "console_settings.py": "the setters over the one _set_toggle tail (the "
                            "`ws.toggles`) -- the persistence tail",
     "dev_channel.py": "the serial words",
+    "settings_rows.py": "a row per toggle on Settings' page, and its hook",
 }
 
 # `dev_channel.py` still names ONE setter by hand, and that is the decision

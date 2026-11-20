@@ -1997,7 +1997,7 @@ def _settings_at(key):
         sl.set_level("volume", VOLUME_REST)
         sl.show_row(key)
         _FOCUSED[0] = lambda: sl._host.box(sl._focused) if sl._focused else None
-        _FOCUSED_KIND[0] = lambda: sl._kinds.get(sl._focused)
+        _FOCUSED_KIND[0] = lambda: sl.rows.kinds().get(sl._focused)
     return setup
 
 
@@ -3761,7 +3761,7 @@ def audit(ws, probe, img):
         out += _mark_pairs(ws, img, box, view, kind)
     sl = ws.settings_layer
     if ws.screen == "settings":
-        for stop, kind in sl._kinds.items():
+        for stop, kind in sl.rows.kinds().items():
             if kind == "toggle" and "fps" in stop.lower() and stop != sl._focused:
                 b = sl._host.box(stop)
                 v = _viewport(ws, b, hinted) if b is not None else None

@@ -44,7 +44,6 @@ verbs draw in is begun by the host side the console hands it
 pointer this layer is routed.
 """
 
-import ssh_service as _ssh
 import ui as _ui
 import layout_base as _lb
 from crash_guard import clear_core_dump, core_dump, crash_available, crash_lines, last_crash
@@ -55,7 +54,6 @@ from perms_ui import PermsPage
 from settings_ui import SettingsPages
 from layers import Layer
 from audio_session import console_volume
-import wallclock as _wc
 
 # -- settings-screen geometry: the row height console's Layout scales ---------
 _SET_ROW_H = 26
@@ -204,17 +202,6 @@ BOARDS = {"tdeck": "T-Deck Plus", "p4": "Waveshare P4 7″", "guition_s3": "Guit
 _PAGE_TITLES = {"achievements": "Achievements", "licences": "Licences", "log": "System log",
                 "permissions": "App permissions"}
 
-# The groups, in page order: (caption, row keys). A row of kind `idle` is
-# Power's.
-_GROUPS = (
-    ("General", ("wifi", "bluetooth", "appearance", "font_scale", "layout_theme",
-                 "home_style", "volume", "brightness", "tz", "name", "usb_drive")),
-    ("Play", ("two_player", "steady", "crisp_pixels", "show_fps")),
-    ("Power", ()),
-    ("Updates", ("webhost", "paired", "ota_channel", "update_online", "update", "update_c6")),
-    ("Developer", ("diag_live", "diag_sd", "crash")),
-)
-
 # The USB drive page's words, by the drive's state (usb_drive.STOPPED ..
 # EJECTED), and what it adds while on.
 _USB_SAYS = ("Show your memory card on a computer over the USB cable. "
@@ -226,23 +213,15 @@ _USB_EJECT = "Eject it on the computer and it comes back here."
 _USB_SERIAL_OFF = "The serial port is off while it is on."
 _USB_SERIAL_BACK = "The serial port comes back when it is off."
 
-# The keycap hints for the focused row's kind.
-_HINT_OPEN = ("confirm", "Open", "back", "Back")
-_HINT_CHANGE = ("change", "Change", "back", "Back")
+# The hints while the Name is typed (the field's own: Done and Cancel).
 _HINT_TYPE = ("confirm", "Done", "cancel", "Cancel")
-_HINTS = {"cycle": _HINT_CHANGE, "seg": _HINT_CHANGE, "slider": _HINT_CHANGE,
-          "field": _HINT_TYPE}
-# A toggle's: what Enter does to it, by whether it is on.
-_HINT_TOGGLE = (("confirm", "Turn on", "back", "Back"), ("confirm", "Turn off", "back", "Back"))
 
 # The level rows, by system/settings key: (lowest, highest, the value with none
 # stored). Volume is the console's level (`audio_session.console_volume`,
 # the one the boot applies and the dev channel's `vol` sets); Brightness is
 # the panel light's, which the idle ladder applies at boot and on a change.
 LEVELS = {"volume": (0, 7, 7), "brightness": (0, 7, 4)}
-_STEPPED = {"steps": True}    # a level row's slider: a segment a level, no number
 NAME_MAX = 16                 # the Name row's bytes
-_NAME_HINT = {"hint": None}   # the empty Name field shows the default name
 # The caption under the read-only Name where nothing can type (D-24's
 # interim words, `Text.can_type`).
 NAME_NO_KEYBOARD = "Pair a keyboard to change"
@@ -344,14 +323,10 @@ class SettingsLayer(Layer):
         self._host = host()           # the rows page's UI context (an AppHost)
         self._sub = host()            # a panel's, fresh each time one opens
         self._view = None             # the page drawn last
-        self._want = None             # the label focus moves to next frame
-        self._focused = None          # the focused id after the last frame
-        self._sub_focused = None      # ... and on the open panel's page
-        self._kinds = {}              # a row's label -> its verb, for the hints
-        self._on = {}                 # a toggle row's label -> whether it is on
-        self._words = {}              # a cycle's values -> the words it shows
+        self._want = None             # the row key focus moves to next frame
+        self._focused = None          # the focused row's key after the last frame
+        self._sub_focused = None      # ... and the open panel page's focused id
         self._about = ()              # About's facts, read at each visit
-        self._footer = None           # the note under the group being drawn
         # The WIFI panel (#38, spec §10): scan list -> pick -> (password) ->
         # connect/forget over the station its wifi role hands it.
         self.wifi_return = None       # the app the panel goes back to (`_wifi_back`)
@@ -387,8 +362,6 @@ class SettingsLayer(Layer):
         self._rows_idle = None
         self._rows_lgen = -1
         self._rows_tog = None
-        self._groups_of = None        # the rows the groups were cut from
-        self._groups = ()
         # _toggle_rows' own memo: the registry block, plus the gate answers
         # it was built from in a PREALLOCATED list compared element-wise.
         self._toggle_cache = None
@@ -401,11 +374,8 @@ class SettingsLayer(Layer):
         self._paired_words = "None"
         # About's pages (docs/history/look_2026-10.md step 32): Achievements, and
         # Licences with a licence's text a page under it
-        self._ach_n = -1              # the badges the Achievements row last said
-        self._ach_t = -1              # ...of how many
         self._rect = (0, 0, 0, 0)     # the layout's content rect, as the page takes it
         self._dt = 0.0                # the frame's dt, for a hosted page's clock
-        self._ach_words = ""
         self.achievements = AchievementsPage(
             ws.app_context("achievements", AchievementsPage.NEEDS))
         self.licences = LicencesPage(ws.app_context("licences", LicencesPage.NEEDS))
@@ -413,17 +383,9 @@ class SettingsLayer(Layer):
         _pctx = ws.app_context("permissions", PermsPage.NEEDS + ("damage",))
         self.permits = PermsPage(_pctx, self._sub, _pctx.damage)
         self.pages = SettingsPages(ws, self._sub, _pctx.damage, self._drop)
+        import settings_rows           # it reads this module's tables: imported once they are made
+        self.rows = settings_rows.RowsPage(self, self._host)
         self.back_title = "Settings"
-        self._name = None             # the Name being typed, until it is stored
-        # The rows page's gen (docs/history/scroll_and_text_2026-10.md §3.3), moved by
-        # `_poll` when a value it shows moves: the override table the page is
-        # given, kept, its gen updated in place.
-        self._gen = 0
-        self._page_o = {"gen": 0}
-        self._vals = []               # what each row showed, in the page's order
-        self._lvl = None              # the battery level About showed
-        self._about_was = None
-        self._could_type = None
 
     def reset(self):
         """A fresh visit (ws.open_settings): focus on the first row, the page
@@ -441,6 +403,7 @@ class SettingsLayer(Layer):
         self._name_bar("Settings")
         self._about = self._read_about()
         self._read_paired()
+        self.rows.open()
 
     # -- About's pages: Achievements, Licences, the System log --------------------
 
@@ -549,7 +512,7 @@ class SettingsLayer(Layer):
         rows = self._settings_rows()
         f = self._want if self._want is not None else self._focused
         for i in range(len(rows)):
-            if say(rows[i][1]) == f:
+            if rows[i][0] == f:
                 return i
         return 0
 
@@ -557,7 +520,7 @@ class SettingsLayer(Layer):
     def set_msel(self, i):
         rows = self._settings_rows()
         if rows:
-            self._want = say(rows[i % len(rows)][1])
+            self._want = rows[i % len(rows)][0]
             self.ws.mark_dirty()
 
     # -- BLUETOOTH KEYBOARD panel (capability-gated) ------------------------------
@@ -1379,16 +1342,10 @@ class SettingsLayer(Layer):
             self.set_level(key, self.level(key)[0] + d)
 
     def commit_name(self):
-        """Store the Name being typed, if it changed: Enter, focus leaving the
-        field and every way out of Settings call this, so the store is written
-        once an edit, never a keystroke."""
-        got = self._name
-        if got is None:
-            return
-        self._name = None
-        if got != str(self.ws.system.get("name", "") or ""):
-            self.ws.system.set("name", got)
-            _ssh.rename(self.ws)
+        """Store the Name being typed, if it changed: every way out of
+        Settings calls this (Enter and focus leaving are the field's own), so
+        the store is written once an edit, never a keystroke."""
+        self.rows.leave()
 
     def close(self):
         """Leaving Settings, by any route: the Name being typed is stored and
@@ -1463,238 +1420,18 @@ class SettingsLayer(Layer):
             return "%d.%d MB free" % (b >> 20, ((b * 10) >> 20) % 10)
         return "%d KB free" % (b >> 10)
 
-    # -- the rows page ----------------------------------------------------------------
-
-    def _grouped(self):
-        """The groups that have rows this session: (caption, rows), memoized
-        on the rows tuple."""
-        rows = self._settings_rows()
-        if self._groups_of is rows:
-            return self._groups
-        out = []
-        for caption, keys in _GROUPS:
-            got = []
-            for r in rows:
-                if r[0] in keys or (caption == "Power" and r[2] == "idle"):
-                    got.append(r)
-            if got:
-                out.append((caption, tuple(got)))
-        self._groups = tuple(out)
-        self._groups_of = rows
-        return self._groups
+    def crash_word(self):
+        """The Last crash row's value: the record's kind, else a core dump's
+        word, else None."""
+        rec = last_crash()
+        v = str(rec.get("kind") or "?")[:8] if rec else ("Dump" if core_dump() else "None")
+        return v[:1].upper() + v[1:]
 
     def _theme_title(self):
         look = self.ws.look
         name = str(look.theme_name or "")
         title = _capital(name.replace("_", " ").replace("-", " "))
         return title + (" Day" if look.theme_variant == "light" else " Night")
-
-    def _value(self, key, kind):
-        """What row `key` of `kind` shows this frame, read before the page is
-        drawn: the page's gen moves when one does (docs/history/scroll_and_text_2026-10.md
-        §3.3), so a frame that shifts the rows never keeps one gone stale. The
-        Name field's text is its own (None): typing draws its row."""
-        ws = self.ws
-        if kind == "wifi-net":
-            ssid = None
-            w = self._wifi.station()
-            if w is not None:
-                try:
-                    connected, ssid, _ip = w.status()
-                    ssid = ssid if connected else None
-                except Exception:  # noqa: BLE001
-                    ssid = None
-            return str(ssid)[:16] if ssid else "Off"
-        if kind == "bluetooth":
-            try:
-                enabled, state, name, _preferred, _error = \
-                    self._bt_service().settings_status()
-            except Exception:  # noqa: BLE001 -- a radio hiccup reads Off
-                enabled, state, name = False, "error", None
-            return (str(name)[:12] if name else state[:1].upper() + state[1:]) \
-                if enabled else "Off"
-        if kind == "action":
-            return self._theme_title() if key == "appearance" else ""
-        if kind == "tz":
-            return _wc.place(_wc.zone())
-        if kind == "crash":
-            rec = last_crash()
-            v = str(rec.get("kind") or "?")[:8] if rec else ("Dump" if core_dump() else "None")
-            return v[:1].upper() + v[1:]
-        if kind == "webhost":
-            return ws.web.label() if ws.web.serving() else "Off"
-        if kind == "paired":
-            return self._paired_words
-        if kind == "diag":
-            return bool(getattr(ws, key, False))
-        if kind == "font":
-            scales = ws.look.FONT_SCALES
-            fs = ws.look.font_scale
-            return scales.index(fs) if fs in scales else 0
-        if kind == "layout":
-            pick = ws.look.layout_theme()
-            vals = (None,) + tuple(ws.look.layout_choices())
-            if pick is not None and pick not in vals:
-                vals = vals + (pick,)
-            return (vals.index(pick), vals)
-        if kind == "home":
-            pick = ws.look.home_style()
-            return 0 if pick is None else ws.look.HOME_STYLES.index(pick) + 1
-        if kind == "idle":
-            lad = ws.idle_ladder
-            steps = lad.steps()
-            v = lad.value(key)
-            return steps.index(v) if v in steps else 0
-        if kind == "channel":
-            return 1 if ws.toggles.ota_channel() == "unstable" else 0
-        if kind == "level":
-            return self.level(key)
-        if kind == "name" and not ws.text.can_type():
-            return _ssh.name(ws)
-        return None
-
-    def _poll(self):
-        """Every value the rows page shows, read for this frame (`_value`),
-        and the page's gen moved where one differs from the last frame's."""
-        ws = self.ws
-        vals = self._vals
-        n = 0
-        moved = self._groups_of is not self._settings_rows()
-        for _caption, rows in self._grouped():
-            for key, _label, kind in rows:
-                v = self._value(key, kind)
-                if n < len(vals):
-                    if vals[n] != v:
-                        vals[n] = v
-                        moved = True
-                else:
-                    vals.append(v)
-                    moved = True
-                n += 1
-        lvl = ws.battery_level()
-        a = ws.ach.count()
-        t = ws.ach.total()
-        if (lvl != self._lvl or a != self._ach_n or t != self._ach_t
-                or self._about is not self._about_was
-                or ws.text.can_type() != self._could_type):
-            self._lvl = lvl
-            self._about_was = self._about
-            self._could_type = ws.text.can_type()
-            moved = True
-        if a != self._ach_n or t != self._ach_t:
-            self._ach_n = a
-            self._ach_t = t
-            self._ach_words = "%d of %d" % (a, t)
-        if moved:
-            self._gen += 1
-            self._page_o["gen"] = self._gen
-
-    def _row(self, key, label, kind, v):
-        """One row of the page, showing `v` (`_value`): its verb, and what
-        its answer does."""
-        ws = self.ws
-        s = say(label)
-        if kind == "wifi-net":
-            self._kinds[s] = "link"
-            if _ui.link(s, v):
-                self.open_page("wifi")
-        elif kind == "bluetooth":
-            self._kinds[s] = "link"
-            if _ui.link(s, v):
-                self.open_page("bt")
-        elif kind == "action":
-            self._kinds[s] = "link"
-            if _ui.link(s, v):
-                self._activate_settings_action(key)
-        elif kind == "crash":
-            self._kinds[s] = "link"
-            if _ui.link(s, v):
-                self.open_page("crash")
-        elif kind == "tz":
-            self._kinds[s] = "link"
-            if _ui.link(s, v):
-                self.open_page("tz")
-        elif kind == "paired":
-            self._kinds[s] = "link"
-            if _ui.link(s, v):
-                self.open_page("paired")
-        elif kind == "webhost":
-            self._kinds[s] = "link"
-            if _ui.link(s, v):
-                ws.web.toggle()
-        elif kind == "diag":
-            on = v
-            self._kinds[s] = "toggle"
-            self._on[s] = on
-            if _ui.toggle(s, on) != on:
-                self._toggle_diag_row(key)
-        elif kind == "font":
-            self._kinds[s] = "cycle"
-            scales = ws.look.FONT_SCALES
-            cur = v
-            words = self._words.get(scales)
-            if words is None:
-                words = self._words[scales] = [_SIZES.get(f, "%dx" % f) for f in scales]
-            got = _ui.cycle(s, words, cur)
-            if got != cur:
-                ws.look.cycle_font_scale(got - cur)
-        elif kind == "layout":
-            self._kinds[s] = "cycle"
-            cur, vals = v
-            got = _ui.cycle(s, ["Theme" if c is None else _capital(str(c)) for c in vals], cur)
-            if got != cur:
-                ws.look.cycle_layout_theme(got - cur)
-        elif kind == "home":
-            self._kinds[s] = "cycle"
-            got = _ui.cycle(s, _HOME_WORDS, v)
-            if got != v:
-                ws.look.cycle_home_style(got - v)
-        elif kind == "idle":
-            self._kinds[s] = "cycle"
-            lad = ws.idle_ladder
-            steps = lad.steps()
-            cur = v
-            words = self._words.get(steps)
-            if words is None:
-                words = self._words[steps] = [_idle_word(t) for t in steps]
-            got = _ui.cycle(s, words, cur)
-            if got != cur:
-                lad.set(key, steps[got])
-        elif kind == "channel":
-            self._kinds[s] = "seg"
-            cur = v
-            got = _ui.seg(s, _STABLE_BETA, cur)
-            if got != cur:
-                ws.toggles.cycle_channel(got - cur)
-        elif kind == "level":
-            self._kinds[s] = "slider"
-            cur, lo, hi = v
-            if key == "volume" and cur == lo:     # muted at 0
-                _ui.icon("mute")
-            got = _ui.slider(s, cur, lo, hi, _STEPPED)  # the power popover's gauge
-            if got != cur:
-                self.set_level(key, got)
-        elif kind == "name" and v is not None:
-            # nothing can type (touch alone, a gamepad): the saved name shows,
-            # read-only (`moybyte-XXXX` where none is), and the group's footer says
-            # how to change it (`_rows_page`), instead of a field no key
-            # reaches (#239 is the on-screen keyboard)
-            self._kinds.pop(s, None)
-            _ui.info(s, v)
-            self._footer = NAME_NO_KEYBOARD
-        elif kind == "name":
-            self._kinds[s] = "field"
-            cur = self._name
-            if cur is None:
-                cur = str(ws.system.get(key, "") or "")
-            if _NAME_HINT["hint"] is None:
-                _NAME_HINT["hint"] = _ssh.default_name()
-            got, done = _ui.field(s, cur, NAME_MAX, _NAME_HINT)
-            if got != cur:
-                self._name = got
-            if done:
-                self.commit_name()
-                self._leave_field()
 
     def ui_host(self):
         """The page's AppHost, whose step the console's back takes first;
@@ -1706,7 +1443,7 @@ class SettingsLayer(Layer):
         prompt."""
         if self.page == "wifi":
             return self.wifi_pick is not None
-        return self.page is None and self._kinds.get(self._focused) == "field"
+        return self.page is None and self._focused == "name" and self.ws.text.can_type()
 
     def cancel(self):
         """Mic in a field: the password prompt closes; the Name gets back the
@@ -1718,53 +1455,6 @@ class SettingsLayer(Layer):
             self._wifi_cancel()
             return True
         return Layer.cancel(self)
-
-    def _leave_field(self):
-        """Focus leaves the field for the row above it: typing ends."""
-        i = self.row_index("name")
-        if i:
-            self.set_msel = i - 1
-
-    def _rows_page(self):
-        self._poll()
-        _ui.page("", self._page_o)
-        f = _ui.focus()
-        kind = self._kinds.get(f)
-        _ui.hints(_HINT_TOGGLE[bool(self._on.get(f))] if kind == "toggle"
-                  else _HINTS.get(kind, _HINT_OPEN))
-        ws = self.ws
-        vals = self._vals
-        n = 0
-        for caption, rows in self._grouped():
-            _ui.group(caption)
-            self._footer = None
-            for key, label, kind in rows:
-                self._row(key, label, kind, vals[n])
-                n += 1
-            if self._footer is not None:
-                # a row's note under its group's card, on the page's ground
-                # in the captions' style
-                _ui.group(self._footer)
-        _ui.group("About")
-        for label, value in self._about:
-            _ui.info(label, value)
-        lvl = self._lvl
-        if lvl is not None:
-            _ui.info("Battery", "%d%%" % lvl)
-        self._kinds["App permissions"] = "link"
-        if _ui.link("App permissions"):
-            self.open_page("permissions")
-        self._kinds["Achievements"] = "link"
-        if _ui.link("Achievements", self._ach_words):
-            ws.ach_ui._secret_taps = 0
-            self.open_page("achievements")
-        self._kinds["Licences"] = "link"
-        if _ui.link("Licences"):
-            self.open_page("licences")
-        self._kinds["System log"] = "link"
-        if _ui.link("System log"):
-            self.open_page("log")
-        _ui.group()
 
     # -- the frame --------------------------------------------------------------------
 
@@ -1787,7 +1477,10 @@ class SettingsLayer(Layer):
             return True
         if view == "licences" and self.licences.keys(i):
             return True
-        self._input_host().keys(i)
+        if view is None:
+            self.rows.keys(i)
+        else:
+            self._input_host().keys(i)
         return True
 
     def has_page(self):
@@ -1870,13 +1563,11 @@ class SettingsLayer(Layer):
         was = ws.frame_state.dirty
         ws.frame_state.dirty = False             # what the rows' answers change marks it again
         if view is None:
-            if want is not None and _ui.focus() != want:
-                _ui.focus(want)       # a page not drawn yet: from this frame on
-                ws.request_frame()    # ... and the next scrolls to it
-            self._rows_page()
-            self._focused = _ui.focus()
-            if self._kinds.get(self._focused) != "field":
-                self.commit_name()        # focus left the field
+            if want is not None:
+                self.rows.focus(want)     # a row not drawn yet: from this frame on
+            self.rows.draw(ws.sys_canvas, ws.theme_colors, self._content(),
+                           _lb.metric_class() == _lb.DESK, dt=self._dt)
+            self._focused = self.rows.focused()
         else:
             self.commit_name()
             _PAGES[view][3](self)
@@ -1931,19 +1622,19 @@ class SettingsLayer(Layer):
 # back step, True where it took the back, else the back closes it).
 _L = SettingsLayer
 _PAGES = {
-    "wifi": ("wifi", _L.wifi_enter, _L.wifi_leave, _L.wifi_page, say("WIFI"), _L._wifi_step),
-    "bt": ("bt", _L._bt_open, None, _L._bt_page, say("BLUETOOTH KEYBOARD"), None),
-    "crash": ("crash", None, None, _L._crash_page, say("LAST CRASH"), None),
-    "tz": ("tz", _L._tz_open, None, _L._tz_page, say("TIME ZONE"), None),
+    "wifi": ("wifi", _L.wifi_enter, _L.wifi_leave, _L.wifi_page, "wifi", _L._wifi_step),
+    "bt": ("bt", _L._bt_open, None, _L._bt_page, "bluetooth", None),
+    "crash": ("crash", None, None, _L._crash_page, "crash", None),
+    "tz": ("tz", _L._tz_open, None, _L._tz_page, "tz", None),
     "paired": ("paired", _L._paired_open, _L._paired_close, _L._paired_page,
-               say("PAIRED BROWSERS"), None),
-    "usb": ("usb", _L._usb_open, None, _L._usb_page, say("USB DRIVE"), _L._usb_on),
-    "achievements": ("about", _L._ach_open, None, _L._ach_draw, "Achievements",
+               "paired", None),
+    "usb": ("usb", _L._usb_open, None, _L._usb_page, "usb_drive", _L._usb_on),
+    "achievements": ("about", _L._ach_open, None, _L._ach_draw, "achievements",
                      lambda sl: sl.achievements.back()),
-    "licences": ("about", _L._lic_open, None, _L._lic_draw, "Licences",
+    "licences": ("about", _L._lic_open, None, _L._lic_draw, "licences",
                  lambda sl: sl.licences.back()),
-    "log": ("about", _L._log_open, None, _L._log_draw, "System log", None),
-    "permissions": ("about", _L._perms_open, None, _L._perms_draw, "App permissions", None),
+    "log": ("about", _L._log_open, None, _L._log_draw, "log", None),
+    "permissions": ("about", _L._perms_open, None, _L._perms_draw, "permissions", None),
 }
 del _L
 

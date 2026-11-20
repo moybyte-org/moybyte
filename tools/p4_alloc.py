@@ -402,9 +402,8 @@ ws._g['_wrap_phases'] = _wrap_phases
 DRILL_SETTINGS = [
     "ws.wm.content_for('settings')::_settings_rows::set.rows",
     "ws.wm.content_for('settings')::_draw_page::set.page",
-    "ws.wm.content_for('settings')::_rows_page::set.rows_page",
-    "ws.wm.content_for('settings')::_row::set.row",
-    "ws.wm.content_for('settings')::_grouped::set.groups",
+    "ws.wm.content_for('settings').rows::draw::set.rows_page",
+    "ws.wm.content_for('settings').rows.engine::_replay_page::set.replay",
     "ws.bar_layer::draw_status_strip::bar.status",
     "ws.sys_canvas::print::cv.print",
     "ws.sys_canvas::rect::cv.rect",

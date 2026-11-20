@@ -103,6 +103,8 @@ CROSSINGS = {
                    ("player", "player_fit")),
     "system_api": ("the globals a user app cart gets, which the Player and the scheduler hand it",
                    ("player", "scheduler")),
+    "idle_ladder": ("Settings' idle rungs step through the ladder's values",
+                    ("settings_rows",)),
     "crash_guard": ("three strikes for an app, a service or a wallpaper alike",
                     ("scheduler", "settings_layer")),
     "theme_custom": ("the theme an Appearance change makes, which the theme editor writes",

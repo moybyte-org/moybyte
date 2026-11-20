@@ -152,11 +152,11 @@ def test_the_achievements_page_opens_from_about(tmp_path):
     ws.ach.seed({"first_open": 20261012})
     ws.open_settings()
     sl = ws.settings_layer
-    sl._want = "Achievements"
+    sl._want = "achievements"
     ws.mark_dirty()
     drv.frame(1 / 30)
     drv.frame(1 / 30)
-    _tap(drv, sl._host.box("Achievements"))
+    _tap(drv, sl._host.box("achievements"))
     drv.frame(1 / 30)
     assert sl.page == "achievements" and sl.page_title() == "Achievements"
     drv.frame(1 / 30)
@@ -165,7 +165,8 @@ def test_the_achievements_page_opens_from_about(tmp_path):
     assert "First Steps" in titles and "Secret" in titles and "Secret Coder" not in titles
     assert [g[0] for g in page._groups] == ["Moybyte", "Harpoon Pop"]
     assert page._head == "1 of 15 found"
-    assert sl._ach_words == "1 of 15"
+    import settings_rows
+    assert settings_rows.s.ach_words == "1 of 15"
     page._focus = "Badge system first_open"
     drv.frame(1 / 30)
     _press(drv, "a")

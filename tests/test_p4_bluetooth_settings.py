@@ -149,7 +149,7 @@ def test_a_first_keyboard_is_picked_by_touch_alone(tmp_path):
         drv.frame(1 / 30)
         drv.frame(1 / 30)
 
-    tap(sl._host, "Bluetooth keyboard")
+    tap(sl._host, "bluetooth")
     assert sl.showing("bt") and sl.bt_msg == "Scan, then pick a keyboard."
     tap(sl._sub, "Scan")
     assert svc.calls[-1] == ("scan",)

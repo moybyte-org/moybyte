@@ -78,6 +78,6 @@ def test_settings_brightness_meter_fills_four_of_seven(theme, mode):
         held.append(sl)
     img, _ok, _r = L.render(L._goldens(), L.HANDHELD, theme, mode, setup, False, "touch")
     sl = held[-1]
-    box = sl._host.box("Brightness")
+    box = sl._host.box("brightness")
     assert box is not None
     _holds(img.convert("RGB"), box, "%s-%s settings" % (theme, mode))

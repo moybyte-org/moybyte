@@ -192,7 +192,8 @@ def test_the_settings_row_opens_the_picker_and_a_pick_sets_the_zone(tmp_path):
     sl = ws.settings_layer
     i = sl.row_index("tz")
     assert sl._settings_rows()[i] == ("tz", "TIME ZONE", "tz")
-    assert sl._value("tz", "tz") == "UTC"
+    import settings_rows
+    assert settings_rows.s.tz_place == "UTC"           # the row says it
     sl.settings_adjust(1, i)
     assert sl.has_page() and sl.page == "tz"
     sl._draw_page()
@@ -206,7 +207,7 @@ def test_the_settings_row_opens_the_picker_and_a_pick_sets_the_zone(tmp_path):
         settings_layer._ui.link = real
     assert not sl.has_page()
     assert wc.zone() == "JST-9" and ws.system.get("tz") == "JST-9"
-    assert sl._value("tz", "tz") == "Tokyo"
+    assert wc.place(wc.zone()) == "Tokyo"
     sl.open_page("tz")
     sl.back()
     assert not sl.has_page()

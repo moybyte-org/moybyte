@@ -101,7 +101,7 @@ def test_settings_name_is_a_field_only_where_something_types(tmp_path, kind, fie
             drv.frame(1 / 30)
     finally:
         ui.info, ui.group = real
-    assert ("field" in ws.settings_layer._kinds.values()) is field
+    assert (ws.settings_layer.rows.drawn("name") == "field") is field
     if not field:
         # the note follows the group, captioned under its card
         assert ("Name", "Moy") in rows and (settings_layer.NAME_NO_KEYBOARD,) in rows, rows

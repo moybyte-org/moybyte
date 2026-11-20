@@ -250,7 +250,7 @@ def test_settings_turns_it_on_and_holds_the_page_until_it_is_off(ws):
     assert sl.page == "usb"
     d.turn_off(ws)
     sl.back()
-    assert sl.page is None and sl._want == say("USB DRIVE")
+    assert sl.page is None and sl._want == "usb_drive"
 
 
 def test_a_computer_that_ejects_the_card_gives_it_back(ws):
