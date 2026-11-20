@@ -393,3 +393,17 @@ class RowsPage:
     def draft(self, key):
         """A commit field's text typed and not yet written, or None."""
         return self.engine.draft(key)
+
+    def kinds(self):
+        """Each stop the last frame drew, by node key: link, toggle, cycle,
+        seg, slider or field."""
+        out = {}
+        for key, kind in self.engine.stop_kinds().items():
+            if kind in ("link", "toggle", "cycle", "seg", "slider", "field"):
+                out[key] = kind
+        return out
+
+    def drawn(self, key):
+        """The kind of node `key` the last frame drew, or None."""
+        kind = self.engine.stop_kinds().get(key)
+        return "seg" if kind == "cycle" else kind

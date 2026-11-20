@@ -143,6 +143,9 @@ int uit_back_dialog(uit_t *e, char *buf, size_t cap);
 int uit_unfocused(const uit_t *e);
 // The id focus is on after the last frame ("" none): its length.
 int uit_focused(const uit_t *e, char *buf, size_t cap);
+// The last frame's stop `i` (from 0): its kind (UIT_SEG with the cycle look
+// answers UIT_KINDS), its id into buf; -1 past the last.
+int uit_stop(const uit_t *e, int i, char *buf, size_t cap);
 // A commit field's draft (typed, not yet written), NULL none.
 const char *uit_draft(const uit_t *e, const char *key, size_t *n);
 // Every way out of the page: each drawn commit field's draft written, its

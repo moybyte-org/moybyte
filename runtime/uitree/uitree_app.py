@@ -1504,6 +1504,14 @@ class Engine(S.Builder):
         """Commit field `key`'s text typed and not yet written, or None."""
         return self.drafts.get(key)
 
+    def stop_kinds(self):
+        """Each stop the last frame drew, by its id: its kind, a seg of the
+        cycle look "cycle"."""
+        out = {}
+        for key, (n, _row) in self.ids.items():
+            out[key] = "cycle" if n.kind == "seg" and n.l.get("look") == "cycle" else n.kind
+        return out
+
     def leave(self):
         """Every way out of the page: a commit field's draft is written."""
         self._bind()

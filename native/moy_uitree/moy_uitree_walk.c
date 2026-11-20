@@ -444,6 +444,19 @@ int uit_leave(uit_t *e)
     return e->nevs - e->evat;
 }
 
+int uit_stop(const uit_t *e, int i, char *buf, size_t cap)
+{
+    if (i < 0 || i >= e->nids)
+        return -1;
+    const uit_id_t *I = &e->ids[i];
+    if (buf && cap)
+        snprintf(buf, cap, "%s", I->id);
+    int k = I->kind;
+    if (k == UIT_SEG && I->gen == e->gen && (e->nodes[I->node].lit & NL_CYCLE))
+        k = UIT_KINDS;
+    return k;
+}
+
 int uit_focused(const uit_t *e, char *buf, size_t cap)
 {
     if (buf && cap)

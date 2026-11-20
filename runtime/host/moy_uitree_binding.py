@@ -29,6 +29,7 @@ _SIGS = (
     ("uit_labels", [_P, _S, _S, _Z, _S, _Z], _I),
     ("uit_focused", [_P, c.c_char_p, _Z], _I),
     ("uit_draft", [_P, _S, c.POINTER(_Z)], c.POINTER(c.c_char)),
+    ("uit_stop", [_P, _I, c.c_char_p, _Z], _I),
     ("uit_leave", [_P], _I),
     ("uit_set_int", [_P, _I, c.c_int32], _I),
     ("uit_set_num", [_P, _I, c.c_double], _I),
@@ -129,6 +130,11 @@ class Engine:
 
     def leave(self):
         return self._L.uit_leave(self._e)
+
+    def stop(self, i):
+        """The last frame's stop `i`: (kind, id), None past the last."""
+        k = self._L.uit_stop(self._e, i, self._buf, 512)
+        return None if k < 0 else (k, self._buf.value.decode("utf-8"))
 
     def set_int(self, slot, v):
         return self._L.uit_set_int(self._e, slot, v)

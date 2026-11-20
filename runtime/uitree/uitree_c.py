@@ -44,6 +44,8 @@ INPUTS = ("keys", "tdeck", "pad", "touch")
 _KINDS = {"page": 1, "group": 2, "label": 3, "info": 4, "link": 5, "button": 6, "toggle": 7,
           "rows": 8, "dialog": 9, "seg": 10, "slider": 11, "field": 12}
 _HEAD = {"rows": ("model",), "dialog": ("buttons",)}
+_KIND_NAMES = dict((v, k) for k, v in _KINDS.items())
+_KIND_NAMES[len(_KINDS) + 1] = "cycle"          # UIT_KINDS: a seg of the cycle look
 _BOUND = ("toggle", "seg", "slider", "field")       # a two-way control: bound to the state of its key
 _LIT_ONLY = {"seg": ("values", "words", "model", "labels")}   # what the reference keeps beside a node's props
 _TYPED = "typed in field "
@@ -335,6 +337,15 @@ class CEngine(Engine):
 
     def draft(self, key):
         return self._x.draft(key)
+
+    def stop_kinds(self):
+        out, i = {}, 0
+        while True:
+            got = self._x.stop(i)
+            if got is None:
+                return out
+            out[got[1]] = _KIND_NAMES[got[0]]
+            i += 1
 
     def leave(self):
         """Every way out of the page: each drawn commit field's draft is
