@@ -551,7 +551,7 @@ class DocView:
     changes it is one write in the trace; reads are free. The caret and the
     selection are the document's, so a verb that moves them is a write too."""
 
-    VERBS = ("set_text", "insert", "go", "select", "find", "undo", "redo", "complete",
+    VERBS = ("set_text", "insert", "go", "place", "select", "find", "undo", "redo", "complete",
              "indent", "outdent", "copy", "cut", "paste", "select_all")
 
     def __init__(self, st, name):
@@ -1773,7 +1773,7 @@ SCHEMA = {
     "info": dict(_C, label="text", value="text", icon="text", signal="int"),
     "link": dict(_C, value="text", label="text", icon="text", signal="int", focus="cond"),
     "button": dict(_C, kind="lit", label="text", icon="text", alone="lit", span="lit", arg="lit",
-                   focus="cond", grow="lit"),
+                   focus="cond", grow="lit", marked="cond"),
     "toggle": dict(_C, label="text", on="action0", focus="cond", hint="text"),
     "slider": dict(_C, label="text", lo="int", hi="int", on="action0", focus="cond", look="lit",
                    icon="text"),
@@ -2466,6 +2466,8 @@ class Ev:
 
 
 def status(text, **p):
+    """A status line: its template's fields, split at " · ", the first
+    always shown, the rest while they fit."""
     return _node("status", None, dict(p, text=text), _caller())
 
 

@@ -54,17 +54,24 @@ SETTLE = 8                  # frames a step may take to settle
 class Surface:
     """What a parity run opens: `open(ws)` on the built workstation, after
     `prepare(carts_dir)` wrote what its store needs (carts that ask for
-    permissions, a document)."""
+    permissions, a document). `probe(ws)`, where given, says the surface's
+    state after each step in one line (its text, caret, what is open): a
+    behaviour run compares those and not the pixels."""
 
-    def __init__(self, open, prepare=None):
-        self.open, self.prepare = open, prepare
+    def __init__(self, open, prepare=None, probe=None):
+        self.open, self.prepare, self.probe = open, prepare, probe
+
+
+# The fifth field of a run whose surface takes the engine's layout (K5,
+# owner 2026-11-20): its steps are held to the recorded state, not pixels.
+BEHAVIOUR = "behaviour"
 
 
 class Frame:
-    __slots__ = ("step", "buf", "w", "h")
+    __slots__ = ("step", "buf", "w", "h", "state")
 
-    def __init__(self, step, buf, w, h):
-        self.step, self.buf, self.w, self.h = step, buf, w, h
+    def __init__(self, step, buf, w, h, state=""):
+        self.step, self.buf, self.w, self.h, self.state = step, buf, w, h, state
 
     def digest(self):
         return hashlib.sha256(self.buf).hexdigest()
@@ -131,10 +138,11 @@ def frames(config, surface, script, carts_dir=None):
         surface.open(ws)
         driver = ConsoleDriver(ws)
         cv = ws.glass_canvas
-        out.append(Frame("(open)", _settle(ws, g, driver), cv.w, cv.h))
+        probe = surface.probe or (lambda ws: "")
+        out.append(Frame("(open)", _settle(ws, g, driver), cv.w, cv.h, probe(ws)))
         for step in script:
             _step(ws, driver, step)
-            out.append(Frame(step, _settle(ws, g, driver), cv.w, cv.h))
+            out.append(Frame(step, _settle(ws, g, driver), cv.w, cv.h, probe(ws)))
     finally:
         ws.home.go_home()
         from runtime import scheduler
@@ -233,6 +241,14 @@ def check_recorded(name, surface, carts_dir=None, moved=None):
     body = load(name)
     moved = moved or {}
     fs = frames(body["config"], surface, body["script"], carts_dir)
+    if moved == BEHAVIOUR:
+        for i, (f, (step, want)) in enumerate(zip(fs, body["frames"])):
+            if f.state != body["states"][i]:
+                raise AssertionError("BEHAVIOUR %s: step %d (%r) left another state than the one "
+                                     "recorded at %s (config %s)\n  recorded: %s\n  the port: %s"
+                                     % (name, i, step, body["commit"], body["config"],
+                                        body["states"][i], f.state))
+        return fs
     for i, (f, (step, want)) in enumerate(zip(fs, body["frames"])):
         if i in moved:
             if f.digest() == want:
@@ -280,7 +296,7 @@ def frames_at(commit, surface_name, config, script):
                     "import uitree_parity as P, test_uitree_ports as T;"
                     "fs = P.frames(%r, T.SURFACES[%r], %r);"
                     "import runtime as R2; assert R2.__file__.startswith(%r), R2.__file__;"
-                    "sys.stdout.buffer.write(pickle.dumps([(f.step, f.buf, f.w, f.h) for f in fs]))"
+                    "sys.stdout.buffer.write(pickle.dumps([(f.step, f.buf, f.w, f.h, f.state) for f in fs]))"
                     % (str(ROOT / "tests"), old_tree, old_tree, config, surface_name, list(script), old_tree))
             env = dict(os.environ, PYTHONPATH=old_tree)
             r = subprocess.run([sys.executable, "-c", code], capture_output=True, env=env, cwd=old_tree)
@@ -311,6 +327,8 @@ def record_at(name, commit):
     RECORDS.mkdir(parents=True, exist_ok=True)
     body = {"surface": surface_name, "config": config, "commit": sha, "script": list(script),
             "frames": [[f.step, f.digest()] for f in fs]}
+    if any(f.state for f in fs):
+        body["states"] = [f.state for f in fs]
     (RECORDS / (name + ".json")).write_text(json.dumps(body, indent=1) + "\n", encoding="utf-8")
     print("recorded %s at %s: %d frames" % (name, sha, len(fs)))
     return 0

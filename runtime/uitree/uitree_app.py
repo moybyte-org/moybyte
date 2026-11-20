@@ -477,6 +477,19 @@ class Engine(S.Builder):
                 self.foot_r = got
                 rect = (rect[0], rect[1], rect[2], max(0, got[1] - rect[1]))
         prev, self.ids = self.ids, {}
+        moved, ahead = self._land_focus(prev)
+        self.rect = rect
+        self.dups = set()
+        self._lists_before = getattr(self, "_lists_now", set())
+        self._lists_now = set()
+        self.tv_stop = False            # a text view that is a stop draws this frame (the band's next)
+        self._kids(n, None, rect)
+        self._focus_after(moved, ahead, hint, last)
+
+    def _land_focus(self, prev):
+        """Before the page draws: focus onto what a handler named
+        (ui.focus), a fresh page's focus= node, or a list's moved cur=, in
+        the frame that draws it. (whether it moved, a node foreseen)."""
         moved = False
         want = [(self.want_focus, None)] if self.want_focus is not None else []
         if self.fresh and prev:
@@ -508,13 +521,13 @@ class Engine(S.Builder):
                     self._sync[k] = key
                 elif key == self.want_focus:
                     self.want_focus = None
-        self.rect = rect
-        self.dups = set()
         self._lists_ever = getattr(self, "_lists_ever", set()) | before
-        self._lists_before = getattr(self, "_lists_now", set())
-        self._lists_now = set()
-        self.tv_stop = False            # a text view that is a stop draws this frame (the band's next)
-        self._kids(n, None, rect)
+        return moved, ahead
+
+    def _focus_after(self, moved, ahead, hint, last=None):
+        """After the page drew: what holds focus now, a commit field left
+        (`last`: what held focus the frame before), and a list's cur=
+        following focus onto its rows."""
         if ahead is not None and ahead not in self.ids:
             self.want_focus = ahead                     # foreseen and not drawn after all: next frame
         f = _v.focus()
