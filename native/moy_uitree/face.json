@@ -1,0 +1,7 @@
+{
+  "moy_uitree": {
+    "about": "the UI engine, native/moy_uitree: one Engine object a front end drives",
+    "host": "moy_uitree_binding",
+    "lazy": true
+  }
+}

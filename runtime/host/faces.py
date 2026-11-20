@@ -26,6 +26,7 @@ FACES = (
     ("moy_store", "moy_store_binding", True, False),
     ("moy_ufiles", "moy_ufiles_binding", True, False),
     ("moy_ui", "moy_ui_binding", True, False),
+    ("moy_uitree", "moy_uitree_binding", False, True),
     ("moy_usb", "moy_usb", False, True),
     ("moycore", "moycore", False, True),
 )

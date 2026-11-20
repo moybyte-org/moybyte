@@ -19,12 +19,9 @@ import uitree as S
 from uitree_app import Engine
 
 try:
-    from moy_uitree import Engine as _New        # MicroPython: the module itself
-except ImportError:
-    try:
-        from runtime.moy_uitree_binding import Engine as _New     # the host: its one library
-    except ImportError:     # pragma: no cover - a tier with neither
-        _New = None
+    from moy_uitree import Engine as _New        # the board's module, or the host's face of it
+except ImportError:         # pragma: no cover - a tier with no engine
+    _New = None
 
 
 class EngineGap(S.UIError):

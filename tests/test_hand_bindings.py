@@ -35,6 +35,8 @@ HAND_WRITTEN = {
     "moy_play": "object types (Tick, Match) and the Player's per-frame rows, "
                 "the hot path the generator leaves by hand",
     "moy_sh": "object types (Screen, Job, Face) over the C shell's state",
+    "moy_uitree": "an object type (Engine) over the UI engine's store; its frame takes "
+                  "the toolkit's context and sink from moy_ui's C",
     "moy_ui": "the toolkit's engine rows, buffer-heavy and on the frame path; "
               "its engine verbs are generated (`api`, tools/gen_os/ui.py)",
     "moy_guard": "runs a Python callback under the scheduler's slice and stops it "
