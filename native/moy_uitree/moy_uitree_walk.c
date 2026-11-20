@@ -396,8 +396,8 @@ static void row_wrote(uit_t *e, int k, int model, int row, int now)
     M->ver++;
     if (e->flags & UIT_F_TRACE) {
         uit_buf_t key = {0};
-        const char *kv = uit_cell(e, model, row, M->key), *f = uit_str(e, M->fname[N->cur]);
-        if (M->ftype[M->key] == UIT_TEXT)
+        const char *kv = uit_cell(e, model, row, M->key), *f = uit_str(e, M->mf->fname[N->cur]);
+        if (M->mf->ftype[M->key] == UIT_TEXT)
             uit_buf_repr(&key, kv, strlen(kv));
         else
             uit_buf_printf(&key, "%s", kv);
@@ -1658,27 +1658,41 @@ static void draw_table(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k)
         moy_ui_api_label(c, s, n ? sspan(e, a, n) : span_of("", 0), NULL);
         return;
     }
+    // its cells made again only where the build, its model or a state its columns read moved
     uit_buf_t *B = &e->cells;
-    B->n = 0;
+    int engine = 0;
+    uint32_t ckey = (uint32_t)e->gen * 65537u + (uint32_t)M->ver * 257u + (uint32_t)M->nrows;
+    KIDS(k, g0)
+    if (NODE(g0)->kind == UIT_COL)
+        ckey += uit_tmpl_key(e, NODE(g0)->t_main, &engine);
     int ncol = 0;
+    uint32_t cols_n = 0;
     for (int p = N->props; p != (int)UIT_NONE; p = e->props[p].next)
         if (!strcmp(uit_str(e, e->props[p].name), "cols")) {
-            uit_buf_puts(B, uit_str(e, e->props[p].src));
+            cols_n += (uint32_t)strlen(uit_str(e, e->props[p].src)) + 1;
             ncol++;
         }
-    uint32_t cols_n = B->n, mark = e->scratch.n;
-    for (int r = 0; r < M->nrows; r++) {
-        int i = 0;
-        KIDS(k, g) {
-            if (NODE(g)->kind != UIT_COL || i >= ncol)
-                continue;
-            uint32_t n = 0, a = NODE(g)->t_main >= 0 ? uit_tmpl_render(e, NODE(g)->t_main, m, r, &n) : 0;
-            uit_buf_put(B, e->scratch.p + a, n);
-            e->scratch.n = mark;
-            i++;
+    if (engine || e->cells_node != k + 1 || e->cells_key != ckey || B->n < cols_n) {
+        B->n = 0;
+        for (int p = N->props; p != (int)UIT_NONE; p = e->props[p].next)
+            if (!strcmp(uit_str(e, e->props[p].name), "cols"))
+                uit_buf_puts(B, uit_str(e, e->props[p].src));
+        uint32_t mark = e->scratch.n;
+        for (int r = 0; r < M->nrows; r++) {
+            int i = 0;
+            KIDS(k, g) {
+                if (NODE(g)->kind != UIT_COL || i >= ncol)
+                    continue;
+                uint32_t n = 0, a = NODE(g)->t_main >= 0 ? uit_tmpl_render(e, NODE(g)->t_main, m, r, &n) : 0;
+                uit_buf_put(B, e->scratch.p + a, n);
+                e->scratch.n = mark;
+                i++;
+            }
+            for (; i < ncol; i++)
+                uit_buf_put(B, "", 0);
         }
-        for (; i < ncol; i++)
-            uit_buf_put(B, "", 0);
+        e->cells_node = (int16_t)(k + 1);
+        e->cells_key = ckey;
     }
     moy_ui_over_t o;
     moy_ui_over_none(&o);
@@ -2207,6 +2221,35 @@ static void focus_after(uit_t *e, moy_ui_ctx_t *c, int moved, const char *ahead,
 
 // -- the frame ----------------------------------------------------------------------------
 
+// Every state's version, the builds and the drafts' edits: moves whenever anything a frame reads may have.
+static uint32_t still_sum(const uit_t *e)
+{
+    uint32_t g = (uint32_t)e->gen * 65537u + e->edits;
+    for (int i = 0; i < e->nslots; i++)
+        g += (uint32_t)e->slots[i].ver * (uint32_t)(2 * i + 1);
+    return g;
+}
+
+int uit_still(uit_t *e, const moy_ui_ctx_t *c, int x, int y, int w, int h, int flags, int fs, int input)
+{
+    if (!e->still_ok || !e->nnodes || e->fresh || e->want || e->evat < e->nevs || e->trace_at < e->trace.n)
+        return 0;
+    if ((flags & (UIT_F_UP | UIT_F_DOWN)) || flags != e->flags || fs != e->fs || input != e->input
+        || x != e->cx || y != e->cy || w != e->cw || h != e->ch)
+        return 0;
+    if (still_sum(e) != e->still_ver || e->has_focused != e->still_had
+        || (e->has_focused && (e->focused.node != e->still_focus.node || e->focused.row != e->still_focus.row
+                               || e->focused.gen != e->still_focus.gen
+                               || strcmp(e->focused.id, e->still_focus.id))))
+        return 0;
+    const int32_t *in = c->in;
+    if (in[MOY_UI_IN_BTNP] || in[MOY_UI_IN_KEY] || in[MOY_UI_IN_REP] || in[MOY_UI_IN_KEYREP]
+        || in[MOY_UI_IN_WHEEL_X] || in[MOY_UI_IN_WHEEL_Y] || (in[MOY_UI_IN_PTR] & (MOY_UI_P_HELD | MOY_UI_P_EDGE))
+        || c->act || c->press)
+        return 0;
+    return !moy_ui_api_moved(c) && !moy_ui_api_moving(c) && !moy_ui_api_owes(c);
+}
+
 int uit_frame(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int x, int y, int w, int h,
               int flags, int fs, int input)
 {
@@ -2229,8 +2272,20 @@ int uit_frame(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int x, int y, i
         int32_t one = 1;
         moy_ui_over_put(&o, MOY_UI_OV_BARE, &one);
     }
+    // the engine values the page's text names, as this frame begins (its gens count them)
+    e->gv = 0;
+    if (e->gen_vals & GV_FOCUS) {
+        char fv[UIT_ID_MAX + 1];
+        int n = moy_ui_api_focus(c, span_of(NULL, 0), fv, sizeof fv);
+        uint32_t h = 2166136261u;
+        for (int i = 0; i < n; i++)
+            h = (h ^ (uint8_t)fv[i]) * 16777619u;
+        e->gv += h;
+    }
+    if (e->gen_vals & GV_INPUT)
+        e->gv += (uint32_t)(input + 1) * 40503u;
     if ((flags & UIT_F_GEN) && e->gen_safe) {
-        uint32_t g = (uint32_t)e->gen + e->edits;
+        uint32_t g = (uint32_t)e->gen + e->edits + e->gv;
         for (int i = 0; i < e->nslots; i++)
             if (e->slots[i].in_gen)
                 g += e->slots[i].ver;
@@ -2366,5 +2421,9 @@ int uit_frame(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int x, int y, i
         uit_buf_free(&hb2);
     }
     uit_buf_free(&hb);
+    e->still_ver = still_sum(e);
+    e->still_focus = e->focused;
+    e->still_had = (uint8_t)e->has_focused;
+    e->still_ok = !owe;
     return (e->nevs - e->evat) | (owe ? 1 << 16 : 0);
 }

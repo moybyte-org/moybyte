@@ -57,6 +57,7 @@ _SIGS = (
     ("uit_back_dialog", [_P, c.c_char_p, _Z], _I),
     ("uit_back_popover", [_P, c.c_char_p, _Z], _I),
     ("uit_unfocused", [_P], _I),
+    ("uit_still", [_P, _P, _I, _I, _I, _I, _I, _I, _I], _I),
     ("uit_dump", [_P, c.c_char_p, _Z], _I),
     ("uit_stats", [_P, _I32], _I),
     ("uit_mem", [c.POINTER(c.c_uint32)], None),
@@ -232,6 +233,14 @@ class Engine:
             x, self._raised = self._raised, None
             raise x
         return r
+
+    def still(self, ctx, x, y, w, h, flags, fs, inp):
+        L = self._L
+        buf = (c.c_char * len(ctx)).from_buffer(ctx)
+        p = L.moy_ui_api_ctx(c.addressof(buf), len(ctx))
+        r = L.uit_still(self._e, p, x, y, w, h, flags, fs, inp)
+        del buf
+        return bool(r)
 
     def on_draw(self, fn):
         """A canvas's draw, `fn(node, x, y, w, h)`, called inside the frame;

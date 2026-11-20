@@ -41,6 +41,12 @@ int uit_buf_printf(uit_buf_t *b, const char *fmt, ...);         // appended, no 
 void uit_buf_repr(uit_buf_t *b, const char *s, size_t n);       // Python's repr of a text
 void uit_buf_free(uit_buf_t *b);
 
+// A model's fields: each one's name (pool) and type.
+typedef struct {
+    uint8_t ftype[UIT_FIELDS];
+    uint16_t fname[UIT_FIELDS];
+} uit_fields_t;
+
 // A state slot.
 typedef struct {
     uint16_t name;              // pool
@@ -53,9 +59,8 @@ typedef struct {
     double f;
     char *s;                    // a text, an enum's value, a row_of's key
     uint32_t sn, scap;
-    // a model
-    uint8_t ftype[UIT_FIELDS];
-    uint16_t fname[UIT_FIELDS];
+    // a model: its fields' names and types (made by uit_model, a model's alone)
+    uit_fields_t *mf;
     int nrows;
     char *cells;                // every cell's text, NUL-terminated, row by row
     uint32_t *at;               // nrows * nf offsets into cells
@@ -252,7 +257,9 @@ struct uit {
     uit_draft_t *drafts;
     int ndrafts, cdrafts;
     uint32_t edits;             // drafts' edits: the page's gen moves with them
-    uint8_t gen_safe;           // no template names @focus, @input or @touch
+    uint8_t gen_safe;           // the page may carry a gen: no canvas, not too many states
+    uint8_t gen_vals;           // the engine values its text names, which its gens count (GV_*)
+    uint32_t gv;                // what they are this frame, hashed (the focus at the frame's begin, the input)
     // a text view's lines: where each line of text slot `tvl_slot` starts, as its version `tvl_ver` held
     uint32_t *tvl;
     int tvl_n, tvl_cap;
@@ -267,8 +274,17 @@ struct uit {
     uint8_t in_pop;             // drawing a popover's body: a split there lays out as its cells (`_pop_split`)
     int16_t foot;               // the page's shown foot this frame, or -1
     int32_t foot_r[4];          // its rect
-    uit_buf_t cells;            // a table's columns and cells, made each frame it draws
+    uit_buf_t cells;            // a table's columns and cells, made again where its key moved
+    uint32_t cells_key;         // what they were made from: the build, the model's and the cols' states' versions
+    int16_t cells_node;         // the table they are, + 1 (0 none)
+    // the frame drawn last, for uit_still: the versions it read and its focus
+    uint32_t still_ver;
+    uit_id_t still_focus;
+    uint8_t still_ok, still_had;
 };
+
+// The engine values a page's gens count: @focus, @input or @touch.
+enum { GV_FOCUS = 1, GV_INPUT = 2 };
 
 // A list: rows and a table keep a model, a cur= and a removal order.
 #define UIT_IS_LIST(kind) ((kind) == UIT_ROWS || (kind) == UIT_TABLE || (kind) == UIT_CARDS)
@@ -277,6 +293,9 @@ struct uit {
 // A cards list's region's gen (`_cell_gens`): the builds and edits, and the versions of what its
 // rows read; -1 past UIT_GEN_SLOTS.
 int32_t uit_cell_gen(uit_t *e, int k);
+// What template `t` reads, as a key: the versions of the states it reads summed; `*engine` set
+// where it reads an engine value (@focus, @input, a system bool, current=), which no key holds.
+uint32_t uit_tmpl_key(const uit_t *e, int t, int *engine);
 // The case of switch node `k` its state's value names, else its "_", else -1.
 int uit_case_of(uit_t *e, int k);
 

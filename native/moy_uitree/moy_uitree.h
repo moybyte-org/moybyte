@@ -141,6 +141,16 @@ void uit_want_focus(uit_t *e, const char *key);
 // redraw of the whole page.
 int uit_frame(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int x, int y, int w, int h,
               int flags, int fs, int input);
+// Whether the frame drawn last is what a frame now would draw, so a host
+// may leave its pixels and skip uit_frame: the same build, no state's
+// version and no draft moved, the same focus, no event, trace line or
+// wanted focus waiting, the same flags, content rect, font scale and input,
+// and the toolkit's context at rest -- no input this frame (a key, a
+// repeat, a press, the wheel, an activation), no begin that moved focus or
+// a scroll, no page moving on its own and no frame owed. Called after the
+// host began the frame (its begin has taken the input). 0 before a first
+// frame and after an open, a build or a close.
+int uit_still(uit_t *e, const moy_ui_ctx_t *c, int x, int y, int w, int h, int flags, int fs, int input);
 // A canvas's draw: the walk calls it inside the frame, in the page's order,
 // with the canvas's node and the rect it draws in; the front end binds what
 // each node draws (a Python function, a Lua one, C).

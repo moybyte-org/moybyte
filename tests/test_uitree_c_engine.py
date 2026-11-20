@@ -153,3 +153,47 @@ def test_a_pushed_page_opens_on_its_own_focus_node(engine, tmp_path):
     focus = P.Surface(opened, probe=lambda ws: seen["app"].engine.focus_key)
     fs = P.frames(C.CONFIGS[0], focus, ["k:down", "k:a"])
     assert [f.state for f in fs] == ["add", "more", "more"], [f.state for f in fs]
+
+
+def test_still_answers_a_frame_that_would_draw_what_the_last_drew(tmp_path, monkeypatch):
+    """`uit_still`, asked inside each frame the host draws before the page's
+    walk: False on the first frame, on a frame that took a key and on the
+    frame after an action moved state; True on a frame nothing reached."""
+    import uitree_app
+    import uitree_c
+    import uitree_parity as P
+    app_py = tmp_path / "still" / "app.py"
+    app_py.parent.mkdir()
+    app_py.write_text(PUSHED)
+    mod = C._module(str(app_py))
+    cls = uitree_app.app_layer("still_c", "Still", mod.build, engine=uitree_c.CEngine)
+    seen, said, step = {}, [], ["(open)"]
+    paint = uitree_c.CEngine.paint
+
+    def watched(self, dt, cv, th, content, desk):
+        said.append((step[0], self.still(content, desk) if self._x is not None else None))
+        paint(self, dt, cv, th, content, desk)
+        step[0] = "after " + step[0].split(" ")[-1]
+    monkeypatch.setattr(uitree_c.CEngine, "paint", watched)
+
+    def opened(ws):
+        seen["app"] = P.host(ws, cls)
+
+    def probe(ws):
+        return ""
+    script = ["f:3", "k:down", "f:3", "k:a", "f:3"]
+    orig = P._step
+
+    def stepped(ws, driver, s):
+        step[0] = s
+        orig(ws, driver, s)
+    monkeypatch.setattr(P, "_step", stepped)
+    P.frames(C.CONFIGS[0], P.Surface(opened, probe=probe), script)
+    print(said)
+    assert said[0][1] in (None, False)
+    by = {}
+    for k, v in said:
+        by.setdefault(k, []).append(v)
+    assert by["k:down"][0] is False and by["k:a"][0] is False, said
+    assert by["after k:a"][0] is False, said      # the action's commit moved n
+    assert True in by["f:3"], said

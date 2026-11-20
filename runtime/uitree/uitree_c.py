@@ -461,13 +461,8 @@ class CEngine(Engine):
             self.want_focus = None
         kind = _v.input_kind()
         self.input = kind if kind in S.INPUTS else "keys"
-        b = self._buttons
-        flags = ((F_DESK if desk else 0) | (F_ON_BAR if _D._ON_BAR[0] else 0)
-                 | (F_BAND if self.band else 0) | (F_BARE if self.bare else 0) | (F_GEN if self._gen_on else 0)
-                 | (F_TRACE if S.TRACING else 0) | (F_UP if b & 4 else 0) | (F_DOWN if b & 8 else 0)
-                 | (min(255, len(self.pages)) << F_PAGES_SHIFT))
         t = _D.UI_TARGET
-        r = x.frame(t[0], cv, t[2], content[0], content[1], content[2], content[3], flags, fs,
+        r = x.frame(t[0], cv, t[2], content[0], content[1], content[2], content[3], self._flags(desk), fs,
                     INPUTS.index(self.input))
         self._buttons = 0
         if r & 0xffff or S.TRACING:
@@ -487,6 +482,28 @@ class CEngine(Engine):
             self.frame_calls.append(self.calls)
         if q or self.timers or self.work_run or self.decl.posts:
             self._damage.all()
+
+    def _flags(self, desk):
+        b = self._buttons
+        return ((F_DESK if desk else 0) | (F_ON_BAR if _D._ON_BAR[0] else 0)
+                | (F_BAND if self.band else 0) | (F_BARE if self.bare else 0) | (F_GEN if self._gen_on else 0)
+                | (F_TRACE if S.TRACING else 0) | (F_UP if b & 4 else 0) | (F_DOWN if b & 8 else 0)
+                | (min(255, len(self.pages)) << F_PAGES_SHIFT))
+
+    def still(self, content, desk):
+        """Whether the frame drawn last is what a frame drawn now into
+        `content` would draw (`uit_still`): no state, draft, focus, event or
+        build moved, the frame's flags and rect are the same, and the
+        toolkit's context, its frame begun, took no input and is at rest."""
+        if not self._visiting() or self.q or self.timers or self.decl.posts or self.want_focus is not None:
+            return False
+        self.committed()
+        kind = _v.input_kind()
+        kind = kind if kind in S.INPUTS else "keys"
+        fs = max(1, getattr(self.cv, "font_scale", 1)) if self.cv is not None else 1
+        t = _D.UI_TARGET
+        return self._x.still(t[0], content[0], content[1], content[2], content[3], self._flags(desk), fs,
+                             INPUTS.index(kind))
 
     # -- asked between frames ----------------------------------------------------------
 

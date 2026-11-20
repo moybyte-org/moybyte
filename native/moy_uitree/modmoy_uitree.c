@@ -296,6 +296,16 @@ static mp_obj_t eng_on_draw(mp_obj_t self, mp_obj_t fn)
 static MP_DEFINE_CONST_FUN_OBJ_2(eng_on_draw_obj, eng_on_draw);
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(eng_frame_obj, 11, 11, eng_frame);
 
+// still(ctx, x, y, w, h, flags, fs, input) -> whether the frame drawn last is what a frame now draws
+static mp_obj_t eng_still(size_t n, const mp_obj_t *a)
+{
+    (void)n;
+    return mp_obj_new_bool(uit_still(eng(a[0]), moy_ui_mp_ctx(a[1]), mp_obj_get_int(a[2]), mp_obj_get_int(a[3]),
+                                     mp_obj_get_int(a[4]), mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
+                                     mp_obj_get_int(a[7]), mp_obj_get_int(a[8])));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(eng_still_obj, 9, 9, eng_still);
+
 // An event's, a trace line's or an id's text: on the VM task's stack for the
 // call, so the module keeps no static RAM.
 #define EVBUF 512
@@ -458,6 +468,7 @@ static const mp_rom_map_elem_t eng_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_free), MP_ROM_PTR(&eng_del_obj) },
     { MP_ROM_QSTR(MP_QSTR_want_focus), MP_ROM_PTR(&eng_want_focus_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame), MP_ROM_PTR(&eng_frame_obj) },
+    { MP_ROM_QSTR(MP_QSTR_still), MP_ROM_PTR(&eng_still_obj) },
     { MP_ROM_QSTR(MP_QSTR_next), MP_ROM_PTR(&eng_next_obj) },
     { MP_ROM_QSTR(MP_QSTR_trace_next), MP_ROM_PTR(&eng_trace_next_obj) },
     { MP_ROM_QSTR(MP_QSTR_can), MP_ROM_PTR(&eng_can_obj) },

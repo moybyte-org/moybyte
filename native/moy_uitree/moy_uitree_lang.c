@@ -39,7 +39,7 @@ int uit_field_find(const uit_t *e, int model, const char *name, size_t n)
         return -1;
     const uit_slot_t *M = &e->slots[model];
     for (int f = 0; f < M->nf; f++) {
-        const char *s = uit_str(e, M->fname[f]);
+        const char *s = uit_str(e, M->mf->fname[f]);
         if (strlen(s) == n && !memcmp(s, name, n))
             return f;
     }
@@ -63,7 +63,7 @@ int uit_row_slot_current(const uit_t *e, int slot, int model, int row)
     if (row < 0 || row >= M->nrows)
         return 0;
     const char *k = uit_cell(e, model, row, M->key);
-    int kt = M->ftype[M->key];
+    int kt = M->mf->ftype[M->key];
     if (S->type == UIT_INT)
         return kt == UIT_INT && strtol(k, NULL, 10) == S->i;
     return kt == UIT_TEXT && strlen(k) == S->sn && !memcmp(k, S->s ? S->s : "", S->sn);
@@ -151,7 +151,7 @@ static int ref_parse(uit_t *e, const char *s, size_t n, int model, ref_t *r)
         int f = uit_field_find(e, model, s + 1, n - 1);
         if (f < 0)
             return uit_check_fail(e, "T02", UIT_MSG("rows have no field %.*s", "%.*s"), (int)(n - 1), s + 1);
-        *r = (ref_t){RK_FIELD, e->slots[model].ftype[f], -1, (int16_t)f};
+        *r = (ref_t){RK_FIELD, e->slots[model].mf->ftype[f], -1, (int16_t)f};
         return 0;
     }
     const char *dot = memchr(s, '.', n);
@@ -171,7 +171,7 @@ static int ref_parse(uit_t *e, const char *s, size_t n, int model, ref_t *r)
     if (f < 0)
         return uit_check_fail(e, "T02", UIT_MSG("rows of %s have no field %.*s", "%s %.*s"), uit_str(e, e->slots[S->model].name),
                               (int)(n - bn - 1), dot + 1);
-    *r = (ref_t){RK_ROWOF, e->slots[S->model].ftype[f], (int16_t)slot, (int16_t)f};
+    *r = (ref_t){RK_ROWOF, e->slots[S->model].mf->ftype[f], (int16_t)slot, (int16_t)f};
     return 0;
 }
 
@@ -235,13 +235,13 @@ static void ref_get(uit_t *e, uint8_t rk, int16_t ref, int16_t f, int model, int
     }
     case RK_FIELD:
         if (model >= 0)
-            val_of_text(v, e->slots[model].ftype[f], uit_cell(e, model, row, f));
+            val_of_text(v, e->slots[model].mf->ftype[f], uit_cell(e, model, row, f));
         break;
     case RK_ROWOF: {
         const uit_slot_t *S = &e->slots[ref];
         int m = S->model;
         int r = uit_row_find(e, m, S->s ? S->s : "", S->sn);
-        val_of_text(v, e->slots[m].ftype[f], r < 0 ? "" : uit_cell(e, m, r, f));
+        val_of_text(v, e->slots[m].mf->ftype[f], r < 0 ? "" : uit_cell(e, m, r, f));
         break;
     }
     case RK_SYS: {

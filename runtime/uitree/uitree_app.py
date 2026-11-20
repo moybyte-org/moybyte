@@ -192,6 +192,8 @@ class Engine(S.Builder):
         self._page_o = {"gen": 0}       # the page's gen: moves when what its rows show may have
         self._gen_ok = False
         self._page_names = ()           # the states the page's gen counts: all but its cells' own
+        self._gen_vals = 0              # the engine values its text names (`_engine_values`)
+        self._gv = 0                    # what they are this frame, hashed
         self._cells = {}                # a split's region (its group) -> [its override block, the states it reads]
         self._split_w = {}              # a split -> [its versions, its span, its widths]; False: no link in it
         self._edits = 0                 # a commit field's draft edits, which move the gen too
@@ -392,6 +394,12 @@ class Engine(S.Builder):
 
     _started = False        # the frame's start ran in its hosted phase
 
+    def still(self, content, desk):
+        """Whether the frame drawn last is what a frame drawn now would
+        draw, so a host may keep its pixels: the C engine answers it
+        (`uit_still`); this replay promises nothing."""
+        return False
+
     def _start(self, dt):
         """The frame's start: its posts and the timers due, before anything
         is placed."""
@@ -417,6 +425,7 @@ class Engine(S.Builder):
             self._new_build = True
             self._split_w = {}
             self._gen_ok = self._gen_on and self._gen_safe(self.root)
+            self._gen_vals = self._engine_values(self.root) if self._gen_ok else 0
             if self._gen_ok:
                 self._cell_gens(self.root)
 
@@ -429,20 +438,28 @@ class Engine(S.Builder):
     GEN_UNSAFE = ("canvas", "picture", "cards", "text_editor", "legacy")
 
     def _gen_safe(self, n):
-        """Whether every pixel the page's rows draw comes from state, so the
-        page's gen (the sum of the versions of the states it reads) moves
-        whenever one may: no canvas, picture or text editor, and no template
-        naming @focus, @input or @touch. A text view's lines are its state's
-        and its scroll the toolkit's own region; cards or a picture with no
-        image draw only their state (an icon on a tile)."""
+        """Whether every pixel the page's rows draw comes from state and
+        the engine values its gens count, so the page's gen (the sum of the
+        versions of the states it reads) moves whenever one may: no canvas,
+        picture or text editor. A text view's lines are its state's and its
+        scroll the toolkit's own region; cards or a picture with no image
+        draw only their state (an icon on a tile)."""
         if n.kind in ("cards", "picture") and not self._images(n):
             pass
         elif n.kind in self.GEN_UNSAFE:
             return False
-        for v in n.src.values():
-            if isinstance(v, str) and ("@focus" in v or "@input" in v or "@touch" in v):
-                return False
         return all(self._gen_safe(k) for k in n.kids)
+
+    def _engine_values(self, n):
+        """The engine values the page's text names, which its gens count:
+        1 @focus (the focus as the frame begins), 2 @input or @touch."""
+        got = 0
+        for v in n.src.values():
+            if isinstance(v, str):
+                got |= (1 if "@focus" in v else 0) | (2 if "@input" in v or "@touch" in v else 0)
+        for k in n.kids:
+            got |= self._engine_values(k)
+        return got
 
     @staticmethod
     def _images(n):
@@ -559,7 +576,7 @@ class Engine(S.Builder):
         return g
 
     def _gen_of(self, names):
-        ver, g = self.s._ver, self.builds + self._edits
+        ver, g = self.s._ver, self.builds + self._edits + self._gv
         for k in names:
             g += ver[k]
         return g & 0x7fffffff
@@ -626,6 +643,10 @@ class Engine(S.Builder):
         o["id"] = self._page_id()
         if self.bare:
             o["bare"] = True
+        gv = self._gen_vals
+        if gv:                                  # the engine values the gens count, as the frame begins
+            self._gv = ((hash(_v.focus()) & 0xffffff) if gv & 1 else 0) + (
+                (S.INPUTS.index(self.input) + 1) * 40503 if gv & 2 else 0)
         if self._gen_ok:
             o["gen"] = self._gen_of(self._page_names)
         else:

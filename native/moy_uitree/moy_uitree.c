@@ -283,6 +283,8 @@ static void buf_fit(uit_buf_t *b)
 
 void uit_close(uit_t *e)
 {
+    e->still_ok = 0;
+    e->cells_node = 0;
     free_drew(e);
     for (int i = 0; i < e->nslots; i++) {
         uit_slot_t *S = &e->slots[i];
@@ -346,6 +348,7 @@ void uit_free(uit_t *e)
         UIT_FREE(e->slots[i].cells);
         UIT_FREE(e->slots[i].at);
         UIT_FREE(e->slots[i].sync);
+        UIT_FREE(e->slots[i].mf);
     }
     for (int i = 0; i < e->norders; i++) {
         UIT_FREE(e->orders[i].key);
@@ -421,6 +424,8 @@ int uit_model(uit_t *e, int slot, const char *names, size_t nlen, const uint8_t 
         key < 0 || key >= nf)
         return uit_fail(e, UIT_E_ARG, UIT_MSG("model: bad slot %d or %d fields", "model %d %d"), slot, nf);
     uit_slot_t *S = &e->slots[slot];
+    if (!S->mf && !(S->mf = UIT_MALLOC(sizeof *S->mf)))
+        return UIT_E_NOMEM;
     S->nf = (uint8_t)nf;
     S->key = (uint8_t)key;
     size_t at = 0;
@@ -429,8 +434,8 @@ int uit_model(uit_t *e, int slot, const char *names, size_t nlen, const uint8_t 
         int o = pool_put(e, names + at, n);
         if (o < 0)
             return UIT_E_NOMEM;
-        S->fname[f] = (uint16_t)o;
-        S->ftype[f] = types[f];
+        S->mf->fname[f] = (uint16_t)o;
+        S->mf->ftype[f] = types[f];
         at += n + 1;
     }
     return 0;
@@ -941,7 +946,7 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         // a toggle bound to a bool field of its list's row: the row's cell is its value
         int m = uit_model_of(e, node);
         int f = uit_field_find(e, m, src, strlen(src));
-        if (f < 0 || e->slots[m].ftype[f] != UIT_BOOL)
+        if (f < 0 || e->slots[m].mf->ftype[f] != UIT_BOOL)
             return uit_fail(e, UIT_E_NAME, UIT_MSG("toggle .%s: no bool field of its rows", "toggle .%s"), src);
         N->slot = (int16_t)m;
         N->cur = (int16_t)f;
@@ -997,7 +1002,7 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
     if (kind == UIT_TEXT_VIEW && !strcmp(name, "field")) {
         // a view of a model: each row's line, this text field
         int f = N->slot >= 0 ? uit_field_find(e, N->slot, src, strlen(src)) : -1;
-        if (f < 0 || e->slots[N->slot].ftype[f] != UIT_TEXT)
+        if (f < 0 || e->slots[N->slot].mf->ftype[f] != UIT_TEXT)
             return uit_fail(e, UIT_E_NAME, UIT_MSG("text_view .%s: no text field of its model", "text_view .%s"), src);
         N->cur = (int16_t)f;
         return 0;
@@ -1076,7 +1081,7 @@ int uit_node_action(uit_t *e, int node, int action)
 
 static int names_engine_value(const char *src)
 {
-    return strstr(src, "@focus") || strstr(src, "@input") || strstr(src, "@touch");
+    return (strstr(src, "@focus") ? GV_FOCUS : 0) | (strstr(src, "@input") || strstr(src, "@touch") ? GV_INPUT : 0);
 }
 
 // The states a template, a condition, a node reads (`_reads`): marked in m[slot].
@@ -1112,6 +1117,44 @@ static void mark_tmpl(const uit_t *e, int t, uint8_t *m)
 }
 
 // Node `k`'s own reads; a list's cur= where `cur`; hint= alone where `hint_only`.
+static int cond_engine(const uit_t *e, int c)
+{
+    if (c < 0)
+        return 0;
+    const uit_cond_t *C = &e->conds[c];
+    for (int i = 0; i < C->n; i++) {
+        int rk = e->terms[C->first + i].rk;
+        if (rk != RK_SLOT && rk != RK_ROWOF && rk != RK_FIELD)
+            return 1;
+    }
+    return 0;
+}
+
+uint32_t uit_tmpl_key(const uit_t *e, int t, int *engine)
+{
+    if (t < 0)
+        return 0;
+    uint32_t g = 0;
+    const uit_tmpl_t *T = &e->tmpls[t];
+    for (int i = 0; i < T->ncode; i++) {
+        const uit_op_t *o = &e->ops[T->code + i];
+        if (o->op == OP_CHOICE) {
+            *engine |= cond_engine(e, o->ref);
+            uint8_t m[UIT_GEN_SLOTS] = {0};
+            mark_cond(e, o->ref, m);
+            for (int j = 0; j < e->nslots && j < UIT_GEN_SLOTS; j++)
+                if (m[j])
+                    g += (uint32_t)e->slots[j].ver * (uint32_t)(2 * j + 1);
+            g += uit_tmpl_key(e, (int16_t)o->c, engine) + uit_tmpl_key(e, (int16_t)o->d, engine);
+        } else if ((o->rk == RK_SLOT || o->rk == RK_ROWOF) && o->ref >= 0) {
+            g += (uint32_t)e->slots[o->ref].ver * (uint32_t)(2 * o->ref + 1);
+        } else if (o->rk && o->rk != RK_FIELD) {
+            *engine = 1;
+        }
+    }
+    return g;
+}
+
 static void mark_node(const uit_t *e, int k, uint8_t *m, int cur, int hint_only)
 {
     const uit_node_t *N = &e->nodes[k];
@@ -1168,7 +1211,7 @@ static void mark_cells(const uit_t *e, int k, uint8_t *m)
 int32_t uit_cell_gen(uit_t *e, int k)
 {
     uint8_t m[UIT_GEN_SLOTS] = {0};
-    uint32_t g = (uint32_t)e->gen + e->edits;
+    uint32_t g = (uint32_t)e->gen + e->edits + e->gv;
     if (e->nslots > UIT_GEN_SLOTS)
         return -1;
     mark_tree(e, k, m, 0, 0);
@@ -1185,12 +1228,11 @@ int32_t uit_cell_gen(uit_t *e, int k)
 static void gen_of_build(uit_t *e)
 {
     e->gen_safe = e->nslots <= UIT_GEN_SLOTS;
+    e->gen_vals = 0;
     for (int t = e->m_tmpls; t < e->ntmpls; t++)
-        if (names_engine_value(uit_str(e, e->tmpls[t].src)))
-            e->gen_safe = 0;
+        e->gen_vals |= (uint8_t)names_engine_value(uit_str(e, e->tmpls[t].src));
     for (int c = e->m_conds; c < e->nconds; c++)
-        if (names_engine_value(uit_str(e, e->conds[c].src)))
-            e->gen_safe = 0;
+        e->gen_vals |= (uint8_t)names_engine_value(uit_str(e, e->conds[c].src));
     for (int k = 0; k < e->nnodes; k++)
         if (e->nodes[k].kind == UIT_CANVAS)
             e->gen_safe = 0;
@@ -1245,6 +1287,7 @@ void uit_on_draw(uit_t *e, uit_draw_fn fn, void *ud)
 
 void uit_open(uit_t *e)
 {
+    e->still_ok = 0;
     e->nids = e->nprev = 0;
     e->has_focused = 0;
     e->focus_key[0] = 0;
