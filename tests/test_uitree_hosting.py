@@ -190,14 +190,54 @@ def test_a_lines_view_that_follows_opens_at_its_foot_and_scrolls_a_new_line_in(t
     assert step in (13, 14, 15, 16), step
 
 
-def test_a_canvas_that_is_a_splits_cell_draws_into_that_cell(tmp_path):
-    """§7 split: each kid is a cell; a canvas there is handed its cell's
-    rect, not a row stacked at the page's top."""
+def _split(tmp_path, config):
     import uitree_app
     import uitree_kinds as K
     K.DRAWN.clear()
     cls = uitree_app.app_layer("uitree_split", "Split", K.split_page)
-    fs = P.frames("tdeck_320x240_fs1_dark", lambda ws: P.host(ws, cls), ["f:1"], str(tmp_path / "carts"))
+    seen = {}
+
+    def opened(ws):
+        seen["app"] = P.host(ws, cls)
+    fs = P.frames(config, opened, ["f:2"], str(tmp_path / "carts"))
+    return K, fs, seen["app"].engine
+
+
+def test_a_canvas_that_is_a_splits_cell_draws_into_that_cell(tmp_path):
+    """§7 split: each kid is a cell; a canvas there is handed its cell's
+    rect, not a row stacked at the page's top."""
+    K, fs, _eng = _split(tmp_path, "tdeck_320x240_fs1_dark")
     x, y, w, h = K.DRAWN[-1]
     assert x < 20 and 100 < w < fs[0].w * 2 // 5 + 4, (x, w)
     assert h > 120, h
+
+
+def test_a_canvas_that_only_draws_is_no_stop(tmp_path):
+    """L6: a canvas with no pointer=, keys= or on= draws and is not a focus
+    stop: it wears no ring and the first stop is the column's button."""
+    K, fs, eng = _split(tmp_path, "tdeck_320x240_fs1_dark")
+    assert eng._ui.box("pad") is None
+    assert eng._ui.box("mark") is not None
+
+
+def test_a_splits_column_centres_and_its_button_takes_its_natural_width(tmp_path):
+    """L8: a row split's column shorter than its cell stands centred on the
+    cross axis; a button in it is as wide as its label needs, not the
+    column."""
+    K, fs, eng = _split(tmp_path, "p4_1024x600_fs2_windowed")
+    cx, cy, cw, ch = K.DRAWN[-1]                # the canvas's cell: the column's height beside it
+    bx, by, bw, bh = eng._ui.box("mark")
+    assert by > cy + ch // 3, (by, cy, ch)      # pushed down from the cell's top
+    assert by + bh < cy + ch * 2 // 3, (by, cy, ch)
+    assert bw < 200, bw
+
+
+def test_a_placed_page_on_the_desk_names_its_keys(tmp_path, monkeypatch):
+    """A split page on the desk draws the band of what its keys do, as a
+    page of rows does (the handheld cuts its band from the page)."""
+    import ui
+    said = []
+    real = ui.hints
+    monkeypatch.setattr(ui, "hints", lambda h, *a: (said.append(h), real(h, *a))[1])
+    _split(tmp_path, "p4_1024x600_fs2_windowed")
+    assert said and "back" in said[-1], said

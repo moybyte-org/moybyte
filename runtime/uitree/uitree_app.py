@@ -316,6 +316,10 @@ class Engine(S.Builder):
             band, rect = _v.cut_bottom(rect, 20 * self.fs)
             _v.at(*band)
             _v.hints(hint)
+        elif _v.hints_width(hint) > 0:  # the desk's band, at the page's foot, its room cut from the page
+            import ui_draw as _ud
+            _v.hints(hint)
+            rect = _v.cut_bottom(rect, _ud.metrics("value_row")[17] * self.fs)[1]
         prev, self.ids = self.ids, {}
         moved = False
         want = [(self.want_focus, None)] if self.want_focus is not None else []
@@ -734,9 +738,19 @@ class Engine(S.Builder):
             self.fire(n.act, self.args_for(n.act, row, n.l.get("arg")), n, row)
 
     def _r_button(self, n, row, rect, at=None):
+        text = self._t(n, "label", row)
+        if at is None and getattr(self, "in_cell", False) and not n.l.get("grow"):
+            # a button in a split's column: its natural width unless it grows,
+            # by the toolkit's rule for a button that is not a row (a dialog's,
+            # moy_ui_api.c's popover body): its label and a pad each side, a
+            # minimum width, the focus ring's reach clear of the row above
+            fs = self.fs
+            self._blank(n.key + " gap", 6 * fs)
+            x, y, w, h = self._blank(n.key + " row", 0)
+            bw = max(_v.text_size(text)[0] + 2 * (16 if self.desk else 12) * fs, (72 if self.desk else 56) * fs)
+            at = (x, y, min(w, bw), h)
         if at:
             _v.at(*at)
-        text = self._t(n, "label", row)
         o = self._o(n, row)
         if n.l.get("alone") and ("icon" in n.p or n.act.icon):
             text = ""
@@ -983,19 +997,48 @@ class Engine(S.Builder):
             r = (x + at, y, s, h) if d == "row" else (x, y + at, w, s)
             at += s + gap
             if k.kind == "group":       # a region of the split: its own scrolled column
-                _v.at(*r)
-                _v.scroll("split %s %d" % (n.key, i))
-                self._kids(k, row, r)
+                sid = "split %s %d" % (n.key, i)
+                off = self._cell_off(sid, n, r, d)
+                cell = (r[0], r[1] + off, r[2], r[3] - off)
+                _v.at(*cell)
+                _v.scroll(sid)
+                was, self.in_cell = getattr(self, "in_cell", False), True
+                self._kids(k, row, cell)
+                self.in_cell = was
+                self._cell_measure(sid, cell)
                 _v.end()
                 _v.scroll()
                 _v.at(*self.rect)
                 continue
-            if k.kind == "canvas":      # a cell of its own: the canvas fills it
+            if k.kind == "canvas" and self._draws_only(k):
+                _NOW.frame = True       # a cell of its own that only draws: drawn into the cell
+                k.l["draw"](self.cv, *r)
+                continue
+            if k.kind == "canvas":      # a cell of its own: the canvas's part fills it
                 _v.at(*r)
                 self._r_canvas(k, row, r)
                 _v.at(*self.rect)
                 continue
             getattr(self, "_r_" + k.kind)(k, row, r)
+
+    def _cell_off(self, sid, n, r, d):
+        """How far down a row split's column starts: centred on the cross
+        axis where the last frame's content was shorter than the cell
+        (`align="center"`, the default), else at the top."""
+        if d != "row" or n.l.get("align", "center") != "center":
+            return 0
+        used = self.__dict__.setdefault("cell_used", {}).get(sid)
+        return max(0, (r[3] - used) // 2) if used is not None else 0
+
+    def _cell_measure(self, sid, cell):
+        """The column's height this frame (a part that is no stop marks the
+        stack's foot); a change asks for the frame that centres it."""
+        y = self._blank(sid + " foot", 1)[1]
+        used = y - cell[1]
+        cu = self.__dict__.setdefault("cell_used", {})
+        if cu.get(sid) != used:
+            cu[sid] = used
+            self._damage.all()
 
     def _r_grid(self, n, row, rect):
         cols, rows_ = n.l["cols"], n.l["rows"]
@@ -1145,8 +1188,23 @@ class Engine(S.Builder):
                 _v.at(x + 26, by, max(0, bx - x - 26), fh)
                 self._r_label(k, row, rect)
 
+    @staticmethod
+    def _draws_only(n):
+        """A canvas with no pointer=, keys= or on=: it draws, and is no stop."""
+        return not any(p in n.l or p in n.p for p in ("pointer", "keys", "on"))
+
+    def _blank(self, key, h):
+        """A row of the stack `h` tall (0: the row's) that draws nothing and
+        is no stop: where the stack is, as (x, y, w, h)."""
+        x, y, w, hh, _st = _v.part(key, 0, h, {"id": key, "disabled": True})
+        self.cv.rect(x, y, w, hh, self.th["panel"])     # the row's band put back to the page's ground
+        return x, y, w, hh
+
     def _r_canvas(self, n, row, rect):
-        x, y, w, h, _st = _v.part(n.key, 0, n.l.get("h", 0), {"id": n.key})
+        o = {"id": n.key}
+        if self._draws_only(n):
+            o["disabled"] = True        # a canvas that only draws: no stop, no ring
+        x, y, w, h, _st = _v.part(n.key, 0, n.l.get("h", 0), o)
         n.l["draw"](self.cv, x, y, w, h)
 
     # -- input --------------------------------------------------------------

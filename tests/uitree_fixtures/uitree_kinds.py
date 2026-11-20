@@ -87,3 +87,4 @@ def split_page():
             ui.canvas("pad", draw_pad)
             with ui.group(""):
                 ui.label("beside")
+                ui.button("mark")

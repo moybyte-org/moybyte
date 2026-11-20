@@ -81,6 +81,7 @@
   "prop missing: L2 scroll.snap",
   "prop missing: L1 slider.off",
   "prop missing: L1 slider.when",
+  "prop not in the table: split.align",
   "prop not in the table: table.hint",
   "prop missing: L1 toggle.off",
   "prop missing: L1 toggle.when",
