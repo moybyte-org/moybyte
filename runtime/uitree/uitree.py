@@ -1811,7 +1811,7 @@ SCHEMA = {
                  tabs="lit", labels="lit"),
     "text_editor": dict(_C, find="lit", find_on="cond", marks="lit", gutter="cond", focus="cond"),
     "slot": dict(_C, min="lit"),
-    "row": dict(_C),
+    "row": dict(_C, close="action0"),
     "tools": dict(_C, lend="lit"),
     "lent": dict(_C),
     "status": dict(_C, text="text"),
@@ -2434,7 +2434,8 @@ def slot(name, **p):
 
 
 def row(key, **p):
-    """Children side by side; a field grows, the rest take their size."""
+    """Children side by side; a field grows, the rest take their size.
+    close= is what Back does while the row is shown (a find strip's close)."""
     return _node("row", key, p, _caller())
 
 

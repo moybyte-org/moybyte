@@ -1616,6 +1616,13 @@ class Engine(S.Builder):
         return True
 
     def has_page(self):
+        was, _NOW.app = _NOW.app, self      # a size class (@desk) reads the app's
+        try:
+            return self._has_page()
+        finally:
+            _NOW.app = was
+
+    def _has_page(self):
         return len(self.pages) > 1 or self.dialog_shown()
 
     def _closer(self, n):
@@ -1633,15 +1640,22 @@ class Engine(S.Builder):
             got = self._closer(k)
             if got is not None:
                 return got
-        return n if n.kind == "group" and "close" in n.l else None
+        return n if n.kind in ("group", "row") and "close" in n.l else None
 
     def back(self):
+        was, _NOW.app = _NOW.app, self      # a size class (@desk) reads the app's
+        try:
+            return self._back()
+        finally:
+            _NOW.app = was
+
+    def _back(self):
         self._bind()
         g = self._closer(self.root) if self.root is not None and not self.dialog_shown() else None
         if g is not None:
             act = g.l["close"]
             if act.can():
-                self.q.append((act, self.args_for(act), "back on group %r" % g.key))
+                self.q.append((act, self.args_for(act), "back on %s %r" % (g.kind, g.key)))
                 self._damage.all()
                 return True
         for k in self.root.kids if self.root else ():
@@ -1687,12 +1701,14 @@ class App(AppLayer):
     domain = "system"
     BUILD = None            # (build,): the app module's root page
     IS_APP = None           # (is_app,): claims the app's identity cart
+    ENGINE = None           # (Engine subclass,): the replay, uitree_editor.Engine for the Editor's kinds
 
     def __init__(self, ctx, names=None):
         self._surf, self._theme, self._damage = ctx.surface, ctx.theme, ctx.damage
         build = self.BUILD[0]
-        self.engine = Engine(S.decl_of(S.module_of(build)), build, ctx.ui, ctx.surface, ctx.damage,
-                             getattr(ctx, "files", None), env=ctx)
+        eng = self.ENGINE[0] if self.ENGINE else Engine
+        self.engine = eng(S.decl_of(S.module_of(build)), build, ctx.ui, ctx.surface, ctx.damage,
+                          getattr(ctx, "files", None), env=ctx)
 
     def is_app(self, cart):
         return bool(self.IS_APP and self.IS_APP[0](cart))
@@ -1747,13 +1763,18 @@ def env():
     return a.env
 
 
-def app_layer(id, title, build, is_app=None, needs=()):
+def app_layer(id, title, build, is_app=None, needs=(), engine=None):
     """The AppLayer class of an app whose screen is `build` (the module's
     root page): what its manifest's `entry` names. Its title is the
-    module's `ui.app(...)` declaration's (§19.1), else `title`."""
+    module's `ui.app(...)` declaration's (§19.1), else `title`. `engine=` is
+    the replay when the build uses the Editor's kinds
+    (`uitree_editor.Engine`)."""
     if not callable(build):
         raise S.UIError("N01", "app_layer(%r): build is not a function" % id,
                         fix="pass the module's page function itself: app_layer(%r, %r, build)" % (id, title))
+    if engine is not None and not (isinstance(engine, type) and issubclass(engine, Engine)):
+        raise S.UIError("N01", "app_layer(%r): engine=%r is not an Engine subclass" % (id, engine),
+                        fix="engine=uitree_editor.Engine, or leave it out")
     ad = S.decl_of(S.module_of(build)).app
     if ad is None and title is None:
         raise S.UIError("D04", "app %r has no ui.app declaration" % id, where=(S.module_of(build), 0),
@@ -1765,6 +1786,7 @@ def app_layer(id, title, build, is_app=None, needs=()):
         title = ad.title()
     return type(title.replace(" ", "") + "App", (App,), {
         "id": id, "TITLE": title, "BUILD": (build,), "IS_APP": (is_app,) if is_app else None,
+        "ENGINE": (engine,) if engine is not None else None,
         "NEEDS": App.NEEDS + tuple(needs)})
 
 
