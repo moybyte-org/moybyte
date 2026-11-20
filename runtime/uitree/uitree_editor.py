@@ -178,8 +178,6 @@ class Engine(uitree_app.Engine):
         moved, ahead = self._land_focus(prev)
         self.rect = rect
         self.dups = set()
-        self._lists_before = getattr(self, "_lists_now", set())
-        self._lists_now = set()
         self.late = []
         self._stack(n, None, rect)
         if self.flash is not None:

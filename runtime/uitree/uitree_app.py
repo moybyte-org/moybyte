@@ -51,9 +51,75 @@ def _rname(kind):
     return r
 
 
+_CLASSES = {}           # the size classes' bits -> their tuple, made once
+_NOROW = None           # the slot key of a node drawn outside a list
+_SLOTS_KEPT = 32        # a node's slots past which those not drawn last pass go
+# the options `_o` may leave in a slot's dict, cleared at each call
+_O_KEYS = ("disabled", "current", "signal", "steps", "fit", "secret", "hint", "syntax", "keys",
+           "face", "wrap", "follow", "badge", "locked", "tone", "icon", "image")
+
+
+class _Slot:
+    """What one node draws under for one row, kept on the node across frames
+    (`Node.aux`): its id, its (node, row) pair, its options dict and its
+    texts, each text with the stamp of the states it read when it was made.
+    A board pays for a string, a tuple or a dict made each frame; these are
+    made again only when the row or a state they read has moved."""
+
+    def __init__(self, n, row, key):
+        self.row = row
+        self.nid = (n.key if row is None else "%s/%s" % (key, n.key))[:ID_MAX]
+        self.pair = (n, row)
+        self.o = {"id": self.nid}
+        self.texts = {}             # prop -> [stamp, text]
+        self.label_o = 0            # a label's options (0: not made yet)
+        self.used = 0
+
+    def renew(self, n, row):
+        """The row's object moved (a write made it anew): its pair and texts."""
+        self.row = row
+        self.pair = (n, row)
+        for m in self.texts.values():
+            m[0] = -1
+
+
 def _shown(n, row):
     g = n.p.get("shown")
     return g is None or g(row)
+
+
+def _case(n, v):
+    """A switch's case for value `v`, else its "_" case (None for neither)."""
+    other = None
+    for c in n.kids:
+        cv = c.l["v"]
+        if cv == v:
+            return c
+        if cv == "_" and other is None:
+            other = c
+    return other
+
+
+# Lists made from a model, apart from the replay's functions: a comprehension
+# naming a function's locals makes their cells at each call of it on a board.
+def _keys(rows):
+    return [r._f[r._m.key] for r in rows]
+
+
+def _fields(rows, f):
+    return [r._f[f] for r in rows]
+
+
+def _words(rows, text):
+    return [S._text(text(r)) for r in rows]
+
+
+def _labelled(vals, tab):
+    return [tab[v] for v in vals]
+
+
+def _matching(rows, key, q):
+    return [r for r in rows if q in r._f[key].lower()]
 
 
 def _list_of(node):
@@ -78,7 +144,22 @@ class Engine(S.Builder):
         self._ui, self._surf, self._damage = host, surface, damage
         self.init_builder(decl.state, build)
         self.q = []
-        self.ids = {}
+        self.ids = {}                   # a stop's id -> its (node, row), kept across frames
+        self._seen = {}                 # a stop's id -> the replay pass that last drew it
+        self._pass = 0                  # the replay passes so far
+        self._n_ids = 0                 # the ids this pass drew
+        self._list_at = {}              # a cards list's key -> [the pass that last drew it, the one before]
+        self._all_names = None          # every state name, and whether one is a document (no versions)
+        self._has_doc = False
+        self._live, self._live_at, self._live_cls, self._live_in = None, -2, None, None
+        self._rf = {}                   # a node kind -> its replay function
+        self._foot_btns = []            # the foot's shown buttons, refilled each frame
+        self._order_of = {}             # a list's key -> the model its row order was taken from
+        self._no_stops = -2             # the states' versions at which the page drew no stop
+        self._hint = None               # the band's hints, and what they were made at (_hints)
+        self._hk = None
+        self._hk_v = self._hk_n = self._hk_a = -2
+        self._hk_c = self._hk_tv = self._hk_d = self._hk_f = self._hk_at = None
         self.dups = set()
         self._sync = {}
         self._orders = {}               # a list's key -> the order of its rows (_after_removal)
@@ -169,8 +250,12 @@ class Engine(S.Builder):
         """Each work whose due= holds: one step a frame, after the frame's
         input and paint; a step past its budget is counted. One trace line
         per run of frames, not per step."""
+        works = self.decl.works
+        if not works:
+            return                      # a view of an empty dict is still made on a board
         import time
-        for w in self.decl.works.values():
+        for name in works:
+            w = works[name]
             if w.unit is not None and S.LIVE is not None and w.unit not in S.LIVE:
                 continue
             S._NOW.app = self
@@ -206,7 +291,13 @@ class Engine(S.Builder):
             if ms > w.budget:
                 run[4] += 1
             run[3] += ms
-            run[5] |= {k for k, v in self.s._ver.items() if vers.get(k) != v}
+            self._wrote(run[5], vers)
+
+    def _wrote(self, names, vers):
+        """Add to `names` the states whose versions moved past `vers`."""
+        for k, v in self.s._ver.items():
+            if vers.get(k) != v:
+                names.add(k)
 
     def query(self, name, *a):
         if name == "colors":
@@ -224,10 +315,10 @@ class Engine(S.Builder):
         self.root = None
         self.want_focus = None          # a fresh visit: no focus, cur or row order carried over
         self._sync, self.ids, self.focused, self.drawn = {}, {}, None, {}
+        self._seen = {}
         self.drafts = {}
         self._orders = {}
-        self._lists_now = self._lists_before = set()
-        self._lists_ever = set()
+        self._list_at = {}
         hook = self.actions.get(hook)
         if hook is not None and hook.hook:
             self.run(hook.fn, *((arg,) if hook.takes == "arg" else ()), action="opened")
@@ -287,9 +378,12 @@ class Engine(S.Builder):
         self._posts()
         self.clock += int(dt * 1000)
         if self.timers:
-            for t in [t for t in self.timers if t[0] <= self.clock]:
-                self.timers.remove(t)
-                self.run_action(t[1], (), "timer")
+            self._timers_due()
+
+    def _timers_due(self):
+        for t in [t for t in self.timers if t[0] <= self.clock]:
+            self.timers.remove(t)
+            self.run_action(t[1], (), "timer")
 
     def _ready(self):
         """The page built, where the frame finds it unbuilt."""
@@ -421,6 +515,25 @@ class Engine(S.Builder):
         for k, names in cells:
             self._cells[k] = [{"gen": 0}, tuple(names)]
 
+    def _all_ver(self):
+        """Every state's version summed with the builds: moves whenever any
+        state may have (versions only grow). -1 where a state is a document,
+        which is edited in place with no version moving."""
+        ver = self.s._ver
+        names = self._all_names
+        if names is None or len(names) != len(ver):
+            names = self._all_names = tuple(ver)
+            self._has_doc = False
+            for k in names:
+                if isinstance(self.s._t[k], S.Doc):
+                    self._has_doc = True
+        if self._has_doc:
+            return -1
+        g = self.builds
+        for k in names:
+            g += ver[k]
+        return g
+
     def _gen_of(self, names):
         ver, g = self.s._ver, self.builds + self._edits
         for k in names:
@@ -464,10 +577,19 @@ class Engine(S.Builder):
         w, h = self.content[2], self.content[3]
         kind = _v.input_kind()
         self.input = kind if kind in S.INPUTS else "keys"
-        self.classes = ("desk" if self.desk else "handheld", "wide" if w * 3 > h * 4 else "tall") + (
-            ("touch",) if self.input == "touch" else ())
-        S.LIVE = S.live_units(n)
-        shown = [k for k in n.kids if _shown(k, None)]
+        cb = (4 if self.desk else 0) | (2 if w * 3 > h * 4 else 0) | (1 if self.input == "touch" else 0)
+        cls = _CLASSES.get(cb)
+        if cls is None:
+            cls = _CLASSES[cb] = ("desk" if cb & 4 else "handheld", "wide" if cb & 2 else "tall") + (
+                ("touch",) if cb & 1 else ())
+        self.classes = cls
+        self._pass += 1
+        allv = self._all_ver()
+        if allv < 0 or self._live_at != allv or self._live_cls is not cls or self._live_in != self.input:
+            S.LIVE = self._live = S.live_units(n)       # what is shown moves only with a state, a class or the input
+            self._live_at, self._live_cls, self._live_in = allv, cls, self.input
+        else:
+            S.LIVE = self._live
         foot = self._foot_of(n)
         band = None
         if foot is not None and not self.desk:
@@ -484,7 +606,7 @@ class Engine(S.Builder):
             o["gen"] = self._gen_of(self._page_names)
         else:
             o.pop("gen", None)
-        rect = _v.page(n.p["title"](None), o)
+        rect = _v.page(self._memo(n, "title", None, n.p["title"]), o)
         f = _v.focus()
         last = self.focused                     # the last frame's focus
         now = self.ids.get(f)
@@ -492,10 +614,12 @@ class Engine(S.Builder):
             self.focused = now                  # a pointer's move lands at the frame's begin
         elif f == "" and self.focused is not None:
             self.focused = self._stepped(n)     # a key's step lands as the stops draw: where it will
-        if self.focused is None and self.want_focus is None:
+        if self.focused is None and self.want_focus is None and (allv < 0 or self._no_stops != allv):
             self.focused = next(self._stops(n), None)   # where focus starts: the first stop
+            if self.focused is None:
+                self._no_stops = allv           # none, and none until a state moves
         hint = self._hints()
-        placed = foot is not None or any(k.kind in ("split", "grid") for k in shown)
+        placed = foot is not None or self._placed(n)
         if not hint or not self.band:
             pass                        # nothing on offer, or the host draws the keys: no band
         elif not placed:
@@ -518,14 +642,16 @@ class Engine(S.Builder):
             if got is not None:
                 self.foot_r = got
                 rect = (rect[0], rect[1], rect[2], max(0, got[1] - rect[1]))
-        prev, self.ids = self.ids, {}
+        prev = self.ids                 # last frame's, until this frame's stops draw over it
         moved, ahead = self._land_focus(prev)
         self.rect = rect
-        self.dups = set()
-        self._lists_before = getattr(self, "_lists_now", set())
-        self._lists_now = set()
+        if self.dups:
+            self.dups = set()
+        self._n_ids = 0
         self.tv_stop = False            # a text view that is a stop draws this frame (the band's next)
         self._kids(n, None, rect)
+        if len(self.ids) != self._n_ids:
+            self._drop_undrawn()
         self._focus_after(moved, ahead, hint, last)
 
     def _land_focus(self, prev):
@@ -533,10 +659,14 @@ class Engine(S.Builder):
         (ui.focus), a fresh page's focus= node, or a list's moved cur=, in
         the frame that draws it. (whether it moved, a node foreseen)."""
         moved = False
-        want = [(self.want_focus, None)] if self.want_focus is not None else []
+        want = None                     # (an id or row key, the list's cur state or None) to focus
+        if self.want_focus is not None:
+            want = [(self.want_focus, None)]
         if self.fresh and prev:
-            want += [(i, None) for i, (node, row) in prev.items()
-                     if "focus" in node.p and node.p["focus"](row)][:1]
+            for i, (node, row) in prev.items():
+                if "focus" in node.p and node.p["focus"](row):
+                    want = (want or []) + [(i, None)]
+                    break
             self.fresh = False
         elif self.fresh and self.root is not None:
             # the page's first frame: focus lands on its focus= node as the
@@ -547,17 +677,17 @@ class Engine(S.Builder):
                 self._ui.focus(fid)
                 moved = True
                 self.fresh = False
-        # a list shown again: drawn last frame, not the frame before, and
-        # drawn some frame before that (its first showing is no return)
-        before = getattr(self, "_lists_before", set())
-        back = (getattr(self, "_lists_now", set()) - before) & getattr(self, "_lists_ever", set())
-        lists = {}
+        lists = None
         for k, lst in self.curs:
-            if self._sync.get(k, self) != self.s._v[k] or (lst.key in back and self.s._v[k]):
+            if self._sync.get(k, self) != self.s._v[k] or (self._shown_again(lst.key) and self.s._v[k]):
+                if want is None:
+                    want, lists = [], {}
+                elif lists is None:
+                    lists = {}
                 want.append((self.s._v[k], k))      # a list shown again: focus on its cur
                 lists[k] = lst
         ahead = None
-        for key, k in want:
+        for key, k in want or ():
             if k is None and key == self.want_focus and key in self.dups:
                 self._focus_named(prev)
             fid = key if k is None and key in prev else self._id_in(prev, key)
@@ -572,7 +702,6 @@ class Engine(S.Builder):
                     self._sync[k] = key
                 elif key == self.want_focus:
                     self.want_focus = None
-        self._lists_ever = getattr(self, "_lists_ever", set()) | before
         return moved, ahead
 
     def _fresh_focus(self, n):
@@ -620,6 +749,37 @@ class Engine(S.Builder):
                 if self.s._v[ck] != v:
                     self.cur_moved(lst, v, "focus")
 
+    def _placed(self, n):
+        """Whether the page's shown rows hold a split or a grid (its band is
+        placed, not stacked)."""
+        for k in n.kids:
+            if (k.kind == "split" or k.kind == "grid") and _shown(k, None):
+                return True
+        return False
+
+    def _list_drawn(self, key):
+        """A cards list drew this pass."""
+        at = self._list_at.get(key)
+        if at is None:
+            self._list_at[key] = [self._pass, -1]
+        elif at[0] != self._pass:
+            at[1], at[0] = at[0], self._pass
+
+    def _shown_again(self, key):
+        """A list shown again: drawn last pass, not the pass before, and
+        drawn some pass before that (its first showing is no return)."""
+        at = self._list_at.get(key)
+        p = self._pass
+        return at is not None and at[0] == p - 1 and at[1] >= 0 and at[1] != p - 2
+
+    def _drop_undrawn(self):
+        """The ids this pass did not draw go: the frame's stops are what it drew."""
+        ids, seen, p = self.ids, self._seen, self._pass
+        for k in [k for k in ids if seen.get(k) != p]:
+            del ids[k]
+            if k in seen:
+                del seen[k]
+
     def _drawn_id(self, key):
         """The id node `key` (or `ROWKEY/NODEKEY`) draws under this frame, as
         the replay will walk the tree: shown, its action on, its switch case
@@ -632,8 +792,7 @@ class Engine(S.Builder):
                     continue
                 if k.kind == "switch":
                     v = self.s._v[k.l["name"]]
-                    case = next((c for c in k.kids if c.l["v"] == v), None) or next(
-                        (c for c in k.kids if c.l["v"] == "_"), None)
+                    case = _case(k, v)
                     got = walk(case) if case is not None else None
                 elif k.kind == "table" and not rowkey and k.key == nodekey:
                     return k.key[:ID_MAX]       # a table is one stop, its key the id
@@ -661,8 +820,7 @@ class Engine(S.Builder):
                 continue
             if k.kind == "switch":
                 v = self.s._v[k.l["name"]]
-                case = next((c for c in k.kids if c.l["v"] == v), None) or next(
-                    (c for c in k.kids if c.l["v"] == "_"), None)
+                case = _case(k, v)
                 if case is not None:
                     yield from self._stops(case, row)
             elif k.kind in ("rows", "cards", "table"):
@@ -733,7 +891,15 @@ class Engine(S.Builder):
 
     def settle(self):
         for _ck, lst in self.curs:
-            self._after_removal(lst, [r._f[r._m.key] for r in self.s._v[lst.l["model"]]])
+            self._order(lst, self.s._v[lst.l["model"]])
+
+    def _order(self, lst, model):
+        """G15's removal rule over `model`, the list's rows now: its keys are
+        read again only when the model is another object."""
+        if self._order_of.get(lst.key) is model and lst.key in self._orders:
+            return
+        self._order_of[lst.key] = model
+        self._after_removal(lst, [r._f[r._m.key] for r in model])
 
     def _after_removal(self, lst, keys):
         """G15's removal rule: the current row gone, the next row in the old
@@ -765,8 +931,7 @@ class Engine(S.Builder):
                 return k
             if k.kind == "switch":
                 v = self.s._v[k.l["name"]]
-                case = next((c for c in k.kids if c.l["v"] == v), None) or next(
-                    (c for c in k.kids if c.l["v"] == "_"), None)
+                case = _case(k, v)
                 for c in case.kids if case is not None else ():
                     if c.kind == "foot" and _shown(c, None):
                         return c
@@ -791,17 +956,20 @@ class Engine(S.Builder):
     def _r_tabs(self, n, row, rect):
         """An enum's tab strip across the page's top: a band cut from the page."""
         import ui_draw as _ud
-        st = self.s._t[n.key]
-        tab = self.decl.labels[n.l["labels"]]
-        vals = list(st.values)
+        sl = self._slot(n, None)
+        m = sl.texts.get("tabs")
+        if m is None:                   # its values, words and options: made once
+            vals = list(self.s._t[n.key].values)
+            m = sl.texts["tabs"] = [vals, _labelled(vals, self.decl.labels[n.l["labels"]]), {"id": n.key}]
+        vals = m[0]
         bh = _ud.metrics("value_row")[17 if self.desk else 16] * self.fs
         pad = 8 if self.desk else 0
         band, self.rect = _v.cut_top(self.rect, bh + 2 * pad)
         if pad:
             band = _v.inset(band, 2 * pad, pad)
         _v.at(*band)
-        self.ids[n.key] = (n, None)
-        got = _v.tabs("", [tab[v] for v in vals], vals.index(self.s._v[n.key]), {"id": n.key})
+        self._id(n.key, sl.pair)
+        got = _v.tabs("", m[1], vals.index(self.s._v[n.key]), m[2])
         _v.at(*self.rect)
         if vals[got] != self.s._v[n.key]:
             old = self.s._v[n.key]
@@ -855,6 +1023,39 @@ class Engine(S.Builder):
         return True
 
     def _hints(self):
+        """The band's hints: made again only when a state, the focused stop,
+        the page's level, its size classes or its text view's stop moved."""
+        allv = self._all_ver()
+        f = self.focused
+        if (allv >= 0 and allv == self._hk_v and f is self._hk_f and self.classes is self._hk_c
+                and self.tv_stop == self._hk_tv and self.desk == self._hk_d
+                and len(self.pages) == self._hk_n and len(self.actions) == self._hk_a
+                and self._hk is not None):
+            return self._hint
+        h = self._hints_now()
+        if allv >= 0 and self._hints_kept(f):
+            self._hint, self._hk = h, True
+            self._hk_v, self._hk_f, self._hk_c = allv, f, self.classes
+            self._hk_tv, self._hk_d, self._hk_n, self._hk_a = self.tv_stop, self.desk, len(self.pages), len(self.actions)
+        else:
+            self._hk = None
+        return h
+
+    def _hints_kept(self, f):
+        """Whether the hints may be kept: none of their texts names an engine
+        value (`@focus`, `@input`, a size class), which no version counts."""
+        for v in (f[0].src.get("hint"), f[0].src.get("label")) if f is not None else ():
+            if isinstance(v, str) and "@" in v:
+                return False
+        if self._hk_a != len(self.actions) or self._hk_at is None:
+            self._hk_at = True
+            for a in self.actions.values():
+                for v in (a.label, a.hint, a.when_src):
+                    if isinstance(v, str) and "@" in v:
+                        self._hk_at = False
+        return self._hk_at
+
+    def _hints_now(self):
         f = self.focused
         d = self.dialog_shown()
         if d:
@@ -919,16 +1120,122 @@ class Engine(S.Builder):
         return None
 
     def _kids(self, n, row, rect):
+        rf = self._rf
         for k in n.kids:
             if _shown(k, row) and (k.act is None or k.act.can(row) or k.act.off == "grey"):
-                getattr(self, _rname(k.kind))(k, row, rect)
+                f = rf.get(k.kind)
+                if f is None:           # the class's function: a bound method is made at each getattr
+                    f = rf[k.kind] = getattr(type(self), _rname(k.kind))
+                f(self, k, row, rect)
+
+    def _slot(self, n, row):
+        """Node `n`'s slot for `row` (None: outside a list)."""
+        a = n.aux
+        if a is None:
+            a = n.aux = ({}, {})            # (row key -> slot, prop -> the states its text reads)
+        slots = a[0]
+        key = _NOROW if row is None else row._f[row._m.key]
+        s = slots.get(key)
+        if s is None:
+            if len(slots) >= _SLOTS_KEPT:
+                self._prune(slots)
+            s = slots[key] = _Slot(n, row, key)
+        elif s.row is not row:
+            s.renew(n, row)
+        s.used = self._pass
+        return s
+
+    def _prune(self, slots):
+        """Rows gone from the list: their slots with them. (Apart from
+        `_slot`: a comprehension naming a function's locals makes their
+        cells at each call of it on a board.)"""
+        for k in [k for k in slots if slots[k].used < self._pass - 1]:
+            del slots[k]
+
+    def _reads_of(self, n, k):
+        """The states prop `k` of node `n` reads, as a tuple, or None where its
+        text is not kept: no template, or one naming an engine value (`@`) or
+        a document (read in place, no version moves)."""
+        names = n.aux[1]
+        if k in names:
+            return names[k]
+        src = n.src.get(k)
+        got = None
+        if isinstance(src, str) and "@" not in src:      # a literal too: its template joins its parts anew
+            st = self.s
+            out = set()
+            self._names_in(src, out)
+            todo = list(out)
+            while todo:
+                name = todo.pop()
+                t = st._t.get(name)
+                if isinstance(t, S.Doc):
+                    out = None
+                    break
+                more = ()
+                if isinstance(t, S.RowOf):
+                    more = (t.model,)
+                elif name in st._derive:
+                    more = st._dsrc[name][1]      # a derive moves with what it reads
+                for d in more:
+                    if d not in out and d in st._ver:
+                        out.add(d)
+                        todo.append(d)
+            got = None if out is None else tuple(out)
+        names[k] = got
+        return got
+
+    def _memo(self, n, k, row, g):
+        """Text prop `k` of `n` for `row`, made again only when a state it
+        reads has moved since it was made (or its row is another object)."""
+        if n.aux is None:
+            n.aux = ({}, {})
+        names = self._reads_of(n, k)
+        if names is None:
+            return g(row)
+        ver, stamp = self.s._ver, self.builds
+        for x in names:
+            stamp += ver[x]
+        s = self._slot(n, row)
+        m = s.texts.get(k)
+        if m is not None and m[0] == stamp:
+            return m[1]
+        v = g(row)
+        if m is None:
+            s.texts[k] = [stamp, v]
+        else:
+            m[0], m[1] = stamp, v
+        return v
+
+    def _id(self, nid, pair):
+        """Register this frame's stop `nid` (its (node, row) `pair`): the ids
+        dict is kept across frames, each id stamped with the pass it was
+        drawn in; two nodes under one id in one pass is a fragment used twice."""
+        ids, seen, p = self.ids, self._seen, self._pass
+        got = ids.get(nid)
+        if seen.get(nid) == p:
+            if got is not None and got[0] is not pair[0]:
+                self.dups.add(nid)
+        else:
+            seen[nid] = p
+            self._n_ids += 1
+        if got is not pair:
+            ids[nid] = pair
+
+    def _pair(self, n, row):
+        """A one-stop node's (node, row), kept while its row is the same."""
+        s = self._slot(n, None)
+        p = s.pair
+        if p[1] is not row:
+            p = s.pair = (n, row)
+        return p
 
     def _t(self, n, k, row, default=""):
         """A text prop's value now; a change after the first frame is traced."""
         g = n.p.get(k)
         if g is None:
             return n.act.label if (k == "label" and n.act is not None) else default
-        v = g(row)
+        v = self._memo(n, k, row, g)
         src = n.src[k]
         if S.TRACING and "{" in src:            # what the trace's "drew" line compares
             nid = (id(n), None if row is None else row._f[row._m.key], k)
@@ -939,13 +1246,18 @@ class Engine(S.Builder):
             self.drawn[nid] = v
         return v
 
-    def _o(self, n, row, **o):
-        nid = n.key if row is None else "%s/%s" % (row._f[row._m.key], n.key)
-        nid = nid[:ID_MAX]              # the engine keeps this much of an id: past it, two ids may meet
-        if nid in self.ids and self.ids[nid][0] is not n:
-            self.dups.add(nid)          # two shown nodes, one id: a fragment used twice
-        self.ids[nid] = (n, row)
-        o["id"] = nid
+    def _o(self, n, row):
+        """The options of stop `n` in `row`, its id registered: the slot's own
+        dict, kept across frames and cleared of what the last call set (a
+        function taking `**kw` makes a dict at every call on a board)."""
+        s = self._slot(n, row)
+        self._id(s.nid, s.pair)         # the engine keeps ID_MAX bytes of an id: past it, two ids may meet
+        o = s.o
+        for k in _O_KEYS:
+            if k in o:
+                del o[k]
+        if len(o) != 1:                 # a key a caller set that the list above lacks
+            o = s.o = {"id": s.nid}
         if n.act is not None and n.act.off == "grey" and not n.act.can(row):
             o["disabled"] = True
         lst = _list_of(n)
@@ -953,7 +1265,8 @@ class Engine(S.Builder):
             o["current"] = row._f[row._m.key] == self.s._v[lst.src["current"]]
         if "signal" in n.p:
             o["signal"] = n.p["signal"](row)
-        name = n.p["icon"](row) if "icon" in n.p else n.act.icon if n.act is not None else ""
+        name = self._memo(n, "icon", row, n.p["icon"]) if "icon" in n.p else \
+            n.act.icon if n.act is not None else ""
         if name:
             _v.icon(name)
         if n.l.get("look") == "steps":
@@ -962,8 +1275,7 @@ class Engine(S.Builder):
 
     def _r_switch(self, n, row, rect):
         v = self.s._v[n.l["name"]]
-        case = next((c for c in n.kids if c.l["v"] == v), None) or next(
-            (c for c in n.kids if c.l["v"] == "_"), None)
+        case = _case(n, v)
         if case is not None:
             self._kids(case, row, rect)
 
@@ -974,33 +1286,48 @@ class Engine(S.Builder):
 
     def _r_label(self, n, row, rect):
         if "icon" in n.p:
-            name = n.p["icon"](row)
+            name = self._memo(n, "icon", row, n.p["icon"])
             if name:
                 _v.icon(name)
-        for text, o in self._label_rows(n, row):
-            _v.label(text, o)
+        if n.l.get("wrap") == "char":
+            for text, o in self._label_rows(n, row):
+                _v.label(text, o)
+            return
+        text = self._t(n, "text", row)
+        _v.label(text, self._label_o(n, row, text))
 
     def _label_rows(self, n, row):
         """A label's rows as the toolkit's labels: (text, options) each."""
-        tone = n.l.get("tone")
         text = self._t(n, "text", row)
+        o = self._label_o(n, row, text)
+        if n.l.get("wrap") == "char":   # lines of what fits a group's card, cut anywhere
+            import ui_draw as _ud
+            per = max(8, (self.rect[2] - 32) // max(1, _ud.font("ui")[1] * self.fs))
+            return tuple((text[at:at + per], o) for at in range(0, len(text), per))
+        return ((text, o),)
+
+    def _label_o(self, n, row, text):
+        """A label's options: made once a node and row, but where its face
+        depends on whether its text fits (`size="fit"`)."""
+        face = n.l.get("face")
+        fit = face and n.l.get("size") == "fit"
+        s = None if fit else self._slot(n, row)
+        if s is not None and s.label_o != 0:
+            return s.label_o
+        tone, wrap, align = n.l.get("tone"), n.l.get("wrap"), n.l.get("align")
         o = None if not tone else {"tone": tone} if tone in ("dim", "value", "danger") else {"ink": tone}
-        face, wrap, align = n.l.get("face"), n.l.get("wrap"), n.l.get("align")
         if face or wrap == "word" or align in ("center", "end") or "lines" in n.l:
             o = {"tone": tone} if tone in ("dim", "value", "danger") else dict(o or {})
-            if face and not (n.l.get("size") == "fit" and not self._fits(face, text)):
+            if face and not (fit and not self._fits(face, text)):
                 o["face"] = face
             if wrap == "word" or "lines" in n.l:
                 o["wrap"] = True
                 o["lines"] = n.l.get("lines", 16)
             if align in ("center", "end"):
                 o["align"] = align
-            return ((text, o),)
-        if wrap == "char":   # lines of what fits a group's card, cut anywhere
-            import ui_draw as _ud
-            per = max(8, (self.rect[2] - 32) // max(1, _ud.font("ui")[1] * self.fs))
-            return tuple((text[at:at + per], o) for at in range(0, len(text), per))
-        return ((text, o),)
+        if s is not None:
+            s.label_o = o
+        return o
 
     def _fits(self, face, text):
         """A label's `size="fit"`: its face where the text fits the page's
@@ -1018,13 +1345,24 @@ class Engine(S.Builder):
         _v.note(self._t(n, "icon", row) or "info", n.p["lines"](row))
 
     def _r_text_view(self, n, row, rect):
-        v = self.s._v[n.l["name"]]
-        if "field" in n.l:
-            f = n.l["field"]
-            lines = [r._f[f] for r in v]
-        else:
-            lines = v.split("\n") if v else []
-        o = self._o(n, None, syntax=n.l.get("syntax", "plain"), keys=True)   # a stop where it runs on
+        name = n.l["name"]
+        s = self._slot(n, None)
+        stamp = self.s._ver[name] + self.builds
+        m = s.texts.get("lines")
+        if m is None or m[0] != stamp:      # its lines, split again only when its state moved
+            v = self.s._v[name]
+            if "field" in n.l:
+                lines = _fields(v, n.l["field"])
+            else:
+                lines = v.split("\n") if v else []
+            if m is None:
+                m = s.texts["lines"] = [stamp, lines]
+            else:
+                m[0], m[1] = stamp, lines
+        lines = m[1]
+        o = self._o(n, None)
+        o["syntax"] = n.l.get("syntax", "plain")
+        o["keys"] = True                # a stop where it runs on
         if n.l.get("face") == "ui":
             o["face"] = "ui"
         if n.l.get("wrap") == "word":
@@ -1120,8 +1458,11 @@ class Engine(S.Builder):
         cur = self.s._v[k]
         if "model" in n.l:
             rows = self.s._v[n.l["model"]]
-            keys = [r._f[r._m.key] for r in rows]
-            words = [S._text(n.l["text"](r)) for r in rows]
+            allv = self._all_ver()
+            m = self._slot(n, None).texts.get("words")
+            if m is None or m[0] is not rows or m[1] != allv or allv < 0:
+                m = self._slot(n, None).texts["words"] = [rows, allv, _keys(rows), _words(rows, n.l["text"])]
+            keys, words = m[2], m[3]
         else:
             keys, words = n.l["values"], n.l["words"]
         at = keys.index(cur) if cur in keys else (-1 if "model" in n.l else 0)
@@ -1202,11 +1543,10 @@ class Engine(S.Builder):
 
     def _r_rows(self, n, row, rect):
         model = self.s._v[n.l["model"]]
-        self._after_removal(n, [r._f[r._m.key] for r in model])
+        self._order(n, model)
         if n.l.get("filter"):
             q = self.s._v[n.l["filter"]].lower()
-            key = self.s._t[n.l["model"]].key
-            model = [r for r in model if q in r._f[key].lower()]
+            model = _matching(model, self.s._t[n.l["model"]].key, q)
         empty = self._t(n, "empty", None) if not model else ""
         if empty:
             _v.label(empty)
@@ -1226,25 +1566,34 @@ class Engine(S.Builder):
     def _r_table(self, n, row, rect):
         """`table MODEL cols=[...]`: one `col` child per column, each a
         template over the row; cur= follows the table's current row."""
-        model = list(self.s._v[n.l["model"]])
-        cells = [tuple(self._t(c, "text", r) for c in n.kids if c.kind == "col") for r in model]
+        src = self.s._v[n.l["model"]]
+        allv = self._all_ver()
+        sl = self._slot(n, None)
+        m = sl.texts.get("cells")
+        if m is None or m[0] is not src or m[1] != allv or allv < 0:
+            # its rows' cells, made again only when its model or a state moved
+            model = list(src)
+            m = sl.texts["cells"] = [src, allv, model, self._cells_of(n, model), _keys(model),
+                                     {"id": n.key}, tuple(n.l["cols"])]
+        model, cells, keys, o, cols = m[2], m[3], m[4], m[5], m[6]
         ck = n.src.get("cur")
-        keys = [r._f[r._m.key] for r in model]
-        self._after_removal(n, keys)
+        self._order(n, src)
         at = keys.index(self.s._v[ck]) if ck and self.s._v[ck] in keys else 0
-        o = {"id": n.key}
         _v.at(*self.rect)
-        self.ids[n.key] = (n, model[at] if model else None)
+        self._id(n.key, self._pair(n, model[at] if model else None))
         if not model:
             _v.label(self._t(n, "empty", None))
             return
-        got, opened = _v.table("", tuple(n.l["cols"]), cells, at, o)
+        got, opened = _v.table("", cols, cells, at, o)
         if ck and 0 <= got < len(model) and keys[got] != self.s._v[ck]:
             self.cur_moved(n, keys[got], "table")
         if 0 <= got < len(model):
-            self.ids[n.key] = (n, model[got])
+            self._id(n.key, self._pair(n, model[got]))
         if opened and "on" in n.l and 0 <= got < len(model):
             self.fire(n.l["on"], (model[got],), n, model[got])
+
+    def _cells_of(self, n, model):
+        return [tuple(self._t(c, "text", r) for c in n.kids if c.kind == "col") for r in model]
 
     def _r_dialog(self, n, row, rect):
         btns = n.l["buttons"]
@@ -1359,7 +1708,7 @@ class Engine(S.Builder):
                       [k.p["icon"](r) if "icon" in k.p else k.act.icon for k, r in items],
                       kinds=[k.l.get("mkind", "") for k, _r in items])
         for i in range(len(items)):
-            self.ids[labels[i][:ID_MAX]] = items[i]
+            self._id(labels[i][:ID_MAX], items[i])
         if got >= 0:
             self._activate(items[got][0], items[got][1])
 
@@ -1489,23 +1838,31 @@ class Engine(S.Builder):
             _v.scroll(n.key, cg[0])
         else:
             _v.scroll(n.key)
-        subs = any("sub" in k.p for k in n.kids)
-        go = {"cols": n.p["cols"](None) if "cols" in n.p else 0, "margin": 16 if self.desk else 8,
-              "foot": ((52 if subs else 30) if self.desk else 26 + (6 if subs else 0)), "top": 4,
-              "wrap": "fit"}
+        cols = n.p["cols"](None) if "cols" in n.p else 0
+        sl = self._slot(n, None)
+        m = sl.texts.get("go")
+        if m is None or m[0] != cols or m[1] != self.desk:      # the grid's options, made once a size
+            subs = False
+            for k in n.kids:
+                subs = subs or "sub" in k.p
+            m = sl.texts["go"] = [cols, self.desk, {
+                "cols": cols, "margin": 16 if self.desk else 8,
+                "foot": ((52 if subs else 30) if self.desk else 26 + (6 if subs else 0)), "top": 4,
+                "wrap": "fit"}]
+        go = m[2]
         w, h = self._size(n.p["w"](None)), self._size(n.p["h"](None))
         new = n.l.get("new")
         grid = "group" not in n.l or new is not None
         if grid:
             _v.grid(n.key, w, h, go)
         if new is not None:
-            self.ids["new"] = (n, None)
+            self._id("new", self._slot(n, None).pair)
             if _v.card(new.label, "", {"id": "new", "icon": "new"})[4] & _v.ACTIVATED:
                 self.fire(new, self.args_for(new), n, None)
         lst = n
-        self._lists_now.add(n.key)
+        self._list_drawn(n.key)
         model = self.s._v[n.l["model"]]
-        self._after_removal(n, [r._f[r._m.key] for r in model])
+        self._order(n, model)
         cap = None
         for r in model:
             if "group" in n.l:          # a caption where it changes, a grid of its own under it
@@ -1608,23 +1965,28 @@ class Engine(S.Builder):
             cv = self.cv
             cv.rect(x, y, w, h, self.th["panel"])
             cv.rect(x + m, y, w - 2 * m, 1, self.th["border"])
-        btns = [k for k in n.kids if k.kind == "button" and _shown(k, row) and k.act.can(row)]
+        btns = self._foot_btns          # kept across frames: a list a frame is garbage on a board
+        del btns[:]
+        for k in n.kids:
+            if k.kind == "button" and _shown(k, row) and k.act.can(row):
+                btns.append(k)
         if n.l.get("look") == "share":
             lab = self._foot_label(n)
             if lab is not None:
                 _v.at(x + m, y + pad, w - 2 * m, by - y - pad)
                 self._r_label(lab, row, rect)
             cells = _v.hsplit((x + m, by, w - 2 * m, fh), len(btns), 8 if desk else 4 * fs) if btns else ()
-            for k, c in zip(btns, cells):
-                self._r_button(k, row, rect, at=c)
+            for i in range(min(len(btns), len(cells))):
+                self._r_button(btns[i], row, rect, cells[i])
             return
         bx = x + w - m
-        for k in reversed(btns):
+        for i in range(len(btns) - 1, -1, -1):
+            k = btns[i]
             _v.face("caption")
             bw = _v.text_size(self._t(k, "label", row))[0] + 48
             _v.face()
             bx -= bw
-            self._r_button(k, row, rect, at=(bx, by, bw, fh))
+            self._r_button(k, row, rect, (bx, by, bw, fh))
             bx -= 8
         for k in n.kids:
             if k.kind == "label" and _shown(k, row):

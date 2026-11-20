@@ -380,6 +380,10 @@ def _decl(v, name):
                   found=repr(v) + " (%s)" % _pyt(v), fix=fix)
 
 
+# the plain values a write equal to the one held needs no check for
+_SAME_OK = (bool, int, str, float, type(None))
+
+
 def _check(t, v, what):
     """`v` as type `t` stores it, or an error that names the fix."""
     if isinstance(t, Opt):
@@ -705,8 +709,10 @@ class State:
             raise UIError("S06", "s.%s written inside a draw" % k,
                           expected="writes happen in handlers",
                           fix="write it in the handler of the event; a draw reads")
-        new = _check(self._t[k], val, "s." + k)
         old = self._v[k]
+        if type(val) is type(old) and type(val) in _SAME_OK and val == old:
+            return                      # the value it holds, checked when it was written: a poll's read, no string made
+        new = _check(self._t[k], val, "s." + k)
         if new == old and not isinstance(self._t[k], Model):
             return
         self._v[k] = new
@@ -753,9 +759,9 @@ def _derive(st, name, src, kind, where):
 def commit(app):
     """The end of a handler's commit: the engine's own moves (a list's cur
     after its row went), then every derive."""
-    settle = getattr(app, "settle", None)
+    settle = getattr(type(app), "settle", None)     # the class's: a bound method is made at each getattr
     if settle is not None:
-        settle()
+        settle(app)
     derive_commit(app)
     done = getattr(app, "committed", None)     # an engine holding state of its own takes the commit's writes
     if done is not None:
@@ -770,8 +776,28 @@ def derive_commit(app):
         return
     seen = getattr(app, "_dseen", None)
     if seen is None:
-        seen = app._dseen = {"ver": dict(st._ver), "val": {k: f() for k, f in st._derive.items()}}
+        _derive_seen(app, st)
         return
+    total = 0
+    for k in st._ver:
+        total += st._ver[k]
+    if total == seen["sum"] and not seen["docs"]:
+        return                          # no version moved (they only grow): no derive did
+    _derive_moved(app, st, seen)
+
+
+# derive_commit's halves that make sets and lists: apart, because a
+# comprehension naming a function's locals makes their cells at each call
+# of it on a board, and derive_commit runs at every frame's commit
+def _derive_seen(app, st):
+    app._dseen = {"ver": dict(st._ver), "val": {k: f() for k, f in st._derive.items()},
+                  "sum": -1,            # a derive over a document or an engine value: no version says
+                  "docs": any(isinstance(st._t[d], Doc) for k in st._dsrc
+                              for d in st._dsrc[k][1] if d in st._t)
+                  or any("@" in st._dsrc[k][0] for k in st._dsrc)}
+
+
+def _derive_moved(app, st, seen):
     moved = {k for k, v in st._ver.items() if seen["ver"].get(k) != v}
     was, _NOW.app = _NOW.app, app
     try:
@@ -786,6 +812,10 @@ def derive_commit(app):
     finally:
         _NOW.app = was
     seen["ver"] = dict(st._ver)
+    total = 0
+    for k in st._ver:
+        total += st._ver[k]
+    seen["sum"] = total
 
 
 def _undeclared(k, names):
