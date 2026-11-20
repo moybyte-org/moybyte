@@ -17,7 +17,11 @@ if ROOT not in sys.path:
 
 FIX = os.path.join(HERE, "fixtures", "uitree_lua")
 MESH = os.path.join(HERE, "fixtures", "apps", "moymesh.moy")
-DT = 1.0 / 30.0
+# A frame is a whole number of ms. The host kernel loop's driver clock is one
+# microsecond count for the process, which the loop reads in whole ms, so at
+# 1/30 s a frame's ms step is 33 or 34 by where earlier runs left that count,
+# and a glide integrated over those steps ended elsewhere every third run.
+DT = 0.033
 CLOCK = 1763553600 + 8 * 3600 + 20 * 60
 
 # a size: the console's (320x240 full screen) and the desk's (a 1024x600 window)
