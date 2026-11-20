@@ -1202,9 +1202,22 @@ def cond_full(src, ctx, where):
                           fix="bracket one side: a & (b | c)")
         if not ops:
             return parts[0]
+        # plain loops: a generator expression is an object a call, and a
+        # derive is read every frame (a `shown=` naming it)
         if ops == {"&"}:
-            return lambda row: all(p(row) for p in parts)
-        return lambda row: any(p(row) for p in parts)
+            def ev_all(row):
+                for p in parts:
+                    if not p(row):
+                        return False
+                return True
+            return ev_all
+
+        def ev_any(row):
+            for p in parts:
+                if p(row):
+                    return True
+            return False
+        return ev_any
     g = level()
     if peek() is not None:
         raise UIError("C01", "derive condition %r: %r after the end" % (src, peek()), where=where, fix='join two conditions with & or |')

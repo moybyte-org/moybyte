@@ -1644,11 +1644,13 @@ class Engine(S.Builder):
         """G6: the innermost shown node that says what Back does there."""
         if not _shown(n, None):
             return None
+        kids = n.kids
         if n.kind == "switch":
             v = self.s._v[n.l["name"]]
-            kids = [c for c in n.kids if c.l["v"] in (v, "_")][:1]
-        else:
-            kids = n.kids
+            for c in n.kids:
+                if c.l["v"] == v or c.l["v"] == "_":
+                    return self._closer(c)
+            return None
         for k in kids:
             if k.kind in ("rows", "cards", "table"):
                 continue

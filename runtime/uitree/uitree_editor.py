@@ -28,7 +28,9 @@ class Engine(uitree_app.Engine):
     def __init__(self, *a, **k):
         uitree_app.Engine.__init__(self, *a, **k)
         self.anchors = {}      # "key.part" -> (x, y, w, h), as this frame placed it
-        self.views = {}        # text editor key -> [rect, top drawn, cell, line h, x0]
+        self.views = {}        # text editor key -> [rect, top drawn, cell, line h, x0, rows]
+        self._tv = {}          # text editor key -> (its packed options, its answer, its id pair)
+        self._mono = [None, 0, 0, 0]    # look epoch, scale: the mono cell and line pitch
         self.split_out = array("i", [0] * (4 * 16 + 4))
         self.dividers = {}     # panes node id -> the divider rects this frame drew
         self.edits_traced = None
@@ -475,71 +477,130 @@ class Engine(uitree_app.Engine):
 
     # -- the text editor --------------------------------------------------------
 
+    def _mono_metrics(self):
+        """The mono face's (cell, line pitch) at the scale: a version 2
+        face's glyph box, petme128's line and its lead. Read again when the
+        look moved (`ui_draw.look_moved`, which a font change publishes)."""
+        m = self._mono
+        if m[0] != _ud._GEN or m[1] != self.fs:
+            fid, fw, line, _asc = _ud.font("mono")
+            info = _ud.font_info(fid) if fid else None
+            m[0], m[1] = _ud._GEN, self.fs
+            m[2] = fw * self.fs
+            m[3] = (info[1] if info is not None and info[4] == 0 else line + 2) * self.fs
+        return m
+
     def _pitch(self):
-        """A text editor's line pitch: a version 2 face's glyph box,
-        petme128's line and its lead."""
-        fid, _fw, line, _asc = _ud.font("mono")
-        info = _ud.font_info(fid) if fid else None
-        return (info[1] if info is not None and info[4] == 0 else line + 2) * self.fs
+        return self._mono_metrics()[3]
 
     def _r_text_editor(self, n, row, rect):
+        """A text editor's rows: one `ui.text_view` on its packed options,
+        which a frame fills in place (the view allocates nothing a frame).
+        Its parts' anchors (`caret`, `word`) are read where a popover hangs
+        from one (`_part_anchor`)."""
         key = n.key
         doc = self.s._v[key]
         ed = doc.ed
         fs = self.fs
-        cell = _ud.font("mono")[1] * fs
-        lh = self._pitch()
+        m = self._mono_metrics()
+        cell, lh = m[2], m[3]
         x, y, w, h = rect
         lines = max(1, h // lh)
         if lines * lh < h:
             self.cv.rect(x, y + lines * lh, w, h - lines * lh, self.th["surface"])
-            rect = (x, y, w, lines * lh)
             h = lines * lh
-        v = self.views.get(key)
+        tv = self._tv.get(key)
+        if tv is None:
+            o = _v.text_options({"syntax": _SYN[doc.lang], "mark": True})
+            tv = self._tv[key] = (o, array("i", [0, 0]), (n, None))
+            v = self.views[key] = [[x, y, w, h], -1, cell, lh, 0, 1]
+        else:
+            v = self.views[key]
+        o, into, pair = tv
+        r = v[0]                        # one assignment a word: an unpacking of four builds a tuple
+        r[0] = x
+        r[1] = y
+        r[2] = w
+        r[3] = h
         gutter = bool(n.p["gutter"](row)) if "gutter" in n.p else False
-        gcols = (len(str(len(ed.lines))) + 1) if gutter else 0
+        gcols = 0
+        if gutter:
+            k = len(ed.lines)
+            gcols = 2
+            while k >= 10:
+                k //= 10
+                gcols += 1
         x0 = x + _TEXT_PAD * fs + gcols * cell
         ed.set_view_size(max(1, (w - (x0 - x)) // cell), lines)
         q = ""
-        if "find" in n.l and n.p.get("find_on", lambda r: True)(row):
+        if "find" in n.l and ("find_on" not in n.p or n.p["find_on"](row)):
             q = self.s._v[n.l["find"]]
         doc.find_q = q
         err = None
+        o[_v.TXO_ERR] = -1
         if "marks" in n.l:
-            for m in self.s._v[n.l["marks"]]:
-                if m.kind == "error":
-                    err = (m.line - 1, m.words)
+            marks = self.s._v[n.l["marks"]]
+            for i in range(len(marks)):
+                mk = marks[i]
+                if mk.kind == "error":
+                    o[_v.TXO_ERR] = mk.line - 1
+                    err = mk.words
                     break
-        o = {"gutter": gutter, "syntax": _SYN[doc.lang], "caret": (ed.row, ed.col), "mark": True,
-             "left": ed.left}
-        if ed.sel is not None:
-            o["sel"] = ed.selection_bounds()
-        if q:
-            o["find"] = (q, doc.find_ci)
-        if err is not None:
-            o["err"] = err
-        if v is None or v[1] != ed.top:
-            o["top"] = ed.top
+        o[_v.TXO_GUTTER] = 1 if gutter else 0
+        o[_v.TXO_CARET] = ed.row
+        o[_v.TXO_CARET + 1] = ed.col
+        k = _v.TXO_SEL
+        b = ed.selection_bounds() if ed.sel is not None else None
+        if b is None:
+            o[k] = o[k + 2] = -1
+            o[k + 1] = o[k + 3] = 0
+        else:
+            o[k] = b[0]
+            o[k + 1] = b[1]
+            o[k + 2] = b[2]
+            o[k + 3] = b[3]
+        o[_v.TXO_FIND_CI] = 1 if q and doc.find_ci else 0
+        o[_v.TXO_LEFT] = ed.left
+        o[_v.TXO_TOP] = ed.top if v[1] != ed.top else -1
         _v.at(x, y, w, h)
-        got = _v.text_view(key, ed.lines, o)
-        ed.top = got[0]
-        if got[1] > 0:
-            lh = h // got[1]
-        self.views[key] = [rect, ed.top, cell, lh, x0, max(1, got[1])]
-        self.ids[key] = (n, None)
-        cy = y + (ed.row - ed.top) * lh + (lh // 2 if self.desk else 0)
+        _v.text_view(key, ed.lines, o, err, q or None, into)
+        ed.top = into[0]
+        if into[1] > 0:
+            lh = h // into[1]
+        v[1] = ed.top
+        v[2] = cell
+        v[3] = lh
+        v[4] = x0
+        v[5] = max(1, into[1])
+        self.ids[key] = pair
+        self.anchors[key] = r
+
+    def _part_anchor(self, name):
+        """The rect a popover hangs from: a node's, or a part's a frame
+        placed (a tab's, a pane's head), or a text editor's `caret` or
+        `word`, read from its view as last drawn."""
+        a = self.anchors.get(name)
+        if a is not None or "." not in name:
+            return a
+        key, part = name.split(".", 1)
+        v = self.views.get(key)
+        if v is None or part not in ("caret", "word") or key not in self.s._v:
+            return None
+        ed = self.s._v[key].ed
+        r, top, cell, lh, x0 = v[0], v[1], v[2], v[3], v[4]
+        cy = r[1] + (ed.row - top) * lh + (lh // 2 if self.desk else 0)
         cx = x0 + (ed.col - ed.left) * cell
-        self.anchors[key + ".caret"] = (cx, cy, cell, lh)
+        if part == "caret":
+            return (cx, cy, cell, lh)
         p = len(ed.word_prefix())
-        self.anchors[key + ".word"] = (cx - p * cell, cy, max(cell, p * cell), lh)
-        self.anchors[key] = rect
+        return (cx - p * cell, cy, max(cell, p * cell), lh)
 
     # -- popovers hang from a node's part -------------------------------------
 
     def _r_popover(self, n, row, rect):
         w = n.p["w"](row) if "w" in n.p else 200
         name = n.p["anchor"](row) if "anchor" in n.p else None
-        a = self.anchors.get(name) if name else None
+        a = self._part_anchor(name) if name else None
         if a is not None and "." not in name and n.kids and n.kids[0].kind == "field":
             # hung from a whole node, a popover that opens on its field
             # (Go to) stands centred over that node's top
@@ -713,27 +774,35 @@ class Engine(uitree_app.Engine):
     def shown_popovers(self):
         """The popovers in the shown tree: a switch's current case only."""
         out = []
-
-        def walk(n):
-            for k in n.kids:
-                if not uitree_app._shown(k, None):
-                    continue
-                if k.kind == "popover":
-                    out.append(k)
-                elif k.kind == "switch":
-                    v = self.s._v[k.l["name"]]
-                    for c in k.kids:
-                        if c.l["v"] in (v, "_"):
-                            walk(c)
-                            break
-                elif k.kind not in ("rows", "cards"):
-                    walk(k)
         if self.root is not None:
-            walk(self.root)
+            self._pops(self.root, out)
         return out
 
+    def _pops(self, n, out):
+        """The shown popovers under `n` into `out`, or, `out` None, the
+        first of them (a frame's question, which allocates nothing)."""
+        for k in n.kids:
+            if not uitree_app._shown(k, None):
+                continue
+            got = None
+            if k.kind == "popover":
+                if out is None:
+                    return k
+                out.append(k)
+            elif k.kind == "switch":
+                v = self.s._v[k.l["name"]]
+                for c in k.kids:
+                    if c.l["v"] == v or c.l["v"] == "_":
+                        got = self._pops(c, out)
+                        break
+            elif k.kind != "rows" and k.kind != "cards":
+                got = self._pops(k, out)
+            if got is not None:
+                return got
+        return None
+
     def popover_shown(self):
-        return bool(self.shown_popovers())
+        return self.root is not None and self._pops(self.root, None) is not None
 
     def editor_keys(self):
         """The text editor that takes typed keys: the shown one, unless a
@@ -743,8 +812,10 @@ class Engine(uitree_app.Engine):
         f = self.focused
         if f is not None and f[0].kind in ("field", "link") :
             return None
-        keys = [k for k in self.views if self.views[k] is not None]
-        return keys[0] if keys else None
+        for k in self.views:
+            if self.views[k] is not None:
+                return k
+        return None
 
     def keys(self, i):
         was, _NOW.app = _NOW.app, self      # a size class (@desk) reads the app's
@@ -756,8 +827,10 @@ class Engine(uitree_app.Engine):
     def _keys(self, i):
         ch = getattr(i, "typed", 0) & 0xFF
         self.shift = bool(getattr(i, "mods", 0) & _SHIFT)
-        answer = [a for a in self.actions.values() if ch and any(S._chord_byte(k) == ch for k in a.keys)]
-        live = [a for a in answer if a.live()]
+        live = ()
+        if ch:
+            answer = [a for a in self.actions.values() if any(S._chord_byte(k) == ch for k in a.keys)]
+            live = [a for a in answer if a.live()]
         if len(live) > 1:               # the checker proves this cannot happen; the engine says so if it does
             raise S.UIError("U08", "%s answer one key while all are shown" % " and ".join(a.name for a in live),
                             fix="never show two units that answer one key together")
