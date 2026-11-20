@@ -1030,11 +1030,12 @@ class BarZone:
         return out
 
     def _layout(self, rect):
-        """[(rect, kind, node, value, label, icon, labelled)] and the
-        hairlines' x, for the lent row in `rect`."""
+        """[(rect, kind, node, value, label, icon, labelled)], the
+        hairlines' x and the density the row packed at (2 every label, 1
+        the current tab's name, 0 icons), for the lent row in `rect`."""
         n = self._row()
         if n is None:
-            return [], []
+            return [], [], 0
         e = self.engine
         was, _NOW.app = _NOW.app, e
         try:
@@ -1119,12 +1120,12 @@ class BarZone:
             labelled = it[0] == "text" or self._named(it, density)
             out.append(((x, y, cw, h), it[0], it[1], it[2], it[3], it[4], labelled))
             x += cw
-        return out, hair
+        return out, hair, density
 
     # -- what the bar asks ----------------------------------------------------
 
     def draw_zone(self, cv, zone):
-        cells, hair = self._layout(zone)
+        cells, hair, density = self._layout(zone)
         look = self.look
         e = self.engine
         was, _NOW.app = _NOW.app, e
@@ -1133,7 +1134,7 @@ class BarZone:
                 look.draw_line(cv, x, zone)
             for r, kind, node, v, label, icon, labelled in cells:
                 if kind == "tab":
-                    look.draw_tab(cv, r, e.s._v[node.key] == v, label, icon, labelled)
+                    look.draw_tab(cv, r, e.s._v[node.key] == v, label, icon, labelled, density == 2)
                 elif kind == "text":
                     look.draw_text(cv, r, label)
                 else:

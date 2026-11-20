@@ -33,7 +33,7 @@ class _Look:
     def word_width(self, label, icon, h):
         return 16 + 4 + 6 * len(label) + 4
 
-    def draw_tab(self, cv, r, cur, label, icon, labelled):
+    def draw_tab(self, cv, r, cur, label, icon, labelled, every):
         self.drawn.append(("tab", r, cur, label if labelled else icon))
 
     def draw_icon(self, cv, r, icon, on, primary):

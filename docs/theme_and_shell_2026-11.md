@@ -2154,9 +2154,11 @@ another project; its X is the back-stack's pop, so it lands on the home on
 the tab and card the Editor was opened from (CHANGE works from any tab). On
 a handheld the bar's zone is the Editor's head row, a `uitree` page lent to
 the bar (runtime/editors/editor_ui.py, laid out by
-`uitree_editor.BarZone`): every label where the row holds them, else icons
-with the open tab named where it fits at no gaps, else icons alone; the
-T-Deck's bar names the open tab.
+`uitree_editor.BarZone`): every label where the row holds them, the open
+tab on its plate; else icons with the open tab named where it fits at no
+gaps, on the theme's current mark as a pill in the mark's ink, as the home's
+bar tabs are (`EditorApp.draw_tab`); else icons alone. The T-Deck's bar
+names the open tab.
 
 **The home in a window.** The desk's PROJECTS opens the same component in a
 desktop-mode window (`HomeWindowLayer`, kind `projects`): on its Make tab

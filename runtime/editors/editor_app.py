@@ -1045,10 +1045,22 @@ class EditorApp:
         fs = self._zone_scale()
         return (_BAR_ICON + 4 + 8) * fs + _ui_draw.print_width(label, fs)
 
-    def draw_tab(self, cv, r, cur, label, icon, labelled):
+    def draw_tab(self, cv, r, cur, label, icon, labelled, every):
+        """A head-row tab in cell `r`. Where the row names `every` tab, each
+        is a tab chip, the current one on its plate; where it names the
+        current one alone (the narrow bar), that one is the theme's current
+        mark as a pill (`_open_mark`) with its name in the mark's ink, as
+        the home's bar tabs are, and the rest are icons."""
         ws = self.ws
         th = ws.theme_colors
         sets = ws.icon_spec() is not None
+        if labelled and cur and not every:
+            ink = self._open_mark(cv, r)
+            _ui_draw.tab(cv, th, r, False, label, True,
+                         th["chrome_ink"] if ink is None else ink,
+                         ws.icon_image_keyed(icon),
+                         icon_draw=self._set_icon(cv, ink) if sets else None, kind=icon)
+            return
         if labelled:
             band_ink = th["ink"] if ws.bar_layer.zone_band_light("menu") else None
             draw = self._set_icon(cv, open_kind=icon if cur else None,
