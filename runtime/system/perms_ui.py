@@ -18,22 +18,21 @@ consent records, the nav role for which carts are the shell's.
 """
 
 import uitree as ui
+import uitree_app
 import app_perms as _perms
 
 TITLE = "App permissions"
 EMPTY = "No app on this console asks for more than a game does."
 NATIVE = "native"             # the native-module switch's permission in a row
 
-s = ui.state(grants=ui.model(key="id", id="", app="", aid="", perm="", line="", on=False))
+s = ui.state(grants=ui.model(key="id", id="", app="", aid="", perm="", line="", on=False, asked=""))
 
-_ctx = [None]                 # the AppContext of the console that hosts the page
-_asked = {}                   # app id -> its manifest's permissions (a native switch's)
 
 
 def opened():
     """A row per permission the install prompt names, grouped by cart in
     the shelf's order."""
-    ctx = _ctx[0]
+    ctx = uitree_app.env()
     consent = ctx.install.consent()
     rows = []
     for cart in ctx.carts.all() or ():
@@ -41,20 +40,21 @@ def opened():
             continue                  # the shell's own: no grant to narrow
         aid = _perms.app_id(cart)
         lines = [(p, _perms.line(p)) for p in _perms.asked(_perms.perms_of(cart), _perms.tiers_of(cart))]
+        asked = ""
         if _perms.native_choice(cart):
             lines.append((NATIVE, _perms.NATIVE_LINE))
-            _asked[aid] = list(cart.get("permissions") or ())
+            asked = " ".join(cart.get("permissions") or ())
         for perm, line in lines:
             on = (_perms.native_opted(consent.get(aid)) if perm == NATIVE else consent.is_on(aid, perm))
             rows.append({"id": aid + " " + perm, "app": cart.get("title") or "?", "aid": aid,
-                         "perm": perm, "line": line, "on": on})
+                         "perm": perm, "line": line, "on": on, "asked": asked})
     s.grants = rows
 
 
 def turn(row):
-    consent = _ctx[0].install.consent()
+    consent = uitree_app.env().install.consent()
     if row.perm == NATIVE:
-        consent.opt(row.aid, "full_access", row.on, _asked.get(row.aid, ()))
+        consent.opt(row.aid, "full_access", row.on, row.asked.split())
     else:
         consent.turn(row.aid, row.perm, row.on)
 
@@ -77,9 +77,7 @@ class PermsPage:
     NEEDS = ("carts", "install", "nav")
 
     def __init__(self, ctx, host, damage):
-        _ctx[0] = ctx
-        import uitree_app
-        self.page = uitree_app.Page(build, host, damage)
+        self.page = uitree_app.Page(build, host, damage, env=ctx)
 
     def open(self):
         self.page.open()

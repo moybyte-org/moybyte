@@ -8,7 +8,7 @@ gated toggle, the theme package's Layout) is a condition over a bool the
 `rows_poll` hook keeps from `SettingsLayer._settings_rows()`, which stays
 the one place a capability decides a row. The hook runs before each frame
 and reads every value the rows show, as the page's poll did; a row's
-answer calls into the layer (`_layer[0]`): its pages, its level and
+answer calls into the layer (`uitree_app.env()`): its pages, its level and
 action verbs, the console's setters.
 
 The Name is a commit field: typed into a draft, stored by Enter (focus then
@@ -18,6 +18,7 @@ with its note under the group.
 """
 
 import uitree as ui
+import uitree_app
 import ssh_service as _ssh
 import wallclock as _wc
 from idle_ladder import ROWS as IDLE_ROWS, STEPS as IDLE_STEPS, DIM
@@ -54,7 +55,6 @@ s = ui.state(
            + [(t[0], False) for t in TOGGLES]
            + [(k, ui.enum(*STEP_WORDS, init=STEP_WORDS[0])) for k, _l in IDLE]))
 
-_layer = [None]               # the SettingsLayer whose rows these are
 
 ui.labels("sizes", dict((str(f), w) for f, w in _SIZES.items()))
 ui.labels("homes", dict(zip(HOMES, _HOME_WORDS)))
@@ -67,7 +67,7 @@ ui.labels("idle", dict((str(t), _idle_word(t)) for t in IDLE_STEPS))
 def _model(name, rows):
     """A model written when its rows move (an equal model write is a new
     version: the page's gen would move every frame)."""
-    last = _layer[0].rows.last
+    last = uitree_app.env().rows.last
     if last.get(name) != rows:
         last[name] = rows
         setattr(s, name, [dict(r) for r in rows])
@@ -101,7 +101,7 @@ def _words(sl):
 
 
 def rows_poll():
-    sl = _layer[0]
+    sl = uitree_app.env()
     ws = sl.ws
     keys = [r[0] for r in sl._settings_rows()]
     for k in CAPS + GATED:
@@ -152,34 +152,34 @@ def rows_opened():
 
 def _page(name):
     def open_():
-        _layer[0].open_page(name)
+        uitree_app.env().open_page(name)
     return open_
 
 
 def _act(key):
     def act():
-        _layer[0]._activate_settings_action(key)
+        uitree_app.env()._activate_settings_action(key)
     return act
 
 
 def web_toggle():
-    _layer[0].ws.web.toggle()
+    uitree_app.env().ws.web.toggle()
 
 
 def ach_open():
-    _layer[0].ws.ach_ui._secret_taps = 0
-    _layer[0].open_page("achievements")
+    uitree_app.env().ws.ach_ui._secret_taps = 0
+    uitree_app.env().open_page("achievements")
 
 
 def font_set():
-    look = _layer[0].ws.look
+    look = uitree_app.env().ws.look
     scales = look.FONT_SCALES
     cur = scales.index(look.font_scale) if look.font_scale in scales else 0
     look.cycle_font_scale(scales.index(int(s.font_scale)) - cur)
 
 
 def layout_set():
-    look = _layer[0].ws.look
+    look = uitree_app.env().ws.look
     keys = [r.v for r in s.layouts]
     pick = look.layout_theme()
     cur = keys.index("" if pick is None else pick)
@@ -187,28 +187,28 @@ def layout_set():
 
 
 def home_set():
-    look = _layer[0].ws.look
+    look = uitree_app.env().ws.look
     pick = look.home_style()
     look.cycle_home_style(HOMES.index(s.home_style) - (0 if pick is None else HOMES.index(pick)))
 
 
 def channel_set():
-    ws = _layer[0].ws
+    ws = uitree_app.env().ws
     cur = 1 if ws.toggles.ota_channel() == "unstable" else 0
     ws.toggles.cycle_channel(CHANNELS.index(s.ota_channel) - cur)
 
 
 def volume_set():
-    _layer[0].set_level("volume", s.volume)
+    uitree_app.env().set_level("volume", s.volume)
 
 
 def brightness_set():
-    _layer[0].set_level("brightness", s.brightness)
+    uitree_app.env().set_level("brightness", s.brightness)
 
 
 def name_set():
     """The Name, stored once an edit (Enter, focus leaving, Settings left)."""
-    ws = _layer[0].ws
+    ws = uitree_app.env().ws
     if s.name != str(ws.system.get("name", "") or ""):
         ws.system.set("name", s.name)
         _ssh.rename(ws)
@@ -220,13 +220,13 @@ def name_done():
 
 def _toggled(name, verb):
     def set_():
-        getattr(_layer[0].ws.toggles, verb)(getattr(s, name))
+        getattr(uitree_app.env().ws.toggles, verb)(getattr(s, name))
     return set_
 
 
 def _idle_set(key):
     def set_():
-        _layer[0].ws.idle_ladder.set(key, int(getattr(s, key)))
+        uitree_app.env().ws.idle_ladder.set(key, int(getattr(s, key)))
     return set_
 
 
@@ -320,11 +320,8 @@ class RowsPage:
     drawn each frame, its draft Name written on every way out."""
 
     def __init__(self, layer, host):
-        _layer[0] = layer
-        import uitree_app
-        self.engine = uitree_app.Page(rows_page, host, self, gen=True)
+        self.engine = uitree_app.Page(rows_page, host, self, gen=True, env=layer)
         self._ws = layer.ws
-        self._layer = layer
         self.last = {}                  # each model's rows as this page last wrote them
 
     def all(self):
@@ -332,17 +329,14 @@ class RowsPage:
         self._ws.request_frame()
 
     def open(self):
-        _layer[0] = self._layer         # the handlers' layer: this console's
         self.engine.open(hook="rows_opened")
 
     def draw(self, cv, th, rect, desk, dt):
-        _layer[0] = self._layer         # the handlers' layer: this console's
         self.engine.run(rows_poll, action="rows_poll")
         ui.commit(self.engine)
         self.engine.paint(dt, cv, th, rect, desk)
 
     def keys(self, i):
-        _layer[0] = self._layer         # the handlers' layer: this console's
         self.engine.keys(i, damage=False)
 
     def focus(self, key):
@@ -352,7 +346,6 @@ class RowsPage:
         return self.engine.focus_key
 
     def leave(self):
-        _layer[0] = self._layer         # the handlers' layer: this console's
         self.engine.leave()
 
     def draft(self, key):

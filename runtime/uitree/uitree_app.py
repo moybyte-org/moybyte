@@ -39,8 +39,9 @@ class Engine(S.Builder):
 
     close_root = None       # what ui.pop() on the first page does: a hosted page's host closes it
 
-    def __init__(self, decl, build, host, surface, damage, files=None, gen=False):
+    def __init__(self, decl, build, host, surface, damage, files=None, gen=False, env=None):
         self.decl = decl
+        self.env = env                  # what the host hands its handlers (`env()`)
         self._gen_on = gen              # the page's gen: off where a golden pins today's draw counts
         self._ui, self._surf, self._damage = host, surface, damage
         self.init_builder(decl.state, build)
@@ -1276,7 +1277,7 @@ class App(AppLayer):
         self._surf, self._theme, self._damage = ctx.surface, ctx.theme, ctx.damage
         build = self.BUILD[0]
         self.engine = Engine(S.decl_of(build.__module__), build, ctx.ui, ctx.surface, ctx.damage,
-                             getattr(ctx, "files", None))
+                             getattr(ctx, "files", None), env=ctx)
 
     def is_app(self, cart):
         return bool(self.IS_APP and self.IS_APP[0](cart))
@@ -1319,6 +1320,18 @@ class App(AppLayer):
         self.engine.idle_step()
 
 
+def env():
+    """What the host handed the engine running this handler: an app's
+    AppContext, a bridged page's console or surface. A module's handlers
+    reach the console's services through it, so two consoles in one process
+    each reach their own."""
+    a = _NOW.app
+    if not isinstance(a, Engine) or _NOW.building:
+        raise S.UIError("A10", "uitree_app.env() outside a handler",
+                        fix="ask it in a handler or a hook; a build names state, it reads no service")
+    return a.env
+
+
 def app_layer(id, title, build, is_app=None, needs=()):
     """The AppLayer class of an app whose screen is `build` (the module's
     root page): what its manifest's `entry` names. Its title is the
@@ -1346,6 +1359,6 @@ class Page(Engine):
     the keys to it; `paint` replays the page into its content rect. It goes
     with the old engine."""
 
-    def __init__(self, build, host, damage, files=None, close=None, gen=False):
-        Engine.__init__(self, S.decl_of(build.__module__), build, host, None, damage, files, gen)
+    def __init__(self, build, host, damage, files=None, close=None, gen=False, env=None):
+        Engine.__init__(self, S.decl_of(build.__module__), build, host, None, damage, files, gen, env)
         self.close_root = close

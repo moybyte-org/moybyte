@@ -15,6 +15,7 @@ the hosting console makes.
 """
 
 import uitree as ui
+import uitree_app
 import wallclock as _wc
 import ssh_service as _ssh
 
@@ -29,8 +30,6 @@ s = ui.state(
     many=False,
     fp="",
 )
-
-_ws = [None]                  # the console whose pages these are
 
 
 def _day(t):
@@ -49,7 +48,7 @@ def tz_opened():
 
 
 def use(row):
-    _ws[0].toggles.set_time_zone(row.tz)
+    uitree_app.env().toggles.set_time_zone(row.tz)
     s.zone = row.tz
     ui.pop()
 
@@ -69,7 +68,7 @@ def tz_page():
 
 def read_paired():
     """The paired browsers and the host key's fingerprint, as the page shows them."""
-    ws = _ws[0]
+    ws = uitree_app.env()
     web = getattr(ws, "webhost", None)
     rows = []
     if web is not None:
@@ -84,7 +83,7 @@ def read_paired():
 
 
 def _forget(kid):
-    web = getattr(_ws[0], "webhost", None)
+    web = getattr(uitree_app.env(), "webhost", None)
     if web is not None:
         web.forget(kid)
     read_paired()
@@ -121,11 +120,9 @@ class SettingsPages:
     own `ui.pop()` through `close(name)`."""
 
     def __init__(self, ws, host, damage, close):
-        _ws[0] = ws
-        import uitree_app
         self.pages = {
-            "tz": (uitree_app.Page(tz_page, host, damage, close=lambda: close("tz")), "tz_opened"),
-            "paired": (uitree_app.Page(paired_page, host, damage, close=lambda: close("paired")),
+            "tz": (uitree_app.Page(tz_page, host, damage, close=lambda: close("tz"), env=ws), "tz_opened"),
+            "paired": (uitree_app.Page(paired_page, host, damage, close=lambda: close("paired"), env=ws),
                        "paired_opened"),
         }
 

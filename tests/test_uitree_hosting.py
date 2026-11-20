@@ -121,17 +121,22 @@ def test_a_page_with_no_stop_answers_confirm_and_back_through_its_role_actions(t
 
 def test_two_engines_over_one_module_each_hold_their_own_state():
     """Two consoles in one process (a test's pair of desks) each open the
-    module's page: each engine's handlers read and write its own values."""
+    module's page: each engine's handlers read and write its own values, and
+    reach their own console through `env()`."""
     import uitree_app
     import uitree_focus as F
-    a = uitree_app.Page(F.build, None, None)
-    b = uitree_app.Page(F.build, None, None)
+    a = uitree_app.Page(F.build, None, None, env="console a")
+    b = uitree_app.Page(F.build, None, None, env="console b")
     a.run(lambda: setattr(F.s, "seen", 3), action="t")
     b.run(lambda: setattr(F.s, "seen", 5), action="t")
     got = []
-    a.run(lambda: got.append(F.s.seen), action="t")
-    b.run(lambda: got.append(F.s.seen), action="t")
-    assert got == [3, 5]
+    a.run(lambda: got.append((F.s.seen, uitree_app.env())), action="t")
+    b.run(lambda: got.append((F.s.seen, uitree_app.env())), action="t")
+    assert got == [(3, "console a"), (5, "console b")]   # each handler reaches its own console
+    import uitree as S
+    with pytest.raises(S.UIError) as e:
+        uitree_app.env()
+    assert e.value.code == "A10"
 
 
 def test_the_display_kinds_draw_and_letters_and_arrows_fire_their_actions(tmp_path):

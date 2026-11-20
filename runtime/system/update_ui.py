@@ -83,14 +83,13 @@ class UpdateUI:
         # Updates row says is ready; None after one found nothing newer.
         self.offered = None
         self._check_armed = False     # one-frame gate so CHECKING... draws before the blocking fetch
-        _owner[0] = self
         self._pg = None               # the page's engine, made when the screen first opens or draws
         self._shown = None            # the screen the page shows (`_screen`)
 
     def _page(self):
         if self._pg is None:
             import uitree_app
-            self._pg = uitree_app.Page(page, self._host, _Damage(self.ws))
+            self._pg = uitree_app.Page(page, self._host, _Damage(self.ws), env=self)
             self._pg.open()
         return self._pg
 
@@ -676,7 +675,6 @@ BAR = None                      # in a screen's lines: the progress bar, its fra
 s = ui.state(cap="", head=ui.model(key="n", n="", text=""), bar=False, frac=0,
              tail=ui.model(key="n", n="", text=""), go_word="", leave_word="")
 
-_owner = [None]                 # the UpdateUI whose screen the page is
 
 # B leaves these; A leaves the last seven too
 _LEAVE_ANY = ("error", "uptodate", "updated", "rolledback", "nopublish", "handed", "c6_uptodate")
@@ -694,10 +692,16 @@ def show(screen):
     s.tail = [{"n": str(i), "text": t} for i, t in enumerate(lines[at + 2:])]
 
 
+def _owner():
+    """The UpdateUI whose screen the running handler's page is."""
+    import uitree_app
+    return uitree_app.env()
+
+
 def go():
     """A, or a tap anywhere but the X: what the phase offers, else leave
     where A leaves."""
-    u = _owner[0]
+    u = _owner()
     ph = u._upd_phase
     if ph == "confirm":
         u._confirm_update()
@@ -712,7 +716,7 @@ def go():
 def leave():
     """B: back to Settings, dropping an install or download under way;
     "done" is past the point of no return."""
-    u = _owner[0]
+    u = _owner()
     if u._upd_phase in _LEAVES:
         u._exit_update()
 
