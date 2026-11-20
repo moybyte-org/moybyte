@@ -899,6 +899,185 @@ static void draw_text_view(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, in
         e->tv_stop_now = 1;
 }
 
+// A label's rows as the toolkit's labels, drawn; or with `h`, measured (their steps added to *h).
+static void label_rows(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row, int32_t *h)
+{
+    const uit_node_t *N = NODE(k);
+    moy_ui_over_t o;
+    uint32_t n1, a1;
+    if (N->t_icon >= 0 && !h) {
+        uint32_t n, at = uit_tmpl_render(e, N->t_icon, model, row, &n);
+        if (n)
+            moy_ui_api_icon(c, sspan(e, at, n));
+    }
+    a1 = text(e, k, 0, model, row, &n1);
+    int t = N->nbtn, opts = N->lit || (t & ~LT_CHAR);
+    int lines = (t & LT_WRAP) == LT_WORD || (t & LT_LINES) ? (N->btn ? N->btn : 16) : 0;
+    // wrap="char": lines of what fits the page's width, cut anywhere, each a label
+    uint32_t per = 0;
+    if ((t & LT_WRAP) == LT_CHAR) {
+        moy_font_info_t fi;
+        moy_ui_font(s->cart, MOY_UI_FONT_UI, &fi);
+        int cw = fi.w * e->fs;
+        per = (uint32_t)((e->pw - 32) / (cw > 1 ? cw : 1));
+        if (per < 8)
+            per = 8;
+    }
+    // `per` characters a line (a UTF-8 sequence is one); one line however long unwrapped,
+    // none for an empty text cut by character (the reference's range over its length)
+    if ((t & LT_WRAP) == LT_CHAR && !n1)
+        return;
+    const char *txt = e->scratch.p + a1;
+    uint32_t at = 0;
+    do {
+        uint32_t m = at, chars = 0;
+        while (m < n1 && chars < per) {
+            m++;
+            while (m < n1 && (txt[m] & 0xc0) == 0x80)
+                m++;
+            chars++;
+        }
+        if ((t & LT_WRAP) != LT_CHAR)
+            m = n1;
+        if (opts)
+            moy_ui_api_text(c, lines, (t >> LT_ALIGN_SHIFT) & 7, N->lit, ((t >> LT_FACE_SHIFT) & 7) - 1);
+        moy_ui_over_none(&o);
+        if (h) {
+            int32_t out[5];
+            moy_ui_api_measure(c, s, MOY_UI_MEASURE_LABEL, sspan(e, a1 + at, m - at), opts ? &o : NULL, out);
+            *h += out[4];
+        } else {
+            moy_ui_api_label(c, s, sspan(e, a1 + at, m - at), opts ? &o : NULL);
+        }
+        at = m;
+    } while (at < n1);
+}
+
+// A gap's pixels: the handheld's at its font scale, the desk's as named (`_gap`).
+static int gap_px(uit_t *e, int i)
+{
+    static const uint8_t GAPS[4][2] = {{6, 10}, {8, 16}, {16, 24}, {0, 0}};
+    return (e->flags & UIT_F_DESK) ? GAPS[i & 3][1] : GAPS[i & 3][0] * e->fs;
+}
+
+// How tall a split's column draws, measured before it draws: -1 where it holds a kind with no
+// measure, which lays it out from its cell's top (`_col_h`).
+static int col_h(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row)
+{
+    int32_t h = 0;
+    KIDS(k, g) {
+        const uit_node_t *N = NODE(g);
+        if (!uit_shown(e, g, model, row) ||
+            (N->act >= 0 && !uit_act_can(e, N->act, model, row) && e->acts[N->act].off != 2))
+            continue;
+        if (N->kind == UIT_LABEL) {
+            label_rows(e, c, s, g, model, row, &h);
+        } else if (N->kind == UIT_BUTTON) {
+            uint32_t n, a = text(e, g, 0, model, row, &n);
+            moy_ui_over_t o;
+            moy_ui_over_none(&o);
+            int32_t one = 1, out[5];
+            moy_ui_over_put(&o, MOY_UI_OV_FIT, &one);
+            moy_ui_api_measure(c, s, MOY_UI_MEASURE_BUTTON, sspan(e, a, n), &o, out);
+            h += out[4];
+        } else {
+            return -1;
+        }
+    }
+    return h;
+}
+
+static void walk(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row);
+static void draw(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row);
+
+// A split (not in a popover): its cells across the page's room in by its pad, each a fixed size
+// in desk units or a weight of what is left ("N*"; with none, every size a weight); a group cell
+// its own scrolled column, any other kind drawn as it stands.
+static void draw_split(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row)
+{
+    const uit_node_t *N = NODE(k);
+    uint32_t dn, da = uit_tmpl_render(e, N->t_value, model, row, &dn);
+    int across = dn == 3 && !memcmp(e->scratch.p + da, "row", 3);
+    uint32_t zn, za = uit_tmpl_render(e, N->t_aux, model, row, &zn);
+    enum { CELLS = 8 };
+    int32_t v[CELLS], spans[CELLS];
+    uint8_t weight[CELLS];
+    int nz = 0, any_w = 0;
+    const char *p = e->scratch.p + za, *end = p + zn;
+    while (p < end && nz < CELLS) {
+        while (p < end && *p == ' ')
+            p++;
+        if (p >= end)
+            break;
+        char *stop;
+        long x = strtol(p, &stop, 10);
+        weight[nz] = stop < end && *stop == '*';
+        if (weight[nz])
+            x = stop == p ? 1 : x, stop++, any_w = 1;
+        v[nz++] = (int32_t)x;
+        p = stop;
+        while (p < end && *p != ' ')
+            p++;
+    }
+    int pad = gap_px(e, N->btn), gap = gap_px(e, N->nbtn);
+    int32_t r[4];
+    moy_ui_inset32(e->rect, pad, pad, r);
+    int32_t span = (across ? r[2] : r[3]) - gap * (nz - 1), sum = 0;
+    if (any_w) {
+        int32_t fixed = 0, ws = 0;
+        for (int i = 0; i < nz; i++)
+            if (weight[i])
+                ws += v[i];
+            else
+                fixed += (e->flags & UIT_F_DESK) ? v[i] : v[i] * e->fs;
+        int32_t rest = span - fixed > 0 ? span - fixed : 0;
+        for (int i = 0; i < nz; i++)
+            spans[i] = weight[i] ? rest * v[i] / (ws > 1 ? ws : 1) : (e->flags & UIT_F_DESK) ? v[i] : v[i] * e->fs;
+    } else {
+        int32_t tot = 0;
+        for (int i = 0; i < nz; i++)
+            tot += v[i];
+        for (int i = 0; i < nz; i++)
+            spans[i] = span * v[i] / (tot > 1 ? tot : 1);
+    }
+    for (int i = 0; i < nz; i++)
+        sum += spans[i];
+    if (nz)
+        spans[nz - 1] += span - sum;
+    int kids[CELLS], nk = 0;
+    KIDS(k, g)
+    if (nk < CELLS && uit_shown(e, g, model, row))
+        kids[nk++] = g;
+    int32_t at = 0;
+    for (int i = 0; i < nk && i < nz; i++) {
+        int g = kids[i];
+        int32_t sz = i < nk - 1 ? spans[i] : span - at;
+        int32_t cell[4] = {across ? r[0] + at : r[0], across ? r[1] : r[1] + at, across ? sz : r[2],
+                           across ? r[3] : sz};
+        at += sz + gap;
+        if (NODE(g)->kind != UIT_GROUP) {
+            draw(e, c, s, g, model, row);
+            continue;
+        }
+        char sid[UIT_ID_MAX + 1];
+        snprintf(sid, sizeof sid, "split %s %d", uit_str(e, N->key), i);
+        moy_ui_api_at(c, cell[0], cell[1], cell[2], cell[3]);
+        moy_ui_api_scroll(c, s, span_of(sid, strlen(sid)), NULL);
+        uint8_t was = e->in_cell;
+        e->in_cell = 1;
+        if (across && N->lit == 1) {
+            int used = col_h(e, c, s, g, model, row);
+            if (used >= 0)
+                moy_ui_api_space(c, (cell[3] - used) / 2);
+        }
+        walk(e, c, s, g, model, row);
+        e->in_cell = was;
+        moy_ui_api_end(c, s);
+        moy_ui_api_scroll(c, s, span_of("", 0), NULL);
+        moy_ui_api_at(c, e->rect[0], e->rect[1], e->rect[2], e->rect[3]);
+    }
+}
+
 // A menu: its items in order, a `rows` among them an item per row of its model, each shown and
 // its action on; an item's id is its text (its letter after a tab where the band shows keys).
 typedef struct {
@@ -985,52 +1164,9 @@ static void draw(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int m
         walk(e, c, s, k, model, row);
         moy_ui_api_group(c, s, span_of("", 0), NULL);
         break;
-    case UIT_LABEL: {
-        if (N->t_icon >= 0) {
-            uint32_t n, at = uit_tmpl_render(e, N->t_icon, model, row, &n);
-            if (n)
-                moy_ui_api_icon(c, sspan(e, at, n));
-        }
-        a1 = text(e, k, 0, model, row, &n1);
-        int t = N->nbtn, opts = N->lit || (t & ~LT_CHAR);
-        int lines = (t & LT_WRAP) == LT_WORD || (t & LT_LINES) ? (N->btn ? N->btn : 16) : 0;
-        // wrap="char": lines of what fits the page's width, cut anywhere, each a label
-        uint32_t per = 0;
-        if ((t & LT_WRAP) == LT_CHAR) {
-            moy_font_info_t fi;
-            moy_ui_font(s->cart, MOY_UI_FONT_UI, &fi);
-            int cw = fi.w * e->fs;
-            per = (uint32_t)((e->pw - 32) / (cw > 1 ? cw : 1));
-            if (per < 8)
-                per = 8;
-        }
-        // `per` characters a line (a UTF-8 sequence is one); one line however long unwrapped,
-        // none for an empty text cut by character (the reference's range over its length)
-        if ((t & LT_WRAP) == LT_CHAR && !n1)
-            break;
-        const char *txt = e->scratch.p + a1;
-        uint32_t at = 0;
-        do {
-            uint32_t m = at, chars = 0;
-            while (m < n1 && chars < per) {
-                m++;
-                while (m < n1 && (txt[m] & 0xc0) == 0x80)
-                    m++;
-                chars++;
-            }
-            if ((t & LT_WRAP) != LT_CHAR)
-                m = n1;
-            if (opts) {
-                moy_ui_over_none(&o);
-                moy_ui_api_text(c, lines, (t >> LT_ALIGN_SHIFT) & 7, N->lit, ((t >> LT_FACE_SHIFT) & 7) - 1);
-                moy_ui_api_label(c, s, sspan(e, a1 + at, m - at), &o);
-            } else {
-                moy_ui_api_label(c, s, sspan(e, a1 + at, m - at), NULL);
-            }
-            at = m;
-        } while (at < n1);
+    case UIT_LABEL:
+        label_rows(e, c, s, k, model, row, NULL);
         break;
-    }
     case UIT_INFO:
     case UIT_LINK:
         a1 = text(e, k, 0, model, row, &n1);
@@ -1044,6 +1180,10 @@ static void draw(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int m
     case UIT_BUTTON:
         a1 = text(e, k, 0, model, row, &n1);
         over_for(e, k, model, row, c, &o, id);
+        if (e->in_cell) {
+            int32_t one = 1;
+            moy_ui_over_put(&o, MOY_UI_OV_FIT, &one);
+        }
         if (moy_ui_api_button(c, s, sspan(e, a1, n1), N->lit, &o) && uit_act_can(e, N->act, model, row))
             fire(e, N->act, k, model, row, NULL);
         break;
@@ -1142,6 +1282,9 @@ static void draw(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int m
         break;
     case UIT_MENU:
         draw_menu(e, c, s, k, model, row);
+        break;
+    case UIT_SPLIT:
+        draw_split(e, c, s, k, model, row);
         break;
     case UIT_SCROLL: {
         const char *key = uit_str(e, N->key);
@@ -1409,6 +1552,7 @@ int uit_frame(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int x, int y, i
     moy_ui_box_t box;
     moy_ui_api_page(c, s, sspan(e, at, n), &o, &box);
     e->pw = box.w;
+    e->rect[0] = box.x, e->rect[1] = box.y, e->rect[2] = box.w, e->rect[3] = box.h;
     // what focus is on as the page begins
     char f[UIT_ID_MAX + 1];
     int fl = moy_ui_api_focus(c, span_of(NULL, 0), f, sizeof f);
@@ -1456,11 +1600,26 @@ int uit_frame(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int x, int y, i
     uit_buf_t hb = {0};
     hints(e, &hb, pages ? pages : 1);
     if (hb.n && (flags & UIT_F_BAND)) {
-        if (flags & UIT_F_ON_BAR) {
-            static const char BAR[] = "change\0Move\0confirm\0Open\0back\0Back";
-            moy_ui_api_hints(c, s, (const uint8_t *)BAR, sizeof BAR - 1, NULL);
-        } else {
-            moy_ui_api_hints(c, s, (const uint8_t *)hb.p, hb.n - 1, NULL);
+        static const char BAR[] = "change\0Move\0confirm\0Open\0back\0Back";
+        const uint8_t *hp = (flags & UIT_F_ON_BAR) ? (const uint8_t *)BAR : (const uint8_t *)hb.p;
+        size_t hn = (flags & UIT_F_ON_BAR) ? sizeof BAR - 1 : hb.n - 1;
+        int placed = 0;
+        KIDS(0, k)
+        if (NODE(k)->kind == UIT_SPLIT && uit_shown(e, k, -1, -1))
+            placed = 1;
+        if (!placed) {
+            moy_ui_api_hints(c, s, hp, hn, NULL);
+        } else if (moy_ui_api_hints_w(c, s, hp, hn) > 0) {
+            // a placed page's band: a handheld's its room's last line, the desk's at the page's foot
+            int32_t band[4], rest[4];
+            int mn, hh = 20 * fs;
+            if (flags & UIT_F_DESK)
+                hh = moy_ui_metrics(MOY_UI_K_VALUE_ROW, &mn)[17] * fs;
+            moy_ui_cut(e->rect, 1, hh, band, rest);
+            if (!(flags & UIT_F_DESK))
+                moy_ui_api_at(c, band[0], band[1], band[2], band[3]);
+            moy_ui_api_hints(c, s, hp, hn, NULL);
+            memcpy(e->rect, rest, sizeof rest);
         }
     }
     // this frame's ids

@@ -550,6 +550,8 @@ int uit_node(uit_t *e, int kind, const char *key, int parent)
     N.slot = N.cur = N.changed = N.on = N.current = -1;
     if (kind == UIT_FIELD)
         N.btn = 32;
+    if (kind == UIT_SPLIT)
+        N.btn = N.nbtn = GAP_M, N.lit = 1;          // pad="m", gap="m", align="center"
     int me = e->nnodes++;
     e->nodes[me] = N;
     if (parent >= 0) {
@@ -582,7 +584,7 @@ int uit_model_of(uit_t *e, int node)
 const char *const uit_kind_names[UIT_KINDS] = {"", "page", "group", "label", "info", "link", "button",
                                                "toggle", "rows", "dialog", "seg", "slider", "field",
                                                "empty", "progress", "text_view", "scroll", "menu",
-                                               "item"};
+                                               "item", "split"};
 
 static const char *TONES[] = {"ink", "dim", "value", "danger"};
 static const char *BKINDS[] = {"normal", "primary", "tonal", "danger", "toggle"};
@@ -665,6 +667,11 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         tslot = &N->t_value;
     else if (!strcmp(name, "max") && kind == UIT_PROGRESS)
         tslot = &N->t_aux;
+    else if (kind == UIT_SPLIT && (!strcmp(name, "dir") || !strcmp(name, "sizes"))) {
+        if (name[0] == 'd' && !strchr(src, '{') && strcmp(src, "row") && strcmp(src, "col"))
+            return uit_check_fail(e, "T03", "ui.split dir=%s: one of row, col", src);
+        tslot = name[0] == 'd' ? &N->t_value : &N->t_aux;
+    }
     else if (!strcmp(name, "icon"))
         tslot = &N->t_icon;
     else if ((!strcmp(name, "empty") && kind == UIT_ROWS) ||
@@ -718,6 +725,19 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
             N->nbtn |= (uint16_t)(CENTRE[i] << LT_ALIGN_SHIFT);
         else
             N->btn = (uint16_t)i, N->nbtn |= LT_LINES;
+        return add_prop(e, node, name, src, repr, PK_LIT, i);
+    }
+    if (kind == UIT_SPLIT && (!strcmp(name, "pad") || !strcmp(name, "gap") || !strcmp(name, "align"))) {
+        static const char *const GAPS[] = {"s", "m", "l", "0"}, *const ALIGNS[] = {"start", "center", "end"};
+        int i = name[0] == 'a' ? lit_index(src, ALIGNS, 3) : lit_index(src, GAPS, 4);
+        if (i < 0)
+            return uit_fail(e, UIT_E_KIND, "split %s=%s", name, src);
+        if (name[0] == 'p')
+            N->btn = (uint16_t)i;
+        else if (name[0] == 'g')
+            N->nbtn = (uint16_t)i;
+        else
+            N->lit = (uint8_t)i;
         return add_prop(e, node, name, src, repr, PK_LIT, i);
     }
     if (!strcmp(name, "mkind") && kind == UIT_ITEM) {

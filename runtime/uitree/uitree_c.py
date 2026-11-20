@@ -44,7 +44,7 @@ INPUTS = ("keys", "tdeck", "pad", "touch")
 _KINDS = {"page": 1, "group": 2, "label": 3, "info": 4, "link": 5, "button": 6, "toggle": 7,
           "rows": 8, "dialog": 9, "seg": 10, "slider": 11, "field": 12, "empty": 13,
           "progress": 14, "text_view": 15,
-          "scroll": 16, "menu": 17, "item": 18}
+          "scroll": 16, "menu": 17, "item": 18, "split": 19}
 _HEAD = {"rows": ("model",), "dialog": ("buttons",)}
 _KIND_NAMES = dict((v, k) for k, v in _KINDS.items())
 _KIND_NAMES[len(_KINDS) + 1] = "cycle"          # UIT_KINDS: a seg of the cycle look
@@ -334,6 +334,8 @@ class CEngine(Engine):
                     continue
                 elif type(src) is bool and S.SCHEMA[nk].get(k) == "cond":
                     raise EngineGap("%s %s=%r: a literal condition" % (nk, k, src))
+                elif type(src) is tuple and S.SCHEMA[nk].get(k) == "ints":     # sizes: ints and weights
+                    src, rep = " ".join([str(v) for v in src]), repr(src)
                 elif type(src) is int or type(src) is bool:        # a literal number or flag
                     src, rep = str(src), repr(src)
                 elif not isinstance(src, str):
