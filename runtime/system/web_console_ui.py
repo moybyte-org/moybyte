@@ -181,14 +181,15 @@ class WebConsoleUI:
     def draw_qr(self, cv, rect):
         """The code, centered in `rect` at the largest whole-pixel module size
         that fits -- including the spec's four-module quiet zone, which is drawn
-        as part of the light field rather than left to whatever is behind.
+        as part of the light field rather than left to whatever is behind --
+        or, while there is no address, NO ADDRESS centred in its place.
         BLACK ON WHITE from the palette, never from the theme: `ink` is white on
         every dark theme, and an inverted code is one most scanners refuse."""
         NAMES = self._NAMES
         url = self._web.url()
         m = self.matrix(url) if url else None
         if not m:
-            cv.print("NO ADDRESS", rect[0], rect[1], NAMES["red"], 1)
+            _ui_draw.label(cv, rect, "NO ADDRESS", NAMES["red"], _ui_draw.ALIGN_CENTER)
             return
         n = len(m) + 2 * _qr.QUIET
         scale = rect[2] // n
