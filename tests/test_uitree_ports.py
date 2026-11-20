@@ -282,6 +282,11 @@ def _frame_probe(ws):
         ea.tab, text, ws.history.can_undo(), ws.history.can_redo(), ea.playing(), ws.wm.top_kind())
 
 
+def _desk_probe(ws):
+    """The Editor frame's state in a line, and the desk's workspace."""
+    return "%s ws=%s" % (_frame_probe(ws), ws.editor_app._desk().key)
+
+
 def _open_editor(tab):
     def open_(ws):
         import test_shell_goldens as G
@@ -310,6 +315,12 @@ CODE_DESK_SCRIPT = ["k:down", "k:down", "k:right", "k:right", "t:x", "enter", "t
 FRAME_SCRIPT = ["zone:3", "zone:4", "zone:5", "zone:6", "zone:0", "zone:1", "zone:2", "t:x",
                 "zone:7", "zone:8", "zone:7", "zone:9"]
 
+# The desk Editor's row: each workspace, a typed letter, undo, redo, undo
+# again, Play, then Restart and Stop beside the playtest
+FRAME_DESK_SCRIPT = ["cell:ws:art", "cell:ws:world", "cell:ws:sound", "cell:ws:settings",
+                     "cell:ws:code", "k:down", "t:x", "cell:undo", "cell:redo", "cell:undo", "cell:play",
+                     "f:4", "cell:restart", "f:4", "cell:stop", "f:4"]
+
 # The System log's ring: (t_us, level, process, text) on a pinned clock, more
 # lines than a handheld's page holds, a traceback's lines under its record.
 LOG_RING = tuple((1000000 + 250000 * n, (6, 4, 3, 7)[n % 4], ("shell", "kernel", "game")[n % 3],
@@ -336,6 +347,7 @@ def _open_log(ws):
 SURFACES = {
     "editor_code": P.Surface(_open_editor("code"), probe=_code_probe),
     "editor_frame": P.Surface(_open_editor("code"), probe=_frame_probe),
+    "editor_desk_row": P.Surface(_open_editor("code"), probe=_desk_probe),
     "settings_permissions": P.Surface(_open_settings_page("permissions"), _perms_carts),
     "settings_tz": P.Surface(_open_tz),
     "settings_paired": P.Surface(_open_paired(BROWSERS, True)),
@@ -463,6 +475,8 @@ RUNS = (
     ("editor_code-big", "editor_code", "big_800x480_fs3_dark", CODE_SCRIPT, P.BEHAVIOUR),
     ("editor_frame-tdeck", "editor_frame", "tdeck_320x240_fs1_dark", FRAME_SCRIPT, P.BEHAVIOUR),
     ("editor_frame-big", "editor_frame", "big_800x480_fs3_dark", FRAME_SCRIPT, P.BEHAVIOUR),
+    ("editor_desk_row", "editor_desk_row", "p4_1024x600_cs2_fs1_windowed", FRAME_DESK_SCRIPT,
+     P.BEHAVIOUR),
 )
 
 

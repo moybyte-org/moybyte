@@ -1,0 +1,112 @@
+{
+ "surface": "editor_desk_row",
+ "config": "p4_1024x600_cs2_fs1_windowed",
+ "commit": "74c5d4922",
+ "script": [
+  "cell:ws:art",
+  "cell:ws:world",
+  "cell:ws:sound",
+  "cell:ws:settings",
+  "cell:ws:code",
+  "k:down",
+  "t:x",
+  "cell:undo",
+  "cell:redo",
+  "cell:undo",
+  "cell:play",
+  "f:4",
+  "cell:restart",
+  "f:4",
+  "cell:stop",
+  "f:4"
+ ],
+ "frames": [
+  [
+   "(open)",
+   "83759dc60a3a26676490a2ed255cb1c6dcc87889c54bbc66f14c0bdbac132dee"
+  ],
+  [
+   "cell:ws:art",
+   "93e174383abf1fb09dfca0731846bb5e9726317b89ac71cf9deff23837b3fa79"
+  ],
+  [
+   "cell:ws:world",
+   "f57589b9c96b316c909338c51869b5711030890efec3b7c8ed6f6fb1ca86c072"
+  ],
+  [
+   "cell:ws:sound",
+   "0f7ecb0849ced4ab5ab5c3e35687d010ff0369baeebed4babf6123e4491d81f1"
+  ],
+  [
+   "cell:ws:settings",
+   "095189f70e1ba4099fa80e558f54b6ea5575fee97b448c98c14b402b44771e3c"
+  ],
+  [
+   "cell:ws:code",
+   "83759dc60a3a26676490a2ed255cb1c6dcc87889c54bbc66f14c0bdbac132dee"
+  ],
+  [
+   "k:down",
+   "df9d96aaebd6423fe2a3745d33fcc2866c59d08e2d39aea1cc9eea9de02d0c10"
+  ],
+  [
+   "t:x",
+   "066f5a4e9ea2ed5f274f612f861754ea2301b5f4a1548e89fb889f83dc5d7da2"
+  ],
+  [
+   "cell:undo",
+   "f744da927c753c5e859e0027e95528ca2fa9d309f1e2577292077732f7e5cdaf"
+  ],
+  [
+   "cell:redo",
+   "066f5a4e9ea2ed5f274f612f861754ea2301b5f4a1548e89fb889f83dc5d7da2"
+  ],
+  [
+   "cell:undo",
+   "f744da927c753c5e859e0027e95528ca2fa9d309f1e2577292077732f7e5cdaf"
+  ],
+  [
+   "cell:play",
+   "8927399c97a9bec909658b513bfe5c1ea7d728ab6ce7c0c12d3628ce5a203ca8"
+  ],
+  [
+   "f:4",
+   "8927399c97a9bec909658b513bfe5c1ea7d728ab6ce7c0c12d3628ce5a203ca8"
+  ],
+  [
+   "cell:restart",
+   "8927399c97a9bec909658b513bfe5c1ea7d728ab6ce7c0c12d3628ce5a203ca8"
+  ],
+  [
+   "f:4",
+   "a128d82f760917d18bde160cb74389ea8b8feb788dec38bc7dc447154ce7292d"
+  ],
+  [
+   "cell:stop",
+   "df583004ba8846e61018404026aa90682b1a45dc315bd939949b9b3807336005"
+  ],
+  [
+   "f:4",
+   "df583004ba8846e61018404026aa90682b1a45dc315bd939949b9b3807336005"
+  ]
+ ],
+ "states": [
+  "tab=code text=9a76021a7296 undo=False redo=False playing=False top=menu ws=code",
+  "tab=paint text=9a76021a7296 undo=False redo=False playing=False top=menu ws=art",
+  "tab=scene text=9a76021a7296 undo=False redo=False playing=False top=menu ws=world",
+  "tab=scene text=9a76021a7296 undo=False redo=False playing=False top=menu ws=sound",
+  "tab=cards text=9a76021a7296 undo=False redo=False playing=False top=menu ws=settings",
+  "tab=code text=9a76021a7296 undo=False redo=False playing=False top=menu ws=code",
+  "tab=code text=9a76021a7296 undo=False redo=False playing=False top=menu ws=code",
+  "tab=code text=aa956505f952 undo=True redo=False playing=False top=menu ws=code",
+  "tab=code text=9a76021a7296 undo=False redo=True playing=False top=menu ws=code",
+  "tab=code text=aa956505f952 undo=True redo=False playing=False top=menu ws=code",
+  "tab=code text=9a76021a7296 undo=False redo=True playing=False top=menu ws=code",
+  "tab=code text=9a76021a7296 undo=False redo=True playing=True top=desktop ws=code",
+  "tab=code text=9a76021a7296 undo=False redo=True playing=True top=desktop ws=code",
+  "tab=code text=9a76021a7296 undo=False redo=True playing=True top=desktop ws=code",
+  "tab=code text=9a76021a7296 undo=False redo=True playing=True top=desktop ws=code",
+  "tab=code text=9a76021a7296 undo=False redo=True playing=False top=menu ws=code",
+  "tab=code text=9a76021a7296 undo=False redo=True playing=False top=menu ws=code"
+ ]
+}

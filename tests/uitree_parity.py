@@ -116,8 +116,37 @@ def _step(ws, driver, step):
             driver.frame(DT)
     elif op == "zone":
         _zone_tap(ws, driver, int(arg))
+    elif op == "cell":
+        _cell_tap(ws, driver, arg)
     else:
-        raise ValueError("parity step %r: one of k:NAME t:TEXT enter del back f:N zone:N" % step)
+        raise ValueError("parity step %r: one of k:NAME t:TEXT enter del back f:N zone:N cell:NAME"
+                         % step)
+
+
+def _cell_tap(ws, driver, name):
+    """A tap on the Editor's bar cell `name` at its centre, through the
+    zone's owner (the bar's own tap translation is the handheld runs'
+    `zone:N`): a desk workspace "ws:KEY", a tab, "undo", "redo", "play",
+    "restart", "stop". The cells are the Editor's (`EditorApp.zone_cells`),
+    or, at a commit before its desk row was lent, that row's own layout."""
+    bl = ws.bar_layer
+    zone = bl.lent_zone("menu", bl.cell("menu", "zone")[0])
+    ea = ws.editor_app
+    cells = {}
+    if hasattr(ea, "_row_layout") and ea._desk() is not None:
+        tabs, undo_r, redo_r, _line, play_r = ea._row_layout(zone, ea._desk())
+        cells = {t: r for t, _l, _k, r, _o in tabs}
+        cells.update(undo=undo_r, redo=redo_r, play=play_r)
+        cells["restart"], cells["stop"] = ea._run_rects(play_r)
+    else:
+        names = {v: k for k, v in ea._HEAD_TAB.items()}
+        for t, _icon, r in ea.zone_cells(zone):
+            cells[names.get(t, t)] = r
+    if name not in cells:
+        raise KeyError("%r is not on the bar: %r" % (name, sorted(map(str, cells))))
+    r = cells[name]
+    (ea.bar_zone or ea).zone_tap(r[0] + r[2] // 2, r[1] + r[3] // 2, zone)
+    driver.frame(DT)
 
 
 def _zone_tap(ws, driver, i):
