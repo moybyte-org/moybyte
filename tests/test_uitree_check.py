@@ -18,6 +18,7 @@ PORTED = (
     "uitree_counter",
     "perms_ui",
     "settings_ui",
+    "uitree_focus",
 )
 
 

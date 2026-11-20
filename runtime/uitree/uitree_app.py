@@ -253,12 +253,15 @@ class Engine(S.Builder):
             if self._sync.get(k, self) != self.s._v[k] or (lst.key in back and self.s._v[k]):
                 want.append((self.s._v[k], k))      # a list shown again: focus on its cur
                 lists[k] = lst
+        ahead = None
         for key, k in want:
             if k is None and key == self.want_focus and key in self.dups:
                 self._focus_named(prev)
             fid = key if k is None and key in prev else self._id_in(prev, key)
             if not fid and k is not None and key != "":
                 fid = self._row_stop_id(lists[k], key)  # a row not drawn yet: its id, so focus lands this frame
+            if not fid and k is None:
+                fid = ahead = self._drawn_id(key)       # a node this frame draws first: focus lands on it now
             if fid:
                 _v.focus(fid)
                 moved = True
@@ -271,6 +274,8 @@ class Engine(S.Builder):
         self._lists_before = getattr(self, "_lists_now", set())
         self._lists_now = set()
         self._kids(n, None, rect)
+        if ahead is not None and ahead not in self.ids:
+            self.want_focus = ahead                     # foreseen and not drawn after all: next frame
         f = _v.focus()
         self.focused = self.ids.get(f)
         self.focus_key = f or ""
@@ -282,6 +287,43 @@ class Engine(S.Builder):
                 v = "" if row is None else row._f[row._m.key]
                 if self.s._v[ck] != v:
                     self.cur_moved(lst, v, "focus")
+
+    def _drawn_id(self, key):
+        """The id node `key` (or `ROWKEY/NODEKEY`) draws under this frame, as
+        the replay will walk the tree: shown, its action on, its switch case
+        the current one, its row in the model. None when it will not draw."""
+        rowkey, _, nodekey = key.rpartition("/")
+
+        def walk(n):
+            for k in n.kids:
+                if not _shown(k, None):
+                    continue
+                if k.kind == "switch":
+                    v = self.s._v[k.l["name"]]
+                    case = next((c for c in k.kids if c.l["v"] == v), None) or next(
+                        (c for c in k.kids if c.l["v"] == "_"), None)
+                    got = walk(case) if case is not None else None
+                elif k.kind in ("rows", "cards", "table"):
+                    got = rowkey and self._row_node_id(k, rowkey, nodekey)
+                elif k.act is not None and not k.act.can(None):
+                    continue
+                elif not rowkey and k.key == nodekey:
+                    return k.key[:ID_MAX]
+                else:
+                    got = walk(k)
+                if got:
+                    return got
+            return None
+        return walk(self.root) if self.root is not None else None
+
+    def _row_node_id(self, lst, rowkey, nodekey):
+        row = next((r for r in self.s._v[lst.l["model"]] if str(r._f[r._m.key]) == rowkey), None)
+        if row is None:
+            return None
+        for k in lst.kids:
+            if k.key == nodekey and _shown(k, row) and (k.act is None or k.act.can(row)):
+                return ("%s/%s" % (rowkey, nodekey))[:ID_MAX]
+        return None
 
     def _row_stop_id(self, lst, rowkey):
         """The id the first focus stop of row `rowkey` of `lst` will draw under."""
@@ -985,7 +1027,7 @@ def app_layer(id, title, build, is_app=None, needs=()):
     """The AppLayer class of an app whose screen is `build` (the module's
     root page): what its manifest's `entry` names."""
     if not callable(build):
-        raise S.UIError("N03", "app_layer(%r): build is not a function" % id,
+        raise S.UIError("N01", "app_layer(%r): build is not a function" % id,
                         fix="pass the module's page function itself: app_layer(%r, %r, build)" % (id, title))
     return type(title.replace(" ", "") + "App", (App,), {
         "id": id, "TITLE": title, "BUILD": (build,), "IS_APP": (is_app,) if is_app else None,

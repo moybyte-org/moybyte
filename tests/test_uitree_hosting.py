@@ -55,3 +55,37 @@ def test_a_uitree_app_closes_and_reopens_on_its_opened_hook(tmp_path):
     app = seen["app"]
     app.open()
     assert C.s.count == 0 and len(app.engine.pages) == 1
+
+
+@pytest.mark.parametrize("config", ["tdeck_320x240_fs1_dark", SIZES[-1]])
+def test_focus_lands_in_the_frame_that_first_draws_its_node(config, tmp_path):
+    """A handler's ui.focus(KEY) on a node its own write shows, and the
+    focus Back returns to the node that pushed, each land in the first
+    frame that draws the node: never a frame drawn with focus elsewhere."""
+    import uitree_focus as F
+    seen, log = {}, []
+
+    def opened(ws):
+        app = seen["app"] = P.host(ws, F.layer())
+        eng = app.engine
+        paint = eng.paint
+
+        def logged(*a):
+            paint(*a)
+            log.append(("extra" in eng.ids, eng.focus_key))
+        eng.paint = logged
+
+    def first_drawn():
+        drawn = [f for d, f in log if d]
+        return drawn[0] if drawn else None
+
+    P.frames(config, opened, ["k:a"], str(tmp_path / "carts"))
+    assert F.s.open and first_drawn() == "extra", log
+    del log[:]
+    P.frames(config, opened, ["k:a", "k:a", "back"], str(tmp_path / "carts2"))
+    eng = seen["app"].engine
+    assert F.s.seen == 1 and len(eng.pages) == 1, eng.trace_text()
+    back = [i for i, (d, f) in enumerate(log) if not d]
+    assert back, log                                  # the pushed page drew no "extra"
+    after = log[back[-1] + 1:]
+    assert after and after[0] == (True, "extra"), log
