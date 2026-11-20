@@ -19,6 +19,7 @@
 #if MOY_ON_BOARD && defined(MOY_API_MIC) && defined(MOY_HW_MIC_DIN)
 #define MIC_BOARD 1
 #include "driver/i2s_std.h"
+#include "driver/i2s_pdm.h"
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
@@ -29,6 +30,18 @@
 #endif
 #if defined(MOY_HW_MIC_SCK)
 #define MIC_OWN_CHANNEL 1       // the T-Deck's: its own pins, I2S1 as master
+#elif defined(MOY_MIC_PDM)
+// A PDM microphone on a clock and a data pin (MOY_HW_MIC_CLK, _DIN), read by
+// I2S0's PDM receiver (the only one with the filter) as 16-bit mono PCM at
+// MOY_MIC_RATE. No codec, no bus, and the speaker's channel is on another
+// controller (MOY_AUDIO_I2S_NUM).
+#define MIC_OWN_CHANNEL 1
+#define MIC_PDM 1
+#endif
+#ifdef MOY_MIC_RATE
+#define MIC_RATE MOY_MIC_RATE
+#else
+#define MIC_RATE MOY_AUDIO_RATE
 #endif
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 #define LOCK() portENTER_CRITICAL(&s_mux)
@@ -47,6 +60,7 @@ typedef struct {
     #ifdef MIC_BOARD
     uint8_t dev;                        // the ES7210 on the kernel's bus, 0xff before
     volatile int run;
+    uint32_t skip;                      // PDM: samples to drop while its filter settles
     TaskHandle_t task;
     #ifdef MIC_OWN_CHANNEL
     i2s_chan_handle_t rx;
@@ -96,6 +110,7 @@ int moy_mic_read(uint32_t owner, int16_t *out, uint32_t n) {
 
 #ifdef MIC_BOARD
 
+#ifndef MIC_PDM
 static int reg(uint8_t r, uint8_t v) {
     uint8_t b[2] = { r, v };
     return moy_bus_write(M->dev, b, 2) == MOY_BUS_OK ? 0 : -1;
@@ -138,18 +153,40 @@ static int es7210_init(void) {
     }
     return 0;
 }
+#endif
 
 #ifdef MIC_OWN_CHANNEL
 static int chan_open(void) {
+#ifdef MIC_PDM
+    i2s_chan_config_t cc = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+#else
     i2s_chan_config_t cc = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
+#endif
     cc.dma_desc_num = 4;
     cc.dma_frame_num = 256;
     if (i2s_new_channel(&cc, NULL, &M->rx) != ESP_OK) {
         M->rx = NULL;
         return -1;
     }
+#ifdef MIC_PDM
+    i2s_pdm_rx_config_t pc = {
+        .clk_cfg = I2S_PDM_RX_CLK_DEFAULT_CONFIG((uint32_t)MIC_RATE),
+        .slot_cfg = I2S_PDM_RX_SLOT_PCM_FMT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,
+                                                           I2S_SLOT_MODE_MONO),
+        .gpio_cfg = {
+            .clk = (gpio_num_t)MOY_HW_MIC_CLK,
+            .din = (gpio_num_t)MOY_HW_MIC_DIN,
+        },
+    };
+    if (i2s_channel_init_pdm_rx_mode(M->rx, &pc) != ESP_OK || i2s_channel_enable(M->rx) != ESP_OK) {
+        i2s_del_channel(M->rx);
+        M->rx = NULL;
+        return -1;
+    }
+    return 0;
+#else
     i2s_std_config_t sc = {
-        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG((uint32_t)MOY_AUDIO_RATE),
+        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG((uint32_t)MIC_RATE),
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,
                                                         I2S_SLOT_MODE_STEREO),
         .gpio_cfg = {
@@ -167,10 +204,13 @@ static int chan_open(void) {
         return -1;
     }
     return 0;
+#endif
 }
 
 static int rx_read(void *buf, size_t bytes, size_t *got) {
-    return i2s_channel_read(M->rx, buf, bytes, got, pdMS_TO_TICKS(50)) == ESP_OK ? 0 : -1;
+    // A timeout still hands over what arrived: the read consumed it.
+    esp_err_t e = i2s_channel_read(M->rx, buf, bytes, got, pdMS_TO_TICKS(50));
+    return (e == ESP_OK || (e == ESP_ERR_TIMEOUT && *got > 0)) ? 0 : -1;
 }
 #else
 static int rx_read(void *buf, size_t bytes, size_t *got) {
@@ -188,10 +228,29 @@ static void reader(void *arg) {
             vTaskDelay(1);
             continue;
         }
+#ifdef MIC_PDM
+        uint32_t n = (uint32_t)(got / 2u);
+        for (uint32_t i = 0; i < n; i++) {
+            mono[i] = frame[i];
+        }
+#else
         uint32_t n = (uint32_t)(got / 4u);
         for (uint32_t i = 0; i < n; i++) {
             mono[i] = (int16_t)(((int32_t)frame[2 * i] + frame[2 * i + 1]) / 2);
         }
+#endif
+        #ifdef MIC_PDM
+        // The PDM filter's start is a step of about 12,000 counts: dropped.
+        if (M->skip > 0) {
+            uint32_t d = M->skip < n ? M->skip : n;
+            M->skip -= d;
+            if (d == n) {
+                continue;
+            }
+            memmove(mono, mono + d, (n - d) * sizeof(mono[0]));
+            n -= d;
+        }
+        #endif
         moy_mic_push(mono, n);
     }
     M->task = NULL;
@@ -205,9 +264,11 @@ static int start(void) {
         return -MOY_MIC_EIO;
     }
     #endif
+    #ifndef MIC_PDM
     if (es7210_init() != 0) {
         return -MOY_MIC_EIO;
     }
+    #endif
     #ifdef MIC_OWN_CHANNEL
     if (chan_open() != 0) {
         return -MOY_MIC_EIO;
@@ -218,6 +279,9 @@ static int start(void) {
     }
     #endif
     M->run = 1;
+    #ifdef MIC_PDM
+    M->skip = MIC_RATE / 4u;
+    #endif
     if (!moy_task_spawn(MOY_TASK_MIC, reader, NULL, &M->task)) {
         M->run = 0;
         M->task = NULL;
@@ -240,7 +304,9 @@ static void stop(void) {
     #else
     moy_aud_out_rx_enable(0);
     #endif
+    #ifndef MIC_PDM
     reg(0x06, 0xff);                            // the ADC powered down
+    #endif
 }
 #endif
 
@@ -256,7 +322,7 @@ int moy_mic_present(void) {
 
 uint32_t moy_mic_rate(void) {
     #ifdef MIC_BOARD
-    return MOY_AUDIO_RATE;
+    return MIC_RATE;
     #else
     return s_sim_rate;
     #endif

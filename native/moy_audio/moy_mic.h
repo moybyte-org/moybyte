@@ -7,7 +7,9 @@
 //
 // The producer is the board's: an I2S receive channel and the ES7210 ADC on the
 // kernel's I2C bus (moy_bus.h) where its `[hardware]` mic row names one
-// (MOY_API_MIC, MOY_HW_MIC_*; board_config.hw_defines). The T-Deck's ES7210
+// (MOY_API_MIC, MOY_HW_MIC_*; board_config.hw_defines). A board naming
+// MOY_MIC_PDM has a PDM microphone on MOY_HW_MIC_CLK and _DIN instead, read at
+// MOY_MIC_RATE by I2S0's PDM receiver, with no codec and no bus. The T-Deck's ES7210
 // has its own I2S pins (MCLK, SCK, LRCK, DIN), so its channel is I2S1 as
 // master; a P4's shares the speaker's clocks and adds only DIN, so its
 // channel is the speaker's I2S0 opened full duplex (moy_aud_out.c's

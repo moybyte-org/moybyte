@@ -140,6 +140,16 @@
 // MOY_AUDIO_DAC_MONO: a codec reading one slot is what that is for.
 #define MOY_AUDIO_RATE                      (44100)
 #define MOY_AUDIO_STEREO                    (1)
+// The speaker's I2S controller is I2S1: the PDM microphone below can only be
+// I2S0's.
+#define MOY_AUDIO_I2S_NUM                   I2S_NUM_1
+
+// The microphone (native/moy_audio/moy_mic.c): a PDM part on GPIO24 (clock) and
+// GPIO26 (data), the vendor firmware's wiring (the schematic's ES7210 and its
+// I2C bus never answered on this unit), read as 16-bit mono PCM at the vendor's
+// 16 kHz by I2S0's PDM receiver with its high-pass filter.
+#define MOY_MIC_PDM                         (1)
+#define MOY_MIC_RATE                        (16000)
 // The feeder on core 0, off the VM's (the P4 boards' setting).
 #define MOY_AUDIO_CORE                      (0)
 

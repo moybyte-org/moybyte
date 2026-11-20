@@ -50,7 +50,7 @@ its V1.2 hardware guide, the vendor's examples, the wiki, issue threads.
 | I2S out: BCLK / LRCK / DOUT | 22 / 21 / 23 | the vendor examples drive these directly, with no master clock and no codec registers; this port does the same, 44.1 kHz stereo |
 | I2S master clock net (`I2S_MCLK`) | 24 | the schematic routes it to the ES8311, the ES7210 and a PDM microphone; not driven by this port |
 | amplifier control | 30 | the vendor code drives it LOW to play; the speakers sounded with it driven low and with it driven high, so it does not gate them on this unit |
-| microphone path | 26 (ES7210 data), 24 (clock), 20 (L/R select) | never initialised by the vendor; absent from this port |
+| PDM microphone: CLK / DATA | 24 / 26 | the vendor firmware's wiring (its recording lesson: I2S0's PDM receiver, 16 kHz, mono, left slot); this port does the same; GPIO20 is the mic's L/R select, left undriven |
 | microSD: CLK / CMD / D0 | 43 / 44 / 39 | SDMMC slot 0, 1-bit: D1 to D3 are not routed to the chip |
 | UART0 (CH340K) | 37 TX / 38 RX | console and flasher |
 | BOOT button (`SPI_BOOT`) | 35 | strap; low = download |
@@ -65,7 +65,7 @@ its V1.2 hardware guide, the vendor's examples, the wiki, issue threads.
 | USB 2.0 Type-C (J16) | USB pads | CC pins pulled down: a device port |
 
 Not fitted or not routed, so ABSENT from `board.toml` rather than zero: the
-camera, and the high-speed USB host. The vendor firmware leaves `reset_gpio_num`
+camera, and the high-speed USB host. (The microphone is fitted; see the PDM row.) The vendor firmware leaves `reset_gpio_num`
 and the camera/audio resets at -1; the schematic has the nets.
 
 ### LoRa (not attached on the bench unit)
@@ -118,7 +118,10 @@ row waits for the module. GPIOs 6-10 and 28 are in the `gpio` lease row and 27
 
 Read from documents, not from this unit: the PCB revision; the touch
 orientation (the vendor maps with no swap or mirror; the corner calibration,
-`moy_runtime.run_touch_calibrate`, has not run); what GPIO30 does (it gates nothing audible); whether the ES8311 and ES7210 are fitted (neither answered on the bus);
+`moy_runtime.run_touch_calibrate`, has not run); what GPIO30 does (it gates nothing audible); whether the ES8311 and ES7210 are fitted (neither answered on the bus); the
+microphone's gain and orientation (its level was read only from the speaker's
+tone, about 300 counts peak against about 100 of room noise; nobody has spoken
+into it yet);
 that the panel is lit and its picture is right (only the framebuffer and the
 scan counters have been read back); the TF slot (no card was in it);
 the USB bridge's DTR/RTS rest state beyond "attaching and `reboot` work with
@@ -163,3 +166,23 @@ taking one slot. The speaker row names no master clock, and the board runs 44.1
 kHz stereo (`MOY_AUDIO_RATE`, `MOY_AUDIO_STEREO`, the other P4s' setting, the
 mix upsampled 2x), where the first codec-less image ran the default 22,050 Hz
 mono; `moy_aud_out.c`'s codec-less slot format now follows `MOY_AUDIO_STEREO`.
+
+## Microphone (2026-11-20)
+
+The `mic` device API was absent: the port declared none because the schematic's
+ES7210 never answered on I2C. The vendor's recording lesson uses a PDM
+microphone on GPIO24 (clock) and GPIO26 (data), I2S0's PDM receiver at 16 kHz
+mono on the left slot, which is the schematic's alternative population (U176,
+an `LMA3526B381` part, with R132, R134 and R161/R162 fitted instead of the
+ES7210 path). The `mic` row names those two pins, and `MOY_MIC_PDM`,
+`MOY_MIC_RATE (16000)` and `MOY_AUDIO_I2S_NUM (I2S_NUM_1)` in mpconfigboard.h
+select `moy_mic.c`'s PDM path: the speaker moves to I2S1 because only I2S0 has
+the PDM receiver. The filter's start is a step of about 12,000 counts, which
+the reader drops with the first quarter second. A recording read 16,000
+samples a second with no drops; room noise peaked at about 100 to 180 counts
+and the speaker's own 440 Hz tone, played at the same time at a low volume,
+at about 300 to 340 (the speaker on I2S1 and the microphone on I2S0 run
+together). The device at 0x2F on the I2C bus answered with registers that read
+like a status block (0x90 0x0c 0x00 0x00 0x76 0x11 ...), not like an audio part:
+it is most likely the board's STC8 power controller, which the schematic puts
+on that bus; it is unidentified and unused.

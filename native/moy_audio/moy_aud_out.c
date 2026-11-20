@@ -30,6 +30,7 @@
 //   MOY_HW_SPEAKER_PA                   the amplifier's enable, driven high once the codec is up
 //   MOY_AUDIO_PA_ACTIVE_LOW             ... or low, where the amplifier's control pin is active low
 //   MOY_AUDIO_RATE                      the output rate, 22050 unless named
+//   MOY_AUDIO_I2S_NUM                   the controller, I2S_NUM_0 unless named (a PDM microphone takes I2S0)
 //   MOY_AUDIO_STEREO                    16-bit stereo at MOY_AUDIO_RATE, twice the
 //                                       mix's (moy_aud_render_st); mono otherwise
 //   MOY_AUDIO_DAC_MONO                  the codec reads one slot: both carry the mean
@@ -66,6 +67,9 @@
 
 #ifndef MOY_AUDIO_RATE
 #define MOY_AUDIO_RATE 22050
+#endif
+#ifndef MOY_AUDIO_I2S_NUM
+#define MOY_AUDIO_I2S_NUM I2S_NUM_0
 #endif
 #ifndef MOY_HW_SPEAKER_MCLK
 #define MOY_HW_SPEAKER_MCLK (-1)
@@ -161,7 +165,7 @@ static bool IRAM_ATTR on_ovf(i2s_chan_handle_t h, i2s_event_data_t *e, void *ctx
 // The channel on the board's pins with a ring of `desc` x `frames`, enabled:
 // 0, or -1 with nothing left open.
 static int chan_open(int desc, int frames) {
-    i2s_chan_config_t cc = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+    i2s_chan_config_t cc = I2S_CHANNEL_DEFAULT_CONFIG(MOY_AUDIO_I2S_NUM, I2S_ROLE_MASTER);
     cc.dma_desc_num = desc;
     cc.dma_frame_num = frames;
     cc.auto_clear = true;       // silence, not stale DMA, on an under-run

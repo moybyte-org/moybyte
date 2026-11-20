@@ -265,6 +265,12 @@ api = "brightness"
 pins = {bl = 31}
 
 [[hardware.resource]]
+name = "mic"
+class = "class"
+api = "mic"
+pins = {clk = 24, din = 26}
+
+[[hardware.resource]]
 name = "c6"
 class = "class"
 api = ["http", "ble"]
@@ -308,8 +314,8 @@ why = "the gate of Q11, the backlight supply's switch, which the schematic marks
 [[hardware.resource]]
 name = "usb_phy"
 class = "never"
-pins = [24, 25, 26, 27]
-why = "the USB 1.1 PHYs' pads: 24 is the schematic's master-clock net and 26 the ES7210's data line (neither used), 25 and 27 reach the J7 and J9 headers (27 is the LoRa socket's IRQ line)"
+pins = [25, 27]
+why = "the USB 1.1 PHYs' pads, which reach the J7 and J9 headers (27 is the LoRa socket's IRQ line)"
 
 [native]
 dest = "native/.staged"
