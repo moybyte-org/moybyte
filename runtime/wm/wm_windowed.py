@@ -1329,17 +1329,12 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         r = _layout_base.render_scale()
         n = _layout_base.chrome_size(self._fs())
         slot = (144 if win.w * r >= 1024 else 112) * n // r
-        btns = self._win_btns(win) | _ui_draw.FRAME_FULL
-        icon = _ui_draw.frame_icon(self._row_rect(win), win.title_h, btns)
-        head = icon[0] if icon is not None else win.x + 16 * n // r
-        return head + slot
+        return self._row_head(win)[0] + slot
 
     def _row_rect(self, win):
-        """The rect a full-screen row's title and buttons lay out on: the
-        window strip's height, centred on the row, so its controls are the
-        size they are on every desk window."""
-        rh = self._row_h()
-        return (win.x, win.y + (rh - win.title_h) // 2, win.w, win.title_h + 2)
+        """The band a full-screen row's strip page is drawn on: the row's
+        height, the window's width."""
+        return (win.x, win.y, win.w, self._row_h())
 
     def band_span(self):
         """(x0, x1) the band's lent zone runs between in the window whose

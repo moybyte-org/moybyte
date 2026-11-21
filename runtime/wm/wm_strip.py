@@ -47,13 +47,14 @@ def _put(nm, v):
         _DIRTY[0] = True
 
 
-def _states(title, icon, tone, back, unit, inset):
+def _states(title, icon, tone, back, unit, inset, full=False):
     page = _page()
     page._bind()
     _put("title", title)
     _put("icon", icon)
     _put("tone", tone)
     _put("back_on", back)
+    _put("max_icon", "restore" if full else "maximize")
     p = _PAD * unit             # a bound pad is pixels (a literal one is units)
     _put("pad", p if p > inset else inset)
     if _DIRTY[0]:
@@ -64,8 +65,8 @@ def _states(title, icon, tone, back, unit, inset):
     return page
 
 
-def _place(rect, unit, title, icon, tone, back, inset):
-    page = _states(title, icon, tone, back, unit, inset)
+def _place(rect, unit, title, icon, tone, back, inset, full=False):
+    page = _states(title, icon, tone, back, unit, inset, full)
     page.unit = unit
     _AT[2] = rect[2]
     _AT[3] = rect[3]
@@ -73,13 +74,13 @@ def _place(rect, unit, title, icon, tone, back, inset):
     return page
 
 
-def buttons(rect, unit, title, icon, tone, back, inset, out):
+def buttons(rect, unit, title, icon, tone, back, inset, out, full=False):
     """The strip at `rect`'s buttons into `out` (cleared), left to right:
     [(name, rect, right)] on the canvas the strip lies on, `right` False
     for the back chevron alone, as `ui_draw.frame_buttons` answers.
     `inset`: the columns at each end the frame's corners take, which the
-    strip's pad keeps clear."""
-    page = _place(rect, unit, title, icon, tone, back, inset)
+    strip's pad keeps clear. `full`: a full-screen window's row."""
+    page = _place(rect, unit, title, icon, tone, back, inset, full)
     del out[:]
     x, y = rect[0], rect[1]
     for name in NAMES:
@@ -202,10 +203,11 @@ def release(i=None):
             rel()
 
 
-def draw(cv, th, rect, unit, title, icon, tone, back, inset):
+def draw(cv, th, rect, unit, title, icon, tone, back, inset, full=False):
     """A frame of the strip page onto `cv` at `rect` (the strip of a frame
-    drawn bare), the toolkit's target the host's frame set given back."""
-    page = _states(title, icon, tone, back, unit, inset)
+    drawn bare, or a full-screen window's row: `full`, its maximise drawn
+    as restore), the toolkit's target the host's frame set given back."""
+    page = _states(title, icon, tone, back, unit, inset, full)
     if page._damage is None:
         page._damage = _NoDamage()
     D = _D[0]
