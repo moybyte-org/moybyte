@@ -10,8 +10,9 @@ press."""
 
 import uitree as ui
 
-# The strip's look, in units: its least pad (more where a depth's rounded
-# corners reach further in: `wm_strip`) and the gap between its items.
+# The strip's look, in units: its least pad (`wm_strip` writes `pad` in
+# pixels, at least the columns a depth's rounded corners take) and the gap
+# between its items.
 PAD = 8
 GAP = 6
 
