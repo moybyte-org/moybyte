@@ -40,6 +40,7 @@ PORTED = (
     "uitree_across_bar",
     "uitree_bar_look",
     "bar_ui",
+    "wm_strip_ui",
     "uitree_two_pages",
     "uitree_placed",
     "uitree_text_editor",
