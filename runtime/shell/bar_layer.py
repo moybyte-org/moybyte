@@ -1502,7 +1502,7 @@ class BarLayer:
         got = getattr(self.ws.wm, "chip_model", None)
         return got() if got is not None else None
 
-    def chip_rects(self, bar, out):
+    def page_chip_rects(self, bar, out):
         """The chips of packed bar `bar` placed by the bar page, [(kind,
         rect)] on the root canvas into `out`, or None where the page does
         not draw that bar (`_paged`)."""

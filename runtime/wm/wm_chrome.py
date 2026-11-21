@@ -9,7 +9,7 @@
 #   WindowChrome._cast_onto            the shadows a window behind takes
 #   WindowChrome._strip_button_hit     the strip's and the corner's fat-finger hit
 #   WindowChrome._grip_hit_rect        the resize grip's touch target
-#   WindowChrome._chip_rects           the taskbar chips in the bar
+#   WindowChrome.chip_rects           the taskbar chips in the bar
 #   WindowChrome._draw_taskbar_chips   the desk bar's window chips
 """The windowed WM's CHROME: the per-window title strip (title + min/max/X),
 border, drop shadow and resize grip, the fat-finger resolution of the strip
@@ -734,7 +734,7 @@ class WindowChrome:
 
     def _chips_same(self, m, side):
         """Whether the open windows and their chip titles are memo `m`'s,
-        compared in place (`_chip_rects`)."""
+        compared in place (`chip_rects`)."""
         kinds, titles = m[0], m[1]
         j = 0
         for k in self._kinds:
@@ -749,7 +749,7 @@ class WindowChrome:
             j += 1
         return j == len(kinds)
 
-    def _chip_rects(self):
+    def chip_rects(self):
         """One chip per open window, in the `chips` widget's cell: across a
         top or bottom bar a labelled chip each, packed from the cell's start
         in a left slot, its end in a right one, and centred on the bar in the
@@ -815,10 +815,10 @@ class WindowChrome:
         return rows
 
     def _chips_made(self, got, lay, fs, side):
-        """`_chip_rects`' answer made again (its comprehensions' cells are
+        """`chip_rects`' answer made again (its comprehensions' cells are
         made on every call of the function that holds them, so they live
         here, where only a change runs): the bar page's where it draws the
-        bar (`BarLayer.chip_rects`), else the look's arithmetic below."""
+        bar (`BarLayer.page_chip_rects`), else the look's arithmetic below."""
         (edge, (bx, by, bw, bh), _dy, _cells), (_n, (cx, cy, cw, ch), _t, slot) = got
         kinds = tuple(k for k in self._kinds if k in self.windows)
         if not kinds:
@@ -829,8 +829,8 @@ class WindowChrome:
             titles = tuple(self._chip_title(self.windows[k]) for k in kinds)
         out = []
         self._chip_memo = (kinds, titles, got, fs, lay.cs, out)
-        paged = None if side else self.ws.bar_layer.chip_rects(got[0], [])
-        self._chip_paged = paged is not None
+        paged = None if side else self.ws.bar_layer.page_chip_rects(got[0], [])
+        self.chips_paged = paged is not None
         if paged is not None:
             for k, r in paged:
                 out.append((k, r, titles[kinds.index(k)]))
@@ -900,7 +900,7 @@ class WindowChrome:
         # The chips blend (their labels' and plates' edges) over the bar's
         # band, which the bar painted once: its ground goes down again first
         # in the root's bar, so a chip repaint is a full repaint's pixels.
-        if self._chip_paged and self.ws.bar_layer.redraw_chips("desk"):
+        if self.chips_paged and self.ws.bar_layer.redraw_chips("desk"):
             return
         self.ws.bar_layer.repaint_cell("desk", "chips")
         line_h = self.root_ctx.layout.line_h
@@ -911,7 +911,7 @@ class WindowChrome:
         window, rect and label, whether it has the focus and whether its
         window is minimised, compared in place in one kept list."""
         k = self._chip_keys
-        chips = self._chip_rects()
+        chips = self.chip_rects()
         moved = len(k) != 5 * len(chips)
         if moved:
             k[:] = [None] * (5 * len(chips))
@@ -941,7 +941,7 @@ class WindowChrome:
         look gives current content (Moy's accent), the plate's second cue. A
         minimized window's chip keeps the chrome's ink."""
         current = _ui_draw.current_ink(sc, th) or th["chrome_ink"]
-        for key, (x, y, w, h), label in self._chip_rects():
+        for key, (x, y, w, h), label in self.chip_rects():
             win = self.windows[key]
             focused = key == self.focus_key and not win.minimized
             _ui_draw.bar_part(sc, th, _ui_draw.BAR_CHIP, (x, y, w, h), focused)

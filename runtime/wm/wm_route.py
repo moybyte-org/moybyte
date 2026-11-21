@@ -178,7 +178,7 @@ class WindowRoute:
         # Taskbar chips live in the OS bar row, above every window -- and
         # under a full-screen one, which covers the bar.
         if click and self.full_cover() < 0:
-            for key, rect, _label in self._chip_rects():
+            for key, rect, _label in self.chip_rects():
                 if _in(px, py, rect):
                     self.chip_tap(key)
                     return True

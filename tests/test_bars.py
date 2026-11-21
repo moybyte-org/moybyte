@@ -244,7 +244,7 @@ def test_the_desk_keeps_icons_windows_and_chips_off_a_side_bar(tmp_path):
     wm._move_window(win, -10_000, win.y)
     assert win.x == dx                                    # a side bar is a wall
     (lb, _cell) = ws.bar_layer.cell("desk", "chips")
-    chips = wm._chip_rects()
+    chips = wm.chip_rects()
     assert chips and all(_inside(r, lb[1]) and r[2] == r[3] for _k, r, _l in chips)
     key, r, label = chips[0]
     assert len(label) == 1
@@ -261,7 +261,7 @@ def test_a_taskbar_packs_its_chips_from_the_cell_start(tmp_path):
     ws.spine.open_app(ws.app("calc"))
     ws.frame(DT)
     bar, cell = ws.bar_layer.cell("desk", "chips")
-    (_k, r, _l), = ws.wm._chip_rects()
+    (_k, r, _l), = ws.wm.chip_rects()
     assert r[0] == bar[1][0] + cell[0] and _inside(r, bar[1])
 
 
@@ -385,7 +385,7 @@ def test_the_focused_windows_chip_is_raised_under_the_current_mark(tmp_path):
     ws.open_settings()
     _settle(ws)
     cv = ws.wm.root_canvas
-    chips = ws.wm._chip_rects()
+    chips = ws.wm.chip_rects()
     assert chips and len({r[3] for _k, r, _l in chips}) == 1
     bar = _px(cv, 600, 20)
     side = 16 * ws.layout.fs

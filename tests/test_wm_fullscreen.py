@@ -178,7 +178,7 @@ def test_the_bar_and_its_chips_are_hidden_and_the_desk_is_not_drawn(tmp_path, mo
     _frames(ws, 4)
     assert "desk" not in drawn and not chips and not desk
     # a tap where a chip was is the row's, not the chip's
-    for _k, rect, _label in ws.wm._chip_rects():
+    for _k, rect, _label in ws.wm.chip_rects():
         assert ws.wm._win_at(*_centre(rect)) == "files"
     # the glass's top row is the band's ground, the bar's colours nowhere
     sc = ws.wm.root_canvas

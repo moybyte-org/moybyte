@@ -836,7 +836,7 @@ def test_click_moves_focus_without_popping_the_playtest(tmp_path):
     # pointer.
     assert ws.wm.z_order[-1] == "menu"
     assert ws.wm._win_at(player.x + 40, player.y + 4) == "menu"
-    x, y, w, h = next(r for k, r, _ in ws.wm._chip_rects() if k == "desktop")
+    x, y, w, h = next(r for k, r, _ in ws.wm.chip_rects() if k == "desktop")
     drv.touch(x + w // 2, y + h // 2)
     drv.frame(1 / 30)
     drv.touch_up()
@@ -1129,7 +1129,7 @@ def test_the_chips_keep_the_order_the_windows_opened(tmp_path):
     ws.wm.chip_tap("files")                           # a chip raises too
     drv.frame(1 / 30)
     assert ws.wm.z_order[-1] == "files"
-    assert [k for k, _r, _l in ws.wm._chip_rects()] == ["files", "calc"]
+    assert [k for k, _r, _l in ws.wm.chip_rects()] == ["files", "calc"]
 
 
 def test_opening_an_open_app_brings_its_window_forward_as_it_was(tmp_path):
@@ -1196,7 +1196,7 @@ def test_minimize_hides_window_and_chip_restores(tmp_path):
     # A minimized top window swallows no keys -- they fall to the desktop root.
     assert ws.wm._route_key(ws.input) is False
     # Its taskbar chip restores it.
-    chips = ws.wm._chip_rects()
+    chips = ws.wm.chip_rects()
     assert chips and chips[0][0] == "settings"
     _kind, (cx, cy, cw, ch), _label = chips[0]
     drv.touch(cx + 2, cy + 2)
@@ -1214,12 +1214,12 @@ def test_a_chip_names_its_window_whole_while_the_bar_has_room(tmp_path):
     for app in ("files", "appearance", "calc"):
         ws.spine.open_app(ws.app(app))
         drv.frame(1 / 30)
-    labels = {k: lb for k, _r, lb in ws.wm._chip_rects()}
+    labels = {k: lb for k, _r, lb in ws.wm.chip_rects()}
     assert labels["appearance"] == "Appearance" and labels["files"] == "Files"
     (_e, (bx, _by, _bw, _bh), _dy, _c), (_n, (cx, _cy, cw, _ch), _t, _s) = \
         ws.wm._chips_cell()
     ws.wm._win_title = lambda win: "A VERY LONG WINDOW TITLE INDEED " * 2
-    chips = ws.wm._chip_rects()
+    chips = ws.wm.chip_rects()
     assert len(chips) == 3
     assert all(len(lb) < 64 for _k, _r, lb in chips)
     assert all(bx + cx <= r[0] and r[0] + r[2] <= bx + cx + cw for _k, r, _l in chips)
@@ -1235,7 +1235,7 @@ def test_chip_click_is_focus_only_never_a_pop(tmp_path):
     drv.frame(1 / 30)
     ws.text.leave_menu()                             # PLAY: playtest above the editor
     drv.frame(1 / 30)
-    chips = {k: r for k, r, _l in ws.wm._chip_rects()}
+    chips = {k: r for k, r, _l in ws.wm.chip_rects()}
     assert set(chips) == {"projects", "menu", "desktop"}
     stack_before = ws.wm.stack.kinds()
     # Clicking the editor's chip FOCUSES it -- no pop, the playtest stays up.
@@ -3618,13 +3618,13 @@ def test_the_editor_and_its_playtest_are_titled_by_app_and_cart(tmp_path):
     wins = ws.wm.windows
     assert ws.wm._win_title(wins["menu"]) == "Editor - " + cart
     assert ws.wm._win_title(wins["desktop"]) == "Play - " + cart
-    labels = {k: lb for k, _r, lb in ws.wm._chip_rects()}
+    labels = {k: lb for k, _r, lb in ws.wm.chip_rects()}
     assert labels["menu"] == "Editor"                # the chip names the app alone
     # Day: on this undeclared glass (the handheld class at font scale 2) the
     # chips' Day Sans cuts a name to what fits; the chip's label is pinned
     ws.look.set_theme("moy", persist=False, variant="light")
     drv.frame(1 / 30)
-    labels = {k: lb for k, _r, lb in ws.wm._chip_rects()}
+    labels = {k: lb for k, _r, lb in ws.wm.chip_rects()}
     assert "Editor".startswith(labels["menu"])
     assert cart.startswith(labels["desktop"])      # the playtest's chip names the cart (D-23)
 

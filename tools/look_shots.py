@@ -3149,11 +3149,11 @@ def _chip_pairs(ws, probe, img):
     out = []
     fs = ws.layout.fs
     wm = ws.wm
-    paged = getattr(wm, "_chip_paged", False)
+    paged = getattr(wm, "chips_paged", False)
     if paged:
         # the bar page's chips (bar items): the window manager's rects
         chips = [(r, k == wm.focus_key and not wm.windows[k].minimized)
-                 for k, r, _t in wm._chip_rects()]
+                 for k, r, _t in wm.chip_rects()]
     else:
         chips = probe.last["chips"]     # the look's chip parts (a bar the page does not draw)
     for r, focused in chips:

@@ -326,7 +326,7 @@ class _BackdropLayer(Layer):
     # home in a window, on Make), then the home's Apps tab: every registered
     # app (minus HIDDEN_APPS), then the installed app- and tool-typed carts no
     # app claims (Notes; a kid's installed app). Geometry is deterministic
-    # (the _chip_rects pattern -- computed per call, no stored state), so draw
+    # (the chip_rects pattern -- computed per call, no stored state), so draw
     # and hit-test can never disagree, and the icons render before the drag
     # backdrop capture, so the drag cache carries them for free. Under a
     # theme's look the column is the look's (docs/history/look_2026-10.md step 25:
