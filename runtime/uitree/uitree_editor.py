@@ -1330,20 +1330,9 @@ class Engine(uitree_app.Engine):
         return True
 
     def _r_slot(self, n, row, rect):
-        """The shell docks another process's window here; the replay draws a
-        stand-in for the game's frame at 1x, centred."""
-        x, y, w, h = rect
-        cv = self.cv
+        """A rect another process's window or page is docked in: recorded
+        (`rect_of`, `anchor`), drawn by its owner, nothing drawn here."""
         self.anchors[n.key] = rect
-        gw, gh = min(w, 320), min(h, 240)
-        gx, gy = x + (w - gw) // 2, y + (h - gh) // 2
-        th = self.th
-        cv.rect(x, y, w, h, th["ink"])
-        cv.rect(gx, gy, gw, gh, th["value"])
-        for i in range(12):
-            cv.rect(gx + (i * 53) % max(1, gw - 4), gy + (i * 37) % max(1, gh - 4), 3, 3, th["panel"])
-        cv.rect(gx + gw // 2 - 8, gy + gh - 20, 16, 8, th["panel"])
-        cv.print("slot 'run': the docked game", gx + 6, gy + 6, th["panel"])
 
     # -- the text editor --------------------------------------------------------
 
