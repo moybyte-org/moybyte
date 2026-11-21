@@ -1074,6 +1074,9 @@ def labels(name, table):
 
 DOC_FIELDS = {"line": INT, "col": INT, "lines": INT, "sel": INT, "match": INT, "matches": INT,
               "can_undo": BOOL, "can_redo": BOOL, "edits": INT, "word": TEXT}
+# ...in one order on every Python, as a model's (`Model.order`): the C store's
+# field indexes of a document's row, a compiled page's among them, are this order's.
+DOC_ORDER = tuple(sorted(DOC_FIELDS))
 
 # @input: the input in use now, as the toolkit names it (spec r3 §14 leaves
 # the spelling open, F-23): keys (a keyboard), tdeck (the T-Deck's), pad, touch

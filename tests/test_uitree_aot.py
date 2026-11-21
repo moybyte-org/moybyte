@@ -42,23 +42,59 @@ def test_every_system_page_compiles(compiled):
         assert any(k.startswith(m + ".") for k in compiled.pages), m
 
 
-def _board_order(monkeypatch):
-    """Every model's fields in another dict order than the one the blobs were
-    compiled with, as a board's dicts keep them."""
+def _reversed(request, d):
+    """Dict `d` walked the other way from here on, in place (an engine holds
+    the module's dicts themselves), and given back after the test."""
+    items = list(d.items())
+    d.clear()
+    d.update(reversed(items))
+    request.addfinalizer(lambda: (d.clear(), d.update(items)))
+
+
+def _board_order(monkeypatch, request):
+    """Every dict whose order could decide an index the C store or a blob
+    keeps, in another order than the one the blobs were compiled with, as a
+    board's dicts (and so its keyword arguments) keep them: each module's
+    states (slots), actions, label tables and each table's keys, each
+    model's fields and the document's fields."""
     import uitree as S
+    monkeypatch.setattr(S, "DOC_FIELDS", dict(reversed(list(S.DOC_FIELDS.items()))))
     for m in MODULES:
-        for t in S.decl_of(__import__(m)).state._t.values():
+        decl = S.decl_of(__import__(m))
+        for t in decl.state._t.values():
             if isinstance(t, S.Model):
                 monkeypatch.setattr(t, "fields", dict(reversed(list(t.fields.items()))))
+        for tab in decl.labels.values():
+            _reversed(request, tab)
+        for d in (decl.state._t, decl.actions, decl.labels):
+            _reversed(request, d)
 
 
 @pytest.mark.parametrize("order", ("host", "board"))
 @pytest.mark.parametrize("name", PORTS.C_RUNS)
-def test_a_c_run_draws_its_record_with_its_pages_loaded(name, order, compiled, tmp_path, monkeypatch):
+def test_a_c_run_draws_its_record_with_its_pages_loaded(name, order, compiled, tmp_path, monkeypatch, request):
     import uitree_app
     if order == "board":
-        _board_order(monkeypatch)
+        _board_order(monkeypatch, request)
     run = [r for r in PORTS.RUNS if r[0] == name][0]
+    moved = run[4] if len(run) > 4 else None
+    built_frames = None
+    if moved == P.BEHAVIOUR:
+        # a run held to its states alone: its loaded frames are held to its built ones, up
+        # to a playtest's first frame (a game's frames follow the clock, and the desk's
+        # after it): the first that plays or shows another surface on top
+        monkeypatch.setattr(uitree_aot, "BLOBS", {})
+        uitree_app.use_engine("c")
+        try:
+            built = P.check_recorded(name, PORTS.SURFACES[run[1]], tmp_path / "built", moved)
+        finally:
+            uitree_app.use_engine("reference")
+        top = built[0].state.split(" top=")[-1]
+        built_frames = []
+        for f in built:
+            if "playing=True" in f.state or f.state.split(" top=")[-1] != top:
+                break
+            built_frames.append(f.digest())
     monkeypatch.setattr(uitree_aot, "BLOBS", compiled.pages)
     loaded, built = [], []
     load = uitree_aot.load
@@ -79,9 +115,12 @@ def test_a_c_run_draws_its_record_with_its_pages_loaded(name, order, compiled, t
         "__init__": lambda self, m: (refused.append(m), Exception.__init__(self, m))[1]}))
     uitree_app.use_engine("c")
     try:
-        P.check_recorded(name, PORTS.SURFACES[run[1]], tmp_path / "carts", run[4] if len(run) > 4 else None)
+        fs = P.check_recorded(name, PORTS.SURFACES[run[1]], tmp_path / "carts", moved)
     finally:
         uitree_app.use_engine("reference")
+    if built_frames is not None:
+        moved_at = [i for i, (f, b) in enumerate(zip(fs, built_frames)) if f.digest() != b]
+        assert not moved_at, "the loaded pages draw other frames than the built ones at steps %s" % moved_at
     assert not refused, refused
     assert loaded, "no page of the run was loaded from a blob"
     assert not [k for k in built if k in compiled.pages], built
@@ -271,3 +310,99 @@ def test_on_the_boards_python_a_loaded_page_neither_builds_nor_lowers_and_keeps_
     assert all(c[2] == 0 and c[3] == 0 for c in first), first
     assert out["loaded"]["kept"] == out["built"]["kept"], (out["loaded"]["kept"], out["built"]["kept"])
     assert out["loaded"]["forgot"] == out["loaded"]["desk"] == 0
+
+
+FRAMES_DRIVER = r'''
+LOADS = []
+
+
+def frames(loop):
+    """Every page the console opens on the C engine, built and then loaded
+    from the host's blobs, in one boot: the frame each draws."""
+    import moy_lcd
+    import uitree_aot
+    ws = loop.ws
+    W, H = moy_lcd.WIDTH, moy_lcd.HEIGHT
+    load = uitree_aot.load
+
+    def counted(eng, x, blob):
+        LOADS.append(uitree_aot.key(eng.pages[0]))
+        return load(eng, x, blob)
+    uitree_aot.load = counted
+
+    def steps(n):
+        for _ in range(n):
+            loop.step()
+
+    sl = lambda: ws.settings_layer
+    def page(p):
+        return lambda: sl().open_page(p)
+
+    def code():
+        ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Star Catcher"))
+        steps(5)
+        ws.text.set_menu_view("code")
+        ed = ws.editor
+        ed.set_text("\n".join("value_%d = probe(%d) + 1" % (i, i) for i in range(120)))
+        ed.row, ed.col = 5, 3
+
+    def leave():
+        if ws.editor is not None:
+            ws.spine.exit()
+        ws.home.go_home()
+
+    routes = [("settings_rows", None, ws.open_settings), ("tz", ws.open_settings, page("tz")),
+              ("log", ws.open_settings, page("log")), ("permissions", ws.open_settings, page("permissions")),
+              ("licences", ws.open_settings, page("licences")), ("paired", ws.open_settings, page("paired")),
+              ("achievements", ws.open_settings, page("achievements")),
+              ("wifi", ws.open_settings, page("wifi")), ("tasks", None, ws.open_tasks), ("code", None, code)]
+    steps(40)
+    out = {"routes": [r[0] for r in routes], "moved": {}, "loads": {}}
+    shots = {}
+    # a first round built: what the routes themselves move (an achievement's progress, its
+    # toast) is moved before the two rounds compared
+    for arm, blobs in (("warm", {}), ("built", {}), ("loaded", BLOBS)):
+        uitree_aot.BLOBS = blobs
+        for e in ALL:
+            e.forget()
+        del LOADS[:]
+        for name, prep, opener in routes:
+            if prep is not None:
+                prep()
+                steps(2)
+            opener()
+            steps(6)
+            shot = b"".join(bytes(moy_lcd.fb(i)) for i in range(moy_lcd.nfbs()))     # the glass's buffers
+            if arm == "built":
+                shots[name] = shot
+            elif arm == "loaded" and name != "log":         # the log's lines grow between rounds
+                a, row = shots[name], W * 2
+                rows = [y % H for y in range(len(a) // row) if a[y * row:(y + 1) * row] != shot[y * row:(y + 1) * row]]
+                if rows:
+                    out["moved"][name] = (rows[0], rows[-1], len(rows))
+            leave()
+            steps(4)
+        out["loads"][arm] = list(LOADS)
+    print("RESULT " + __import__("json").dumps(out))
+'''
+
+
+def test_on_the_boards_python_every_loaded_page_draws_its_built_frame(compiled, tmp_path):
+    """The boards' MicroPython keeps its dicts, and so its keyword arguments,
+    in another order than the CPython that compiled the blobs: every page the
+    T-Deck's console opens, the Editor's Code tab among them (a document's
+    status line: its caret and length), draws from its blob the frame it
+    draws built there, in one boot."""
+    import test_frame_alloc as FA
+    import test_uitree_c_memory as M
+    entries = dict((k, uitree_aot.entry(v)) for k, v in compiled.pages.items())
+    info, text = FA._run(tmp_path, entry="(_pre() or frames)",
+                         more="ROUNDS = 1\nBLOBS = %r\n" % (entries,) + M.DRIVER + FRAMES_DRIVER,
+                         why="a compiled page's frame on the boards' MicroPython: this is its check there")
+    assert "refused" not in text, text[-2000:]
+    assert not info["loads"]["built"] and not info["loads"]["warm"], info["loads"]
+    loaded = set(info["loads"]["loaded"])
+    for page in ("settings_rows.rows_page", "achievements_ui.achievements_page", "tasks_ui.tasks_page", "code_ui.code_page",
+                 "editor_ui.head"):
+        assert page in loaded, (page, sorted(loaded))
+    assert not info["moved"], info["moved"]

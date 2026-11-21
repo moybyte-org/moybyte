@@ -279,8 +279,8 @@ class CEngine(Engine):
             elif isinstance(t, S.RowOf):
                 x.row_of(self._slot[name], self._slot[t.model])
             elif type(t) is S.Doc:
-                fields = ["doc"] + list(S.DOC_FIELDS)
-                types = bytes([TEXT] + [self._ftype(f, name) for f in S.DOC_FIELDS.values()])
+                fields = ("doc",) + S.DOC_ORDER
+                types = bytes([TEXT] + [self._ftype(S.DOC_FIELDS[f], name) for f in S.DOC_ORDER])
                 m = self._slot[name] - 1
                 self._ck(x.model(m, "\0".join(fields).encode("utf-8"), types, 0), "doc " + name)
                 x.row_of(self._slot[name], m)
@@ -373,7 +373,8 @@ class CEngine(Engine):
         sig[4], sig[5], sig[6], sig[7] = d.find_q, d.find_ci, ed.sel, ed.left
         reads = self._doc_reads.get(name, ())
         cells = ["1"]
-        for f, ft in S.DOC_FIELDS.items():
+        for f in S.DOC_ORDER:
+            ft = S.DOC_FIELDS[f]
             if f not in reads:              # a field no template of the page reads: never asked
                 cells.append("0" if ft is not S.TEXT else "")
                 continue
@@ -657,7 +658,7 @@ class CEngine(Engine):
         # what the page's templates and conditions read of each document: the fields pushed
         reads = self._doc_reads = {}
         for name in self._docs:
-            got = [f for f in S.DOC_FIELDS if any((name + "." + f) in t for t in srcs)]
+            got = [f for f in S.DOC_ORDER if any((name + "." + f) in t for t in srcs)]
             reads[name] = tuple(got)
 
     def front(self):
