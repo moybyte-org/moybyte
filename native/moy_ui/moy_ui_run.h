@@ -110,4 +110,15 @@ void moy_ui_run_paste(const uint8_t *text, size_t n);
 // each frame of a Lua or compiled app, as an app's own host fills them.
 void moy_ui_run_steps(int32_t rep, int32_t keyrep);
 
+// A drawing of the caller's over the run's frame, as a row draws: `fn` is
+// called with the run's context (begun for this tick), the RUN sink over
+// `target`, the surface the frame lays out in (the run's content rect) and
+// the snapshot's face word, the run's draw state saved around it. Answers
+// what `fn` answers, or -MOY_UI_STALE / -MOY_UI_NOMEM where no run or context
+// could be had. The UI tree engine's frame on a run (moy_uitree.h's
+// uit_run_frame) is its caller.
+typedef int (*moy_ui_run_fn)(void *ud, moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t surface,
+                             int32_t face);
+int moy_ui_run_with(void *target, moy_ui_run_fn fn, void *ud);
+
 #endif // MOY_UI_RUN_H

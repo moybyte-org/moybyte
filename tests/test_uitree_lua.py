@@ -3,7 +3,8 @@
 - An app written in it opens, paints, takes input and closes beside today's.
 - Old against port: Moy Mesh's hand-written thread and Radio pages and their
   ports draw the same pixels through one input script, on the handheld and
-  in a desk window (tests/uitree_lua_parity.py).
+  in a desk window (tests/uitree_lua_parity.py), on the reference back end.
+- Every other test runs on the engine in use (the C engine on the host).
 - The checker (tools/uitree_lua_check.py): one failing case per error code a
   Lua app can raise, each reported at its file and line.
 """
@@ -82,6 +83,12 @@ def test_an_app_opens_paints_takes_input_and_closes(tmp_path):
 @pytest.mark.parametrize("size", sorted(parity.SIZES))
 @pytest.mark.parametrize("pair", sorted(parity.PAIRS))
 def test_old_and_port_draw_the_same_pixels(pair, size):
+    """The reference back end (runtime/run/uitree_replay.lua) against the
+    hand-written pages it replays into today's verbs: the C engine lays out
+    by its own rules, and the ports hold a record and bubbles it does not
+    draw yet (E00)."""
+    import uitree_app
+    uitree_app.use_engine("reference")
     wh, old, port, errors, _logs = parity.compare(pair, size)
     assert errors == []
     assert list(old) == list(port)
