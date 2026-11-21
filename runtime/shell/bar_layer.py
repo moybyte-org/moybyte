@@ -1561,8 +1561,8 @@ class BarLayer:
     def _page_stop(self, where, item):
         """The id of the bar page's stop under focus item `item` of
         `where`'s bars (`focus_items`), or None where the page draws no stop
-        there (the system button, the zone's targets, a handheld's cluster, a
-        hand-drawn battery, a bar the page does not draw)."""
+        there (the zone's targets, a handheld's cluster, a hand-drawn
+        battery, a bar the page does not draw)."""
         name = item[2]
         if name not in _PAGE_STOPS:
             return None
@@ -1684,9 +1684,9 @@ class BarLayer:
             cv.clip()
 
     def _page_paint(self, name, cv, x, y, w, h):
-        """A canvas of the bar page: the system button, a hand-drawn
-        battery, through their painters in the bar's coordinates
-        (the page is drawn at the bar's origin on `cv`)."""
+        """A canvas of the bar page (the hand-drawn battery) through its
+        painter in the bar's coordinates (the page is drawn at the bar's
+        origin on `cv`)."""
         at = self._page_at
         where, bar, cells = at[0], at[1], at[2]
         ox, oy = _bar_engine._ORIGIN
