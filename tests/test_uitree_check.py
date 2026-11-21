@@ -44,6 +44,7 @@ PORTED = (
     "uitree_placed",
     "uitree_text_editor",
     "uitree_grid",
+    "uitree_model_row",
 )
 
 

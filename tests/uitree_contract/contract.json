@@ -2043,8 +2043,7 @@
     },
     "dir": {
      "type": "word:row",
-     "level": 2,
-     "designed": true
+     "level": 2
     }
    }
   },

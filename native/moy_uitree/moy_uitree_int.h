@@ -183,7 +183,12 @@ enum { PN_MIN_ANY = -1, PN_MIN_ONE = -2 };
 typedef struct {
     int16_t node, r[4];
     uint8_t depth, path[PN_DEPTH];
-} uit_pa_t;                     // a pane arranged, a body placed, a pane drawn
+} uit_pa_t;
+
+#define UIT_MCELLS 16           // the model row cells a pass records at most
+typedef struct {
+    int16_t node, model, row, r[4];
+} uit_mc_t;                     // a row from a model: one row's cell                     // a pane arranged, a body placed, a pane drawn
 typedef struct {
     int16_t r[4];
     uint8_t depth, path[PN_DEPTH], i, axis;
@@ -353,6 +358,8 @@ struct uit {
     int16_t ground[4];
     int16_t *rects;
     int crects;
+    uit_mc_t mcells[UIT_MCELLS];   // a pass's model row cells (`put_cell`)
+    uint8_t nmcells;
     uit_arr_t *arr;             // the panes' answers (a page with panes or a hosted body)
     uint8_t has_panes;
     int16_t du;                 // the desk unit the host hands (`uit_panes_set`)

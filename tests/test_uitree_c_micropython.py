@@ -174,7 +174,8 @@ def conf(loop):
             ("across", ACROSS_SRC, ACROSS_SCRIPT, (uitree_editor.Engine, uitree_c.CEditorEngine)),
             ("across_bar", ACROSS_BAR_SRC, ACROSS_BAR_SCRIPT, (uitree_editor.Engine, uitree_c.CEditorEngine)),
             ("bar_look", BAR_LOOK_SRC, BAR_LOOK_SCRIPT, (uitree_editor.Engine, uitree_c.CEditorEngine)),
-            ("grid", GRID_SRC, GRID_SCRIPT, pairs)]:
+            ("grid", GRID_SRC, GRID_SCRIPT, pairs),
+            ("model_row", MROW_SRC, MROW_SCRIPT, (uitree_editor.Engine, uitree_c.CEditorEngine))]:
         runs = {}
         for tag, cls in zip(("py", "c"), pair):
             mod = _load("conf_%s_%s" % (name, tag), src)
@@ -407,6 +408,8 @@ ACROSS_BAR_SCRIPT = ["k:a", "k:right", "k:a", "k:down", "k:left", "k:a"]
 BAR_LOOK_SCRIPT = ["k:a", "k:right", "k:right", "k:right", "k:right", "k:a", "k:left", "k:a"]
 # a grid (tests/uitree_fixtures/uitree_grid.py): walked, the wide key pressed, hidden, walked
 GRID_SCRIPT = ["k:down", "k:right", "k:a", "k:left", "k:a", "k:down", "k:up", "k:a"]
+# a row from a model (tests/uitree_fixtures/uitree_model_row.py): grown past its room, walked, marked
+MROW_SCRIPT = ["k:a", "k:a", "k:right", "k:a", "k:right", "k:a", "k:left", "k:a"]
 
 
 @pytest.fixture(scope="module")
@@ -418,6 +421,7 @@ def result(tmp_path_factory):
     across_bar = (Path(__file__).resolve().parent / "uitree_fixtures" / "uitree_across_bar.py").read_text()
     bar_look = (Path(__file__).resolve().parent / "uitree_fixtures" / "uitree_bar_look.py").read_text()
     grid = (Path(__file__).resolve().parent / "uitree_fixtures" / "uitree_grid.py").read_text()
+    mrow = (Path(__file__).resolve().parent / "uitree_fixtures" / "uitree_model_row.py").read_text()
     more = (DRIVER.replace("@FIXTURES@", repr(_fixtures())) + "\nLONG_SRC = %r\n" % LONG
             + "PLACED_SRC = %r\nPLACED_SCRIPT = %r\nBAR_SRC = %r\n" % (placed, PLACED_SCRIPT, bar_row)
             + "TE_SRC = %r\nTE_SCRIPT = %r\n" % (te, TE_SCRIPT)
@@ -425,6 +429,7 @@ def result(tmp_path_factory):
             + "ACROSS_BAR_SRC = %r\nACROSS_BAR_SCRIPT = %r\n" % (across_bar, ACROSS_BAR_SCRIPT)
             + "BAR_LOOK_SRC = %r\nBAR_LOOK_SCRIPT = %r\n" % (bar_look, BAR_LOOK_SCRIPT)
             + "GRID_SRC = %r\nGRID_SCRIPT = %r\n" % (grid, GRID_SCRIPT)
+            + "MROW_SRC = %r\nMROW_SCRIPT = %r\n" % (mrow, MROW_SCRIPT)
             + "SETTINGS_KEYS = %r\nSETTINGS_RUNS = %r\n" % (SETTINGS_KEYS, SETTINGS_RUNS))
     info, text = FA._run(tmp_path_factory.mktemp("uitree_c"), entry="conf", more=more,
                          why="the C engine runs on the boards' MicroPython: this is its check there")

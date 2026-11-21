@@ -2519,6 +2519,7 @@ static int rects_ready(uit_t *e)
     }
     for (int i = 0; i < e->nnodes; i++)
         e->rects[4 * i + 2] = -1;
+    e->nmcells = 0;
     return 1;
 }
 
@@ -2532,6 +2533,16 @@ static void put_rect(uit_t *e, int k, const int32_t r[4])
 
 int uit_rect(const uit_t *e, const char *key, int32_t out[4])
 {
+    const char *sl = strchr(key, '/');
+    for (int i = 0; sl && i < e->nmcells; i++) {     // ROWKEY/KEY: a model row's cell
+        const uit_mc_t *m = &e->mcells[i];
+        const char *rk = uit_cell((uit_t *)e, m->model, m->row, e->slots[m->model].key);
+        if (strlen(rk) == (size_t)(sl - key) && !memcmp(rk, key, (size_t)(sl - key)) &&
+            !strcmp(uit_str(e, e->nodes[m->node].key), sl + 1)) {
+            out[0] = m->r[0], out[1] = m->r[1], out[2] = m->r[2], out[3] = m->r[3];
+            return 1;
+        }
+    }
     for (int k = (e->crects < e->nnodes ? e->crects : e->nnodes) - 1; k >= 0; k--) {
         const int16_t *p = e->rects + 4 * k;
         if (p[2] >= 0 && !strcmp(uit_str(e, e->nodes[k].key), key)) {
@@ -2772,7 +2783,10 @@ static int32_t row_gap(const uit_t *e)
     return (e->flags & UIT_F_DESK) ? 4 : 2;
 }
 
-static int row_kids(uit_t *e, int k, int model, int row, int16_t *kids, int *st, int *st_shown)
+// A row's shown cells in order, each with the list row it draws on (`km`, `kr`): a `rows` among
+// them a cell per row of its model, its kids shown on that row (a row from a model).
+static int row_kids(uit_t *e, int k, int model, int row, int16_t *kids, int16_t *km, int16_t *kr, int *st,
+                    int *st_shown)
 {
     int n = 0;
     KIDS(k, g) {
@@ -2780,10 +2794,28 @@ static int row_kids(uit_t *e, int k, int model, int row, int16_t *kids, int *st,
         *st |= kind == UIT_STATUS;
         if (n == PLACE_KIDS || !placed_shown(e, g, model, row))
             continue;
+        if (kind == UIT_ROWS) {
+            int m = NODE(g)->slot;
+            for (int r = 0; r < e->slots[m].nrows; r++)
+                KIDS(g, b)
+                if (n < PLACE_KIDS && placed_shown(e, b, m, r))
+                    kids[n] = (int16_t)b, km[n] = (int16_t)m, kr[n++] = (int16_t)r;
+            continue;
+        }
         *st_shown |= kind == UIT_STATUS;
-        kids[n++] = (int16_t)g;
+        kids[n] = (int16_t)g, km[n] = (int16_t)model, kr[n++] = (int16_t)row;
     }
     return n;
+}
+
+// A model row's cell placed: kept for `uit_rect`'s ROWKEY/KEY (its node's own rect is one cell's).
+static void put_cell(uit_t *e, int k, int model, int row, const int32_t r[4])
+{
+    if (e->nmcells < UIT_MCELLS) {
+        uit_mc_t *m = &e->mcells[e->nmcells++];
+        m->node = (int16_t)k, m->model = (int16_t)model, m->row = (int16_t)row;
+        m->r[0] = (int16_t)r[0], m->r[1] = (int16_t)r[1], m->r[2] = (int16_t)r[2], m->r[3] = (int16_t)r[3];
+    }
 }
 
 // A row cell's natural width, or -1 where it grows (`_natural`).
@@ -2818,13 +2850,13 @@ static int32_t natural(uit_t *e, int k, int model, int row, int32_t h)
     if (N->kind == UIT_ROW) {
         // a row in a row: its cells' widths and gaps where none grows; one with nothing shown
         // a spacer
-        int16_t kids[PLACE_KIDS];
-        int st = 0, sts = 0, nk = row_kids(e, k, model, row, kids, &st, &sts);
+        int16_t kids[PLACE_KIDS], km[PLACE_KIDS], kr[PLACE_KIDS];
+        int st = 0, sts = 0, nk = row_kids(e, k, model, row, kids, km, kr, &st, &sts);
         int32_t sum = 0;
         if (!nk)
             return -1;
         for (int i = 0; i < nk; i++) {
-            int32_t v = natural(e, kids[i], model, row, h);
+            int32_t v = natural(e, kids[i], km[i], kr[i], h);
             if (v < 0)
                 return -1;
             sum += v;
@@ -2833,6 +2865,46 @@ static int32_t natural(uit_t *e, int k, int model, int row, int32_t h)
                2 * len_of(e, N->t_aux, model, row, 0);
     }
     return -1;
+}
+
+// A row of fixed cells wider than its `room`: its model's cells (`km` not the row's `model`) cut
+// to one width, the widest first, never under the row's height `h`; those that still do not fit
+// dropped from the end (`_fit_cells`). Answers the cells left.
+static int fit_cells(int16_t *kids, int16_t *km, int16_t *kr, int32_t *nat, int model, int n, int32_t room,
+                     int32_t gap, int32_t h)
+{
+    int32_t sum = gap * (n > 1 ? n - 1 : 0), most = 0;
+    for (int i = 0; i < n; i++) {
+        sum += nat[i];
+        if (km[i] != model && nat[i] > most)
+            most = nat[i];
+    }
+    if (sum <= room || !most)
+        return n;
+    int32_t lo = h < most ? h : most, hi = most;    // the widest cap that fits, else the floor
+    while (lo < hi) {
+        int32_t cap = lo + (hi - lo + 1) / 2, t = gap * (n > 1 ? n - 1 : 0);
+        for (int i = 0; i < n; i++)
+            t += km[i] != model && nat[i] > cap ? cap : nat[i];
+        if (t <= room)
+            lo = cap;
+        else
+            hi = cap - 1;
+    }
+    sum = gap * (n > 1 ? n - 1 : 0);
+    for (int i = 0; i < n; i++) {
+        if (km[i] != model && nat[i] > lo)
+            nat[i] = lo;
+        sum += nat[i];
+    }
+    for (int i = n - 1; i >= 0 && sum > room; i--)
+        if (km[i] != model) {
+            sum -= nat[i] + (n > 1 ? gap : 0);
+            for (int j = i; j < n - 1; j++)
+                kids[j] = kids[j + 1], km[j] = km[j + 1], kr[j] = kr[j + 1], nat[j] = nat[j + 1];
+            n--;
+        }
+    return n;
 }
 
 // Cells i0..i1 their widths: a fixed one its own, the fills their basis and an even share of what
@@ -2857,17 +2929,17 @@ static void row_share(const int32_t *nat, const int32_t *base, int32_t *ws, int 
 static void row_cells(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row,
                       const int32_t r[4])
 {
-    int16_t kids[PLACE_KIDS];
+    int16_t kids[PLACE_KIDS], km[PLACE_KIDS], kr[PLACE_KIDS];
     int32_t nat[PLACE_KIDS], ws[PLACE_KIDS], base[PLACE_KIDS];
     int st = 0, st_shown = 0, mid = -1, grow = 0;
-    int n = row_kids(e, k, model, row, kids, &st, &st_shown);
+    int n = row_kids(e, k, model, row, kids, km, kr, &st, &st_shown);
     const uit_node_t *R = NODE(k);
     if (st && !st_shown && !e->placing) {
         moy_ui_box_t b = {(int16_t)r[0], (int16_t)r[1], (int16_t)r[2], (int16_t)r[3]};
         moy_ui_status(s, b, (const uint8_t *)"", 0, 0, s->fs);     // a status row's band, its line hidden
     }
     for (int i = 0; i < n; i++) {
-        nat[i] = natural(e, kids[i], model, row, r[3]);
+        nat[i] = natural(e, kids[i], km[i], kr[i], r[3]);
         grow += nat[i] < 0;
         if (mid < 0 && NODE(kids[i])->kind == UIT_ROW && (NODE(kids[i])->lit & RW_MID))
             mid = i;
@@ -2883,6 +2955,11 @@ static void row_cells(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, 
     int32_t gap = R->kind == UIT_ROW ? len_of(e, R->t_value, model, row, row_gap(e)) : row_gap(e);
     int32_t pad = R->kind == UIT_ROW ? len_of(e, R->t_aux, model, row, 0) : 0;
     int32_t x0 = r[0] + pad, x1 = r[0] + r[2] - pad, ms = 0, b = 0;
+    int fills = 0;
+    for (int i = 0; i < n; i++)
+        fills += nat[i] < 0;
+    if (!fills && mid < 0)
+        n = fit_cells(kids, km, kr, nat, model, n, x1 - x0, gap, r[3]);
     if (mid < 0)
         row_share(nat, base, ws, 0, n, x1 - x0 - gap * (n > 1 ? n - 1 : 0));
     else {
@@ -2922,15 +2999,17 @@ static void row_cells(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, 
         if (gk == UIT_STATUS || gk == UIT_CASE || gk == UIT_SWITCH || gk == UIT_PANEL || gk == UIT_CANVAS ||
             gk == UIT_ROW || (gk == UIT_BUTTON && NODE(g)->lit == MOY_UI_BUTTON_BAR))
             cell[1] = r[1], cell[3] = r[3];     // a band, a region, a bar item: the row's height
+        if (km[i] != model)
+            put_cell(e, g, km[i], kr[i], cell);
         if (e->placing || gk == UIT_ROW)
-            place_at(e, c, s, g, model, row, cell);     // a placement records the cells, drawing none
+            place_at(e, c, s, g, km[i], kr[i], cell);   // a placement records the cells, drawing none
         else if (gk == UIT_BUTTON) {
             put_rect(e, g, cell);
             moy_ui_api_at(c, cell[0], cell[1], cell[2], cell[3]);
-            draw(e, c, s, g, model, row);
+            draw(e, c, s, g, km[i], kr[i]);
         } else {
             moy_ui_api_at(c, cell[0], cell[1], cell[2], cell[3]);
-            place_at(e, c, s, g, model, row, cell);
+            place_at(e, c, s, g, km[i], kr[i], cell);
         }
         x += kw + gap;
     }

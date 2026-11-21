@@ -1115,6 +1115,12 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         N->nbtn = (uint16_t)v;
         return add_prop(e, node, name, src, repr, PK_LIT, (int)v);
     }
+    if (kind == UIT_ROWS && !strcmp(name, "dir")) {
+        // dir="row": a row from a model, its cells along the placed row it stands in (row_kids)
+        if (strcmp(src, "row") && strcmp(src, "col"))
+            return uit_fail(e, UIT_E_KIND, UIT_MSG("rows dir=%s: row or col", "rows dir=%s"), src);
+        return add_prop(e, node, name, src, repr, PK_LIT, src[0] == 'r');
+    }
     if (!strcmp(name, "mkind") && kind == UIT_ITEM) {
         N->lit = (uint8_t)!strcmp(src, "danger");
         return add_prop(e, node, name, src, repr, PK_LIT, N->lit);

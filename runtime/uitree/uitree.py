@@ -1961,7 +1961,8 @@ SCHEMA = {
     "field": dict(_C, label="text", max="lit", on="action0", secret="lit", focus="cond",
                   changed="action0", hint="text", commit="lit"),
     "seg": dict(_C, label="text", on="action0", focus="cond", look="lit", labels="lit", text="text"),
-    "rows": dict(_C, cur="lit", current="lit", empty="text", filter="lit", changed="action1", group="lit"),
+    "rows": dict(_C, cur="lit", current="lit", empty="text", filter="lit", changed="action1", group="lit",
+                 dir="lit"),
     "table": dict(_C, cur="lit", cols="lit", changed="action1", on="action1", empty="text", hint="text", focus="cond"),
     "col": dict(_C, text="text"),
     "cards": dict(_C, cur="lit", current="lit", w="int", h="int", cols="int", new="action0",
@@ -2082,6 +2083,9 @@ def _node(kind, key, props, where, act=None):
         b.root = n
         return n
     parent = b.stack[-1]
+    if kind == "rows" and n.l.get("dir") == "row" and parent.kind != "row":
+        raise UIError("B03", 'ui.rows dir="row" outside a placed row', where=where,
+                      fix='put it in `with ui.row(KEY):` on a placed page, its cells along the row; or drop dir=')
     if n.key is None:
         n.key = "%s#%d" % (kind, len(parent.kids))
     for k in parent.kids:

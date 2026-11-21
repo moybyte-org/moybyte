@@ -545,8 +545,9 @@ class Engine(uitree_app.Engine):
         if k.kind == "row":
             # a row in a row: its cells' widths and gaps where none grows;
             # one with nothing shown a spacer
-            kids = self._row_kids(k, row)
-            nat = [self._natural(c, row, h) for c in kids]
+            rws = []
+            kids = self._row_kids(k, row, rws)
+            nat = [self._natural(c, r, h) for c, r in zip(kids, rws)]
             if not kids or any(v is None for v in nat):
                 return None
             return sum(nat) + self._len(k, "gap", row, self._row_gap()) * max(0, len(kids) - 1) + \
@@ -576,25 +577,42 @@ class Engine(uitree_app.Engine):
             return v * self._unit()
         return n.p[k](row)
 
-    def _row_kids(self, n, row):
+    def _row_kids(self, n, row, rws):
+        """A row's shown cells in order, the list row each draws on in
+        `rws`: a lent site the shown lender's buttons, in its place; a
+        `rows` a cell per row of its model, its kids shown on that row (a
+        row from a model)."""
         kids = []
-        for k in n.kids:                # a lent site: the shown lender's buttons, in its place
+        for k in n.kids:
             if k.kind == "lent":
                 t = self.lenders.get(k.key)
-                kids += [b for b in t.kids if self._shown(b, row)] if t is not None else []
+                for b in t.kids if t is not None else ():
+                    if self._shown(b, row):
+                        kids.append(b)
+                        rws.append(row)
+            elif k.kind == "rows":
+                if not self._shown(k, row):
+                    continue
+                for r in self.s._v[k.l["model"]]:
+                    for b in k.kids:
+                        if self._shown(b, r):
+                            kids.append(b)
+                            rws.append(r)
             elif self._shown(k, row):
                 kids.append(k)
+                rws.append(row)
         return kids
 
     def _r_row(self, n, row, rect):
         x, y, w, h = rect
         if n.key:
             self.anchors[n.key] = rect
-        kids = self._row_kids(n, row)
+        rws = []
+        kids = self._row_kids(n, row, rws)
         if any(k.kind == "status" for k in n.kids) and not any(k.kind == "status" for k in kids) and \
                 not self.placing:
             _ud.status_row(self.cv, self.th, rect, ())     # a status row's band, its line hidden
-        nat = [self._natural(k, row, h) for k in kids]
+        nat = [self._natural(k, r, h) for k, r in zip(kids, rws)]
         if not any(v is None for v in nat):
             for i in [i for i, k in enumerate(kids) if k.kind == "tabs"][:1]:
                 nat[i] = None
@@ -605,6 +623,8 @@ class Engine(uitree_app.Engine):
         pad = self._len(n, "pad", row, 0)
         x0, x1 = x + pad, x + w - pad
         mid = next((i for i, k in enumerate(kids) if k.kind == "row" and k.l.get("mid")), None)
+        if mid is None and not any(v is None for v in nat):
+            self._fit_cells(kids, rws, nat, row, x1 - x0, gap, h)
         ws = [0] * len(kids)
         if mid is None:
             self._share(nat, base, ws, 0, len(kids), x1 - x0 - gap * max(0, len(kids) - 1))
@@ -631,14 +651,46 @@ class Engine(uitree_app.Engine):
             r = (x, y, kw, h) if k.kind in _WHOLE or (k.kind == "button" and k.l.get("kind") == "bar") \
                 else (x, y + 2, kw, h - 4)      # a band, a region, a bar item: the row's height
             self._put_rect(k.key, r)
+            kr = rws[i]
+            if kr is not row:           # a model row's cell: ROWKEY/KEY
+                self._put_rect(kr._f[kr._m.key] + "/" + k.key, r)
             if k.kind == "row" or self.placing:
-                self._draw(k, row, r)       # a placement records the cells, drawing none
+                self._draw(k, kr, r)        # a placement records the cells, drawing none
             elif k.kind == "button":
-                self._r_button(k, row, rect, at=r)
+                self._r_button(k, kr, rect, at=r)
             else:
                 _v.at(*r)
-                self._draw(k, row, r)
+                self._draw(k, kr, r)
             x += kw + gap
+
+    @staticmethod
+    def _fit_cells(kids, rws, nat, row, room, gap, h):
+        """A row of fixed cells wider than `room`: its model's cells (on a
+        row other than the row's own) cut to one width, the widest first,
+        never under the row's height `h`; those that still do not fit
+        dropped from the end."""
+        mine = [r is not row for r in rws]
+        most = max([v for v, m in zip(nat, mine) if m] or [0])
+        sep = gap * max(0, len(nat) - 1)
+        if sum(nat) + sep <= room or not most:
+            return
+        lo, hi = min(h, most), most
+        while lo < hi:
+            cap = lo + (hi - lo + 1) // 2
+            if sum(cap if m and v > cap else v for v, m in zip(nat, mine)) + sep <= room:
+                lo = cap
+            else:
+                hi = cap - 1
+        for i, m in enumerate(mine):
+            if m and nat[i] > lo:
+                nat[i] = lo
+        total = sum(nat) + sep
+        for i in range(len(nat) - 1, -1, -1):
+            if total <= room:
+                break
+            if mine[i]:
+                total -= nat[i] + (gap if len(nat) > 1 else 0)
+                del kids[i], rws[i], nat[i], mine[i]
 
     @staticmethod
     def _share(nat, base, ws, i0, i1, room):
