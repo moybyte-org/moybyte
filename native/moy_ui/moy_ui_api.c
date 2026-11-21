@@ -1088,6 +1088,48 @@ void moy_ui_inst_sync(moy_ui_inst_t *I) {
     }
 }
 
+// The keys entering the page from a side (moy_ui_api_enter): focus on its stop nearest that
+// side, of the stops the last frame drew (a page that drew none keeps the first one drawn).
+static void enter_land(moy_ui_ctx_t *c) {
+    int best = -1;
+    int32_t score = 0;
+    for (int i = 0; i < c->n_prev; i++) {
+        const moy_ui_stop_t *s = &c->prev[i];
+        if (s->flags & STOP_PAGE) {
+            continue;
+        }
+        moy_ui_box_t b = s->b;
+        int32_t sc;
+        switch (c->enter) {
+        case MOY_UI_EDGE_DOWN:          // its first stop: the topmost, the leftmost of those
+            sc = -((int32_t)b.y * 4096 + b.x);
+            break;
+        case MOY_UI_EDGE_UP:            // its last: the lowest, the leftmost of those
+            sc = (int32_t)(b.y + b.h) * 4096 - b.x;
+            break;
+        case MOY_UI_EDGE_LEFT:          // from its right: the rightmost, the topmost of those
+            sc = (int32_t)(b.x + b.w) * 4096 - b.y;
+            break;
+        default:                        // from its left: the leftmost, the topmost of those
+            sc = -((int32_t)b.x * 4096 + b.y);
+            break;
+        }
+        if (best < 0 || sc > score) {
+            best = i;
+            score = sc;
+        }
+    }
+    if (best < 0) {
+        c->focus = 0;
+        return;
+    }
+    c->focus = c->prev[best].id;
+    c->focus_box = c->prev[best].b;
+    c->focus_name[0] = 0;
+    c->reveal = 1;
+    c->jump = 1;
+}
+
 int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, int flags,
                      int fs) {
     static const int32_t none[MOY_UI_IN_LEN] = {0};
@@ -1138,6 +1180,10 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->act = 0;
     c->keys = 0;
     c->edge = 0;
+    if (c->enter && !c->elsewhere) {
+        enter_land(c);
+    }
+    c->enter = 0;
     c->step_x = c->step_y = 0;
     c->kv = c->kv_next & 0x7f;          // the key view PgUp and PgDn page this frame
     c->kv_next = c->kv_n = 0;
@@ -1417,7 +1463,10 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
                 to = t;
                 at = &v[t];
             }
-            c->edge = (uint8_t)(to < 0 && one == MOY_UI_B_UP && !c->modal);
+            if (to < 0 && !c->modal) {
+                c->edge = (uint8_t)(one == MOY_UI_B_UP ? MOY_UI_EDGE_UP : one == MOY_UI_B_DOWN ? MOY_UI_EDGE_DOWN
+                                    : one == MOY_UI_B_LEFT ? MOY_UI_EDGE_LEFT : MOY_UI_EDGE_RIGHT);
+            }
         }
         if (to >= 0) {
             c->focus = v[to].id;
@@ -4410,6 +4459,10 @@ void moy_ui_api_paste(moy_ui_ctx_t *c, const uint8_t *text, size_t n) {
         }
     }
     c->paste_n = (uint16_t)k;
+}
+
+void moy_ui_api_enter(moy_ui_ctx_t *c, int dir) {
+    c->enter = (uint8_t)(dir & (MOY_UI_EDGE_UP | MOY_UI_EDGE_DOWN | MOY_UI_EDGE_LEFT | MOY_UI_EDGE_RIGHT));
 }
 
 int moy_ui_api_edge(const moy_ui_ctx_t *c) {

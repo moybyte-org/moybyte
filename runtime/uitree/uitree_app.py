@@ -35,6 +35,8 @@ from layout_base import bar_rows, content_of, metric_class, DESK
 import uitree as S
 from uitree import _NOW
 
+EDGE_UP, EDGE_DOWN, EDGE_LEFT, EDGE_RIGHT = 1, 2, 4, 8   # moy_ui_api.h's MOY_UI_EDGE_*
+
 _UP, _DOWN = 1 << 2, 1 << 3     # the up and down bits of a host's frame buttons (ui_draw._HOST_BUTTONS)
 _IN_REP = 10                    # the frame input's repeat word, a byte a direction (ui_draw._IN_REP)
 ID_MAX = 31            # bytes of a node id the host engine keeps (seen: a longer focus id comes back cut)
@@ -2291,6 +2293,24 @@ class Engine(S.Builder):
             if got is not None:
                 return got
         return n if n.kind in ("group", "row") and "close" in n.l else None
+
+    # -- the keys between surfaces: one engine's page hands them to another's
+
+    def edge(self):
+        """Which way the last frame's step found no stop past the focused
+        one, outside a dialog (EDGE_* bits, 0 none): the keys went past this
+        page's side and its focus stayed. Whoever holds the keys above the
+        pages hands them on that way (`enter`)."""
+        return _v._C.api_edge(self._ui.ctx)
+
+    def enter(self, way):
+        """The keys come into this page travelling `way` (EDGE_*): its next
+        frame drawn with them lands focus on its stop nearest the side they
+        come in by (its first going down, its last going up, its rightmost
+        going left, its leftmost going right)."""
+        _v._C.api_enter(self._ui.ctx, way)
+        if self._damage is not None:
+            self._damage.all()
 
     def back(self):
         was, _NOW.app = _NOW.app, self      # a size class (@desk) reads the app's

@@ -454,6 +454,7 @@ SIGS = (
     ("moy_ui_api_keys_taken", [c.c_void_p], c.c_int),
     ("moy_ui_api_typing", [c.c_void_p], c.c_int),
     ("moy_ui_api_edge", [c.c_void_p], c.c_int),
+    ("moy_ui_api_enter", [c.c_void_p, c.c_int], None),
     ("moy_ui_api_tap_armed", [c.c_void_p], c.c_int),
     ("moy_ui_api_at", [c.c_void_p, c.c_int, c.c_int, c.c_int, c.c_int], None),
     ("moy_ui_api_dup", [c.c_void_p], c.c_char_p),
@@ -946,8 +947,12 @@ def install(m, lib, ctx_, sink, span0, over, box_of):
     m.api_typing = api_typing
     def api_edge(ctx):
         p_, k_ = ctx_(ctx)
-        return bool(lib.moy_ui_api_edge(p_))
+        return int(lib.moy_ui_api_edge(p_))
     m.api_edge = api_edge
+    def api_enter(ctx, dir):
+        p_, k_ = ctx_(ctx)
+        lib.moy_ui_api_enter(p_, int(dir))
+    m.api_enter = api_enter
     def api_tap_armed(ctx):
         p_, k_ = ctx_(ctx)
         return bool(lib.moy_ui_api_tap_armed(p_))

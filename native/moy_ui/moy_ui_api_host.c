@@ -438,7 +438,7 @@ int moy_ui_api_host_begin(moy_ui_ctx_t *c, int32_t *in, moy_ui_box_t surface, in
     if (moving) {
         got |= MOY_UI_HB_MOVING;
     }
-    if ((in[MOY_UI_IN_BTNP] & 4) && c->edge) {
+    if ((in[MOY_UI_IN_BTNP] & 4) && (c->edge & MOY_UI_EDGE_UP)) {
         got |= MOY_UI_HB_EDGE;
     }
     // The directions this frame's steps took, where they moved nothing and

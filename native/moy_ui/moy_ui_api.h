@@ -694,9 +694,11 @@ typedef struct {
     uint8_t jump;                   // the reveal is the app's focus move: no glide
     int16_t step_row;
     uint32_t step_rev;
-    // An up press over a page's topmost stop, outside a dialog: the frame's
-    // keys went past the page's top (the shell walks focus onto its bar).
-    uint8_t edge;
+    // A step that found no stop that way, outside a dialog: the frame's keys
+    // went past the page's side (MOY_UI_EDGE_*; the shell walks focus onto
+    // its bar from the top). `enter`: the side the next begin lands focus
+    // from (moy_ui_api_enter), 0 none.
+    uint8_t edge, enter;
     moy_ui_dlg_t dlg;
     uint32_t modal_from;            // the focus a dialog took
     int32_t typed;                  // the key a focused field takes this frame, 0 none
@@ -1462,9 +1464,17 @@ void moy_ui_api_keys_back(moy_ui_ctx_t *c);
 // from its clipboard, so the app holds no clipboard grant; MOY_UI_API_PASTE
 // bytes at most are kept.
 void moy_ui_api_paste(moy_ui_ctx_t *c, const uint8_t *text, size_t n);
-// Whether this frame's up press found no stop above the focused one, outside
-// a dialog: the keys went past the page's top.
+// Which way this frame's step found no stop past the focused one, outside a
+// dialog (MOY_UI_EDGE_*, 0 none): the keys went past the page's top, foot,
+// left or right, and focus stayed where it was.
+enum { MOY_UI_EDGE_UP = 1, MOY_UI_EDGE_DOWN = 2, MOY_UI_EDGE_LEFT = 4, MOY_UI_EDGE_RIGHT = 8 };
 int moy_ui_api_edge(const moy_ui_ctx_t *c);
+// The keys enter the page travelling `dir` (MOY_UI_EDGE_*: the edge the page
+// they left answered): the next begin, not elsewhere, lands focus on the stop
+// nearest the side they come in by -- its first stop going down, its last
+// going up, its rightmost going left, its leftmost going right -- of the
+// stops the last frame drew, in the frame that draws it.
+void moy_ui_api_enter(moy_ui_ctx_t *c, int dir);
 // Whether the pointer is down on a stop its release may activate: a press
 // that has not become a page's drag (nor caught a fling, which taps nothing).
 int moy_ui_api_tap_armed(const moy_ui_ctx_t *c);

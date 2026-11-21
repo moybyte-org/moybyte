@@ -799,9 +799,16 @@ static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_typing_obj, ui_api_typing);
 
 static mp_obj_t ui_api_edge(mp_obj_t a0) {
     moy_ui_ctx_t *c = ctx_of(a0);
-    return mp_obj_new_bool(moy_ui_api_edge(c));
+    return mp_obj_new_int(moy_ui_api_edge(c));
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_edge_obj, ui_api_edge);
+
+static mp_obj_t ui_api_enter(mp_obj_t a0, mp_obj_t a1) {
+    moy_ui_ctx_t *c = ctx_of(a0);
+    moy_ui_api_enter(c, num(a1));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_enter_obj, ui_api_enter);
 
 static mp_obj_t ui_api_tap_armed(mp_obj_t a0) {
     moy_ui_ctx_t *c = ctx_of(a0);
@@ -923,6 +930,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_lost_obj, ui_api_lost);
     { MP_ROM_QSTR(MP_QSTR_api_keys_taken), MP_ROM_PTR(&ui_api_keys_taken_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_api_typing), MP_ROM_PTR(&ui_api_typing_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_api_edge), MP_ROM_PTR(&ui_api_edge_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_api_enter), MP_ROM_PTR(&ui_api_enter_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_api_tap_armed), MP_ROM_PTR(&ui_api_tap_armed_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_api_at), MP_ROM_PTR(&ui_api_at_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_api_dup), MP_ROM_PTR(&ui_api_dup_obj) }, \
