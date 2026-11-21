@@ -2855,6 +2855,8 @@ static int32_t natural(uit_t *e, int k, int model, int row, int32_t h)
     const uit_node_t *N = NODE(k);
     uint32_t n, at;
     if (N->kind == UIT_BUTTON) {
+        if (N->btn & BT_GROW)
+            return -1;                  // a growing button: a fill
         if (N->t_value >= 0)
             return len_of(e, N->t_value, model, row, 0);     // a bar item: its own width
         if (N->lit == MOY_UI_BUTTON_BAR) {
