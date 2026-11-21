@@ -61,9 +61,21 @@ DOC = "#doc"        # a document's hidden model: its state's name and this (uitr
 def entry(blob):
     """A page's entry as the frozen module holds it: (blob, state names,
     their type codes, action names, {node: draw}, {node: ground}, the rest
-    of the front end's literals, `CEngine.front`)."""
+    of the front end's literals (`CEngine.front`), then `tables`' four),
+    every part made on the host, the dicts once when the image imports it."""
     f = front_of(blob)
-    return (blob, tuple(f["S"]), f["T"], tuple(f["A"]), f["D"], f["G"], f["X"])
+    return (blob, tuple(f["S"]), f["T"], tuple(f["A"]), f["D"], f["G"], f["X"]) + tables(f)
+
+
+def tables(f):
+    """What a load binds by index, from a blob's front: {state: its slot} (a
+    document's model, named its state's name and DOC, has none of its own),
+    {action: its index}, the documents' state names, and how many states
+    the module declares."""
+    names = f["S"]
+    docs = tuple(n[:-len(DOC)] for n in names if n.endswith(DOC))
+    slot = dict((n, i) for i, n in enumerate(names) if not n.endswith(DOC))
+    return slot, dict((a, i) for i, a in enumerate(f["A"])), docs, len(names) - len(docs)
 
 
 def _literal(text):
@@ -132,37 +144,51 @@ def ctype(t):
 
 
 def load(eng, x, blob):
-    """Fill the new store `x` from `blob` (a blob, or a frozen `entry`) for `eng`'s first page: its states
-    and actions bound by name to the module's (a missing one refused by name,
-    as a build would), its canvases' draws to the module's functions, every
-    state pushed. Refused (nothing loaded) where the blob is not this page's,
-    this engine's or this module's."""
+    """Fill the new store `x` from `blob` (a blob, or a frozen `entry`) for
+    `eng`'s first page: its states and actions bound by name to the module's
+    (a missing one, or one of another type, refused by name), its canvases'
+    draws to the module's functions, every state pushed. Refused (nothing
+    loaded) where the blob is not this page's, this engine's or this
+    module's."""
     if type(blob) is tuple:
         f = {"S": blob[1], "T": blob[2], "A": blob[3], "D": blob[4], "G": blob[5], "X": blob[6]}
+        tb = blob[7:]
         blob = blob[0]
     else:
         f = front_of(blob)
-    _load(eng, x, blob, f)
+        tb = tables(f)
+    _load(eng, x, blob, f, tb)
 
 
-def _load(eng, x, blob, f):
+# a scalar's store type, by the type object (`ctype` for the rest)
+_SCALAR = {S.BOOL: 1, S.INT: 2, S.NUM: 3, S.TEXT: 4}
+
+
+def _load(eng, x, blob, f, tb):
+    """The compiler proved the blob against the module it was made from; the
+    load binds each name in one pass, the lookups the engine needs anyway
+    refusing what this module lacks or types otherwise."""
     st, acts = eng.s, eng.actions
+    slot, aidx, docs, declared = tb
+    decl = st._t
     names = f["S"]                  # the store's slots in the blob's order (a board's dicts keep another)
     types = []
-    for n in names:
-        doc = n.endswith(DOC) and n[:-len(DOC)]
-        t = DOC if doc and type(st._t.get(doc)) is S.Doc else st._t.get(n)
+    for n, c in zip(names, f["T"]):
+        t = decl.get(n)
         if t is None:
+            if n.endswith(DOC) and type(decl.get(n[:-len(DOC)])) is S.Doc:
+                types.append(DOC)
+                continue
             raise Refused("no state %r: the blob names one the module does not declare" % n)
-        types.append(t)
-    if len(names) - len([t for t in types if t == DOC]) != len(st._t):
-        raise Refused("state %s: the module declares one the blob lacks" % [n for n in st._t if n not in names][0])
-    for n, ty, t in zip(names, types, f["T"]):
-        if ctype(ty) != t:
+        if _SCALAR.get(t, 0) != c and ctype(t) != c:
             raise Refused("state %s: the module's type is not the blob's" % n)
-    for a in f["A"]:
-        if a not in acts:
-            raise Refused("no action %r: the blob names one the module does not declare" % a)
+        types.append(t)
+    if len(decl) != declared:
+        raise Refused("state %s: the module declares one the blob lacks" % [n for n in decl if n not in slot][0])
+    try:
+        bound = [acts[a] for a in f["A"]]
+    except KeyError as e:
+        raise Refused("no action %r: the blob names one the module does not declare" % e.args[0])
     mod = sys.modules[_module(eng.pages[0])]
     draws = {}
     for node, name in f["D"].items():
@@ -173,12 +199,11 @@ def _load(eng, x, blob, f):
     r = x.load(blob, eng._page_id(), VARIANT)
     if r < 0:
         raise Refused(x.error())
-    eng._slot = dict((n, i) for i, n in enumerate(names) if types[i] != DOC)
+    eng._slot, eng._aidx = slot, aidx         # read only: the entry's, made once
     eng._names = list(names)
     eng._types = types
-    eng._docs = dict((n, [-1] * 8) for n, t in zip(names, types) if type(t) is S.Doc)
-    eng._acts = [acts[a] for a in f["A"]]
-    eng._aidx = dict((a, i) for i, a in enumerate(f["A"]))
+    eng._docs = dict((d, [-1] * 8) for d in docs)
+    eng._acts = bound
     eng._draws, eng._grounds = draws, f["G"]
     eng.unfront(f["X"])
     x.on_draw(eng._draw)
