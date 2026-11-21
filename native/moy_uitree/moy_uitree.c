@@ -1211,6 +1211,12 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
             N->btn |= BT_ALONE;
         return add_prop(e, node, name, src, repr, PK_LIT, 0);
     }
+    if (!strcmp(name, "grow") && kind == UIT_BUTTON) {
+        // a fill along a row (BT_GROW): a bar item's label cut at its cell's end
+        if (!strcmp(src, "True"))
+            N->btn |= BT_GROW;
+        return add_prop(e, node, name, src, repr, PK_LIT, 0);
+    }
     if (!strcmp(name, "marked") && kind == UIT_BUTTON) {
         int c = uit_cond_compile(e, src, model);
         if (c < 0)

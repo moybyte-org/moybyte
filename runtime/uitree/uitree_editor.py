@@ -526,6 +526,8 @@ class Engine(uitree_app.Engine):
 
     def _natural(self, k, row, h):
         if k.kind == "button":
+            if k.l.get("grow"):
+                return None                         # a growing button: a fill
             if k.src.get("w") is not None:
                 return self._len(k, "w", row, 0)    # a bar item: its own width
             if k.l.get("kind") == "bar":
