@@ -89,6 +89,9 @@ NO_PAIR = {
     "S04": "Lua raises it at run for a record's field; Python's at run for a row's: no shared spelling yet",
     "S06": "Python raises it for a write from a draw or a service; Lua for a top-level write: no shared "
            "mistake yet",
+    "E00": "what an engine does not draw: both layers raise it at a page's run on the engine that lacks the "
+           "kind (Lua's cased on the console in tests/test_uitree_lua.py), never in a checker run, which "
+           "draws nothing",
 }
 
 

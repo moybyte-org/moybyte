@@ -28,8 +28,9 @@ local F_BAND, F_TRACE, F_PAGES = 4, 16, 256
 local A_HOOK, A_ROLE_CONFIRM, A_ROLE_BACK = 1, 2, 4
 local E_CHECK = -6
 local KINDS = { page = 1, group = 2, label = 3, info = 4, link = 5, button = 6, toggle = 7, rows = 8, dialog = 9,
-                slider = 11, field = 12, empty = 13, scroll = 16, switch = 22, case = 23, foot = 26, popover = 30,
-                row = 32, rule = 41, note = 42 }
+                seg = 10, slider = 11, field = 12, empty = 13, progress = 14, text_view = 15, scroll = 16, menu = 17,
+                item = 18, split = 19, switch = 22, case = 23, table = 24, col = 25, foot = 26, popover = 30,
+                row = 32, panel = 39, rule = 41, note = 42, grid = 43 }
 local BASE = { bool = BOOL, int = INT, number = NUM, text = TEXT, enum = ENUM, rowof = ROWOF, model = MODEL }
 local FIELD = { bool = BOOL, int = INT, number = NUM, text = TEXT, enum = TEXT }
 -- a prop whose value is a literal the dump prints as one (its Python repr)
@@ -227,32 +228,47 @@ local function c_key(n)
   local k = n.kind
   if k == "page" then return "page" end
   if k == "button" or k == "link" then return n.o.arg ~= nil and n.action .. "/" .. tostring(n.o.arg) or n.action end
-  if k == "toggle" or k == "slider" or k == "field" then return n.a[2] end
-  if k == "rows" then return n.a[1] end
+  if k == "item" then return n.action end
+  if k == "toggle" or k == "slider" or k == "field" or k == "seg" or k == "text_view" then return n.a[2] end
+  if k == "rows" or k == "table" then return n.a[1] end
   if k == "switch" then return "switch:" .. n.a[1] end
   if k == "foot" then return "foot" end
   return n.o.key or n.rkey
 end
 
--- the props a kind takes from its head, in the order the Python layer gives them, after the rest
-local HEADS = {
-  page = function(n) return { { "title", n.a[1] } } end,
-  group = function(n) return { { "caption", n.a[1] } } end,
-  label = function(n) return { { "text", n.a[1] } } end,
-  info = function(n) return { { "label", n.a[1] }, { "value", n.o.value or "" } } end,
-  link = function(n) return { { "value", n.o.value or "" } } end,
-  button = function(n) return { { "kind", n.o.kind or "normal" } } end,
-  toggle = function(n) return { { "label", n.a[1] } } end,
-  slider = function(n) return { { "label", n.a[1] }, { "lo", n.o.lo }, { "hi", n.o.hi } } end,
-  field = function(n) return { { "label", n.a[1] }, { "max", n.o.max or 32 }, n.o.commit and { "commit", true } or nil } end,
-  empty = function(n) return { { "title", n.a[1] } } end,
-  note = function(n) return { { "lines", n.o.lines }, { "icon", n.o.icon or "" } } end,
-  dialog = function(n) return { { "title", n.a[1] } } end,
+-- a kind's props in the order the Python layer gives them: `first`, then
+-- the props the node was given (by name) but those its head takes (`takes`),
+-- then its head's (`last`); a pair whose value is nil is left out
+local function pair(k, v) return { k, v } end
+local SHAPE = {
+  page = { last = function(n) return { pair("title", n.a[1]) } end },
+  group = { last = function(n) return { pair("caption", n.a[1]) } end },
+  label = { last = function(n) return { pair("text", n.a[1]) } end },
+  info = { takes = { "value" }, last = function(n) return { pair("label", n.a[1]), pair("value", n.o.value or "") } end },
+  link = { takes = { "value", "arg" }, last = function(n) return { pair("value", n.o.value or "") } end },
+  button = { takes = { "kind" }, last = function(n) return { pair("kind", n.o.kind or "normal") } end },
+  toggle = { bind = true, takes = { "label" }, last = function(n) return { pair("label", n.a[1]) } end },
+  slider = { bind = true, takes = { "label", "lo", "hi" },
+             last = function(n) return { pair("label", n.a[1]), pair("lo", n.o.lo), pair("hi", n.o.hi) } end },
+  field = { bind = true, takes = { "label", "max", "commit" },
+            last = function(n) return { pair("label", n.a[1]), pair("max", n.o.max or 32), pair("commit", n.o.commit or nil) } end },
+  rows = { model = true, takes = { "by" } },
+  empty = { last = function(n) return { pair("title", n.a[1]) } end },
+  note = { takes = { "lines", "icon" }, last = function(n) return { pair("lines", n.o.lines), pair("icon", n.o.icon or "") } end },
+  dialog = { takes = { "buttons" }, last = function(n) return { pair("title", n.a[1]) } end },
+  progress = { last = function(n) return { pair("value", n.a[1]) } end },
+  seg = { bind = true, takes = { "label", "look", "labels", "text" },
+          first = function(n) return { pair("labels", n.o.labels) } end,
+          last = function(n) return { pair("label", n.a[1]), pair("look", n.o.look or "seg"), pair("text", n.o.text) } end },
+  text_view = { bind = true, first = function(n) return { pair("field", n.field) } end },
+  menu = { last = function(n) return { pair("caption", n.a[1]) } end },
+  table = { model = true },
+  col = { last = function(n) return { pair("text", n.a[1]) } end },
+  split = { takes = { "dir", "sizes" }, last = function(n) return { pair("dir", n.o.dir), pair("sizes", n.o.sizes) } end },
+  grid = { takes = { "cols", "rows" }, last = function(n) return { pair("cols", n.o.cols), pair("rows", n.o.rows) } end },
 }
-local SKIP = { key = 1, value = 1, kind = 1, label = 1, lo = 1, hi = 1, max = 1, commit = 1, lines = 1, icon = 1,
-               buttons = 1, by = 1 }
-local KEEP = { label = { link = 1, button = 1 }, icon = { label = 1, info = 1, link = 1, button = 1, slider = 1, empty = 1 },
-               lines = { label = 1, empty = 1 } }
+-- a prop given as a list that is one prop: its values joined, as the Python layer joins a tuple
+local JOINED = { sizes = 1 }
 
 local function lower_node(n, parent, path)
   local kind = KINDS[n.kind]
@@ -263,29 +279,39 @@ local function lower_node(n, parent, path)
   local me = check(X:node(kind, key, parent), "ui." .. n.kind .. " " .. q(key), n.at)
   local function prop(k, v)
     if v == nil then return end
+    if type(v) == "table" and JOINED[k] then
+      local parts = {}
+      for i, x in ipairs(v) do parts[i] = tostring(x) end
+      local rep = {}
+      for i, x in ipairs(v) do rep[i] = type(x) == "string" and "'" .. x .. "'" or tostring(x) end
+      check(X:prop(me, k, table.concat(parts, " "), "(" .. table.concat(rep, ", ") .. (#v == 1 and ",)" or ")")),
+            "ui." .. n.kind .. " " .. k .. "=", n.at)
+      return
+    end
     if type(v) == "table" then
-      for _, line in ipairs(v) do check(X:prop(me, k, line, nil), "ui." .. n.kind .. " " .. k .. "=" .. q(line), n.at) end
+      for _, line in ipairs(v) do check(X:prop(me, k, tostring(line), nil), "ui." .. n.kind .. " " .. k .. "=" .. q(line), n.at) end
       return
     end
     local src, islit = lit(v)
     local rep = (islit or LIT[k]) and (type(v) == "string" and "'" .. v .. "'" or src) or nil
     check(X:prop(me, k, src, rep), "ui." .. n.kind .. " " .. k .. "=" .. q(src), n.at)
   end
-  if n.kind == "toggle" or n.kind == "slider" or n.kind == "field" then
+  local shape = SHAPE[n.kind] or {}
+  if shape.bind then
     check(X:prop(me, "bind", n.a[2], nil), "ui." .. n.kind .. " " .. q(n.a[2]), n.at)
-  elseif n.kind == "rows" then
-    check(X:prop(me, "bind", n.a[1], nil), "ui.rows " .. q(n.a[1]), n.at)
+  elseif shape.model then
+    check(X:prop(me, "bind", n.a[1], nil), "ui." .. n.kind .. " " .. q(n.a[1]), n.at)
     ROWS = true
   end
+  if shape.first then for _, kv in ipairs(shape.first(n)) do prop(kv[1], kv[2]) end end
+  local takes = { key = true }
+  for _, k in ipairs(shape.takes or {}) do takes[k] = true end
   for _, k in ipairs(sorted(n.o)) do
-    if not SKIP[k] or (KEEP[k] and KEEP[k][n.kind]) then
-      prop(k, n.o[k])
-    end
+    if not takes[k] then prop(k, n.o[k]) end
   end
-  local heads = HEADS[n.kind]
-  if heads then
-    local h = heads(n)
-    for i = 1, 3 do if h[i] then prop(h[i][1], h[i][2]) end end
+  if shape.last then
+    local h = shape.last(n)
+    for i = 1, 4 do if h[i] then prop(h[i][1], h[i][2]) end end
   end
   if n.action then check(X:node_action(me, AIDX[n.action]), "ui." .. n.kind .. " " .. q(key) .. "'s action", n.at) end
   if n.kind == "dialog" then

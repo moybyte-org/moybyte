@@ -157,6 +157,44 @@ def test_a_foot_that_shares_its_width_and_a_slider_icon_draw(tmp_path):
     assert shots["Shared"] != shots["Plain"] and shots["Iconed"] != shots["Plain"]
 
 
+def test_a_split_a_grid_and_a_panel_draw_on_the_c_engine(tmp_path):
+    """The placing kinds only the C engine draws: a split's parts, a grid's
+    cells and a panel each move the pixels, and the reference back end
+    refuses them by name (E00)."""
+    import uitree_app
+    from runtime import host_app
+    uitree_app.use_engine("c")
+    carts = str(tmp_path / "carts")
+    host_app.moy_carts.ensure_dirs(carts)
+    body = ('ui.app("%s", { icon = "calc" })\n'
+            'ui.action("a", "Add", function() end)\nui.action("b", "Back", function() end)\n'
+            'ui.page("p", function()\n%s\nend)\n')
+    pages = {
+        "Plain": '  ui.label("one")\n  ui.label("two")',
+        "Split": '  ui.split({ dir = "row", sizes = { 1, 1 } }, function() ui.label("one") ui.label("two") end)',
+        "Grid": '  ui.grid({ cols = 2, rows = 1 }, function() ui.button("a") ui.button("b") end)',
+        "Panel": '  ui.panel("side", function() ui.label("one") end)\n  ui.label("two")',
+    }
+    for name, page in pages.items():
+        _cart(carts, name, body % (name, page))
+    ws, drv, frame, open_cart = _console(carts)
+    shots = {}
+    for name in pages:
+        open_cart(ws, name)
+        for _ in range(4):
+            frame()
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
+        shots[name] = bytes(drv.rgb888())
+        ws.spine.exit_to_caller()
+    assert shots["Split"] != shots["Plain"] and shots["Grid"] != shots["Plain"]
+    uitree_app.use_engine("reference")
+    open_cart(ws, "Grid")
+    for _ in range(4):
+        frame()
+    err = ws.run.player.cart_error
+    assert err and "error[E00] main.lua:5:" in err and "ui.grid" in err, err
+
+
 def test_a_cancelled_timer_runs_nothing(tmp_path):
     from runtime import host_app
     from runtime.host import moy_log
