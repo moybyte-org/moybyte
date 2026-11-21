@@ -3147,11 +3147,25 @@ def _chip_pairs(ws, probe, img):
     """The focused window's chip on the desk bar: its label's ink against
     its plate, as text (design review R3-06)."""
     out = []
-    for r, focused in probe.last["chips"]:
+    fs = ws.layout.fs
+    wm = ws.wm
+    paged = getattr(wm, "_chip_paged", False)
+    if paged:
+        # the bar page's chips (bar items): the window manager's rects
+        chips = [(r, k == wm.focus_key and not wm.windows[k].minimized)
+                 for k, r, _t in wm._chip_rects()]
+    else:
+        chips = probe.last["chips"]     # the look's chip parts (a bar the page does not draw)
+    for r, focused in chips:
         if not focused or r[2] < 40:
             continue
         x, y, w, h = r
-        label = (x + 38, y + 2, max(1, w - 40), max(1, h - 4))
+        if paged:
+            # the label: past its icon (16 units and a gap of 6), across the
+            # middle of the cell, which its ON mark covers
+            label = (x + 22 * fs, y + h // 2 - 6 * fs, max(1, w - 22 * fs), 12 * fs)
+        else:
+            label = (x + 38, y + 2, max(1, w - 40), max(1, h - 4))
         hist = _colours(img, label, 1)
         if not hist:
             continue
