@@ -1,7 +1,7 @@
 {
  "surface": "achievements",
  "config": "tdeck_320x240_fs1_dark",
- "commit": "e8c55f53f",
+ "commit": "f8bad070b",
  "script": [
   "k:right",
   "k:a",
@@ -31,23 +31,23 @@
   ],
   [
    "k:down",
-   "216abe1c3feda1bc8bc2b5a1016f376e7a8a2b238baf42f54da851a8d1a1a245"
+   "316d180774c6b8a5872517d119a4fd72ee0fdd74e98f3c0bcddf1d9481704e09"
   ],
   [
    "k:down",
-   "df310ca0ab313e962f83501ccdfc8b389e4d9cf379f2e4cfeabdde3993e30e48"
+   "ae459a18cdf5679555fa75a2a68f2e546a84d1e8d44f5fbd350715ca4df0c098"
   ],
   [
    "k:a",
-   "48b55e5571feaea36c3c67a13beb453c26b25f143b441e30ea9e638d2d9aefba"
+   "ebf64d18589d1e3dad002bdcec08d1b1292e13eaf1a88f90f038a9643d7e0dec"
   ],
   [
    "back",
-   "9e1fd4126239c2aef61ffb0f209d3502bc7242116bc7c6af5727595aa2d39c0a"
+   "bea07e37217b3b7367903319278b28744ac204f287ac948e93c0282ec775f9ca"
   ],
   [
    "f:2",
-   "9e1fd4126239c2aef61ffb0f209d3502bc7242116bc7c6af5727595aa2d39c0a"
+   "bea07e37217b3b7367903319278b28744ac204f287ac948e93c0282ec775f9ca"
   ]
  ]
 }
