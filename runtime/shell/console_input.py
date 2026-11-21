@@ -611,11 +611,12 @@ class InputRouter:
 
     def bar_where(self):
         """The `where` of the bar over the fullscreen surface that holds the
-        keys -- the home, Settings, the Editor, an app -- or None: the desk,
-        a running cart, a surface with no bar."""
+        keys -- the home, Settings, the Editor, an app -- or "desk", the
+        desk's bar over its windows (none while a full-screen window covers
+        it), or None: a running cart, a surface with no bar."""
         ws = self.ws
         if ws.windowed_chrome:
-            return None
+            return "desk" if ws.wm.desk_open() and ws.wm.full_cover() < 0 else None
         if ws.pause.open and ws.pause.shows_bar():
             return "pause"
         kind = ws.wm.top_kind()
@@ -657,7 +658,9 @@ class InputRouter:
         where = self.bar_where() if (edge or (pressed and i.steps("up"))) else None
         if where is None:
             return False
-        layer = ws.pause if where == "pause" else ws.content_layer()
+        layer = ws.pause if where == "pause" else self._keys_layer()
+        if layer is None:
+            return False
         if edge and where != "pause":
             # a page's: not a canvas's or a caret's, whose own popovers draw pages
             if not layer.ball_steps():
@@ -672,6 +675,19 @@ class InputRouter:
         if where == "home":
             ws.ach_ui.konami_watch(i)
         return True
+
+    def _keys_layer(self):
+        """The surface whose top the keys go up past onto the bar: on the
+        desk the focused window's content (the desk's own, focus on none),
+        else the content layer."""
+        ws = self.ws
+        if ws.windowed_chrome:
+            win = ws.wm._focus_win()
+            if win is not None:
+                if win.minimized:
+                    return None
+                return ws.wm.content_for(win.kind)
+        return ws.content_layer()
 
     def _pause_bar(self):
         """The pause menu holds the keys and the bar shows over it, nothing

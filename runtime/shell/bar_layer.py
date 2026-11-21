@@ -150,7 +150,7 @@ _TAPPED = ("clock", "menu", "wifi", "battery", "close", "status")
 # opens the control center (the `battery` widget's component).
 _CLUSTER = ("status", "wifi", "battery")
 # The focus items that are stops of the bar page on a bar it draws.
-_PAGE_STOPS = ("status", "wifi", "battery", "clock")
+_PAGE_STOPS = ("menu", "chip", "status", "wifi", "battery", "clock")
 # A bar's titles where no running cart names one.
 _TITLES = {"projects": "PROJECTS", "settings": "SETTINGS", "desk": "DESK",
            "webconsole": "Web console", "tasks": "Tasks"}
@@ -604,6 +604,7 @@ class BarLayer:
         self._items_lgen = -1         # the status items' count the packing holds
         self._hooks = None            # the bar page's actions' ways out (`_page_draw`)
         self._stop_rects = []         # the page's status item rects (`_page_stop`)
+        self._chip_stops = []         # the page's chip rects on the desk (`focus_items`, `_page_stop`)
         _ui_draw.on_bar(False)
         _bar_engine.forget()          # (what another console's bar handed the page)
 
@@ -1502,11 +1503,36 @@ class BarLayer:
             hooks = self._hooks = (self.page_tap, self._chip_tap, self._item_tap)
         _bar_ui.TAP[0], _bar_ui.CHIP[0], _bar_ui.ITEM[0] = hooks
         self._page_items(where)
+        if "menu" in names:
+            self._sys_plate(cv, bar, cells, clip)
         f = self.focus_item
         focus = self._page_stop(where, f) if f is not None and self.focus_where == where else None
         _bar_engine.draw(cv, ws.theme_colors, bar, names, L.cs, L.fs, cw or L.clock_w, sys_w,
                          n_items, ws.wifi_icon_kind(), self.clock_text(), self._battery_state() != 0,
                          clip, self._wins(), focus)
+
+    def _sys_plate(self, cv, bar, cells, clip):
+        """The system button's plate under the page's `menu` item: the
+        theme's own part on its tile (`sys_tile`) in the item's cell,
+        pressed while the system menu shows; nothing where `clip`, the part
+        drawn again, misses it."""
+        r = None
+        for c in cells:
+            if c[0] == "menu":
+                r = c[1]
+                break
+        if r is None:
+            return
+        tx, ty, tw, tht = self.sys_tile(r, (0, 0, bar[2], bar[3]), False)
+        tx += bar[0]
+        ty += bar[1]
+        if clip is not None and (clip[0] >= tx + tw or tx >= clip[0] + clip[2]
+                                 or clip[1] >= ty + tht or ty >= clip[1] + clip[3]):
+            return
+        m = self.ws.sysmenu
+        part = _ui_draw.BAR_HH_SYS if _band_part() == _ui_draw.BAR_HH_BAND else _ui_draw.BAR_SYS
+        _ui_draw.bar_part(cv, self.ws.theme_colors, part, (tx, ty, tw, tht),
+                          m.open and m.widget == "menu")
 
     def page_tap(self, name):
         """The bar page's open of an OS widget (`bar_ui.TAP`): its component,
@@ -1549,6 +1575,12 @@ class BarLayer:
             for k in range(len(rects)):
                 if rects[k][0] == x:
                     return _bar_engine.item_key(k)
+            return None
+        if name == "chip":
+            x = bar[1][0] + item[1][0]
+            for k, r in self.page_chip_rects(bar, self._chip_stops) or ():
+                if r[0] == x:
+                    return _bar_engine.chip_key(k)
             return None
         if name == "battery" and self._battery_state():
             return None
@@ -2484,6 +2516,10 @@ class BarLayer:
                     rects.append((c[1], c[0]))
             if cluster is not None:
                 rects.append((cluster, "cluster"))
+            if where == "desk":
+                bx, by = bar[1][0], bar[1][1]
+                for _k, r in self.page_chip_rects(bar, self._chip_stops) or ():
+                    rects.append(((r[0] - bx, r[1] - by, r[2], r[3]), "chip"))
             zone = self.lent_zone(where, bar)
             if zone is not None:
                 owner = self._zone_owner(where)

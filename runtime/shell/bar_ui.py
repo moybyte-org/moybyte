@@ -10,16 +10,17 @@ Wi-Fi, the battery, the clock, the chips (a row from a model: a window
 each, `wins`, which the window manager writes, its focused one marked) and
 the apps' status items (a row from a model: an item each, `items`, its icon
 in its state's ink, the one whose menu is open marked) are bar items
-(`button kind="bar"`). The canvases are drawn by the bar layer (`PAINT`),
-each for its reason: the system button is the theme's own part (its tile,
-`ui_draw.bar_part`, with Moy on it); the battery's low and charging states
-are drawn by hand (no icon set has them); the zone is its owner's, drawn
-after the page."""
+(`button kind="bar"`), and so is the system button (`menu`, Moy), whose
+plate, the theme's own part (`ui_draw.bar_part`, pressed while the system
+menu shows), the bar layer draws at its rect before the page paints. The
+canvases are drawn by the bar layer (`PAINT`), each for its reason: the
+battery's low and charging states are drawn by hand (no icon set has them);
+the zone is its owner's, drawn after the page."""
 
 import uitree as ui
 
 s = ui.state(sys_w=16, sg=4, cw=40, wicon="wifi", time="00:00",
-             menu=True, chips=True, zone=True, tray=True, status=False, wifi_on=True,
+             menu_on=True, chips=True, zone=True, tray=True, status=False, wifi_on=True,
              batt_icon=True, batt_glyph=False, clock_on=True,
              wins=ui.model(key="k", k="", title="", icon="", on=False, tone=""),
              items=ui.model(key="k", k="", icon="", on=False, tone=""))
@@ -41,12 +42,13 @@ def cell(cv, x, y, w, h):
     """The zone: its owner draws it after the page."""
 
 
-def menu_cell(cv, x, y, w, h):
-    PAINT[0]("menu", cv, x, y, w, h)
-
-
 def battery_cell(cv, x, y, w, h):
     PAINT[0]("battery", cv, x, y, w, h)
+
+
+def _menu():
+    if TAP[0] is not None:
+        TAP[0]("menu")
 
 
 def _wifi():
@@ -74,6 +76,7 @@ def _item(row):
         ITEM[0](int(row.k))
 
 
+ui.action("menu", "Moy", _menu, hint="Moy")
 ui.action("wifi", "Wi-Fi", _wifi, hint="Wi-Fi")
 ui.action("chip", "Window", _chip, takes="row")
 ui.action("item", "Status", _item, takes="row")
@@ -84,7 +87,7 @@ ui.action("clock", "Clock", _clock, hint="Clock")
 def bar():
     with ui.page(""):
         with ui.row("bar", pad=2, gap=2, grow=True):
-            ui.canvas("menu", menu_cell, w="{sys_w}", shown="menu")
+            ui.button("menu", icon="moy", alone=True, kind="bar", w="{sys_w}", shown="menu_on")
             with ui.row("chips", pad=CHIP_PAD, gap=CHIP_GAP, grow=True, shown="chips"):
                 with ui.rows("wins", dir="row"):
                     ui.button("chip", label="{.title}", icon="{.icon}", kind="bar", marked=".on",
