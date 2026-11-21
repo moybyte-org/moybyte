@@ -260,6 +260,10 @@ def _zone_tap(ws, driver, i):
     driver.frame(DT)
 
 
+def _not_paged(edge, cells):
+    return False
+
+
 def frames(config, surface, script, carts_dir=None):
     """The settled frame after the opening and after each step of `script`,
     on a fresh workstation of golden configuration `config`. `surface` is a
@@ -276,6 +280,11 @@ def frames(config, surface, script, carts_dir=None):
         surface.prepare(carts_dir)
     ws = g._build(g.CONFIGS[config], carts_dir)
     out = []
+    # a run compares a page with its old self: the desk's bar stays on the
+    # old painters here (the bar page's own pictures are the shell goldens')
+    from runtime import bar_layer
+    paged = bar_layer._paged
+    bar_layer._paged = _not_paged
     try:
         surface.open(ws)
         driver = ConsoleDriver(ws)
@@ -286,6 +295,7 @@ def frames(config, surface, script, carts_dir=None):
             _step(ws, driver, step)
             out.append(Frame(step, _settle(ws, g, driver), cv.w, cv.h, probe(ws)))
     finally:
+        bar_layer._paged = paged
         ws.home.go_home()
         from runtime import scheduler
         scheduler.SCHED.reset()

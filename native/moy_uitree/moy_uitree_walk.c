@@ -2512,6 +2512,8 @@ static int32_t fixed_h(uit_t *e, int k)
         break;
     case UIT_ROW: {
         int st = 0, field = 0;
+        if (N->lit & RW_GROW)
+            return -1;                  // a growing row: a fill of its stack
         KIDS(k, g) {
             int gk = NODE(g)->kind;
             if (gk == UIT_CASE || gk == UIT_SWITCH || gk == UIT_PANEL)
@@ -2906,6 +2908,10 @@ static void draw_canvas_at(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, in
     int32_t got[5];
     moy_ui_over_none(&o);
     moy_ui_over_text(&o, MOY_UI_OV_ID, span_of(key, strlen(key)));
+    if (e->flags & UIT_F_BARE) {
+        int32_t one = 1;
+        moy_ui_over_put(&o, MOY_UI_OV_BARE, &one);       // a bare page's canvases sink no well
+    }
     id_put(e, k, model, row, key);
     moy_ui_api_part(c, s, span_of(key, strlen(key)), 0, 0, &o, got);
     if (e->draw_fn)

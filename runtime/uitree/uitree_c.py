@@ -1122,7 +1122,8 @@ class CEditorEngine(CEngine, _ed.Engine):
         return moved
 
     def _flags(self, desk):
-        return CEngine._flags(self, desk) & ~F_BARE        # bare only over hosted bodies
+        f = CEngine._flags(self, desk)
+        return f if self.bare else f & ~F_BARE     # bare over hosted bodies, or where its host says
 
     def _hosts(self, n):
         return False            # a legacy node is a gap of this engine's (`lower`)
@@ -1314,14 +1315,14 @@ class CEditorEngine(CEngine, _ed.Engine):
                 now.app, now.frame = app, frame
             return
         cv = self.cv
-        cv.clip(x, y, w, h)
+        _ed._clip_in(cv, x, y, w, h, self.clip_to)
         try:
             g = self._grounds.get(node)
             if g:
                 cv.rect(x, y, w, h, self.th[g])
             CEngine._draw(self, node, x, y, w, h)
         finally:
-            cv.clip()
+            _ed._clip_back(cv, self.clip_to)
 
 
 class CEditorPage(CEditorEngine, _ed.Page):

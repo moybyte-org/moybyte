@@ -94,9 +94,29 @@ _TEXT_PAD = 8          # moy_ui_api_int.h's TEXT_PAD: the view's text inset at t
 
 
 
+def _clip_in(cv, x, y, w, h, outer):
+    """Clip `cv` to a canvas's rect, inside `outer` where the host gives one."""
+    if outer is not None:
+        x0, y0 = max(x, outer[0]), max(y, outer[1])
+        w = max(0, min(x + w, outer[0] + outer[2]) - x0)
+        h = max(0, min(y + h, outer[1] + outer[3]) - y0)
+        x, y = x0, y0
+    cv.clip(x, y, w, h)
+
+
+def _clip_back(cv, outer):
+    """A canvas's clip given back: the host's, else none."""
+    if outer is None:
+        cv.clip()
+    else:
+        cv.clip(outer[0], outer[1], outer[2], outer[3])
+
+
 class Engine(uitree_app.Engine):
 
     STOPS = uitree_app.Engine.STOPS + ("legacy",)
+    clip_to = None         # (x, y, w, h): the clip the host draws the page under, which a canvas's
+                           # own clip meets and gives back (a bar's strip drawn again in part)
 
     def __init__(self, *a, **k):
         uitree_app.Engine.__init__(self, *a, **k)
@@ -168,7 +188,7 @@ class Engine(uitree_app.Engine):
             _v.at(*g)
         # the hosted phase drew the ground round the bodies: the page opens
         # over them bare
-        rect = _v.page(n.p["title"](None), _BARE if hosting and self.placed else None)
+        rect = _v.page(n.p["title"](None), _BARE if (hosting and self.placed) or self.bare else None)
         if g is not None:
             rect = tuple(self.content)
         hint = self._hints()
@@ -408,8 +428,8 @@ class Engine(uitree_app.Engine):
             # a wrapped label: its lines of the ui face, a pad above and below
             line = _ud.font("ui")[2]
             return (k.l.get("lines", 2) * (line + 2) + 6) * self.fs
-        if k.kind == "row" and any(c.kind in _REGIONS for c in k.kids):
-            return None         # a row of regions: the rule turned, a fill of its stack
+        if k.kind == "row" and (k.l.get("grow") or any(c.kind in _REGIONS for c in k.kids)):
+            return None         # a growing row, a row of regions: a fill of its stack
         if k.kind == "row" and any(c.kind == "status" for c in k.kids) and \
                 not any(c.kind == "field" for c in k.kids):
             return self._height(next(c for c in k.kids if c.kind == "status"))   # a status line's
@@ -657,14 +677,14 @@ class Engine(uitree_app.Engine):
 
     def _r_canvas(self, n, row, rect):
         _v.at(*rect)
-        x, y, w, h, _st = _v.part(n.key, 0, 0, {"id": n.key})
-        self._id(n.key, self._slot(n, None).pair)
+        x, y, w, h, _st = _v.part(n.key, 0, 0, {"id": n.key, "bare": True} if self.bare else {"id": n.key})
+        self._id(n.key, self._slot(n, None).pair)    # (a bare page's canvases sink no well)
         self.canvases[n.key] = (n, (x, y, w, h))
-        self.cv.clip(x, y, w, h)
+        _clip_in(self.cv, x, y, w, h, self.clip_to)
         if "ground" in n.l:
             self.cv.rect(x, y, w, h, self.th[n.l["ground"]])
         n.l["draw"](self.cv, x, y, w, h)
-        self.cv.clip()
+        _clip_back(self.cv, self.clip_to)
 
     def point(self, px, py, click):
         """A canvas with pointer= is handed down, drag and up in its own

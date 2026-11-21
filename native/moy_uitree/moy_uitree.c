@@ -1058,13 +1058,14 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
             N->lit |= CV_GROW;
         return add_prop(e, node, name, src, repr, PK_LIT, (N->lit & CV_GROW) != 0);
     }
-    if (kind == UIT_ROW && !strcmp(name, "mid")) {
-        // a row in a row centred on it (RW_MID)
+    if (kind == UIT_ROW && (!strcmp(name, "mid") || !strcmp(name, "grow"))) {
+        // a row in a row centred on it (RW_MID); a row filling its stack (RW_GROW)
+        int bit = name[0] == 'm' ? RW_MID : RW_GROW;
         if (strcmp(src, "True") && strcmp(src, "False") && strcmp(src, "1") && strcmp(src, "0"))
-            return uit_fail(e, UIT_E_KIND, UIT_MSG("row mid=%s: True or False", "row mid=%s"), src);
+            return uit_fail(e, UIT_E_KIND, UIT_MSG("row %s=%s: True or False", "row %s=%s"), name, src);
         if (src[0] == 'T' || src[0] == '1')
-            N->lit |= RW_MID;
-        return add_prop(e, node, name, src, repr, PK_LIT, (N->lit & RW_MID) != 0);
+            N->lit |= bit;
+        return add_prop(e, node, name, src, repr, PK_LIT, (N->lit & bit) != 0);
     }
     if (kind == UIT_SPLIT && (!strcmp(name, "pad") || !strcmp(name, "gap") || !strcmp(name, "align"))) {
         static const char *const GAPS[] = {"s", "m", "l", "0"}, *const ALIGNS[] = {"start", "center", "end"};

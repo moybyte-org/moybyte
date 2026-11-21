@@ -1940,7 +1940,7 @@ SCHEMA = {
     "slot": dict(_C, min="lit"),
     # §7.7's bridge: a surface still on today's verbs hosted in one node
     "legacy": dict(_C, draw="fn", pointer="fn", keys="fn", hints="fn", gen="fn"),
-    "row": dict(_C, close="action0", gap="int", pad="int", mid="lit"),
+    "row": dict(_C, close="action0", gap="int", pad="int", mid="lit", grow="lit"),
     "tools": dict(_C, lend="lit"),
     "lent": dict(_C),
     "status": dict(_C, text="text"),

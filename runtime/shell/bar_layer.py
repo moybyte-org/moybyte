@@ -125,6 +125,8 @@ import ui as _ui
 import ui_draw as _ui_draw
 import layout_base as _layout_base
 import iconsets as _iconsets
+import bar_engine as _bar_engine
+import bar_ui as _bar_ui
 from shell_layout import STATUS as _STATUS, ITEMS as _SL_ITEMS, RING_ROOM as _RING_ROOM
 from status_items import ITEMS as _ITEMS, PAUSED as _PAUSED, ERROR as _ERROR
 
@@ -176,6 +178,30 @@ def _battery(cv, x, y, side, u, ink):
 
 # A look leaf no theme sets (moy_theme.h's MOY_THEME_NONE).
 _NONE = -2147483648
+
+
+def _paged(edge, cells):
+    """Whether the bar page draws a bar's widgets (`_page_draw`): a top or
+    bottom bar whose cells are the page's in its order, some of
+    `bar_engine.LEFT` from its start and of its RIGHT from its end, its
+    zone among them (`bar_engine.placed`, read off the packing), on a desk
+    (a handheld's status cluster keeps its ring room: not the page's yet)."""
+    if edge not in ("top", "bottom") or _layout_base.metric_class() != _layout_base.DESK:
+        return False
+    zone = False
+    side = 0
+    for name, _r, _t, slot in cells:
+        if name in _bar_engine.LEFT:
+            if slot != 0 or side:
+                return False
+            zone = zone or name == "zone"
+        elif name in _bar_engine.RIGHT or name == "status":
+            if slot != 2:
+                return False
+            side = 1
+        else:
+            return False
+    return zone
 
 
 def _band_part():
@@ -1402,14 +1428,18 @@ class BarLayer:
                 got = _ui_draw.current(cv, ws.theme_colors, sel, r=5 * fs, fs=fs)
                 if got is not None and _ui_draw.marks()[3]:
                     self._sel_ink = (sel, got)
-            for name, r, text, _slot in cells:
-                if name in _PAINTED and (show_x or name != "close"):
-                    if only is not None and not _meets(r, only):
-                        continue
-                    if looked:
-                        self._paint_look_cell(cv, where, name, r, text, bar, across)
-                    else:
-                        self._paint_cell(cv, mp, where, name, r, text, cs, dy, across, game)
+            if looked and not across and _paged(edge, cells):
+                self._ink_dx = None
+                self._page_draw(cv, where, bar, edge, cells, only)
+            else:
+                for name, r, text, _slot in cells:
+                    if name in _PAINTED and (show_x or name != "close"):
+                        if only is not None and not _meets(r, only):
+                            continue
+                        if looked:
+                            self._paint_look_cell(cv, where, name, r, text, bar, across)
+                        else:
+                            self._paint_cell(cv, mp, where, name, r, text, cs, dy, across, game)
         zone = self.lent_zone(where, packed)
         if zone is None or (only is not None and not _meets(zone, only)):
             return
@@ -1435,6 +1465,82 @@ class BarLayer:
                 self._paint_back_title(cv, zone, None, bar, game)
                 zone = self.past_back(zone, game)
             owner.draw_zone(cv, zone)
+
+    # -- the bar page (runtime/shell/bar_ui.py) ----------------------------------------
+
+    def _page_draw(self, cv, where, bar, edge, cells, clip=None):
+        """The themes' bar's widgets drawn by the bar page (`bar_engine.draw`)
+        at `bar` on `cv` (its strip, or the canvas it lies on), `clip` the
+        part drawn again; the page's canvases are `_page_paint`'s."""
+        names = []
+        cw = sys_w = n_items = 0
+        for name, r, text, _slot in cells:
+            names.append(name)
+            if name == "clock":
+                cw = r[2]
+            elif name == "menu":
+                sys_w = r[2]
+            elif name == "status":
+                n_items = text or 0
+        ws = self.ws
+        L = ws.layout
+        self._page_at = (where, bar, cells)
+        _bar_ui.PAINT[0] = self._page_paint
+        _bar_engine.draw(cv, ws.theme_colors, bar, names, L.cs, L.fs, cw or L.clock_w, sys_w,
+                         n_items, ws.wifi_icon_kind(), self.clock_text(), self._battery_state() != 0,
+                         clip)
+
+    def _page_again(self, cv, where, bar, span):
+        """The bar page drawn again over `span` (bar coordinates) of `bar`
+        (a packed bar) on the canvas it lies on, whose ground there is
+        fresh (`repaint_cell`): the selected item's fill first, as
+        `_render_bar` draws it."""
+        edge, (bx, by, bw, bh), _dy, cells = bar
+        clip = (bx + span[0], by + span[1], span[2], span[3])
+        cv.clip(clip[0], clip[1], clip[2], clip[3])
+        try:
+            sel = self._selected_box(where, cells)
+            self._sel_ink = None
+            if sel is not None:
+                fs = self.ws.layout.fs
+                cv.camera(-bx, -by)
+                got = _ui_draw.current(cv, self.ws.theme_colors, sel, r=5 * fs, fs=fs)
+                cv.camera(0, 0)
+                if got is not None and _ui_draw.marks()[3]:
+                    self._sel_ink = (sel, got)
+            self._page_draw(cv, where, (bx, by, bw, bh), edge, cells, clip)
+        finally:
+            cv.clip()
+
+    def _page_paint(self, name, cv, x, y, w, h):
+        """A canvas of the bar page: the system button, the status items, a
+        hand-drawn battery, through their painters in the bar's coordinates
+        (the page is drawn at the bar's origin on `cv`)."""
+        where, bar, cells = self._page_at
+        ox, oy = _bar_engine._ORIGIN
+        box = (0, 0, bar[2], bar[3])
+        if ox or oy:
+            cv.camera(-ox, -oy)
+        try:
+            x -= ox
+            for c in cells:
+                if c[0] == name:
+                    r = c[1]
+                    break
+            else:
+                return
+            if name == "battery":
+                u = _layout_base.unit()
+                side = 16 * u
+                self._battery_glyph(cv, x + (w - side) // 2, (box[3] - side) // 2, side, u,
+                                    self._battery_state())
+            elif name == "status":
+                self._paint_status(cv, (x, r[1], w, r[3]), c[2])
+            else:
+                self._paint_look_cell(cv, where, name, (x, r[1], w, r[3]), None, box, False)
+        finally:
+            if ox or oy:
+                cv.camera(0, 0)
 
     # -- the way back (docs/history/look_2026-10.md step 27a) --------------------------
     #
@@ -2045,11 +2151,14 @@ class BarLayer:
         cv, bar, (x, y, w, h), looked = got
         if not looked:
             return
-        edge, (bx, by, bw, bh), _dy, _cells = bar
-        cv.camera(-bx, -by)
-        self._paint_look_cell(cv, where, "menu", (x - bx, y - by, w, h), None,
-                              (0, 0, bw, bh), edge in ("left", "right"))
-        cv.camera(0, 0)
+        edge, (bx, by, bw, bh), _dy, cells = bar
+        if _paged(edge, cells):
+            self._page_again(cv, where, bar, self._tile_span((x - bx, y - by, w, h), bar))
+        else:
+            cv.camera(-bx, -by)
+            self._paint_look_cell(cv, where, "menu", (x - bx, y - by, w, h), None,
+                                  (0, 0, bw, bh), edge in ("left", "right"))
+            cv.camera(0, 0)
         self.strip_moved(cv, x, y, w, h)
         self._redraw_status(where)
 
@@ -2062,6 +2171,11 @@ class BarLayer:
         cv, bar, (x, y, w, h), looked = got
         edge, (bx, by, bw, bh), _dy, cells = bar
         if not looked or edge in ("left", "right"):
+            return
+        if _paged(edge, cells):
+            span = self._status_span((x - bx, y - by, w, h), bar)
+            self._page_again(cv, where, bar, span)
+            self.strip_moved(cv, span[0] + bx, span[1] + by, span[2], span[3])
             return
         cv.camera(-bx, -by)
         sel = self._selected_box(where, cells)
@@ -2109,7 +2223,9 @@ class BarLayer:
         th = ws.theme_colors
         text = self.clock_text()
         across = edge in ("left", "right")
-        if looked:
+        if looked and _paged(edge, _cells):
+            self._page_again(cv, where, bar, (x - bx, y - by, w, h))
+        elif looked:
             cv.camera(-bx, -by)
             self._paint_look_cell(cv, where, "clock", (x - bx, y - by, w, h), None,
                                   (0, 0, bw, bh), across)

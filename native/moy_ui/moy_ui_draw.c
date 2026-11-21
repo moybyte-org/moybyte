@@ -1058,7 +1058,7 @@ int moy_ui_bar_item(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, const moy
     }
     int icon = (flags & MOY_UI_F_ICON) && (k->icon >= 0 || k->glyph >= 0);
     int cw = icon ? side : t_w(&d.f, k->label.p, k->label.n, fs);
-    int cx = b.x + moy_ui_fdiv(b.w - cw, 2), iy = b.y + moy_ui_fdiv(b.h - side, 2);
+    int cx = icon ? b.x + moy_ui_fdiv(b.w - cw, 2) : b.x, iy = b.y + moy_ui_fdiv(b.h - side, 2);
     int mi = -1;
     if (flags & MOY_UI_F_ON) {
         moy_ui_box_t m = {(int16_t)(cx - 3 * u), (int16_t)(iy - 3 * u / 2), (int16_t)(cw + 6 * u),

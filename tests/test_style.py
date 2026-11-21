@@ -431,6 +431,8 @@ def test_every_kind_a_surface_asks_the_catalog_for_exists():
         # other kind a surface names must be in the table itself.
         if kind in STYLE["button_kinds"]:
             continue
+        if kind == "bar":
+            continue        # the shell's bar item (MOY_UI_BUTTON_BAR), outside the style's kinds
         assert kind in ui_draw.kinds(), (kind, asked[kind])
     # And every shell kind has a consumer: a table entry nothing asks for is a
     # decision pretending to be one.
