@@ -61,10 +61,11 @@ DOC = "#doc"        # a document's hidden model: its state's name and this (uitr
 def entry(blob):
     """A page's entry as the frozen module holds it: (blob, state names,
     their type codes, action names, {node: draw}, {node: ground}, the rest
-    of the front end's literals (`CEngine.front`), then `tables`' four),
-    every part made on the host, the dicts once when the image imports it."""
+    of the front end's literals (`CEngine.front`), the slots' orders
+    (`orders`), then `tables`' four), every part made on the host, the
+    dicts once when the image imports it."""
     f = front_of(blob)
-    return (blob, tuple(f["S"]), f["T"], tuple(f["A"]), f["D"], f["G"], f["X"]) + tables(f)
+    return (blob, tuple(f["S"]), f["T"], tuple(f["A"]), f["D"], f["G"], f["X"], f["O"]) + tables(f)
 
 
 def tables(f):
@@ -90,11 +91,11 @@ def front_of(blob):
     """The front end's part of a blob (the header's front offset and
     length): {"S": state names, "T": their type codes, "A": action names,
     "D": {node: draw function name}, "G": {node: ground role}, "X": the
-    rest of the front end's literals}."""
+    rest of the front end's literals, "O": the slots' orders}."""
     if len(blob) < 32 or blob[:4] != b"MUIT":
         raise Refused("not a compiled page")
     at, n = _u32(blob, 24), _u32(blob, 28)
-    out = {"S": [], "T": b"", "A": [], "D": {}, "G": {}, "X": None}
+    out = {"S": [], "T": b"", "A": [], "D": {}, "G": {}, "X": None, "O": ()}
     for line in bytes(blob[at:at + n]).decode("utf-8").split("\n"):
         if not line:
             continue
@@ -103,8 +104,8 @@ def front_of(blob):
             out[tag] = rest.split(",") if rest else []
         elif tag == "T":
             out["T"] = bytes(int(c) for c in rest)
-        elif tag == "X":
-            out["X"] = _literal(rest)
+        elif tag in "XO":
+            out[tag] = _literal(rest)
         else:
             for item in rest.split(",") if rest else ():
                 k, _, v = item.partition(":")
@@ -125,8 +126,26 @@ def front(eng):
         draws.append("%d:%s" % (node, name))
     lines = ("S " + ",".join(eng._names), "T " + "".join(str(ctype(t)) for t in eng._types),
              "A " + ",".join(a.name for a in eng._acts), "D " + ",".join(draws),
-             "G " + ",".join("%d:%s" % kv for kv in eng._grounds.items()), "X " + repr(eng.front()))
+             "G " + ",".join("%d:%s" % kv for kv in eng._grounds.items()), "X " + repr(eng.front()),
+             "O " + repr(tuple(orders(t) for t in eng._types)))
     return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def orders(t):
+    """What of state type `t` the store keeps by index, in the order the C
+    store numbers it: a model's fields (`Model.order`), a document's row's
+    (`DOC_ORDER` after its text), an enum's values; None for the rest. A
+    blob holds its compile's, and a load refuses one this Python orders
+    otherwise, so no dict's order on either side can trade two indexes."""
+    if type(t) is S.Opt:
+        t = t.base
+    if t == DOC:
+        return ("doc",) + S.DOC_ORDER
+    if isinstance(t, S.Model):
+        return t.order
+    if type(t) is S.Enum:
+        return t.values
+    return None
 
 
 def ctype(t):
@@ -151,8 +170,8 @@ def load(eng, x, blob):
     loaded) where the blob is not this page's, this engine's or this
     module's."""
     if type(blob) is tuple:
-        f = {"S": blob[1], "T": blob[2], "A": blob[3], "D": blob[4], "G": blob[5], "X": blob[6]}
-        tb = blob[7:]
+        f = {"S": blob[1], "T": blob[2], "A": blob[3], "D": blob[4], "G": blob[5], "X": blob[6], "O": blob[7]}
+        tb = blob[8:]
         blob = blob[0]
     else:
         f = front_of(blob)
@@ -172,16 +191,20 @@ def _load(eng, x, blob, f, tb):
     slot, aidx, docs, declared = tb
     decl = st._t
     names = f["S"]                  # the store's slots in the blob's order (a board's dicts keep another)
+    if len(f["O"]) != len(names):
+        raise Refused("a blob with no order for each of its states")
     types = []
-    for n, c in zip(names, f["T"]):
+    for n, c, o in zip(names, f["T"], f["O"]):
         t = decl.get(n)
         if t is None:
             if n.endswith(DOC) and type(decl.get(n[:-len(DOC)])) is S.Doc:
-                types.append(DOC)
-                continue
-            raise Refused("no state %r: the blob names one the module does not declare" % n)
-        if _SCALAR.get(t, 0) != c and ctype(t) != c:
+                t = DOC
+            else:
+                raise Refused("no state %r: the blob names one the module does not declare" % n)
+        elif _SCALAR.get(t, 0) != c and ctype(t) != c:
             raise Refused("state %s: the module's type is not the blob's" % n)
+        if o is not None and orders(t) != o:
+            raise Refused("state %s: its fields or values are in another order than the blob's" % n)
         types.append(t)
     if len(decl) != declared:
         raise Refused("state %s: the module declares one the blob lacks" % [n for n in decl if n not in slot][0])

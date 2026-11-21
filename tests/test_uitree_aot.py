@@ -194,6 +194,31 @@ def test_a_blob_naming_what_the_module_lacks_is_refused_by_name(compiled):
         uitree_aot.load(eng, None, head + text)
 
 
+@pytest.mark.parametrize("page, kind", (("achievements_ui.achievements_page", "model"),
+                                        ("code_ui.code_page", "doc"), ("editor_ui.head", "enum")))
+def test_a_blob_whose_fields_or_values_this_python_orders_otherwise_is_refused(page, kind, compiled,
+                                                                              monkeypatch):
+    """A model's fields, a document's or an enum's values in another order
+    than the compile's (a dict walked otherwise) are refused by the load,
+    and the page builds, rather than drawing one field's value as another's."""
+    import uitree as S
+    eng, blob = _engine(page, compiled)
+    entry = uitree_aot.entry(blob)
+    st = eng.s._t
+    if kind == "doc":
+        name = [n for n, t in st.items() if type(t) is S.Doc][0] + uitree_aot.DOC
+        monkeypatch.setattr(S, "DOC_ORDER", S.DOC_ORDER[::-1])
+    elif kind == "model":
+        name = [n for n, t in st.items() if isinstance(t, S.Model)][0]
+        monkeypatch.setattr(st[name], "order", st[name].order[::-1])
+    else:
+        name = [n for n, t in st.items() if type(t) is S.Enum][0]
+        monkeypatch.setattr(st[name], "values", st[name].values[::-1])
+    for b in (blob, entry):
+        with pytest.raises(uitree_aot.Refused, match="state %s: its fields or values are in another order" % name):
+            uitree_aot.load(eng, None, b)
+
+
 def test_a_blob_carries_every_field_of_every_record():
     """Each struct a blob stores names every member in moy_uitree_aot.c's
     field tables; a slot's members the visit owns are listed there by name."""
