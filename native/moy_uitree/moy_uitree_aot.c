@@ -367,7 +367,7 @@ int uit_load(uit_t *e, const char *blob, size_t n, const char *page_id, const ch
     if (id || var)
         return uit_fail(e, UIT_E_BLOB, UIT_MSG("a compiled page of another page or variant than %s %s",
                                                "blob page %s %s"), page_id ? page_id : "", variant ? variant : "");
-    uint8_t placed;
+    uint8_t placed = 0;
     if (take(&r, &placed, 1) || placed != e->placed)
         return uit_fail(e, UIT_E_BLOB, UIT_MSG("a compiled page %s; this store is %s",
                                                "blob placed %s %s"), placed ? "placed" : "not placed",
