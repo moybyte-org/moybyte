@@ -66,7 +66,7 @@ enum {
 enum { UIT_IN_KEYS = 0, UIT_IN_TDECK, UIT_IN_PAD, UIT_IN_TOUCH };
 
 // Action flags.
-enum { UIT_A_HOOK = 1, UIT_A_ROLE_CONFIRM = 2, UIT_A_ROLE_BACK = 4, UIT_A_ROW = 8 };
+enum { UIT_A_HOOK = 1, UIT_A_ROLE_CONFIRM = 2, UIT_A_ROLE_BACK = 4, UIT_A_ROW = 8, UIT_A_SHIFT_ENTER = 16 };
 
 typedef struct uit uit_t;
 
@@ -157,6 +157,18 @@ int uit_place(uit_t *e, int x, int y, int w, int h, int flags, int fs);
 // into out, else 0 (not placed: hidden, lent, inside a flow).
 int uit_rect(const uit_t *e, const char *key, int32_t out[4]);
 
+// Back on a placed page's shown row or group that says what Back does there
+// (`close=`, the innermost): its action, its key into buf; -1 where its
+// action is off, -2 where none shows.
+int uit_back_closer(uit_t *e, char *buf, size_t cap);
+// Enter on a placed page's popover row (`uitree_editor.Engine._keys`): the
+// focused link's action queued on its row, as A takes it. 1 where a popover's
+// link holds focus (its action off too), else 0.
+int uit_take_focused(uit_t *e);
+// A part's rect the front end placed this frame (a text editor's caret or
+// word, "code.caret"), that a popover's anchor= may name; the frame's own
+// draws record them (four a frame, the rest let go).
+void uit_anchor(uit_t *e, const char *name, int x, int y, int w, int h);
 // Node `node`'s condition prop `name` now (a text editor's gutter=, which its
 // front end draws by): 1 or 0, -1 where it has none.
 int uit_cond_of(uit_t *e, int node, const char *name);

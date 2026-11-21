@@ -55,6 +55,9 @@ _SIGS = (
     ("uit_place", [_P, _I, _I, _I, _I, _I, _I], _I),
     ("uit_rect", [_P, _S, _I32], _I),
     ("uit_cond_of", [_P, _I, _S], _I),
+    ("uit_anchor", [_P, _S, _I, _I, _I, _I], None),
+    ("uit_take_focused", [_P], _I),
+    ("uit_back_closer", [_P, c.c_char_p, _Z], _I),
     ("uit_lent", [_P, _S, _I32, _I, c.c_char_p, _Z], _I),
     ("uit_lent_place", [_I32, _I, _I, _I, _I, _I, _I, _I32, c.POINTER(_I), _I32], _I),
     ("uit_frame", [_P, _P, _P, _I, _I, _I, _I, _I, _I, _I], _I),
@@ -80,7 +83,7 @@ EV_NONE, EV_ACTION, EV_WRITE = range(3)
 F_DESK, F_ON_BAR, F_BAND, F_BARE, F_TRACE, F_UP, F_DOWN, F_GEN = 1, 2, 4, 8, 16, 32, 64, 128
 F_PAGES_SHIFT = 8
 OWE = 1 << 16
-A_HOOK, A_ROLE_CONFIRM, A_ROLE_BACK, A_ROW = 1, 2, 4, 8
+A_HOOK, A_ROLE_CONFIRM, A_ROLE_BACK, A_ROW, A_SHIFT_ENTER = 1, 2, 4, 8, 16
 INPUTS = ("keys", "tdeck", "pad", "touch")
 
 
@@ -298,6 +301,12 @@ class Engine:
         a = self._L.uit_back_popover(self._e, self._buf, 512)
         return a if a < 0 else (a, self._buf.value.decode("utf-8"))
 
+    def back_closer(self):
+        """Back on a shown closer row (close=): (its action, its key), -1
+        where its action is off, -2 where none shows."""
+        a = self._L.uit_back_closer(self._e, self._buf, 512)
+        return a if a < 0 else (a, self._buf.value.decode("utf-8"))
+
     def unfocused(self):
         return self._L.uit_unfocused(self._e)
 
@@ -314,6 +323,12 @@ class Engine:
         """Where node `key` was placed last, (x, y, w, h), else None."""
         out = (c.c_int32 * 4)()
         return tuple(out) if self._L.uit_rect(self._e, b(key), out) else None
+
+    def take_focused(self):
+        return self._L.uit_take_focused(self._e)
+
+    def anchor(self, name, x, y, w, h):
+        self._L.uit_anchor(self._e, b(name), x, y, w, h)
 
     def cond_of(self, node, name):
         """Node `node`'s condition `name` now: 1, 0, or -1 where it has none."""

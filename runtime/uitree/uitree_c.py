@@ -41,7 +41,7 @@ EV_NONE, EV_ACTION, EV_WRITE, EV_CELL = 0, 1, 2, 3
 F_DESK, F_ON_BAR, F_BAND, F_BARE, F_TRACE, F_UP, F_DOWN, F_GEN = 1, 2, 4, 8, 16, 32, 64, 128
 F_PAGES_SHIFT = 8
 OWE = 1 << 16
-A_HOOK, A_ROLE_CONFIRM, A_ROLE_BACK = 1, 2, 4
+A_HOOK, A_ROLE_CONFIRM, A_ROLE_BACK, A_SHIFT_ENTER = 1, 2, 4, 16
 INPUTS = ("keys", "tdeck", "pad", "touch")
 _KINDS = {"page": 1, "group": 2, "label": 3, "info": 4, "link": 5, "button": 6, "toggle": 7,
           "rows": 8, "dialog": 9, "seg": 10, "slider": 11, "field": 12, "empty": 13,
@@ -54,7 +54,7 @@ _KINDS = {"page": 1, "group": 2, "label": 3, "info": 4, "link": 5, "button": 6, 
 # the placed kinds: a page the engine's layout places holds them (`CEditorPage`)
 _PLACED_KINDS = ("tools", "row", "status", "text_editor", "panes", "pane", "legacy", "slot", "panel", "lent")
 # what a placed page's frame does not draw yet
-_PLACED_GAPS = ("panes", "pane", "legacy", "slot", "lent", "popover", "tabs")
+_PLACED_GAPS = ("panes", "pane", "legacy", "slot", "lent", "tabs")
 _HEAD = {"rows": ("model",), "table": ("model",), "cards": ("model",), "dialog": ("buttons",)}
 _KIND_NAMES = dict((v, k) for k, v in _KINDS.items())
 _KIND_NAMES[len(_KINDS) + 1] = "cycle"          # UIT_KINDS: a seg of the cycle look
@@ -92,6 +92,7 @@ class _TextEditor:
     def __init__(self, eng, node, n):
         self.key = n.key
         self.kind = "text_editor"
+        self.parts = (n.key + ".caret", n.key + ".word")
         self.l = dict((k, n.l[k]) for k in ("find", "marks") if k in n.l)
         self.p = {}
         for k in ("gutter", "find_on"):
@@ -127,6 +128,10 @@ class CEngine(Engine):
         self._grounds = {}      # a canvas's ground= role, by its node
         self._docs = {}         # a document's state -> what it was pushed at (`_push_doc`)
         self._editors = {}      # a text editor's node -> its stand-in (`_TextEditor`)
+        self._pointers = []     # (key, its pointer= action) of each canvas a pointer is routed to
+        self._held = None       # (key, action, rect): the canvas a press holds until its release
+        self._pop_lists = {}    # a popover's key -> (model, cur) of the list the arrows walk in it
+        self._pop_fields = {}   # a popover's key -> whether a field of its own takes typed keys
 
     def _made(self):
         """The store, made and declared at the first way in that needs it."""
@@ -240,7 +245,7 @@ class CEngine(Engine):
             if a.chars or a.unit is not None:
                 raise EngineGap("action %s's chars= or unit" % a.name)
             flags = (A_HOOK if a.hook else 0) | (A_ROLE_CONFIRM if "role:confirm" in a.keys else 0) | (
-                A_ROLE_BACK if "role:back" in a.keys else 0)
+                A_ROLE_BACK if "role:back" in a.keys else 0) | (A_SHIFT_ENTER if S.SHIFT_ENTER in a.keys else 0)
             off = {"hide": 1, "grey": 2}.get(getattr(a, "off", None), 0)
             self._aidx[a.name] = self._ck(x.action(
                 a.name, a.label or "", a.hint if isinstance(a.hint, str) else "", a.when_src, off, flags,
@@ -441,6 +446,9 @@ class CEngine(Engine):
         placed, placed_kinds, placed_gaps = self.PLACED, _PLACED_KINDS, _PLACED_GAPS
         grounds = self._grounds = {}
         editors = self._editors = {}
+        pointers = self._pointers = []
+        pop_lists = self._pop_lists = {}
+        pop_fields = self._pop_fields = {}
 
         def node(n, parent, lent=False):
             nk, l = n.kind, n.l
@@ -467,6 +475,14 @@ class CEngine(Engine):
                     r = cprop(me, "field", l["field"], None)       # a model's lines: this text field
                 if r < 0:
                     fail(r, "%s %s" % (nk, n.key), n.where)
+            if nk == "popover":
+                pop_fields[n.key] = any(k.kind == "field" for k in n.kids)
+                for k in n.kids:
+                    if k.kind == "rows" and k.src.get("cur"):
+                        pop_lists[n.key] = (k.l["model"], k.src["cur"])
+                        break
+            if nk == "canvas" and l and l.get("pointer") is not None:
+                pointers.append((n.key, l["pointer"]))
             if nk == "canvas" and l and l.get("ground"):
                 grounds[me] = l["ground"]
             elif nk == "text_editor":
@@ -782,6 +798,84 @@ class CEditorEngine(CEngine, _ed.Engine):
             self._doc_moved()
         CEngine.paint(self, dt, cv, th, content, desk)
 
+    def point(self, px, py, click):
+        """A canvas with pointer= is handed down, drag and up in its own
+        coordinates, at the rect the last frame placed it; the press that
+        starts on it holds it until release (`uitree_editor.Engine.point`)."""
+        down = self.pointer_down()
+        held = self._held
+        if held is not None:
+            key, act, r = held
+            ev = S.Ev("drag" if down else "up", px - r[0], py - r[1], "touch")
+            self.q.append((act, (ev,), "pointer %s on canvas %r" % (ev.kind, key)))
+            if not down:
+                self._held = None
+            self._damage.all()
+            return True
+        if click and self._visiting():
+            for key, act in self._pointers:
+                r = self._x.rect(key)
+                if r is not None and r[0] <= px < r[0] + r[2] and r[1] <= py < r[1] + r[3]:
+                    ev = S.Ev("down", px - r[0], py - r[1], "touch")
+                    self.q.append((act, (ev,), "pointer down on canvas %r" % key))
+                    if down:
+                        self._held = (key, act, r)
+                    else:
+                        self.q.append((act, (S.Ev("up", ev.x, ev.y, "touch"),), "pointer up on canvas %r" % key))
+                    self._damage.all()
+                    return True
+        return CEngine.point(self, px, py, click)
+
+    def step_rows(self, d):
+        """Up or down `d` rows in the shown popover's list
+        (`uitree_editor.Engine.step_rows`): its cur= moves, and focus
+        follows to the row's drawn stop. False where no popover list shows."""
+        if not self._visiting():
+            return False
+        got = self._x.back_popover()
+        lst = self._pop_lists.get(got[1]) if type(got) is tuple else None
+        if lst is None:
+            return False
+        model, ck = lst
+        rows = self.s._v[model]
+        if not rows:
+            return True
+        keyf = rows[0]._m.key
+        keys = [r._f[keyf] for r in rows]
+        cur = self.s._v[ck]
+        i = keys.index(cur) if cur in keys else -1
+        j = max(0, min(len(keys) - 1, i + d))
+        if keys[j] != cur:
+            self.s._v[ck] = keys[j]
+            self.s._ver[ck] += 1
+            was, S._NOW.app = S._NOW.app, self
+            S._trace("state", ck, "%r -> %r   (step %+d)" % (cur, keys[j], d))
+            S._NOW.app = was
+            self.committed()
+        self.want_focus = keys[j]       # a row's key: the engine focuses the stop it drew for it
+        self._damage.all()
+        return True
+
+    def _has_page(self):
+        """Back is the app's while a popover or a closer row (a find strip) shows."""
+        return CEngine._has_page(self) or self.popover_shown() or (
+            self._visiting() and self._x.back_closer() != -2)
+
+    def _back(self):
+        """Back: a shown popover's close= (in C), else the innermost shown
+        closer row's (`close=`, where it is on), else the store's back."""
+        self._bind()
+        x = self._made()
+        if self._visiting() and x.dialog() < 0 and x.back_popover() == -2:
+            got = x.back_closer()
+            if got != -2 and got != -1:
+                act = self._acts[got[0]]
+                kind = "row"
+                self.q.append((act, self.args_for(act), "back on %s %r" % (kind, got[1])))
+                self._damage.all()
+                return True
+        return CEngine._back(self)
+
     # -- keys: the Editor's typed bytes and arrows into its document, ahead of the store's
 
     def popover_shown(self):
@@ -822,6 +916,10 @@ class CEditorEngine(CEngine, _ed.Engine):
         try:
             if self._chord(ch) or self._doc_keys(i, ch):
                 return True
+            if ch == 13 and self._visiting() and self._x.take_focused():
+                self._drain()           # Enter takes a popover's row, as A does
+                self._damage.all()
+                return True
         finally:
             S._NOW.app = was
         return CEngine.keys(self, i, damage)
@@ -845,10 +943,19 @@ class CEditorEngine(CEngine, _ed.Engine):
     def _doc_keys(self, i, ch):
         """The arrows and the typed bytes into the shown text editor's
         document (`uitree_editor.Engine._keys`), where it takes them."""
+        text = ch and (ch in (8, 9, 13, 127) or 32 <= ch < 127)
+        if text and ch != 13 and self.views and self._visiting():
+            # a popover with no field of its own (completion, the scripts) is left by a typed
+            # key, which then edits as though it was never open
+            got = self._x.back_popover()
+            if type(got) is tuple and not self._pop_fields.get(got[1]):
+                act = self._acts[got[0]]
+                self.run_action(act, self.args_for(act), "typed %r on popover %r" % (chr(ch), got[1]))
+                if not self.popover_shown():
+                    return self._into_doc(next(iter(self.views)), ch, bool(getattr(i, "mods", 0) & _ed._SHIFT))
         ek = self.editor_keys()
         if ek is None:
             return False
-        text = ch and (ch in (8, 9, 13, 127) or 32 <= ch < 127)
         doc = self.s._v[ek]
         moved = False
         if not self.host_arrows:
@@ -924,6 +1031,11 @@ class CEditorEngine(CEngine, _ed.Engine):
                 r = self._te_rect
                 r[0], r[1], r[2], r[3] = x, y, w, h
                 self._r_text_editor(te, None, r)
+                if self._x.back_popover() != -2:
+                    for part in te.parts:      # where a popover may hang from: its caret, its word
+                        a = self._part_anchor(part)
+                        if a is not None:
+                            self._x.anchor(part, a[0], a[1], a[2], a[3])
             finally:
                 now.app, now.frame = was
             return

@@ -301,6 +301,22 @@ static mp_obj_t eng_cond_of(mp_obj_t self, mp_obj_t node, mp_obj_t name)
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(eng_cond_of_obj, eng_cond_of);
 
+// anchor(name, x, y, w, h): a part's rect placed this frame, a popover's anchor= may name
+static mp_obj_t eng_anchor(size_t n, const mp_obj_t *a)
+{
+    (void)n;
+    uit_anchor(eng(a[0]), CSTR(a[1]), mp_obj_get_int(a[2]), mp_obj_get_int(a[3]), mp_obj_get_int(a[4]),
+               mp_obj_get_int(a[5]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(eng_anchor_obj, 6, 6, eng_anchor);
+
+static mp_obj_t eng_take_focused(mp_obj_t self)
+{
+    return MP_OBJ_NEW_SMALL_INT(uit_take_focused(eng(self)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(eng_take_focused_obj, eng_take_focused);
+
 #define LENT_MAX 32
 #define LENT_TEXT 4096
 
@@ -481,6 +497,17 @@ static mp_obj_t eng_back_popover(mp_obj_t self)
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(eng_back_popover_obj, eng_back_popover);
 
+static mp_obj_t eng_back_closer(mp_obj_t self)
+{
+    char evbuf[EVBUF];
+    int a = uit_back_closer(eng(self), evbuf, sizeof evbuf);
+    if (a < 0)
+        return MP_OBJ_NEW_SMALL_INT(a);
+    mp_obj_t t[2] = {MP_OBJ_NEW_SMALL_INT(a), mp_obj_new_str(evbuf, strlen(evbuf))};
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(eng_back_closer_obj, eng_back_closer);
+
 static mp_obj_t eng_dialog(mp_obj_t self)
 {
     return MP_OBJ_NEW_SMALL_INT(uit_dialog(eng(self)));
@@ -588,6 +615,9 @@ static const mp_rom_map_elem_t eng_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_rect), MP_ROM_PTR(&eng_rect_obj) },
     { MP_ROM_QSTR(MP_QSTR_lent), MP_ROM_PTR(&eng_lent_obj) },
     { MP_ROM_QSTR(MP_QSTR_cond_of), MP_ROM_PTR(&eng_cond_of_obj) },
+    { MP_ROM_QSTR(MP_QSTR_anchor), MP_ROM_PTR(&eng_anchor_obj) },
+    { MP_ROM_QSTR(MP_QSTR_take_focused), MP_ROM_PTR(&eng_take_focused_obj) },
+    { MP_ROM_QSTR(MP_QSTR_back_closer), MP_ROM_PTR(&eng_back_closer_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_absent), MP_ROM_PTR(&eng_set_absent_obj) },
     { MP_ROM_QSTR(MP_QSTR_lent_place), MP_ROM_PTR(&eng_lent_place_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame), MP_ROM_PTR(&eng_frame_obj) },

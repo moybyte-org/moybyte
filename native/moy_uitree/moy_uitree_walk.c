@@ -1365,8 +1365,14 @@ static void pop_split(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, 
 
 // A popover (`_r_popover`): hung under its anchor's stop (a list's current row for "LIST.cur"),
 // washing what it covers; its close= fired the frame it is dismissed.
+static void placed_popover(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k);
+
 static void draw_popover(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row)
 {
+    if (e->placed) {
+        placed_popover(e, c, s, k);
+        return;
+    }
     const uit_node_t *N = NODE(k);
     const char *key = uit_str(e, N->key);
     int32_t w = size_of(e, int_of(e, N->t_aux, model, row, 200));
@@ -2229,8 +2235,10 @@ static int id_in(uit_t *e, const char *want, char out[UIT_ID_MAX + 1])
         const uit_id_t *I = &e->prev[i];
         int hit;
         if (I->row >= 0) {
+            // a row drawn last frame that its model still holds (a list filtered since keeps
+            // fewer): never "" for a row past its end
             int m = I->gen == e->gen ? uit_model_of(e, I->node) : -1;
-            hit = m >= 0 && !strcmp(row_key(e, m, I->row), want);
+            hit = m >= 0 && I->row < e->slots[m].nrows && *want && !strcmp(row_key(e, m, I->row), want);
         } else {
             hit = !strcmp(I->id, want);
         }
@@ -2242,10 +2250,18 @@ static int id_in(uit_t *e, const char *want, char out[UIT_ID_MAX + 1])
     return 0;
 }
 
+static int is_menu_rows(uit_t *e, int k);
+static void menu_row_id(uit_t *e, int link, int m, int r, char id[UIT_ID_MAX + 1]);
+
 static int row_stop_id(uit_t *e, int lst, const char *key, size_t n, char out[UIT_ID_MAX + 1])
 {
-    if (uit_row_find(e, NODE(lst)->slot, key, n) < 0)
+    int r = uit_row_find(e, NODE(lst)->slot, key, n);
+    if (r < 0)
         return 0;
+    if (e->placed && is_menu_rows(e, lst)) {
+        menu_row_id(e, NODE(lst)->kid, NODE(lst)->slot, r, out);     // a menu row's id is its text
+        return 1;
+    }
     if (NODE(lst)->kind == UIT_TABLE) {
         snprintf(out, UIT_ID_MAX + 1, "%s", uit_str(e, NODE(lst)->key));     // one stop, its key the id
         return 1;
@@ -2856,10 +2872,245 @@ int uit_place(uit_t *e, int x, int y, int w, int h, int flags, int fs)
 
 // A placed page's band hints: a dialog's, else the focused stop's; none while nothing or a text
 // editor holds focus (a text surface keeps its keys).
+// The innermost shown row or group under `k` whose close= says what Back does there, else -1
+// (`_closer`: a switch its one case, a list's rows none).
+static int closer_of(uit_t *e, int k)
+{
+    const uit_node_t *N = NODE(k);
+    if (!uit_shown(e, k, -1, -1))
+        return -1;
+    if (N->kind == UIT_SWITCH) {
+        int cs = uit_case_of(e, k);
+        return cs < 0 ? -1 : closer_of(e, cs);
+    }
+    KIDS(k, g) {
+        if (UIT_IS_LIST(NODE(g)->kind))
+            continue;
+        int got = closer_of(e, g);
+        if (got >= 0)
+            return got;
+    }
+    return (N->kind == UIT_ROW || N->kind == UIT_GROUP) && N->on >= 0 ? k : -1;
+}
+
+int uit_back_closer(uit_t *e, char *buf, size_t cap)
+{
+    int g = e->nnodes && uit_dialog(e) < 0 ? closer_of(e, 0) : -1;
+    if (g < 0)
+        return -2;
+    if (buf && cap)
+        snprintf(buf, cap, "%s", uit_str(e, NODE(g)->key));
+    return uit_act_can(e, NODE(g)->on, -1, -1) ? NODE(g)->on : -1;
+}
+
+// An action's hint into the band where it renders any.
+static void hint_named(uit_t *e, uit_buf_t *b, const char *verb, int a)
+{
+    uint32_t n, at = uit_tmpl_render(e, e->acts[a].hint, -1, -1, &n);
+    if (n) {
+        hint_add(b, verb, strlen(verb));
+        hint_add(b, e->scratch.p + at, n);
+    }
+}
+
+// Whether popover `p` holds words alone (See why): nothing in it takes the keys.
+static int pop_note(uit_t *e, int p)
+{
+    KIDS(p, g) {
+        int kind = NODE(g)->kind;
+        if (kind == UIT_FIELD || kind == UIT_ROWS || kind == UIT_LINK || kind == UIT_BUTTON || kind == UIT_MENU)
+            return 0;
+    }
+    return 1;
+}
+
+int uit_take_focused(uit_t *e)
+{
+    const uit_id_t *F = &e->focused;
+    if (!e->has_focused || F->gen != e->gen || F->kind != UIT_LINK || popover_of(e) < 0)
+        return 0;
+    int m = F->row >= 0 ? uit_model_of(e, F->node) : -1;
+    if (F->act < 0 || !uit_act_can(e, F->act, m, F->row))
+        return 1;
+    fire(e, F->act, F->node, m, F->row, NULL);
+    return 1;
+}
+
+void uit_anchor(uit_t *e, const char *name, int x, int y, int w, int h)
+{
+    if (e->nanc >= 4)
+        return;
+    snprintf(e->anc_name[e->nanc], UIT_ID_MAX + 1, "%s", name);
+    int16_t *a = e->anc[e->nanc++];
+    a[0] = (int16_t)x, a[1] = (int16_t)y, a[2] = (int16_t)w, a[3] = (int16_t)h;
+}
+
+// The rect a popover hangs from (`_part_anchor`): a part the front end placed this frame
+// ("code.caret"), or a text editor's or a slot's whole rect; 0 none.
+static int anchor_rect(uit_t *e, const char *name, size_t n, int32_t out[4])
+{
+    for (int i = 0; i < e->nanc; i++)
+        if (strlen(e->anc_name[i]) == n && !memcmp(e->anc_name[i], name, n)) {
+            for (int j = 0; j < 4; j++)
+                out[j] = e->anc[i][j];
+            return 1;
+        }
+    if (memchr(name, '.', n) || !e->rects)
+        return 0;
+    for (int k = 0; k < e->nnodes; k++) {
+        const uit_node_t *N = NODE(k);
+        const char *key = uit_str(e, N->key);
+        if ((N->kind == UIT_TEXT_EDITOR || N->kind == UIT_SLOT) && strlen(key) == n && !memcmp(key, name, n)) {
+            const int16_t *r = e->rects + 4 * k;
+            if (r[2] < 0)
+                return 0;
+            for (int j = 0; j < 4; j++)
+                out[j] = r[j];
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Whether rows node `k` is a popover's list of one link a row (`_menu_rows`).
+static int is_menu_rows(uit_t *e, int k)
+{
+    const uit_node_t *L = NODE(k);
+    return L->kind == UIT_ROWS && L->parent != UIT_NONE && NODE(L->parent)->kind == UIT_POPOVER &&
+           L->kid != UIT_NONE && NODE(L->kid)->next == UIT_NONE && NODE(L->kid)->kind == UIT_LINK;
+}
+
+// A menu row's text and id: the link's label, its value after a tab, cut to what the toolkit keeps.
+static void menu_row_id(uit_t *e, int link, int m, int r, char id[UIT_ID_MAX + 1])
+{
+    uint32_t mark = e->scratch.n, ln, la = text(e, link, 0, m, r, &ln), vn = 0, va = 0;
+    if (NODE(link)->t_value >= 0)
+        va = text(e, link, 1, m, r, &vn);
+    if (vn)
+        snprintf(id, UIT_ID_MAX + 1, "%.*s\t%.*s", (int)ln, e->scratch.p + la, (int)vn, e->scratch.p + va);
+    else
+        snprintf(id, UIT_ID_MAX + 1, "%.*s", (int)ln, e->scratch.p + la);
+    e->scratch.n = mark;
+}
+
+// A popover's list of one link a row is a menu (`_menu_rows`): a choice row each, its value at
+// the row's right, its id its text; the row taken runs the link's action on it.
+static void menu_rows(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k)
+{
+    const uit_node_t *L = NODE(k);
+    int link = L->kid, m = L->slot, nr = e->slots[m].nrows;
+    if (!nr) {
+        uint32_t n, at = L->t_aux >= 0 ? uit_tmpl_render(e, L->t_aux, -1, -1, &n) : 0;
+        if (L->t_aux >= 0 && n) {
+            moy_ui_over_t o;
+            moy_ui_over_none(&o);
+            moy_ui_api_text(c, 0, 0, 1, -1);      // tone "dim"
+            moy_ui_api_label(c, s, sspan(e, at, n), &o);
+        }
+        return;
+    }
+    uit_buf_t labels = {0};
+    for (int r = 0; r < nr; r++) {
+        if (r)
+            uit_buf_printf(&labels, "%c", 0);
+        char id[UIT_ID_MAX + 1];
+        menu_row_id(e, link, m, r, id);
+        uit_buf_printf(&labels, "%s", id);
+        id_put(e, link, m, r, id);
+    }
+    int got = moy_ui_api_menu(c, s, span_of("", 0), (const uint8_t *)labels.p, labels.n,
+                              (const uint8_t *)"", 0, NULL);
+    if (got >= 0 && got < nr && uit_act_can(e, NODE(link)->act, m, got))
+        fire(e, NODE(link)->act, link, m, got, NULL);
+    uit_buf_free(&labels);
+}
+
+// A popover on a placed page (`uitree_editor.Engine._r_popover`): hung from its anchor= (a
+// whole text editor, or a part of one), `w=` wide; one that opens on a field hung from a whole
+// node stands centred over that node's top. Its field, its words as they flow, its menu rows,
+// anything else as it draws; a note (words alone) names its close in its own band.
+static void placed_popover(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k)
+{
+    const uit_node_t *N = NODE(k);
+    const char *key = uit_str(e, N->key);
+    int32_t w = int_of(e, N->t_aux, -1, -1, 200), a[4];
+    if (N->t_value >= 0) {
+        uint32_t n, mark = e->scratch.n, at = uit_tmpl_render(e, N->t_value, -1, -1, &n);
+        const char *name = e->scratch.p + at;
+        if (n && anchor_rect(e, name, n, a)) {
+            if (!memchr(name, '.', n) && N->kid != UIT_NONE && NODE(N->kid)->kind == UIT_FIELD) {
+                int32_t most = a[2] - 16 * e->fs;
+                w = w < most ? w : most;
+                a[0] += fdiv(a[2] - w, 2), a[1] += 4 * e->fs, a[2] = w, a[3] = 0;
+            }
+            moy_ui_api_at(c, a[0], a[1], a[2], a[3]);
+        }
+        e->scratch.n = mark;
+    }
+    if (!moy_ui_api_popover(c, s, span_of(key, strlen(key)), w, NULL) && N->on >= 0)
+        fire(e, N->on, k, -1, -1, NULL);
+    KIDS(k, g) {
+        if (!uit_shown(e, g, -1, -1))
+            continue;
+        if (is_menu_rows(e, g))
+            menu_rows(e, c, s, g);
+        else
+            draw(e, c, s, g, -1, -1);
+    }
+    if (pop_note(e, k) && N->on >= 0) {
+        uint32_t n, at = uit_tmpl_render(e, e->acts[N->on].hint, -1, -1, &n);
+        if (n) {
+            uint32_t hb = e->scratch.n;
+            uit_buf_put(&e->scratch, "cancel", 6);
+            uit_buf_put(&e->scratch, e->scratch.p + at, n);
+            moy_ui_api_hints(c, s, (const uint8_t *)e->scratch.p + hb, e->scratch.n - hb - 1, NULL);
+        }
+    }
+    moy_ui_api_popover(c, s, span_of("", 0), 0, NULL);
+}
+
+// A placed page's band hints (`uitree_editor.Engine._hints`): a dialog's; none over a note; under
+// a popover or a closer row, the arrows' walk of its list, what Enter does on the focused stop
+// (and Shift+Enter in a field) and what Back closes; else none while nothing or a text editor
+// holds focus (a text surface keeps its keys), the focused stop's otherwise.
 static void placed_hints(uit_t *e, uit_buf_t *b, int pages)
 {
-    if (uit_dialog(e) >= 0 || (e->has_focused && e->focused.kind != UIT_TEXT_EDITOR))
+    b->n = 0;
+    if (uit_dialog(e) >= 0) {
         hints(e, b, pages);
+        return;
+    }
+    int pop = popover_of(e);
+    if (pop >= 0 && pop_note(e, pop))
+        return;
+    int closer = pop >= 0 ? pop : closer_of(e, 0);
+    if (closer < 0) {
+        if (e->has_focused && e->focused.kind != UIT_TEXT_EDITOR)
+            hints(e, b, pages);
+        return;
+    }
+    if (pop >= 0)
+        KIDS(pop, g)
+        if (NODE(g)->kind == UIT_ROWS && NODE(g)->cur >= 0) {
+            static const char PICK[] = "scroll\0Pick";
+            uit_buf_put(b, PICK, sizeof PICK - 1);
+            break;
+        }
+    if (e->has_focused && e->focused.gen == e->gen) {
+        const uit_id_t *F = &e->focused;
+        int a = F->kind == UIT_FIELD ? NODE(F->node)->on : F->act;
+        if (a >= 0 && uit_act_can(e, a, -1, F->row))
+            hint_named(e, b, "confirm", a);
+        if (F->kind == UIT_FIELD)
+            for (int s = 0; s < e->nacts; s++)
+                if (e->acts[s].flags & UIT_A_SHIFT_ENTER) {
+                    if (uit_act_can(e, s, -1, -1))
+                        hint_named(e, b, "Shift+enter", s);
+                    break;
+                }
+    }
+    if (NODE(closer)->on >= 0)
+        hint_named(e, b, "back", NODE(closer)->on);
 }
 
 // A placed page's band: the page's last row, cut from its room, where it names anything.
@@ -2931,6 +3182,7 @@ int uit_frame(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int x, int y, i
     e->input = input;
     e->cx = (int16_t)x, e->cy = (int16_t)y, e->cw = (int16_t)w, e->ch = (int16_t)h;
     e->scratch.n = 0;
+    e->nanc = 0;
     int pages = (flags >> 8) & 0xff;
     uit_id_t last = e->focused;             // the last frame's focus
     int had_last = e->has_focused;

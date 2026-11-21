@@ -1001,6 +1001,8 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
             return c;
         return add_prop(e, node, name, src, repr, PK_COND, c);
     }
+    if (!strcmp(name, "pointer") && kind == UIT_CANVAS)
+        return add_prop(e, node, name, src, repr, PK_LIT, 0);     // its front end routes the pointer to it
     if (!strcmp(name, "ground") && kind == UIT_CANVAS)
         return add_prop(e, node, name, src, repr, PK_LIT, 0);     // its front end fills it (a theme role)
     if (!strcmp(name, "kind") && kind == UIT_BUTTON) {
@@ -1070,7 +1072,8 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
     }
     if ((!strcmp(name, "on") && (kind == UIT_TOGGLE || kind == UIT_SEG || kind == UIT_SLIDER ||
                                  kind == UIT_FIELD || kind == UIT_TABLE || kind == UIT_TABS)) ||
-        (!strcmp(name, "changed") && kind == UIT_FIELD) || (!strcmp(name, "close") && kind == UIT_POPOVER)) {
+        (!strcmp(name, "changed") && kind == UIT_FIELD) ||
+        (!strcmp(name, "close") && (kind == UIT_POPOVER || kind == UIT_ROW || kind == UIT_GROUP))) {
         for (int a = 0; a < e->nacts; a++)
             if (!strcmp(uit_str(e, e->acts[a].name), src)) {
                 if (name[0] == 'o' || (name[0] == 'c' && name[1] == 'l'))

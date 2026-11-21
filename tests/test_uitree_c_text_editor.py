@@ -19,9 +19,12 @@ CONFIGS = ("tdeck_320x240_fs1_dark", "p4_1024x600_fs2_windowed", "big_800x480_fs
            "p4_1024x600_cs2_fs1_windowed")
 # the caret down and across, letters typed into the document (a bare letter an action answers
 # too: the text editor takes typed bytes first), the gutter off and on by its button (focused),
-# the find shown by its chord, its matches marked as the caret walks, hidden
+# the find shown by its chord, its matches marked as the caret walks, closed by Back; the menu
+# popover opened at the caret, a row walked to and taken, opened again and closed by Back, opened
+# and left by a typed letter, which the document takes
 SCRIPT = ["k:down", "k:down", "k:right", "k:right", "t:z", "t:q", "k:down", "t:g", "t:g", "k:up",
-          "k:a", "k:down", "k:a", "t:\x06", "k:down", "k:down", "t:\x06"]
+          "k:a", "k:down", "k:a", "t:\x06", "k:down", "k:down", "back", "k:down", "t:\x05", "k:down", "enter", "t:\x05", "back",
+          "t:\x05", "t:w"]
 
 
 def _run(engine, config):
@@ -35,8 +38,9 @@ def _run(engine, config):
     def probe(ws):
         e = seen["app"].engine
         d = e.s._v["code"]
-        return "%s L%d:%d %s gutter=%s finding=%s %r" % (
-            e.focus_key, d.line, d.col, d.text().count("zq"), e.s._v["gutter_on"], e.s._v["finding"],
+        return "%s L%d:%d %s gutter=%s finding=%s picking=%s %r" % (
+            e.focus_key, d.line, d.col, d.text().count("zq") + 10 * d.text().count("repr"),
+            e.s._v["gutter_on"], e.s._v["finding"], e.s._v["picking"],
             [(k, e.rect_of(k)) for k in ("find_strip", "code", "status_row")])
     return seen, P.frames(config, P.Surface(opened, probe=probe), SCRIPT)
 
@@ -50,5 +54,7 @@ def test_a_text_editor_draws_and_types_alike_on_both_engines(config, tmp_path):
     states = [f.state for f in ref]
     assert " L1:1 0 " in states[0] and any("gutter=False" in t for t in states), states
     assert any("finding=True" in t and "('find_strip', (" in t for t in states), states
+    assert any("picking=True" in t for t in states) and "picking=False" in states[-1], states
+    assert any(t.split()[0].startswith("repr") or t.split()[0].startswith("range") for t in states), states
     assert [f.state for f in c] == [f.state for f in ref]
     P.compare(ref, c, tmp_path, "text_editor")

@@ -303,6 +303,10 @@ struct uit {
     int crects;
     int16_t late[8];            // the popovers and dialogs a stack draws last, over it
     int nlate;
+    // a part's rect a front end placed this frame, that a popover hangs from ("code.caret")
+    char anc_name[4][UIT_ID_MAX + 1];
+    int16_t anc[4][4];
+    int nanc;
     // the frame drawn last, for uit_still: the versions it read and its focus
     uint32_t still_ver;
     uit_id_t still_focus;
