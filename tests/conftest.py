@@ -303,7 +303,7 @@ def pytest_runtest_teardown(item, nextitem):
     same worker (`MemoryError: the glass's canvas table is full`)."""
     if nextitem is not None and nextitem.path == item.path:
         return
-    gb = sys.modules.get("runtime.host.glass_binding")
+    gb = sys.modules.get("runtime.glass_binding")        # runtime/host/, by its flat name
     lib = gb._LIB[0] if gb is not None and gb._LIB else None
     if not lib:
         return
