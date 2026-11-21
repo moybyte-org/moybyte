@@ -4,7 +4,8 @@ The host suite runs `uitree` on CPython, which has what a board's MicroPython
 lacks (frames, signatures, `re.fullmatch`, function attributes, a writable
 instance `__dict__`, `collections.Counter`); uitree.py meets each in one guarded
 place at its top. This boots the T-Deck's console as tests/test_frame_alloc.py
-stages it, frozen, on the boards' model, opens every page ported to the layer,
+stages it, frozen, on the boards' model and on the engine a board defaults to
+(`uitree_app.DEFAULT`: C, as the image carries moy_uitree), opens every page ported to the layer,
 drags the scrolling ones, and checks that each built and painted and that no
 frame raised. The kernel's loop runs on past a frame that raises, so a raise
 is caught here, around the frame, or it reads as a frame that drew nothing. A
@@ -69,14 +70,18 @@ def pages(loop):
     import uitree_app
     ws = loop.ws
     painted = {}
-    paint = uitree_app.Engine.paint
 
-    def counted(self, *a):
-        r = paint(self, *a)
-        k = self.pages[0].__name__
-        painted[k] = painted.get(k, 0) + 1
-        return r
-    uitree_app.Engine.paint = counted
+    def counter(paint):
+        def counted(self, *a):
+            r = paint(self, *a)
+            k = self.pages[0].__name__
+            painted[k] = painted.get(k, 0) + 1
+            return r
+        return counted
+    # the engine the board defaults to: its app class and its hosted page's
+    classes = (uitree_app._engine_class(False), uitree_app._engine_class(True))
+    for cls, paint in [(cls, cls.paint) for cls in classes]:
+        cls.paint = counter(paint)
     # the kernel's step keeps the loop running past a frame that raised:
     # every raise is kept here, its first traceback printed
     errors = []
@@ -279,6 +284,7 @@ def pages(loop):
                        [[list(pa), i, a, list(r)] for pa, i, a, r in sp.arranged[1]],
                        list(pd.drawn), list(sp.minimum())]
     shown["spaces"] = spaces
+    shown["engine"] = uitree_app.engine_in_use()
     print("RESULT " + json.dumps({"painted": painted, "shown": shown, "errors": errors}))
 '''
 
@@ -308,6 +314,7 @@ def test_every_ported_page_builds_and_draws_on_the_boards_micropython(tmp_path):
                              "that the layer and its pages run on a board's MicroPython")
     shown, painted = info["shown"], info["painted"]
     assert not info["errors"], (info["errors"][:3], text[-3000:])
+    assert shown["engine"] == "c", "a board whose image carries moy_uitree runs the C engine"
     assert shown["rows"] == "settings", shown
     assert shown["wifi"] == "wifi" and shown["wifi_popover"] == "wifi", shown
     assert [shown[p] for p in ("tz", "paired", "log", "permissions", "licences", "achievements")] == \
