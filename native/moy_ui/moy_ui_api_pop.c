@@ -62,6 +62,13 @@ static void wash_view(const moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_
 // the cut edge). An anchor that is a point (a finger's, `h` 0) starts the
 // card there and slides it to fit whole where the surface has the room, as
 // a phone's context menu does.
+// How far a popover's card keeps off the surface's sides: one hung from
+// ui.at's rect the page's gutters (8 px at the scale, 12 on the desk), any
+// other the modal band.
+static int pop_edge(const moy_ui_ctx_t *c) {
+    return c->pop.placed ? (c->cls ? 12 : 8) * c->fs : moy_ui_modal_band(c->fs, c->cls);
+}
+
 static moy_ui_box_t pop_place(moy_ui_ctx_t *c, const moy_ui_keep_t *kb, int body, int w,
                               int *bh_out) {
     moy_ui_box_t a = c->pop.at, sf = c->surface;
@@ -76,6 +83,9 @@ static moy_ui_box_t pop_place(moy_ui_ctx_t *c, const moy_ui_keep_t *kb, int body
     }
     if (x < x0) {
         x = x0;
+    }
+    if (w >= sf.w - 2 * pop_edge(c)) {
+        x = sf.x + moy_ui_fdiv(sf.w - w, 2);    // as wide as it may be: centred
     }
     int y;
     if (c->pop.mid) {
@@ -393,7 +403,7 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
     if (w <= 0) {
         w = a.w;
     }
-    int edge = c->pop.placed ? (c->cls ? 12 : 8) * fs : pad;
+    int edge = pop_edge(c);
     if (w > sf.w - 2 * edge) {
         w = sf.w - 2 * edge;
     }
