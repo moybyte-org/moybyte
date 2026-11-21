@@ -865,10 +865,14 @@ void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
         c->grid_tall = 0;
     }
     int pad = mua_pmetric(c, MOY_UI_M_VALUE_ROW_CARD_PAD), top = mua_pmetric(c, MOY_UI_M_VALUE_ROW_CARD_TOP);
+    // a card's labels may run as wide as its column's pitch less a pad
+    // either side, past the card no further than its draw reaches (a
+    // shadow's 8 px at the scale, mua_clip_row); never narrower than the card
+    int lw = c->grid_pitch - 2 * pad, most = c->grid_w + 2 * pad + 16 * c->fs;
+    lw = lw > most ? most : lw < c->grid_w + 2 * pad ? c->grid_w + 2 * pad : lw;
     // a fitted grid's row is as tall as its tallest card: a title broken
     // onto a second line grows its card and its row by that line
-    int tall = c->grid_wrap == 2 ? moy_ui_card_wrap(s, c->grid_w + 2 * pad, title, c->fs,
-                                                    mua_ground_of(c)) : 0;
+    int tall = c->grid_wrap == 2 ? moy_ui_card_wrap(s, lw, title, c->fs, mua_ground_of(c)) : 0;
     int grew = tall > c->grid_tall;
     if (grew) {
         c->grid_tall = (uint8_t)(tall > 255 ? 255 : tall);
@@ -915,7 +919,7 @@ void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
         int32_t saved[4];
         memcpy(saved, &row->st[MOY_ST_CX0], sizeof(saved));
         row->st[MOY_ST_CX1] = row->st[MOY_ST_CX0];
-        moy_ui_card(s, b, pic, title, sub, f | (c->grid_wrap ? MOY_UI_F_WRAP : 0), c->fs,
+        moy_ui_card(s, b, pic, lw, title, sub, f | (c->grid_wrap ? MOY_UI_F_WRAP : 0), c->fs,
                     gnd, c->card_tone, &content, &g);
         memcpy(&row->st[MOY_ST_CX0], saved, sizeof(saved));
         rc_t q = mua_rc_of(content);
@@ -925,7 +929,7 @@ void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
     }
     c->fl.cast = 1;
     EACH_ROW(c, k, s, b, stacked, c->page) {
-        moy_ui_card(s, b, pic, title, sub, f | (c->grid_wrap ? MOY_UI_F_WRAP : 0), c->fs,
+        moy_ui_card(s, b, pic, lw, title, sub, f | (c->grid_wrap ? MOY_UI_F_WRAP : 0), c->fs,
                     gnd, c->card_tone, &content, &g);
         if (c->card_blank >= 0 || c->card_blank_glyph >= 0) {
             moy_ui_card_blank(s, content, c->card_blank, c->card_blank_glyph, c->card_tone,

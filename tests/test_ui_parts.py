@@ -2012,6 +2012,54 @@ def test_a_card_scrolled_out_of_view_answers_no_picture():
     assert st["boxes"][3][2] == 0 and st["boxes"][3][3] == 0, "the second row is out of view"
 
 
+def _label_run(w, title, theme=("blocks", "light"), current=False):
+    """A grid of `w`-wide pictures with `title` on its middle card, drawn,
+    and that card's picture box."""
+    def draw():
+        ui.page("")
+        ui.grid("cards", w, 56)
+        got = [ui.card("%s %d" % (title, i) if i != 1 else title, "",
+                       {"current": current and i == 1}) for i in range(3)]
+        ui.grid()
+        return got
+    r = _Run(draw, theme)
+    r.frame()
+    return r, r.frame()[1][:4]
+
+
+def _label_ink(w, title, theme=("blocks", "light")):
+    """The ink under the middle card's picture, cropped to its extent: its
+    label's pixels."""
+    r, (x, y, pw, ph) = _label_run(w, title, theme)
+    ground = r.px(x - 8, y + ph + 2)
+    ink = {(i, j) for j in range(y + ph + 1, y + ph + 18) for i in range(x - 16, x + pw + 16)
+           if r.px(i, j) != ground}
+    assert ink, "the label drew"
+    x0, y0 = min(i for i, _ in ink), min(j for _, j in ink)
+    return {(i - x0, j - y0) for i, j in ink}
+
+
+def test_a_cards_label_runs_to_its_columns_pitch_before_it_is_cut():
+    """The T-Deck's three 76-wide cards: "Save a drawing" in the blocks
+    theme's Atkinson is wider than its card, not than its column, and draws
+    whole, as it does on a card wide enough."""
+    assert _label_ink(76, "Save a drawing") == _label_ink(140, "Save a drawing")
+
+
+def test_a_label_inked_for_a_solid_current_fill_stays_on_it():
+    """Contrast's current card is a solid fill whose ink its labels take:
+    there the label is cut to the card (past it, that ink would be lost on
+    the page), where the same card not current runs past it to its column."""
+    pad = 5                                     # style.json's card_pad
+    seen = []
+    for current in (False, True):
+        r, (x, y, pw, ph) = _label_run(76, "Save a drawing", ("contrast", "light"), current)
+        under = r.px(x - pad + 1, y + ph + 2)   # the card's ground: its fill where current
+        seen.append({(i, j) for j in range(y + ph + 2, y + ph + 14)
+                     for i in range(x - pad + 1, x + pw + pad - 1) if r.px(i, j) != under})
+    assert seen[0] and seen[1] and seen[0] != seen[1]
+
+
 # -- the Appearance verbs' page in every runtime -------------------------------------------
 
 WASM_LOOK = os.path.join(ROOT, "tests", "fixtures", "wasm", "app_look.moy")

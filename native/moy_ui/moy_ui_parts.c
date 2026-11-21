@@ -1198,9 +1198,9 @@ static int tone_ink(const pd_t *d, int tone) {
                    : tok(d, MOY_UI_T_CHROME_INK, MOY_UI_T_INK);
 }
 
-int moy_ui_card(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_box_t pic, moy_ui_span_t title,
-                moy_ui_span_t sub, int flags, int fs, int desk, int tone, moy_ui_box_t *content,
-                uint16_t *gnd) {
+int moy_ui_card(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_box_t pic, int lw,
+                moy_ui_span_t title, moy_ui_span_t sub, int flags, int fs, int desk, int tone,
+                moy_ui_box_t *content, uint16_t *gnd) {
     pd_t d;
     open_pd(s, &d, fs, desk);
     const moy_ui_marks_t *m = moy_ui_marks();
@@ -1231,11 +1231,12 @@ int moy_ui_card(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_box_t pic, moy_ui
     int sc = tscale(s);
     int th = pm(&d, MOY_UI_M_VALUE_ROW_CARD_TITLE, 1);
     int y = pic.y + pic.h + pm(&d, MOY_UI_M_VALUE_ROW_CARD_TOP, 1) / 2;
-    int room = b.w - 2 * d.fs;
+    int room = lw - 2 * d.fs;
     int ink = tok(&d, MOY_UI_T_CHROME_INK, MOY_UI_T_INK);
     int dim = tok(&d, MOY_UI_T_CHROME_INK_DIM, MOY_UI_T_INK_DIM);
     if ((flags & MOY_UI_F_ON) && solid && s->shown && cur_ink >= 0) {
         ink = dim = cur_ink;
+        room = b.w - 2 * d.fs;          // labels inked for the fill stay on it
     }
     if (tone != MOY_UI_TONE_INK && tone != MOY_UI_TONE_DIM && tone != MOY_UI_TONE_LOCKED
         && dim != ink) {
@@ -1249,7 +1250,7 @@ int moy_ui_card(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_box_t pic, moy_ui
     // on the handheld the sub line sits under the title's line, a desk's a
     // band below it
     int sy = y + th - d.fs - (d.desk ? 0 : 4 * d.fs);
-    // a title wider than the card breaks at its last word that fits, onto a
+    // a title wider than its band breaks at its last word that fits, onto a
     // second line, where the card's foot holds the line and the sub under it
     size_t head = title.n;
     int tl = th - (d.desk ? 4 : 2) * d.fs;   // the second line's step
