@@ -1145,23 +1145,25 @@ def _edit_state(ws):
         out["selected"] = ed.selected_text()[:60] if ed.has_selection() else ""
         out["top"] = ed.top
         out["caret"] = [ed.row, ed.col]
-        lay = getattr(ws, "code_layout", None)
-        if lay is not None and out["tab"] == "code":
+        page = getattr(ws.code_layer, "page", None) if out["tab"] == "code" else None
+        view = page.views.get("code") if page is not None else None
+        if view is not None:
             out["autoscroll"] = ws.code_layer.autoscrolling()
             # where the text lies on the glass: x of column 0, y of the top
-            # row. On the desk the Code tab lays out in its pane's body
-            # (EditorDesk.laid_out), the pane in the Editor window's content.
+            # row, a cell, a line, as the page last drew its text view. On
+            # the desk the page draws in its pane's body (EditorDesk.laid_out),
+            # the pane in the Editor window's content.
+            rect, _top, cell, lh, x0 = view[:5]
             ox = oy = 0
             desk = getattr(ws, "built_editor_desk", None)
             got = desk.laid_out("code") if desk is not None else None
             if got is not None:
-                (ox, oy, _w, _h), lay = got
+                ox, oy = got[0][:2]
                 win = getattr(getattr(ws, "wm", None), "windows", {}).get("menu")
                 if win is not None:
                     cx, cy = win.content_rect()[:2]
                     ox, oy = ox + cx, oy + cy
-            out["grid"] = [ox + ws.code_layer._text_x0(lay, ed), oy + lay.y0,
-                           lay.cell, lay.lh]
+            out["grid"] = [ox + x0, oy + rect[1], cell, lh]
     return out
 
 
