@@ -5,8 +5,10 @@ and a handheld's (its status cluster's ring room is not the page's yet), is
 `shell_layout.pack`'s. `draw` is a frame of the page onto a bar's strip."""
 
 import bar_ui
+import iconsets as _iconsets
 import layout_base as LB
 import shell_layout as SL
+import status_items as _status
 import uitree as S
 
 s = bar_ui.s
@@ -40,6 +42,7 @@ def _page():
     if p is None:
         import uitree_editor
         p = _PAGE[0] = uitree_editor.page(bar_ui.bar, None, None)
+        _WINS[0] = _ITEMS_W[0] = None       # (a new page's store holds neither)
     return p
 
 
@@ -58,6 +61,35 @@ def _place(rect, names, cs, fs, clock_w, sys_len, n_items):
 
 
 _WINS = [None]                  # the `wins` rows last written (the window manager's, kept while they stand)
+SEL = [-1]                      # the status item whose menu is open (the bar layer's), -1 none
+PAUSED = ["ink_dim"]            # a paused item's ink as a tone: the look's content role (the bar layer's)
+_ITEMS = [None, -1, -2, None, -1]   # the `items` rows, and the items' gen, SEL, PAUSED and count they show
+_ITEMS_W = [None]               # the `items` rows last written
+_KEYS = tuple(str(k) for k in range(_status.CAP))
+
+
+def _items(n):
+    """The `items` rows for `n` status items (`status_items.ITEMS` in its
+    order, an item it does not hold yet as the app glyph in the accent): its
+    key its index, its icon the set's slot or the app glyph where the set
+    has none, its tone its state's ink, the one whose menu is open marked.
+    The list is kept while all of that stands."""
+    it = _status.ITEMS
+    g = it.gen
+    c = _ITEMS
+    if c[0] is not None and c[1] == g and c[2] == SEL[0] and c[3] is PAUSED[0] and c[4] == n:
+        return c[0]
+    rows = []
+    for k in range(n):
+        x = it.at(k)
+        icon = x.icon if x is not None else None
+        st = x.state if x is not None else _status.ON
+        rows.append({"k": _KEYS[k], "icon": icon if icon in _iconsets.SLOT else "app",
+                     "on": k == SEL[0],
+                     "tone": "danger" if st == _status.ERROR else PAUSED[0] if st == _status.PAUSED
+                     else "accent"})
+    c[0], c[1], c[2], c[3], c[4] = rows, g, SEL[0], PAUSED[0], n
+    return rows
 
 
 def _states(names, cs, fs, clock_w, sys_len, n_items, glyph=None, wins=None):
@@ -70,17 +102,20 @@ def _states(names, cs, fs, clock_w, sys_len, n_items, glyph=None, wins=None):
         _WINS[0] = wins
         s._v["wins"] = S._check(s._t["wins"], wins, "s.wins")
         s._ver["wins"] += 1
-    g = 2 * cs
+    n = min(n_items, _status.CAP)
+    items = _items(n)
+    if items is not _ITEMS_W[0]:
+        _ITEMS_W[0] = items
+        s._v["items"] = S._check(s._t["items"], items, "s.items")
+        s._ver["items"] += 1
     sg = max(6 * cs, 4 * fs)        # a gap between inks (an icon item is its ink wide)
-    ic = 16 * cs
     _put("sg", sg)
     _put("cw", clock_w)
-    _put("sys_w", sys_len or ic)
-    _put("status", bool(n_items) and ("wifi" in names or "battery" in names))
-    _put("status_w", n_items * ic + max(0, n_items - 1) * max(g, 4 * fs))   # BarLayer._status_x's stride
-    for n in LEFT + RIGHT:
-        if n != "battery":
-            _put(SHOWN.get(n, n), n in names)
+    _put("sys_w", sys_len or 16 * cs)
+    _put("status", bool(n) and ("wifi" in names or "battery" in names))
+    for nm in LEFT + RIGHT:
+        if nm != "battery":
+            _put(SHOWN.get(nm, nm), nm in names)
     if glyph is not None:
         _put("batt_icon", "battery" in names and not glyph)
         _put("batt_glyph", "battery" in names and glyph)
@@ -111,8 +146,11 @@ def pack(w, h, rows, cs, fs, clock_w, text_w=None, of=None, sys_len=0, cluster=N
         iy = 1 + (thick - LB.BAR_ROWS * cs) // 2
         cells = []
         for name in LEFT + ("status",) + RIGHT:
-            r = page.rect_of("battery_st" if name == "battery" and s._v["batt_glyph"] else name)
-            if r is None or (name != "status" and name not in names) or (name == "status" and not s._v["status"]):
+            if name == "status":
+                r = _items_span(page, n_items) if s._v["status"] else None
+            else:
+                r = page.rect_of("battery_st" if name == "battery" and s._v["batt_glyph"] else name)
+            if r is None or (name != "status" and name not in names):
                 continue
             x, _y, cw, _h = r
             if name in ("menu", "zone", "status", "wifi", "battery"):
@@ -123,6 +161,31 @@ def pack(w, h, rows, cs, fs, clock_w, text_w=None, of=None, sys_len=0, cluster=N
             cells.append((name, r, n_items if name == "status" else None, slot))
         out.append((bar[0], rect, (thick - LB.BAR_ROWS * fs) // 2, tuple(cells)))
     return tuple(out)
+
+
+def _items_span(page, n):
+    """The status items' cell: the span of the page's `n` item cells."""
+    x0 = x1 = None
+    for k in range(min(n, _status.CAP)):
+        r = page.rect_of(_KEYS[k] + "/item")
+        if r is not None:
+            x0 = r[0] if x0 is None else min(x0, r[0])
+            x1 = r[0] + r[2] if x1 is None else max(x1, r[0] + r[2])
+            y, h = r[1], r[3]
+    return None if x0 is None else (x0, y, x1 - x0, h)
+
+
+def item_rects(rect, names, cs, fs, clock_w, sys_len, n_items, out):
+    """The status items of a bar at `rect` (a packed bar of the page's
+    shape): their rects in its bar's coordinates into `out` (cleared), in
+    the items' order."""
+    page = _place(rect, names, cs, fs, clock_w, sys_len, n_items)
+    del out[:]
+    for k in range(min(n_items, _status.CAP)):
+        r = page.rect_of(_KEYS[k] + "/item")
+        if r is not None:
+            out.append(r)
+    return out
 
 
 def chip_rects(rect, names, cs, fs, clock_w, sys_len, n_items, wins, out):

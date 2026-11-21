@@ -1419,7 +1419,8 @@ class BarLayer:
             show_x = self.show_x(where)
             self._ink_dx = self._status_dx(cells, self._cluster(game)) \
                 if looked and not across else None
-            sel = None if game or across else self._selected_box(where, cells)
+            paged = looked and not across and _paged(edge, cells)
+            sel = None if game or across or paged else self._selected_box(where, cells)
             self._sel_ink = None
             if sel is not None:
                 # the bar item whose popover is open: selected, the tabs' fill;
@@ -1428,7 +1429,7 @@ class BarLayer:
                 got = _ui_draw.current(cv, ws.theme_colors, sel, r=5 * fs, fs=fs)
                 if got is not None and _ui_draw.marks()[3]:
                     self._sel_ink = (sel, got)
-            if looked and not across and _paged(edge, cells):
+            if paged:
                 self._ink_dx = None
                 self._page_draw(cv, where, bar, edge, cells, only)
             else:
@@ -1477,9 +1478,40 @@ class BarLayer:
         L = ws.layout
         self._page_at = (where, bar, cells)
         _bar_ui.PAINT[0] = self._page_paint
+        self._page_items(where)
         _bar_engine.draw(cv, ws.theme_colors, bar, names, L.cs, L.fs, cw or L.clock_w, sys_w,
                          n_items, ws.wifi_icon_kind(), self.clock_text(), self._battery_state() != 0,
                          clip, self._wins())
+
+    def _page_items(self, where):
+        """What the bar page's status items show beyond the items: which one's
+        menu is open (`bar_engine.SEL`) and the look's paused ink
+        (`bar_engine.PAUSED`)."""
+        m = getattr(self.ws, "sysmenu", None)
+        _bar_engine.SEL[0] = self.ws.status_open_k \
+            if m is not None and m.open and m.widget == "status" and not self._in_window(where) else -1
+        _bar_engine.PAUSED[0] = self.ws.look.live.tones.get("paused", "ink_dim")
+
+    def page_item_rects(self, bar, out):
+        """The status items of packed bar `bar` placed by the bar page,
+        their rects in the bar's coordinates in the items' order into `out`,
+        or None where the page does not draw that bar (`_paged`)."""
+        edge, rect, _dy, cells = bar
+        if not _paged(edge, cells):
+            return None
+        names, cw, sys_w, n_items = self._page_names(cells)
+        L = self.ws.layout
+        return _bar_engine.item_rects(rect, names, L.cs, L.fs, cw or L.clock_w, sys_w, n_items, out)
+
+    def _status_boxes(self, bar, r, n):
+        """The boxes of the `n` status items of status cell `r` in packed
+        bar `bar`: the bar page's where it draws that bar, else the
+        stride's (`_status_x`)."""
+        got = self.page_item_rects(bar, []) if bar is not None else None
+        if got is not None:
+            return got
+        x, side, step = self._status_x(r, n)
+        return [(x + k * step, r[1], side, side) for k in range(n)]
 
     @staticmethod
     def _page_names(cells):
@@ -1517,28 +1549,19 @@ class BarLayer:
     def _page_again(self, cv, where, bar, span):
         """The bar page drawn again over `span` (bar coordinates) of `bar`
         (a packed bar) on the canvas it lies on, whose ground there is
-        fresh (`repaint_cell`): the selected item's fill first, as
-        `_render_bar` draws it."""
+        fresh (`repaint_cell`)."""
         edge, (bx, by, bw, bh), _dy, cells = bar
         clip = (bx + span[0], by + span[1], span[2], span[3])
         cv.clip(clip[0], clip[1], clip[2], clip[3])
         try:
-            sel = self._selected_box(where, cells)
             self._sel_ink = None
-            if sel is not None:
-                fs = self.ws.layout.fs
-                cv.camera(-bx, -by)
-                got = _ui_draw.current(cv, self.ws.theme_colors, sel, r=5 * fs, fs=fs)
-                cv.camera(0, 0)
-                if got is not None and _ui_draw.marks()[3]:
-                    self._sel_ink = (sel, got)
             self._page_draw(cv, where, (bx, by, bw, bh), edge, cells, clip)
         finally:
             cv.clip()
 
     def _page_paint(self, name, cv, x, y, w, h):
-        """A canvas of the bar page: the system button, the status items, a
-        hand-drawn battery, through their painters in the bar's coordinates
+        """A canvas of the bar page: the system button, a hand-drawn
+        battery, through their painters in the bar's coordinates
         (the page is drawn at the bar's origin on `cv`)."""
         where, bar, cells = self._page_at
         ox, oy = _bar_engine._ORIGIN
@@ -1558,8 +1581,6 @@ class BarLayer:
                 side = 16 * u
                 self._battery_glyph(cv, x + (w - side) // 2, (box[3] - side) // 2, side, u,
                                     self._battery_state())
-            elif name == "status":
-                self._paint_status(cv, (x, r[1], w, r[3]), c[2])
             else:
                 self._paint_look_cell(cv, where, name, (x, r[1], w, r[3]), None, box, False)
         finally:
@@ -1918,14 +1939,17 @@ class BarLayer:
                 ws.icon(it.icon, x, r[1], cv, scale=max(1, side // 16), ink=ink)
             x += step
 
-    def status_hit(self, r, n, px):
+    def status_hit(self, r, n, px, bar=None):
         """The index of the status item under bar x `px` in status cell `r`
-        holding `n`, or None."""
+        holding `n` of packed bar `bar`, or None."""
         if not n:
             return None
-        x, side, step = self._status_x(r, n)
-        k = (px - x) // step if px >= x else -1
-        return k if 0 <= k < n and px < x + k * step + side else None
+        boxes = self._status_boxes(bar, r, n)
+        for k in range(len(boxes)):
+            b = boxes[k]
+            if b[0] <= px < b[0] + b[2]:
+                return k
+        return None
 
     def _cluster_box(self, cells):
         """The handheld's status cluster's focus ring, (x, y, w, h) in its
@@ -2361,9 +2385,8 @@ class BarLayer:
                 elif c[0] == "status":
                     n = c[2] or 0
                     if n:
-                        x, side, step = self._status_x(c[1], n)
-                        for k in range(n):
-                            rects.append(((x + k * step, c[1][1], side, side), "status"))
+                        for b in self._status_boxes(bar, c[1], n):
+                            rects.append(((b[0], c[1][1], b[2], c[1][3]), "status"))
                 elif c[0] in _TAPPED and (show_x or c[0] != "close"):
                     rects.append((c[1], c[0]))
             if cluster is not None:
@@ -2584,7 +2607,7 @@ class BarLayer:
             ws.widget_tap("battery")         # the cluster opens the control center
             return True
         if name == "status":
-            k = self.status_hit(hit[1], hit[2] or 0, px)
+            k = self.status_hit(hit[1], hit[2] or 0, px, bar)
             if k is not None:
                 ws.notices.open_status_menu(_ITEMS.at(k))
             return True

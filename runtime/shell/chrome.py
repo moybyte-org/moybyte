@@ -1083,9 +1083,10 @@ class Live:
     the same block, and `buttons` its button leaves as `ui.use_buttons`
     installs them: (app or None, kind, leaves), a paint fill its first stop's
     colour, every colour placed; `fixed` the colours no theme changes
-    (FIXED), placed in the block too."""
+    (FIXED), placed in the block too; `tones` each content role as the
+    "#RRGGBB" text a page's `tone=` takes."""
 
-    __slots__ = ("tokens", "content", "near", "block", "used", "look", "buttons", "fixed")
+    __slots__ = ("tokens", "content", "tones", "near", "block", "used", "look", "buttons", "fixed")
 
 
 # The colours no theme changes (docs/media/look_2026-10/DESIGN.md, Components:
@@ -1153,7 +1154,7 @@ def live_colors(name, variant=DEFAULT_VARIANT):
     toks = _ui_draw._C.tokens()
     roles = _ui_draw._C.theme_roles()
     rec = Live()
-    rec.tokens, rec.content, near_tok = {}, {}, {}
+    rec.tokens, rec.content, rec.tones, near_tok = {}, {}, {}, {}
     for i in range(len(roles)):
         v = placed[i]
         if i < len(toks):
@@ -1162,6 +1163,8 @@ def live_colors(name, variant=DEFAULT_VARIANT):
             near_tok[roles[i]] = bool(v) if flag else near[i]
         else:
             rec.content[roles[i]] = v
+            if row[i] >= 0:
+                rec.tones[roles[i]] = "#%06x" % (row[i] & 0xffffff)
     rec.near = near_tok
     lv = list(leaves)
     for k, i in enumerate(at):
