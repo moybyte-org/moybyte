@@ -12,7 +12,8 @@ import native_build
 _DIR = os.path.join(native_build.ROOT, "native", "moy_uitree")
 
 PART = native_build.Part("uitree", ("moy_uitree.h", "moy_uitree_int.h", "moy_uitree.c",
-                                    "moy_uitree_lang.c", "moy_uitree_walk.c", "moy_uitree_aot.c", "moy_uitree_run.c"),
+                                    "moy_uitree_lang.c", "moy_uitree_walk.c", "moy_uitree_aot.c", "moy_uitree_run.c",
+                                    "moy_uitree_check.c", "moy_uitree_schema.h"),
                           (_DIR,))
 
 _P, _I, _S, _Z = c.c_void_p, c.c_int, c.c_char_p, c.c_size_t
@@ -84,6 +85,8 @@ _SIGS = (
     ("uit_popover", [_P, c.c_char_p, _Z], _I),
     ("uit_stats", [_P, _I32], _I),
     ("uit_layout_hash", [], c.c_uint32),
+    ("uit_check_prop", [_S, _S, _I, _S, c.c_char_p, _Z], _S),
+    ("uit_prop_words", [_S, _S], _S),
     ("uit_save", [_P, c.c_char_p, _Z, _S, c.c_uint32, c.c_char_p, _Z], _I),
     ("uit_load", [_P, c.c_char_p, _Z, _S, _S], _I),
     ("uit_mem", [c.POINTER(c.c_uint32)], None),
@@ -108,6 +111,23 @@ def lib():
 
 def b(s):
     return s.encode("utf-8") if isinstance(s, str) else s
+
+
+def check_prop(kind, prop, vc, word):
+    """None, or (code, what, expected, fix): uit_check_prop, as the
+    MicroPython module's `check_prop`."""
+    out = c.create_string_buffer(1024)
+    code = lib().uit_check_prop(b(kind), b(prop), vc, b(word) if word is not None else None, out, 1024)
+    if code is None:
+        return None
+    parts = out.value.decode("utf-8").split("\x1f")
+    return (code.decode("ascii"), parts[0], parts[1], parts[2])
+
+
+def prop_words(kind, prop):
+    """Word prop `prop`'s words, comma-separated, or None."""
+    w = lib().uit_prop_words(b(kind), b(prop))
+    return w.decode("ascii") if w is not None else None
 
 
 def layout():

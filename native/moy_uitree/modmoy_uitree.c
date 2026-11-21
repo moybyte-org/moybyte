@@ -801,12 +801,42 @@ static mp_obj_t uit_mod_layout(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(uit_mod_layout_obj, uit_mod_layout);
 
+// check_prop(kind, prop, vc, word) -> None, or (code, what, expected, fix): uit_check_prop
+static mp_obj_t uit_mod_check_prop(size_t n, const mp_obj_t *a)
+{
+    char out[1024];
+    const char *code = uit_check_prop(CSTR(a[0]), CSTR(a[1]), mp_obj_get_int(a[2]), CSTR(a[3]), out, sizeof out);
+    if (!code)
+        return mp_const_none;
+    mp_obj_t t[4];
+    t[0] = mp_obj_new_str(code, strlen(code));
+    const char *s = out;
+    for (int i = 1; i < 4; i++) {
+        const char *e = strchr(s, 0x1f);
+        size_t k = e ? (size_t)(e - s) : strlen(s);
+        t[i] = mp_obj_new_str(s, k);
+        s = e ? e + 1 : s + k;
+    }
+    return mp_obj_new_tuple(4, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(uit_mod_check_prop_obj, 4, 4, uit_mod_check_prop);
+
+// prop_words(kind, prop) -> its words, comma-separated, or None
+static mp_obj_t uit_mod_prop_words(mp_obj_t kind, mp_obj_t prop)
+{
+    const char *w = uit_prop_words(CSTR(kind), CSTR(prop));
+    return w ? mp_obj_new_str(w, strlen(w)) : mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(uit_mod_prop_words_obj, uit_mod_prop_words);
+
 static const mp_rom_map_elem_t uit_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_uitree) },
     { MP_ROM_QSTR(MP_QSTR_Engine), MP_ROM_PTR(&eng_type) },
     { MP_ROM_QSTR(MP_QSTR_mem), MP_ROM_PTR(&uit_mod_mem_obj) },
     { MP_ROM_QSTR(MP_QSTR_peak_reset), MP_ROM_PTR(&uit_mod_peak_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_layout), MP_ROM_PTR(&uit_mod_layout_obj) },
+    { MP_ROM_QSTR(MP_QSTR_check_prop), MP_ROM_PTR(&uit_mod_check_prop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_prop_words), MP_ROM_PTR(&uit_mod_prop_words_obj) },
     { MP_ROM_QSTR(MP_QSTR_FORMAT), MP_ROM_INT(UIT_FORMAT) },
 };
 static MP_DEFINE_CONST_DICT(uit_globals, uit_globals_table);

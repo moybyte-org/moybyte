@@ -37,7 +37,9 @@ and conditions are checked against the declared types when the page is
 built, once, at open.
 
 It imports no engine: `tools/uitree_check.py` runs an app's page functions
-with this module alone. The replay into the toolkit's verbs is
+with this module and the engine's prop check alone (`moy_uitree.check_prop`,
+the contract's one table of kinds and props, which every front checks a
+node's props against). The replay into the toolkit's verbs is
 `uitree_app.py` (the Editor's kinds: `uitree_editor.py`).
 
 Every mistake is a `UIError`: a code, the app's file and line, what was
@@ -47,12 +49,21 @@ import collections
 import re
 import sys
 
+# The contract's prop check is the engine's C. The browser's build carries no engine (its
+# apps are the boards', checked on the host), so there a prop is checked by nothing but
+# this table's routing (`_node`: E00 for one it does not route).
+try:
+    from moy_uitree import check_prop as _check_prop, prop_words as _prop_words
+except ImportError:
+    _check_prop = _prop_words = None
+
 # The host's introspection, and the one place a board goes without it. A
 # board's MicroPython has no frames, signatures or fuzzy matching: there an
 # error's file:line reads ?:0, a handler's parameter count is not checked at
-# its declaration, a misspelt name gets no "did you mean", and a service's
-# post outside a handler goes to the app declared last. Every error code is
-# raised on both; tools/uitree_check.py runs the full checks on the host.
+# its declaration, a misspelt state or action name gets no "did you mean" (a
+# misspelt prop does: `_check_prop` is C), and a service's post outside a
+# handler goes to the app declared last. Every error code is raised on both;
+# tools/uitree_check.py runs the full checks on the host.
 try:
     import difflib
     import inspect
@@ -1945,7 +1956,9 @@ class Node:
             b.ctx = Ctx()
 
 
-# the props each kind takes: text, int, cond, choice, lit, fn, action0/1/p (none, the row, a pointer event)
+# how the reference keeps each prop of a kind: text, int, cond, choice, lit, fn, action0/1/p (none,
+# the row, a pointer event). Which props a kind takes, and the words a word prop takes, are the
+# contract's (`_check_prop`); this table only routes what that check let through.
 _C = {"shown": "cond"}
 SCHEMA = {
     "page": {"title": "text"},
@@ -2012,14 +2025,13 @@ _FN_FIX = {None: "%s=draw, where def draw(cv, x, y, w, h)",
            ("legacy", "keys"): "%s=keys, where def keys(i) returns whether it took the input",
            ("legacy", "hints"): "%s=hints, where def hints() returns the band's hints",
            ("legacy", "gen"): "%s=gen, where def gen() returns an int that moves with its pixels"}
-CHOICES = {"dir": ("row", "col"), "kind": ("normal", "primary", "danger", "tonal", "bar"),
-           "wrap": ("cut", "word", "char"), "align": ("start", "center", "end"),
-           "face": ("ui", "title", "mono", "caption", "result"), "follow": (True, False),
-           "syntax": ("plain", "sgr", "python", "lua", "json", "markdown")}
-# §7.9: a node's retired props, each with its replacement (N04)
-RETIRED_PROPS = {"disabled": 'when= on the action, with off="grey"', "keyname": "the action's keys=",
-                 "ink": "tone=", "does": "hint= on the action", "fixed": 'weights in sizes ("1*")',
-                 "paint": "an image field: image=.cover", "below": "scroll new=", "lit": "marked="}
+def _checked(kind, k, v, where):
+    """The contract's check of prop `k` of a `kind` node: N01 or N04 at the call's line. The
+    value's class is the reference's own check (`_prop`, `_direct_src`), so it goes as any (0)."""
+    bad = _check_prop and _check_prop(kind, k, 0, v if type(v) is str else None)
+    if bad is not None:
+        code, what, expected, fix = bad
+        raise UIError(code, what, expected=expected or None, fix=fix, where=where)
 
 
 def _b():
@@ -2044,18 +2056,13 @@ def _node(kind, key, props, where, act=None):
         pt = schema.get(k)
         if v is None and (pt is None or not pt.startswith("action")):
             continue                        # an optional prop given None is not given
-        if pt is None and k in RETIRED_PROPS:
-            raise UIError("N04", "ui.%s %s= is retired" % (kind, k), where=where, fix=RETIRED_PROPS[k])
-        if pt is None:
-            near = _near(k, schema)
-            raise UIError("N01", "ui.%s has no prop %r" % (kind, k), where=where,
-                          expected=", ".join(schema) or "(none)",
-                          fix="did you mean %s?" % near if near else ('drop it; %s takes %s' % (kind, ', '.join(schema) or 'none')))
+        if pt is None or pt == "lit":
+            _checked(kind, k, v, where)
+            if pt is None:
+                raise UIError("E00", "ui.%s %s= is the contract's, and no engine draws it on a %s yet" % (kind, k, kind),
+                              where=where, fix="drop it")
         n.src[k] = v
         if pt == "lit":
-            if k in CHOICES and v not in CHOICES[k]:
-                raise UIError("N01", "ui.%s %s=%r" % (kind, k, v), where=where,
-                              expected=", ".join(CHOICES[k]), fix='%s=%r' % (k, CHOICES[k][0]))
             n.l[k] = v
         elif pt == "fn":
             if not callable(v):
@@ -2168,10 +2175,11 @@ def _prop(pt, k, v, ctx, where, kind):
         return lambda row: tuple(int(x) for x in str(t.g(row)).split())
     if pt == "choice":
         tmpl(v, ctx, where)
+        words = _prop_words(kind, k).split(",") if _prop_words else None
         for s in _branches(v):
-            if s not in CHOICES[k]:
+            if words and s not in words:
                 raise UIError("T03", "ui.%s %s=%r: %r" % (kind, k, v, s), where=where,
-                              expected=", ".join(CHOICES[k]), fix='%s=%r, or {cond?a:b} of two of them' % (k, CHOICES[k][0]))
+                              expected=", ".join(words), fix='%s=%r, or {cond?a:b} of two of them' % (k, words[0]))
         t = tmpl(v, ctx, where)
         return t.g
     t = tmpl(v, ctx, where, k)
@@ -2231,9 +2239,6 @@ def label(text, **p):
     its width, `wrap="word"` breaks it at word breaks (at most `lines=`
     lines, then an ellipsis), `align=`, `tone=`, `icon=` before it."""
     where = _caller()
-    if p.get("size", "fit") != "fit":
-        raise UIError("N01", "ui.label size=%r" % (p["size"],), where=where, expected="fit",
-                      fix='size="fit", or drop it')
     if "lines" in p and (type(p["lines"]) is not int or p["lines"] < 1):
         raise UIError("N01", "ui.label lines=%r" % (p["lines"],), where=where,
                       expected="an int, at least 1", fix="lines=2")
@@ -2348,18 +2353,12 @@ def toggle(label, name, **p):
     return _node("toggle", _state_name(name, (BOOL,), "ui.toggle", where), dict(p, label=label), where)
 
 
-def _look(kind, look, looks, where):
-    if look not in looks:
-        raise UIError("N01", "ui.%s look=%r" % (kind, look), where=where,
-                      expected=", ".join(repr(x) for x in looks), fix="look=%r" % looks[0])
-
-
 def slider(label, name, lo, hi, look="bar", **p):
     """A value from lo to hi, left and right its own. `look="steps"` draws
     a segment a step and no number; `icon=` (a template; empty draws none)
     stands before its label."""
     where = _caller()
-    _look("slider", look, ("bar", "steps"), where)
+    _checked("slider", "look", look, where)
     p = dict(p, look=look) if look != "bar" else p
     if isinstance(name, str) and name.startswith("."):
         f = _row_field("slider", name, INT, where)
@@ -2394,7 +2393,7 @@ def seg(label, name, labels=None, text=None, look="seg", **p):
     `text=`. `look="cycle"` shows the one value between chevrons and
     activation steps it; `look="seg"` shows every value."""
     where = _caller()
-    _look("seg", look, ("seg", "cycle"), where)
+    _checked("seg", "look", look, where)
     _state_name(name, (Enum, RowOf), "ui.seg", where)
     t = _st()._t[name]
     if isinstance(t, Enum):
@@ -2491,9 +2490,6 @@ def progress(value, **p):
     if "max" not in p:
         raise UIError("N01", "progress %s has no max=" % value, where=where,
                       fix="max=\"{NAME}\" (an int), or max=0 for work whose size is not known")
-    if p.get("look", "count") != "count":
-        raise UIError("N01", "progress look=%r" % (p["look"],), where=where, expected="count",
-                      fix='look="count" ("3 of 5", or the label saying it: "{done} of {total} found"), or drop it (a bar)')
     return _node("progress", None, dict(p, value="{%s}" % value if not str(value).startswith("{") else value),
                  where)
 
@@ -2557,7 +2553,7 @@ def foot(look="end", **p):
     end, a label before them; `look="share"` (F-13): its buttons share its
     width, a label a line of its own over them."""
     where = _caller()
-    _look("foot", look, ("end", "share"), where)
+    _checked("foot", "look", look, where)
     if look != "end":
         p["look"] = look
     return _node("foot", "foot", p, where)

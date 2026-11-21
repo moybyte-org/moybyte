@@ -1397,7 +1397,7 @@
      "level": 1
     },
     "wrap": {
-     "type": "word:cut,word",
+     "type": "word:cut,word,char",
      "level": 1
     },
     "lines": {
@@ -1604,7 +1604,7 @@
      "level": 2
     },
     "syntax": {
-     "type": "name",
+     "type": "word:plain,sgr,python,lua,json,markdown",
      "level": 2
     },
     "face": {
@@ -1837,7 +1837,7 @@
      "level": 1
     },
     "look": {
-     "type": "word:steps",
+     "type": "word:bar,steps",
      "level": 2
     },
     "icon": {
@@ -1927,7 +1927,7 @@
      "level": 2
     },
     "look": {
-     "type": "word:cycle",
+     "type": "word:seg,cycle",
      "level": 2
     },
     "text": {
