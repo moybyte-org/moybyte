@@ -841,7 +841,7 @@ local function cond_expr(e, ctx, at)
     if e:sub(pos, pos) == "(" then
       if not DERIVE_MODE then
         fail("C03", at, "the condition " .. q(e) .. " has brackets", "an inline condition without brackets", "brackets",
-             "ui.derive(\"NAME\", \"bool\", \"" .. e .. "\") and test NAME")
+             "ui.derive(\"NAME\", { cond = \"" .. e .. "\" }) and test NAME")
       end
       pos = pos + 1
       local n = expr()
@@ -889,7 +889,7 @@ local function cond_expr(e, ctx, at)
     if (other == "&&" or other == "||") and other ~= op then
       fail("C02", at, "the condition " .. q(e) .. " mixes && and ||" .. (DERIVE_MODE and " at one bracket level" or ""),
            "&& or ||, not both", q(e), DERIVE_MODE and "brackets around one side"
-           or "ui.derive(\"NAME\", \"bool\", \"a && (b || c)\") and test NAME")
+           or "ui.derive(\"NAME\", { cond = \"a && (b || c)\" }) and test NAME")
     end
     return n
   end
@@ -1115,15 +1115,23 @@ end
 -- derives: a bool condition or a text template over state, computed by the
 -- layer and written by nobody. Compiled once every declaration is in (a
 -- derive may read one declared below it); a cycle is G01.
-function T.derive(name, kind, src)
+function T.derive(name, o, extra)
   local at = where()
   no_build("ui.derive", at)
   if type(name) ~= "string" or not name:match("^[%a_][%w_]*$") then
     fail("N01", at, "a derive's name is " .. describe(name), "a word", describe(name))
   end
-  if kind ~= "bool" and kind ~= "text" then
-    fail("N01", at, "the derive " .. q(name) .. "'s type is " .. describe(kind), "\"bool\" (a condition) or \"text\" (a template)", describe(kind))
+  local form = "ui.derive(\"" .. name .. "\", { cond = \"a && b\" }), or { text = \"{n} left\" }"
+  if type(o) ~= "table" or getmetatable(o) ~= nil or extra ~= nil then
+    fail("N01", at, "the derive " .. q(name) .. " is given " .. describe(o), "a table of cond = or text =", describe(o), form)
   end
+  for k in pairs(o) do
+    if k ~= "cond" and k ~= "text" then fail("N01", at, "the derive " .. q(name) .. " takes no " .. q(k), "cond or text", q(k), form) end
+  end
+  if (o.cond == nil) == (o.text == nil) then
+    fail("N01", at, "the derive " .. q(name) .. " takes one of cond and text", "one of them", o.cond and "both" or "neither", form)
+  end
+  local kind, src = o.cond ~= nil and "bool" or "text", o.cond or o.text
   if type(src) ~= "string" then fail("N01", at, "the derive " .. q(name) .. "'s source is " .. describe(src), "a text", describe(src)) end
   claim(name, "derive", at)
   DECL[name] = { t = kind, derived = src }

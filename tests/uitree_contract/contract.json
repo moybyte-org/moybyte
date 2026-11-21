@@ -172,8 +172,8 @@
    ],
    "meaning": "`&&` and `||` mixed at one bracket level (inline: at all)",
    "fix": {
-    "python": "`ui.derive(\"ok\", \"bool\", \"a && (b || c)\")` and `shown=\"ok\"`",
-    "lua": "`ui.derive(...)`",
+    "python": "`ui.derive(\"ok\", cond=\"a && (b || c)\")` and `shown=\"ok\"`",
+    "lua": "`ui.derive(\"ok\", { cond = \"a && (b || c)\" })`",
     "c": "a `derive` node"
    },
    "as_run": ""
@@ -484,7 +484,7 @@
    "stage": [
     "build"
    ],
-   "meaning": "an unknown kind or prop, a bad prop value, a missing required prop (`progress` with no `max=`), a wrong count of arguments, a function given where its result belongs or the reverse",
+   "meaning": "an unknown kind or prop, a bad prop value, a missing required prop (`progress` with no `max=`; a `derive` with neither or both of `cond=` and `text=`), a wrong count of arguments, a function given where its result belongs or the reverse",
    "fix": {
     "python": "the near name the message offers",
     "lua": "as Python",

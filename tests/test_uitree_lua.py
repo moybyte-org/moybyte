@@ -211,7 +211,7 @@ CASES = {
     "E01": (APP + 'local s = ui.state { e = ui.enum("a", "b") }' + PAGE, 2, None),
     "E02": (APP + 'local s = ui.state { e = ui.enum("a", "b", { init = "c" }) }' + PAGE, 2, None),
     "E03": (APP + 'local s = ui.state { e = ui.enum("a", 3, { init = "a" }) }' + PAGE, 2, None),
-    "G01": (APP + 'local s = ui.state { n = 0 }\nui.derive("x", "bool", "y")\nui.derive("y", "bool", "x")' + PAGE, 3, None),
+    "G01": (APP + 'local s = ui.state { n = 0 }\nui.derive("x", { cond = "y" })\nui.derive("y", { cond = "x" })' + PAGE, 3, None),
     "H01": (APP + 'ui.hook("tick", function() end)\nui.page("p", function() ui.button("tick") end)\n', 3, None),
     "H03": (APP + 'ui.hook("tick", function() end, { hint = "Tick" })' + PAGE, 2, None),
     "I02": (APP + 'ui.action("go", "Go", function() end, { icon = "{n}" })' + PAGE, 2, None),
@@ -220,6 +220,9 @@ CASES = {
             'ui.action("stop", "Stop", function() end, { keys = { "s" } })' + PAGE, 3, None),
     "K03": (APP + 'ui.action("go", "Go", function() end, { keys = { "alt+x" } })' + PAGE, 2, None),
     "N01": (APP + 'ui.page("p", function() ui.label("x", { nope = 1 }) end)\n', 2, None),
+    "N01 derive": (APP + 'local s = ui.state { n = 0 }\nui.derive("big", "bool", "n>3")' + PAGE, 3, None),
+    "N01 text derive": (APP + 'local s = ui.state { n = 0 }\nui.derive("left", { text = "{n} left" })\n'
+                        'ui.derive("big", { cond = "n>3", text = "x" })' + PAGE, 4, None),
     "N02": (APP + GO + 'ui.page("p", function()\n  ui.button("go")\n  ui.button("go")\nend)\n', 5, None),
     "N03": (APP + 'local s = ui.state { m = ui.model { key = "id", id = "" } }\nui.page("p", function()\n'
             '  ui.rows("m", function()\n    ui.rows("m", function() ui.label("x") end)\n  end)\nend)\n', 5, None),
@@ -240,7 +243,7 @@ CASES = {
     "S06": (APP + 'local s = ui.state { n = 0 }\ns.n = 1' + PAGE, 3, None),
     "P05": (APP + 'ui.action("go", "Go", function()\n  ui.pop()\nend)' + PAGE, 3, 'ui._fire("go")\n'),
     "S07": (APP + 'local s = ui.state { m = ui.model { name = "" } }' + PAGE, 2, None),
-    "S09": (APP + 'local s = ui.state { n = 0 }\nui.derive("big", "bool", "n>3")\n'
+    "S09": (APP + 'local s = ui.state { n = 0 }\nui.derive("big", { cond = "n>3" })\n'
             'ui.action("go", "Go", function()\n  s.big = true\nend)' + PAGE, 5, 'ui._fire("go")\n'),
     "S10": (APP + 'local s = ui.state { unread = 0 }\nui.action("go", "Go", function()\n  s.unread = 0\nend)\n'
             'ui.page("p", function() ui.scroll({ new = "unread" }, function() ui.label("x") end) end)\n', 4,
@@ -263,7 +266,7 @@ CASES = {
     "A01 source": (APP + 'ui.action("go", "Go", function()\n  ui.post("nope")\nend)' + PAGE, 3, None),
     "A02 source": (APP + 'ui.hook("h", function() end)\nui.action("go", "Go", function()\n  ui.post("h", 3)\nend)'
                    + PAGE, 4, None),
-    "S09 source": (APP + 'local s = ui.state { n = 0 }\nui.derive("big", "bool", "n>3")\n'
+    "S09 source": (APP + 'local s = ui.state { n = 0 }\nui.derive("big", { cond = "n>3" })\n'
                    'ui.action("go", "Go", function()\n  s.big = true\nend)' + PAGE, 5, None),
     "S03 source": (APP + REC + 'ui.action("go", "Go", function()\n  s.r.x = 1\nend)' + PAGE, 4, None),
     "S04 source": (APP + REC + 'ui.action("go", "Go", function()\n  local v = s.r.nope\nend)' + PAGE, 4, None),

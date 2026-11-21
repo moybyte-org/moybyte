@@ -768,7 +768,7 @@ def derive(name, *, cond=None, text=None):
     where = _caller()
     _declaring("derive")
     if (cond is None) == (text is None):
-        raise UIError("D02", "ui.derive(%r) takes one of cond= or text=" % name, where=where,
+        raise UIError("N01", "ui.derive(%r) takes one of cond= or text=" % name, where=where,
                       fix='ui.derive(%r, cond="count > 1") or ui.derive(%r, text="{n} left")' % (name, name))
     _derive(_st(), name, cond if cond is not None else text, "cond" if cond is not None else "tmpl", where)
     return name

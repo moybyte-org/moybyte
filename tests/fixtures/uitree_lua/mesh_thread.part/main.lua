@@ -26,7 +26,7 @@ local s = ui.state {
   asked = false,
   msg = ui.opt(ui.row_of("msgs")),
 }
-ui.derive("readonly", "bool", "t.kind=dm && (t.keystate=waiting || t.keystate=changed)")
+ui.derive("readonly", { cond = "t.kind=dm && (t.keystate=waiting || t.keystate=changed)" })
 ui.labels("STATUS", { sending = "Sending\u{2026}", sent = "Sending\u{2026}", failed = "Not sent", delivered = "" })
 ui.labels("KEYSTATE", { known = "Encrypted", none = "Not private", changed = "Key changed",
                         waiting = "Waiting for key" })
