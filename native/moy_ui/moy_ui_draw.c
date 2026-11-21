@@ -1066,6 +1066,11 @@ int moy_ui_bar_item_w(int slot, int glyph, moy_ui_span_t label, int h, int fs) {
     return x1 - x0 + (label.n ? 6 * (side / 16) + lw : 0);
 }
 
+// A bar item's ON mark: its plate BAR_MARK_X units out from the content along x and
+// BAR_MARK_Y half units across.
+#define BAR_MARK_X 3
+#define BAR_MARK_Y 3
+
 int moy_ui_bar_item(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, const moy_ui_button_t *k) {
     draw_t d;
     open_draw(s, &d);
@@ -1097,8 +1102,8 @@ int moy_ui_bar_item(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, const moy
     int iy = b.y + moy_ui_fdiv(b.h - side, 2);
     int mi = -1;
     if (flags & MOY_UI_F_ON) {
-        moy_ui_box_t m = {(int16_t)(cx - 3 * u), (int16_t)(iy - 3 * u / 2), (int16_t)(cw + 6 * u),
-                          (int16_t)(side + 3 * u)};
+        moy_ui_box_t m = {(int16_t)(cx - BAR_MARK_X * u), (int16_t)(iy - BAR_MARK_Y * u / 2),
+                          (int16_t)(cw + 2 * BAR_MARK_X * u), (int16_t)(side + BAR_MARK_Y * u)};
         moy_ui_current(s, m, MOY_UI_ITEM_CELL, 5 * fs, 0, fs, &mi);
         ink = mi >= 0 ? mi : ink;
     }

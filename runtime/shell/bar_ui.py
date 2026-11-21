@@ -24,6 +24,13 @@ s = ui.state(sys_w=16, sg=4, cw=40, wicon="wifi", time="00:00",
              wins=ui.model(key="k", k="", title="", icon="", on=False, tone=""),
              items=ui.model(key="k", k="", icon="", on=False, tone=""))
 
+# The chips' look: their row's pad and the gap between chips, in units. The
+# ON mark round the focused chip (and an open status item) is the bar item's:
+# BAR_MARK_X units out from the content along x and BAR_MARK_Y half units
+# across (moy_ui_bar_item, native/moy_ui/moy_ui_draw.c).
+CHIP_PAD = 6
+CHIP_GAP = 12
+
 PAINT = [None]      # the bar layer's draw of a canvas: f(name, cv, x, y, w, h)
 TAP = [None]        # the bar layer's open of an item: f(name)
 CHIP = [None]       # the window manager's tap of a window's chip: f(kind)
@@ -78,7 +85,7 @@ def bar():
     with ui.page(""):
         with ui.row("bar", pad=2, gap=2, grow=True):
             ui.canvas("menu", menu_cell, w="{sys_w}", shown="menu")
-            with ui.row("chips", pad=6, gap=12, grow=True, shown="chips"):
+            with ui.row("chips", pad=CHIP_PAD, gap=CHIP_GAP, grow=True, shown="chips"):
                 with ui.rows("wins", dir="row"):
                     ui.button("chip", label="{.title}", icon="{.icon}", kind="bar", marked=".on",
                               tone="{.tone}")
