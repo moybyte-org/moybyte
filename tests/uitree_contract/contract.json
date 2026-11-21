@@ -1167,6 +1167,21 @@
   "work": 2,
   "pictures": 2
  },
+ "queries": {
+  "about": "what a handler or a canvas's draw asks the engine (a build that asks is B01): the Python reference's; Lua has no canvas and draws through moybyte.ui",
+  "text_size": {
+   "level": 2,
+   "returns": "(w, h) of a text at a scale, in the page's face"
+  },
+  "colors": {
+   "level": 2,
+   "returns": "the theme's roles"
+  },
+  "fade": {
+   "level": 2,
+   "returns": "nothing: the toolkit's edge fade drawn over a rect, at its top or its foot"
+  }
+ },
  "action_props": {
   "hint": {
    "type": "tpl",

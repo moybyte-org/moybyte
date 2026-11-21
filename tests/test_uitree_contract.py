@@ -231,6 +231,14 @@ def test_the_lua_layer_holds_to_the_table():
     _held("lua", lua_facts())
 
 
+def test_the_python_layer_answers_the_queries():
+    import runtime  # noqa: F401
+    import uitree as U
+    for q in TABLE["queries"]:
+        if q != "about":
+            assert callable(getattr(U, q, None)), q
+
+
 def test_the_lists_name_no_line_twice():
     for lang in ("python", "lua"):
         known = _known(lang)
