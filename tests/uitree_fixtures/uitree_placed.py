@@ -50,6 +50,7 @@ def _words():
 def _rows():
     ui.label("Rows mode")
     ui.button("look", label="Bump once")
+    ui.slot("dock")
 
 
 def build():

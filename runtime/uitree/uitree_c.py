@@ -57,7 +57,7 @@ _KINDS = {"page": 1, "group": 2, "label": 3, "info": 4, "link": 5, "button": 6, 
 # the placed kinds: a page the engine's layout places holds them (`CEditorPage`)
 _PLACED_KINDS = ("tools", "row", "status", "text_editor", "panes", "pane", "legacy", "slot", "panel", "lent")
 # what a placed page's frame does not draw yet
-_PLACED_GAPS = ("slot", "lent", "tabs")
+_PLACED_GAPS = ("lent", "tabs")
 _PANE_KINDS = ("panes", "pane")
 _LEGACY_FNS = ("draw", "pointer", "keys", "hints", "gen")
 _HEAD = {"rows": ("model",), "table": ("model",), "cards": ("model",), "dialog": ("buttons",)}
