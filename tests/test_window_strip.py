@@ -186,3 +186,23 @@ def test_nothing_in_the_strip_is_cut_by_the_frame(tmp_path, config):
     for j in range(sh):
         assert inked[j][:edge] == ground[j][:edge], (config, "left", j)
         assert inked[j][-edge:] == ground[j][-edge:], (config, "right", j)
+
+
+def test_the_strip_s_layers_go_with_their_window_and_their_console(tmp_path):
+    """A layer is off the gc heap on a board and nothing collects it: the
+    strip's kept layers go back when a window leaves the table, and a new
+    console finds nothing of the last one's (layers, the canvas they were
+    stamped onto, the page)."""
+    ws = _moy_desk(tmp_path / "a")
+    ws.spine.open_app(ws.app("calc"))
+    ws.frame(1 / 30)
+    assert any(lay is not None for lay in SE._LAYS)
+    ws.wm.close_window_kind("calc")
+    ws.frame(1 / 30)
+    assert all(lay is None for lay in SE._LAYS)
+    ws.spine.open_app(ws.app("calc"))
+    ws.frame(1 / 30)
+    assert any(lay is not None for lay in SE._LAYS)
+    _moy_desk(tmp_path / "b")
+    assert all(lay is None for lay in SE._LAYS) and all(k[0] is None for k in SE._KEYS)
+    assert SE._STAMPS[0] is None or SE._STAMPS[0] is not ws.wm.root_canvas
