@@ -113,28 +113,35 @@ ui.labels("TABS", {"running": "Running", "notes": "Notifications"})
 
 
 def _fill(layer):
-    """The rows as the running set and the list hold them now."""
+    """The rows as the running set and the list hold them now, written to
+    the models only where they differ from the rows last written: a sample
+    moves the CPU figures, a run's state its verbs, and an open that moved
+    nothing pushes nothing."""
     procs = layer.ws.procs
     layer._gen = procs.gen
     layer._note_gen = NOTES.gen
     rows = procs.rows()
-    layer.raw = dict((r[0], r) for r in rows)
-    out = []
-    for r in rows:
-        vs = verbs(r)
-        out.append({"id": r[0], "name": r[1], "st": STATES.get(r[3], r[3]), "cpu": cpu_text(r[4]),
-                    "mem": mem_text(r[5]), "first": vs[0], "can_details": DETAILS in vs,
-                    "can_switch": SWITCH in vs, "can_stop": STOP in vs, "can_close": CLOSE in vs})
-    s.procs = out
-    s.any_procs = bool(out)
+    if rows != layer._rows:
+        layer._rows = rows
+        layer.raw = dict((r[0], r) for r in rows)
+        out = []
+        for r in rows:
+            vs = verbs(r)
+            out.append({"id": r[0], "name": r[1], "st": STATES.get(r[3], r[3]), "cpu": cpu_text(r[4]),
+                        "mem": mem_text(r[5]), "first": vs[0], "can_details": DETAILS in vs,
+                        "can_switch": SWITCH in vs, "can_stop": STOP in vs, "can_close": CLOSE in vs})
+        s.procs = out
+        s.any_procs = bool(out)
     layer.notes = list(NOTES.list)
     notes = []
     for n in layer.notes:
         named = n.labels()[:NOTE_LABELS] + [("", ""), ("", "")]
         notes.append({"id": str(n.id), "app": str(n.app), "summary": n.summary, "body": n.body or "",
                       "l1": named[0][1], "l2": named[1][1]})
-    s.notes = notes
-    s.any_notes = bool(notes)
+    if notes != layer._notes:
+        layer._notes = notes
+        s.notes = notes
+        s.any_notes = bool(notes)
     s.hand = procs.handheld()
 
 
@@ -276,6 +283,8 @@ class TasksLayer(Layer):
         self.host = _ui_draw.AppHost()
         self.raw = {}                # a row's key -> the row as Procs.rows gave it
         self.notes = []              # the list's notifications as the rows show them
+        self._rows = None            # the running set's rows and the list's, as last written to the models
+        self._notes = None
         self._gen = -1               # the running set's gen the rows were read at
         self._note_gen = -1
         self._rect = (0, 0, 0, 0)
