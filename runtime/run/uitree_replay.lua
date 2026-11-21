@@ -605,8 +605,21 @@ local function replay(p)
   if want then E.focus(want) end
 end
 
+-- a kind only the C engine draws: refused by name, never drawn wrong
+local C_KINDS = I.C_KINDS
+local function refuse(n)
+  if C_KINDS[n.kind] then
+    fail("E00", n.at, "the reference back end does not draw ui." .. n.kind, "the C engine", "the reference",
+         "run this app on the C engine: uitree_app.use_engine(\"c\")")
+  end
+  for _, k in ipairs(n.kids) do refuse(k) end
+  if n.body then refuse(n.body) end
+  for _, c in pairs(n.built or {}) do refuse(c) end
+  for _, c in pairs(n.cases or {}) do refuse(c) end
+end
+
 I.BACK.frame = function(p)
   first_frame = false
-  if not p.root then build_page(p); first_frame = true end
+  if not p.root then build_page(p); refuse(p.root); first_frame = true end
   replay(p)
 end

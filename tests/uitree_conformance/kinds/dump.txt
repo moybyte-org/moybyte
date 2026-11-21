@@ -1,0 +1,9 @@
+page 'page'  title='Kinds'
+  seg 'mode'  label='Mode'  look='seg'
+  progress 'progress#1'  max=5  label='Done'  value='{done}' = 2
+  menu 'menu#2'  caption='Do'
+    item 'bump'  action=bump
+  table 'items'  cur='sel'  cols=['Name', 'Size']  on=pick
+    [0 rows of items]
+  text_view 'log'
+  label 'label#5'  text='{picked}' = ''

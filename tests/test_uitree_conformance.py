@@ -25,7 +25,12 @@ import pytest
 
 import uitree_conf as C
 
-NAMES = ("counter", "list", "pages", "gates")
+NAMES = ("counter", "list", "pages", "gates", "kinds")
+# the fixtures whose Lua half only the C engine draws (level 2's kinds): on the
+# reference engine the Lua layer refuses them (E00), so the checks that run it skip
+C_ONLY = ("kinds",)
+ON_REFERENCE = os.environ.get("MOYBYTE_UI_ENGINE") == "reference"
+LUA_CHECKS = ("events", "content", "glass", "trace")
 SMALL, DESK = C.CONFIGS
 
 # the rows of the glass outside the page's content: the bar, the hints band
@@ -73,7 +78,7 @@ LUA_DUMP = ("the dump's grammar is open (F-30); Lua keys nodes by kind (`info`),
             "prop's value now (§24.2's example is Python's)")
 KNOWN = {
     ("dump", "counter", None): LUA_DUMP, ("dump", "list", None): LUA_DUMP,
-    ("dump", "pages", None): LUA_DUMP, ("dump", "gates", None): LUA_DUMP,
+    ("dump", "pages", None): LUA_DUMP, ("dump", "gates", None): LUA_DUMP, ("dump", "kinds", None): LUA_DUMP,
 }
 for _n in NAMES:
     KNOWN[("content", _n, DESK)] = LUA_SCALE
@@ -87,6 +92,8 @@ def _params(check, names=NAMES, configs=(None,)):
         for c in configs:
             why = KNOWN.get((check, n, c))
             marks = [pytest.mark.xfail(strict=True, reason=why)] if why else []
+            if ON_REFERENCE and n in C_ONLY and check in LUA_CHECKS:
+                marks = [pytest.mark.skip(reason="the reference back end draws no level-2 kind (E00)")]
             out.append(pytest.param(n, c, marks=marks, id="%s-%s" % (n, c) if c else n))
     return out
 
@@ -131,7 +138,7 @@ def events(trace):
 
 
 def shape(dump):
-    """The tree's kinds and nesting: (depth, kind), nothing under a rows."""
+    """The tree's kinds and nesting: (depth, kind), nothing under a list."""
     out, cut = [], None
     for line in dump.splitlines():
         depth = (len(line) - len(line.lstrip(" "))) // 2
@@ -142,7 +149,7 @@ def shape(dump):
         if kind.startswith("["):
             continue
         out.append("%s%s" % ("  " * depth, kind))
-        if kind == "rows":
+        if kind in ("rows", "table", "cards"):
             cut = depth
     return out
 
