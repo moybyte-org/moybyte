@@ -356,6 +356,38 @@ def test_a_canvas_pointer_hands_down_drag_and_up_in_its_own_coordinates(tmp_path
     assert any("down:touch drag:touch up:touch" in l for l in lines), lines
 
 
+def test_a_letter_key_and_the_confirm_role_fire_on_the_c_engine(tmp_path):
+    """An action's letter key fires it, traced `key 's'`, and the confirm
+    role's key fires its action where nothing on the page is focused, as
+    uitree_c.py's keys() fires them for a Python app."""
+    import uitree_app
+    from runtime import host_app
+    from runtime.host import moy_log
+    uitree_app.use_engine("c")
+    carts = str(tmp_path / "carts")
+    host_app.moy_carts.ensure_dirs(carts)
+    _cart(carts, "Keys", 'ui.app("Keys", { icon = "calc" })\n'
+          'local s = ui.state { n = 0 }\n'
+          'ui.action("save", "Save", function() s.n = s.n + 1 end, { keys = { "s" } })\n'
+          'ui.action("go", "Go", function() s.n = s.n + 10 end, { keys = { "role:confirm" } })\n'
+          'ui.page("p", function() ui.label("{n}") end)\n')
+    ws, drv, frame, open_cart = _console(carts)
+    seq = moy_log.next()
+    open_cart(ws, "Keys")
+    for _ in range(4):
+        frame()
+    drv.type_char(ord("s"))
+    frame()
+    frame()
+    drv.press("a")
+    frame()
+    frame()
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    lines = [r[4].split("[trace] ", 1)[1] for r in moy_log.read(seq, 4000) if "[trace] " in r[4]]
+    acts = [" ".join(l.split()[1:]) for l in lines if l.split()[1:2] == ["action"]]
+    assert acts == ["action save from key 's'", "action go from role confirm"], lines
+
+
 def test_a_cancelled_timer_runs_nothing(tmp_path):
     from runtime import host_app
     from runtime.host import moy_log

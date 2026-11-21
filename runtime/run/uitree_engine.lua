@@ -42,6 +42,7 @@ local FIX = "run this app on the reference engine: uitree_app.use_engine(\"refer
 local X = nil                   -- the store, made at the first frame
 local SLOT, NAMES, TYPES = {}, {}, {}   -- a state's slot by name; the name and declaration by slot
 local AIDX, ACTS = {}, {}       -- an action's index by name; the action by index
+local LETTERS = {}              -- the letter keys the actions declare, as key codes
 local PUSHED = {}               -- each state's write count (a derive's value) as last pushed
 local LOWERED = nil             -- the page whose tree the store holds
 local KEYS = {}                 -- the keys of the lowered page's nodes
@@ -112,7 +113,7 @@ local function declare()
     for _, k in ipairs(a.keys or {}) do
       if k == "role:confirm" then flags = flags | A_ROLE_CONFIRM
       elseif k == "role:back" then flags = flags | A_ROLE_BACK
-      elseif k:match("^%l$") then letters[#letters + 1] = k end
+      elseif k:match("^%l$") then letters[#letters + 1] = k; LETTERS[#LETTERS + 1] = string.byte(k) end
     end
     local off = a.off == "hide" and 1 or a.off == "grey" and 2 or 0
     local i = check(X:action(name, a.label or "", a.hint or "", a.when, off, flags, table.concat(letters), a.icon or ""),
@@ -441,6 +442,22 @@ local function pointers()
   end
 end
 
+-- a letter an action declares, pressed where the engine gives it to that
+-- action (uit_letter: not into a focused field), and the confirm role's key
+-- where nothing is focused, as uitree_c.py's keys() fires them
+local function letters()
+  for _, code in ipairs(LETTERS) do
+    if keyp(code) then
+      local a = X:letter(code)
+      if a >= 0 then fire_placed(ACTS[a].name, "key " .. q(string.char(code))) end
+    end
+  end
+  local name = KEYMAP["role:confirm"]
+  if name and (btnp("a") or keyp(13)) and X:unfocused() and X:dialog() < 0 then
+    fire_placed(name, "role confirm")
+  end
+end
+
 local ROLE_KEYS = { more = function() return btnp("y") or keyp(109) end }
 
 I.BACK.frame = function(p)
@@ -453,6 +470,7 @@ I.BACK.frame = function(p)
   end
   committed()
   pointers()
+  letters()
   local pf = R.pending_focus
   if pf then
     R.pending_focus = nil
