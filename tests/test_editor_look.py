@@ -124,12 +124,12 @@ def test_the_code_tab_keeps_one_left_inset(tmp_path, theme, mode):
     assert at <= num - ox <= at + fs, ("number", num - ox, at)
     code = _ink_left(px, ox + tx0 - cell // 2, ox + lay.cx + lay.cw, y, y + lh)
     assert tx0 <= code - ox <= tx0 + fs, ("code", code - ox, tx0)
-    sx, sy, _sw, sh = cl.page.anchors["status_row"]
+    sx, sy, _sw, sh = cl.page.rect_of("status_row")
     status = _ink_left(px, ox + sx + 1, ox + sx + 200, oy + sy + 1, oy + sy + sh)
     assert x0 <= status - ox <= x0 + fs, ("status", status - ox, x0)
     # The symbol keys: the first key's edge on x0, the last one's on the
     # inset from the right; a tap anywhere on a key is that key.
-    kx, ky0, kw, kh = cl.page.canvases["symbols"][1]
+    kx, ky0, kw, kh = cl.page.rect_of("symbols")
     n = len(cl._symbols())
     ins = x0 - lay.cx - fs
     span = kw - 2 * ins

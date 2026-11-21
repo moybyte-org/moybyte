@@ -83,31 +83,24 @@ def test_settings_name_is_a_field_only_where_something_types(tmp_path, kind, fie
     """Under touch alone or a gamepad the Name row shows the saved name,
     read-only, and says to pair a keyboard to change it (an info row, no
     stop to type into, no Done hint)."""
-    from runtime import settings_layer
     ws = build_ws(tmp_path)
     drv = make_drv(ws)
     ws.system.set("name", "Moy")
     ws.open_settings()
     ws.use_inputs([("local", kind)])
     ws.settings_layer.show_row("name")
-    rows = []
-    ui = settings_layer._ui
-    real = ui.info, ui.group
-    ui.info = lambda label, value, o=None: (rows.append((label, value)), real[0](label, value, o))
-    ui.group = lambda caption="", o=None: (rows.append((caption,)), real[1](caption, o))
-    try:
-        for _ in range(3):
-            ws.mark_dirty()
-            drv.frame(1 / 30)
-    finally:
-        ui.info, ui.group = real
-    assert (ws.settings_layer.rows.drawn("name") == "field") is field
-    if not field:
-        # the note follows the group, captioned under its card
-        assert ("Name", "Moy") in rows and (settings_layer.NAME_NO_KEYBOARD,) in rows, rows
-        assert rows.index((settings_layer.NAME_NO_KEYBOARD,)) > rows.index(("Name", "Moy"))
-    else:
-        assert (settings_layer.NAME_NO_KEYBOARD,) not in rows
+    for _ in range(3):
+        ws.mark_dirty()
+        drv.frame(1 / 30)
+    page = ws.settings_layer.rows
+    assert (page.drawn("name") == "field") is field
+    drawn = page.engine.stop_kinds()
+    infos = [k for k, kind in drawn.items() if kind == "info" and k.startswith("info#")]
+    # the read-only Name row (an info row reading the saved name) only where
+    # nothing types; the note's group is shown on the same `!can_type`, and
+    # where it lies is test_settings_layer_pixels' (under the General card)
+    assert len(infos) == (0 if field else 1), drawn
+    assert page.engine.s.name_shown == "Moy" and page.engine.s.can_type is field
 
 
 @pytest.mark.parametrize("kind,hints", [("keys", ("confirm", "Connect", "back", "Cancel")),
@@ -116,7 +109,6 @@ def test_settings_name_is_a_field_only_where_something_types(tmp_path, kind, fie
 def test_the_wifi_prompt_promises_connect_only_where_something_types(tmp_path, kind, hints):
     """The password prompt's strip names Connect only where a field is there
     to type into; elsewhere it is Cancel alone (R4-08)."""
-    from runtime import ui as ui_api
     ws = build_ws(tmp_path)
     drv = make_drv(ws)
     ws.open_settings()
@@ -125,18 +117,10 @@ def test_the_wifi_prompt_promises_connect_only_where_something_types(tmp_path, k
     sl.open_page("wifi")
     sl.wifi_pick = "Cafe"
     got = []
-    real = ui_api.hints
-
-    def spy(items, *a, **kw):
-        got.append(tuple(items))
-        return real(items, *a, **kw)
-    ui_api.hints = spy
-    try:
-        for _ in range(2):
-            ws.mark_dirty()
-            drv.frame(1 / 30)
-    finally:
-        ui_api.hints = real
+    for _ in range(2):
+        ws.mark_dirty()
+        drv.frame(1 / 30)
+        got.append(sl.wifi.engine.hints())          # what the prompt's band names after the frame
     assert hints in got and all(h == hints for h in got if "Cancel" in h), got
 
 

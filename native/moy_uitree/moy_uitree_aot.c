@@ -107,7 +107,7 @@ uint32_t uit_layout_hash(void)
         x = fnv(x, uit_kind_names[k], strlen(uit_kind_names[k]) + 1);
     static const int32_t lasts[] = {
         UIT_MODEL, OP_MAP, RK_CURRENT, SYS_TOUCH, PK_STATE, UIT_FIELDS, UIT_NONE, NL_FIELD, GAP_0,
-        TV_PROSE, TL_LEND, BT_ALONE, LT_LINES, LT_ALIGN_SHIFT, UIT_A_ROW, UIT_ID_MAX,
+        TV_PROSE, TL_LEND, BT_ALONE, LT_FIT, LT_ALIGN_SHIFT, UIT_A_ROW, UIT_ID_MAX,
     };
     for (size_t i = 0; i < sizeof lasts / sizeof lasts[0]; i++)
         x = fnv_int(x, lasts[i]);

@@ -556,7 +556,7 @@ def test_under_touch_the_name_row_reads_the_default_name_over_its_note(tmp_path,
     changes it stands under the General group's card on the page's ground,
     in the captions' dim ink, with no divider -- not a row of the group
     (design review R5-11)."""
-    from runtime import host_app, settings_layer
+    from runtime import host_app
     cfg = dict(CONFIGS["tdeck_320x240_fs1_dark"], variant=variant)
     ws = _build(cfg, tmp_path / "carts")
     ws.system.set("name", "")

@@ -53,7 +53,7 @@ _KINDS = {"page": 1, "group": 2, "label": 3, "info": 4, "link": 5, "button": 6, 
           "canvas": 20, "tabs": 21, "switch": 22, "case": 23, "table": 24, "col": 25, "foot": 26,
           "cards": 27, "card": 28, "picture": 29, "popover": 30,
           "tools": 31, "row": 32, "status": 33, "text_editor": 34, "panes": 35, "pane": 36,
-          "legacy": 37, "slot": 38, "panel": 39, "lent": 40}
+          "legacy": 37, "slot": 38, "panel": 39, "lent": 40, "rule": 41, "note": 42}
 # the placed kinds: a page the engine's layout places holds them (`CEditorPage`)
 _PLACED_KINDS = ("tools", "row", "status", "text_editor", "panes", "pane", "legacy", "slot", "panel", "lent")
 # what a placed page's frame does not draw yet
@@ -821,6 +821,22 @@ class CEngine(Engine):
 
     focus_key = property(_focus_key, _no_set)
 
+    def row_stop(self, cur, rowkey):
+        """The id the first stop of row `rowkey` of the list whose cur= is
+        `cur` draws under, or None (no such list or row): the engine's."""
+        return self._made().row_stop(cur, rowkey)
+
+    def _page_rect(self):
+        """The page's room for its rows after the last frame, the engine's."""
+        return self._x.page_rects()[0] if self._visiting() else None
+
+    def _foot_rect(self):
+        """The shown foot's rect after the last frame (None, none shown), the engine's."""
+        return self._x.page_rects()[1] if self._visiting() else None
+
+    rect = property(_page_rect, _no_set)
+    foot_r = property(_foot_rect, _no_set)
+
     def draft(self, key):
         return self._x.draft(key) if self._visiting() else None
 
@@ -834,6 +850,13 @@ class CEngine(Engine):
                 return out
             out[got[1]] = _KIND_NAMES[got[0]]
             i += 1
+
+    def hints(self):
+        """The band's hints as the last frame left the page: (verb, text, ...), the engine's."""
+        if not self._visiting():
+            return ()
+        t = self._x.hints()
+        return tuple(t.split("\0")[:-1]) if t else ()
 
     def leave(self):
         """Every way out of the page: each drawn commit field's draft is

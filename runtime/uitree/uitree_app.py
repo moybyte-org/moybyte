@@ -945,7 +945,12 @@ class Engine(S.Builder):
                 return ("%s/%s" % (rowkey, k.key))[:ID_MAX]
         return None
 
-    def _focus_named(self, prev):
+    def row_stop(self, cur, rowkey):
+        """The id the first stop of row `rowkey` of the list whose cur= is
+        `cur` draws under, or None (no such list or row)."""
+        lst = next((l for k, l in self.curs if k == cur), None)
+        return self._row_stop_id(lst, rowkey) if lst is not None else None
+
         """G15: a handler's ui.focus(KEY) names a node; through a fragment used
         twice, it resolves among the shown instances, and two shown is N08."""
         w = self.want_focus
@@ -1110,6 +1115,10 @@ class Engine(S.Builder):
         else:
             self._hk = None
         return h
+
+    def hints(self):
+        """The band's hints as the last frame left the page: (verb, text, ...)."""
+        return self._hints()
 
     def _hints_kept(self, f):
         """Whether the hints may be kept: none of their texts names an engine

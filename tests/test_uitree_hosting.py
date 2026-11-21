@@ -72,7 +72,7 @@ def test_focus_lands_in_the_frame_that_first_draws_its_node(config, tmp_path):
 
         def logged(*a):
             paint(*a)
-            log.append(("extra" in eng.ids, eng.focus_key))
+            log.append(("extra" in eng.stop_kinds(), eng.focus_key))
         eng.paint = logged
 
     def first_drawn():
@@ -110,9 +110,9 @@ def test_a_page_with_no_stop_answers_confirm_and_back_through_its_role_actions(t
     assert "from role confirm" in trace and "from role back" in trace, trace
     S._NOW.app = eng
     try:
-        assert eng._hints() == ("confirm", "Send", "back", "Cancel")
+        assert eng.hints() == ("confirm", "Send", "back", "Cancel")
         eng.run_action(eng.actions["quiet"], (), "test")
-        assert eng._hints() == ()
+        assert eng.hints() == ()
     finally:
         S._NOW.app = None
     assert eng.role("back") and R.s.left == 2           # a host routing its own keys
@@ -232,28 +232,40 @@ def test_a_splits_column_centres_and_its_button_takes_its_natural_width(tmp_path
     assert bw < 200, bw
 
 
-def test_a_splits_column_centres_in_the_frame_it_first_draws(tmp_path, monkeypatch):
+def test_a_splits_column_centres_in_the_frame_it_first_draws(tmp_path):
     """The column is measured before it draws (the toolkit's `measure`), so
     its first frame stands where every later one does: no frame centres it
     late."""
-    import ui
+    import uitree_app
+    import uitree_kinds as K
+    cls = uitree_app.app_layer("uitree_split", "Split", K.split_page)
     tops = []
-    real = ui.button
-    monkeypatch.setattr(ui, "button", lambda t, *a: (
-        tops.append(ui.measure("button", t, a[1] if len(a) > 1 else None)[1]), real(t, *a))[1])
-    _split(tmp_path, "p4_1024x600_fs2_windowed")
+
+    def opened(ws):
+        eng = P.host(ws, cls).engine
+        paint = eng.paint
+
+        def logged(*a):
+            paint(*a)
+            box = eng._ui.box("mark")           # the column's button, where this frame drew it
+            if box is not None:
+                tops.append(box[1])
+        eng.paint = logged
+    P.frames("p4_1024x600_fs2_windowed", opened, ["f:2"], str(tmp_path / "carts"))
     assert len(tops) > 1 and len(set(tops)) == 1, tops
 
 
 def test_a_placed_page_on_the_desk_names_its_keys(tmp_path, monkeypatch):
     """A split page on the desk draws the band of what its keys do, as a
     page of rows does (the handheld cuts its band from the page)."""
-    import ui
-    said = []
-    real = ui.hints
-    monkeypatch.setattr(ui, "hints", lambda h, *a: (said.append(h), real(h, *a))[1])
-    _split(tmp_path, "p4_1024x600_fs2_windowed")
-    assert said and "back" in said[-1], said
+    K, fs, eng = _split(tmp_path, "p4_1024x600_fs2_windowed")
+    said = eng.hints()
+    assert "back" in said, said
+    x, y, w, h = eng.content
+    f, row = fs[-1], 2 * fs[-1].w
+    band = [f.buf[yy * row + 2 * x:yy * row + 2 * (x + w)] for yy in range(y + h - 16, y + h)]
+    assert any(len(set(line[i:i + 2] for i in range(0, len(line), 2))) > 1 for line in band), \
+        "no band drawn at the page's foot"
 
 
 def _foot(tmp_path, config, script=("f:2",)):
@@ -293,6 +305,6 @@ def test_a_table_is_named_by_its_key_before_it_draws(tmp_path):
     pressed next lands on it (the task manager's Enter after it opens)."""
     fs, eng = _foot(tmp_path, "tdeck_320x240_fs1_dark", ("f:1",))
     assert eng.focus_key == "log", eng.focus_key
-    lst = next(l for _k, l in eng.curs if l.key == "log")
-    assert eng._drawn_id("log") == "log"
-    assert eng._row_stop_id(lst, "r1") == "log" and eng._row_stop_id(lst, "nope") is None
+    stops = eng.stop_kinds()
+    assert stops.get("log") == "table", stops                   # one stop, by its key
+    assert not [k for k in stops if k.startswith("log/")], stops     # its rows are no stops of their own

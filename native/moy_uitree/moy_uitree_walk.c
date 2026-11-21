@@ -1044,6 +1044,23 @@ static void label_rows_m(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int 
     // none for an empty text cut by character (the reference's range over its length)
     if ((t & LT_WRAP) == LT_CHAR && !n1)
         return;
+    int face = ((t >> LT_FACE_SHIFT) & 7) - 1;
+    if ((t & LT_FIT) && face >= 0) {
+        // its face where the theme has one that draws every character of its text and the
+        // text fits the page's width in it, else the page's own face
+        moy_font_info_t fi;
+        uint32_t f = moy_ui_font(moy_ui_cart_on(), face, &fi);
+        if (!f || !moy_text_covers(f, (const uint8_t *)e->scratch.p + a1, n1)) {
+            face = -1;
+        } else {
+            int32_t out[5];
+            moy_ui_api_text(c, lines, (t >> LT_ALIGN_SHIFT) & 7, N->lit, face);
+            moy_ui_over_none(&o);
+            moy_ui_api_measure(c, s, MOY_UI_MEASURE_LABEL, sspan(e, a1, n1), &o, out);
+            if (out[2] > e->pw - 32)
+                face = -1;
+        }
+    }
     const char *txt = e->scratch.p + a1;
     uint32_t at = 0;
     do {
@@ -1057,7 +1074,7 @@ static void label_rows_m(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int 
         if ((t & LT_WRAP) != LT_CHAR)
             m = n1;
         if (opts)
-            moy_ui_api_text(c, lines, (t >> LT_ALIGN_SHIFT) & 7, N->lit, ((t >> LT_FACE_SHIFT) & 7) - 1);
+            moy_ui_api_text(c, lines, (t >> LT_ALIGN_SHIFT) & 7, N->lit, face);
         moy_ui_over_none(&o);
         if (h) {
             int32_t out[5];
@@ -2159,6 +2176,30 @@ static void draw(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int m
         moy_ui_over_none(&o);
         moy_ui_over_put(&o, MOY_UI_OV_STEPS, &one);
         moy_ui_api_progress(c, s, l, v, hi, &o);
+        break;
+    }
+    case UIT_RULE:
+        moy_ui_api_rule(c, s);
+        break;
+    case UIT_NOTE: {
+        // its icon ("info" where it has none) and each line's paragraph, empty ones kept
+        uint32_t ni, ai = N->t_icon >= 0 ? uit_tmpl_render(e, N->t_icon, model, row, &ni) : 0;
+        if (N->t_icon < 0 || !ni)
+            ai = 0, ni = 0;
+        uit_buf_t lines = {0};
+        int any = 0;
+        for (int p = N->props; p != (int)UIT_NONE; p = e->props[p].next) {
+            const uit_prop_t *P = &e->props[p];
+            if (strcmp(uit_str(e, P->name), "lines"))
+                continue;
+            uint32_t n, at = uit_tmpl_render(e, P->idx, model, row, &n);
+            if (any++)
+                uit_buf_printf(&lines, "%c", 0);
+            uit_buf_printf(&lines, "%.*s", (int)n, e->scratch.p + at);
+        }
+        moy_ui_api_note(c, s, ni ? sspan(e, ai, ni) : span_of("info", 4), (const uint8_t *)(lines.p ? lines.p : ""),
+                        lines.n);
+        uit_buf_free(&lines);
         break;
     }
     case UIT_EMPTY: {
@@ -3911,6 +3952,47 @@ static void placed_hints(uit_t *e, uit_buf_t *b, int pages)
     }
     if (NODE(closer)->on >= 0)
         hint_named(e, b, "back", NODE(closer)->on);
+}
+
+int uit_row_stop(uit_t *e, const char *cur, const char *rowkey, char *buf, size_t cap)
+{
+    int s = uit_slot_find(e, cur, strlen(cur));
+    char id[UIT_ID_MAX + 1];
+    if (s < 0 || !buf || !cap)
+        return 0;
+    for (int k = 0; k < e->nnodes; k++)
+        if (UIT_IS_LIST(NODE(k)->kind) && NODE(k)->cur == s)
+            return row_stop_id(e, k, rowkey, strlen(rowkey), id) && snprintf(buf, cap, "%s", id) > 0;
+    return 0;
+}
+
+int uit_page_rects(const uit_t *e, int32_t out[8])
+{
+    memcpy(out, e->rect, 4 * sizeof *out);
+    if (e->nnodes && e->foot >= 0)
+        memcpy(out + 4, e->foot_r, 4 * sizeof *out);
+    else
+        out[4] = out[5] = out[6] = out[7] = 0;
+    return e->nnodes && e->foot >= 0;
+}
+
+int uit_hints(uit_t *e, char *buf, size_t cap)
+{
+    if (!e->nnodes)
+        return 0;
+    int pages = (e->flags >> 8) & 0xff;
+    uint32_t sn = e->scratch.n;
+    uit_buf_t hb = {0};
+    if (e->placed)
+        placed_hints(e, &hb, pages ? pages : 1);
+    else
+        hints(e, &hb, pages ? pages : 1);
+    e->scratch.n = sn;
+    int n = (int)hb.n;
+    if (buf && (size_t)n <= cap)
+        memcpy(buf, hb.p, (size_t)n);
+    uit_buf_free(&hb);
+    return n;
 }
 
 // A placed page's band: the page's last row, cut from its room, where it names anything.

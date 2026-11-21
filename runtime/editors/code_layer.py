@@ -379,12 +379,12 @@ class CodeLayer(Layer):
 
     def symbol_at(self, x):
         """The symbol key at x across the strip (`draw_symbols`'s cells), or -1."""
-        got = self.page.canvases.get("symbols") if getattr(self.page, "canvases", None) else None
+        got = self.page.rect_of("symbols")
         if not got:
             return -1
         fs = max(1, getattr(self.ws.sys_canvas, "font_scale", 1))
         ins = _CODE_INSET * fs - fs
-        w = got[1][2] - 2 * ins
+        w = got[2] - 2 * ins
         n = len(self._symbols())
         x -= ins
         if not 0 <= x < w:
@@ -496,8 +496,7 @@ class CodeLayer(Layer):
     def row_box(self, cur, key):
         """Where row `key` of the popover list whose cur= is `cur` drew last
         frame: (x, y, w, h), or None."""
-        lst = next((l for k, l in self.page.curs if k == cur), None)
-        sid = self.page._row_stop_id(lst, key) if lst is not None else None
+        sid = self.page.row_stop(cur, key)
         return self._host.box(sid) if sid else None
 
     def view(self):

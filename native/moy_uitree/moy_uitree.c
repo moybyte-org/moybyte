@@ -790,7 +790,8 @@ const char *const uit_kind_names[UIT_KINDS] = {"", "page", "group", "label", "in
                                                "item", "split", "canvas", "tabs", "switch", "case",
                                                "table", "col", "foot", "cards", "card", "picture",
                                                "popover", "tools", "row", "status", "text_editor",
-                                               "panes", "pane", "legacy", "slot", "panel", "lent"};
+                                               "panes", "pane", "legacy", "slot", "panel", "lent",
+                                               "rule", "note"};
 
 static const char *const TONES[] = {"ink", "dim", "value", "danger"};
 static const char *const BKINDS[] = {"normal", "primary", "tonal", "danger", "toggle", "bar"};   // moy_ui's, then its bar item
@@ -943,14 +944,14 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         // a caption drawn where its value changes from the row before: over the rows
         model = N->slot;
         tslot = &N->t_main;
-    } else if (kind == UIT_EMPTY && !strcmp(name, "lines")) {
+    } else if ((kind == UIT_EMPTY || kind == UIT_NOTE) && !strcmp(name, "lines")) {
         // one prop a line, each a template, drawn in order (an empty one left out)
         int t = uit_tmpl_compile(e, src, model);
         if (t < 0)
             return t;
         if (e->tmpls[t].type == UIT_BOOL || e->tmpls[t].type == UIT_MODEL)
-            return uit_check_fail(e, "T03", UIT_MSG("empty lines=%s is a %s, not a text", "%s %s"), src,
-                                  uit_type_name(e->tmpls[t].type));
+            return uit_check_fail(e, "T03", UIT_MSG("%s lines=%s is a %s, not a text", "%s %s %s"),
+                                  uit_kind_names[kind], src, uit_type_name(e->tmpls[t].type));
         return add_prop(e, node, name, src, repr, PK_TMPL, t);
     } else if (kind == UIT_SEG && !strcmp(name, "text")) {
         // a seg over a row_of: each row's word, a template over its model's rows
@@ -1045,6 +1046,12 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         else
             N->btn = (uint16_t)i, N->nbtn |= LT_LINES;
         return add_prop(e, node, name, src, repr, PK_LIT, i);
+    }
+    if (kind == UIT_LABEL && !strcmp(name, "size")) {
+        if (strcmp(src, "fit"))
+            return uit_fail(e, UIT_E_KIND, UIT_MSG("label size=%s: only \"fit\"", "label size=%s"), src);
+        N->nbtn |= LT_FIT;
+        return add_prop(e, node, name, src, repr, PK_LIT, 1);
     }
     if (kind == UIT_CANVAS && (!strcmp(name, "draw") || !strcmp(name, "h"))) {
         // draw= names the front end's function (uit_on_draw); h= its height in a stack

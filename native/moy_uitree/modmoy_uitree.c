@@ -616,6 +616,38 @@ static mp_obj_t eng_leave(mp_obj_t self)
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(eng_leave_obj, eng_leave);
 
+static mp_obj_t eng_row_stop(mp_obj_t self, mp_obj_t cur, mp_obj_t key)
+{
+    char id[UIT_ID_MAX + 1];
+    if (!uit_row_stop(eng(self), CSTR(cur), CSTR(key), id, sizeof id))
+        return mp_const_none;
+    return mp_obj_new_str(id, strlen(id));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(eng_row_stop_obj, eng_row_stop);
+
+static mp_obj_t eng_page_rects(mp_obj_t self)
+{
+    int32_t r[8];
+    int foot = uit_page_rects(eng(self), r);
+    mp_obj_t o[8];
+    for (int i = 0; i < 8; i++)
+        o[i] = MP_OBJ_NEW_SMALL_INT(r[i]);
+    mp_obj_t t[2] = {mp_obj_new_tuple(4, o), foot ? mp_obj_new_tuple(4, o + 4) : mp_const_none};
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(eng_page_rects_obj, eng_page_rects);
+
+static mp_obj_t eng_hints(mp_obj_t self)
+{
+    uit_t *e = eng(self);
+    int n = uit_hints(e, NULL, 0);
+    vstr_t v;
+    vstr_init_len(&v, (size_t)n);
+    uit_hints(e, v.buf, (size_t)n);
+    return mp_obj_new_str_from_vstr(&v);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(eng_hints_obj, eng_hints);
+
 static mp_obj_t eng_dump(mp_obj_t self)
 {
     uit_t *e = eng(self);
@@ -661,6 +693,9 @@ static const mp_rom_map_elem_t eng_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_labels), MP_ROM_PTR(&eng_labels_obj) },
     { MP_ROM_QSTR(MP_QSTR_focused), MP_ROM_PTR(&eng_focused_obj) },
     { MP_ROM_QSTR(MP_QSTR_draft), MP_ROM_PTR(&eng_draft_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hints), MP_ROM_PTR(&eng_hints_obj) },
+    { MP_ROM_QSTR(MP_QSTR_page_rects), MP_ROM_PTR(&eng_page_rects_obj) },
+    { MP_ROM_QSTR(MP_QSTR_row_stop), MP_ROM_PTR(&eng_row_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_stop), MP_ROM_PTR(&eng_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_leave), MP_ROM_PTR(&eng_leave_obj) },
     { MP_ROM_QSTR(MP_QSTR_letter), MP_ROM_PTR(&eng_letter_obj) },

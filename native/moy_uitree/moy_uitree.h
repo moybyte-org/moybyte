@@ -42,7 +42,9 @@ enum {
     UIT_COL, UIT_FOOT, UIT_CARDS, UIT_CARD, UIT_PICTURE, UIT_POPOVER,
     // the placed kinds: a page placed by the engine's layout (uit_set_placed) holds them
     UIT_TOOLS, UIT_ROW, UIT_STATUS, UIT_TEXT_EDITOR, UIT_PANES, UIT_PANE, UIT_LEGACY, UIT_SLOT,
-    UIT_PANEL, UIT_LENT, UIT_KINDS
+    UIT_PANEL, UIT_LENT,
+    UIT_RULE, UIT_NOTE,     // level 1: a divider, a note (no stop either)
+    UIT_KINDS
 };
 
 // Events (`uit_next`).
@@ -288,6 +290,15 @@ int uit_focused(const uit_t *e, char *buf, size_t cap);
 // The last frame's stop `i` (from 0): its kind (UIT_SEG with the cycle look
 // answers UIT_KINDS), its id into buf; -1 past the last.
 int uit_stop(const uit_t *e, int i, char *buf, size_t cap);
+// The id the first stop of row `rowkey` of the list whose cur= is state `cur` draws under
+// (a table's own key: one stop) into buf: 1, else 0 (no such list or row).
+int uit_row_stop(uit_t *e, const char *cur, const char *rowkey, char *buf, size_t cap);
+// The last frame's page rect into out[0..3] and its shown foot's into out[4..7]:
+// whether a foot was shown.
+int uit_page_rects(const uit_t *e, int32_t out[8]);
+// The band's items as the last frame's state names them, NUL-separated
+// (the last NUL included): their length; written only where it fits cap.
+int uit_hints(uit_t *e, char *buf, size_t cap);
 // A commit field's draft (typed, not yet written), NULL none.
 const char *uit_draft(const uit_t *e, const char *key, size_t *n);
 // Every way out of the page: each drawn commit field's draft written, its
