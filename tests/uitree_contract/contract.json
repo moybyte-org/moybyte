@@ -1,5 +1,5 @@
 {
- "spec": "ui_api_spec_2026-11.md revision 3",
+ "spec": "ui_api_spec_2026-11.md revision 4",
  "about": "The UI API's contract as data: every error code (§25.2), node kind and prop (§7), takes= value (§5.4), role (§13.1), retired name (§7.9), app field (§19.1) and system value (§14). Both reference layers are tested against it (tests/test_uitree_contract.py).",
  "types": {
   "tpl": "a template",
@@ -37,7 +37,7 @@
    ],
    "meaning": "a site names no action (the message says when the text given is an action's label)",
    "fix": {
-    "python": "`app.action(\"add\", \"Add one\", add)`, then `app.button(\"add\")`",
+    "python": "`ui.action(\"add\", \"Add one\", add)`, then `ui.button(\"add\")`",
     "lua": "`ui.action(\"add\", \"Add one\", add)`",
     "c": "an `action` node named `add`"
    },
@@ -87,7 +87,7 @@
    ],
    "meaning": "an action with an empty label",
    "fix": {
-    "python": "`app.hook(\"scanned\", scanned)`",
+    "python": "`ui.hook(\"scanned\", scanned)`",
     "lua": "`ui.hook(\"scanned\", scanned)`",
     "c": "a `hook` node"
    },
@@ -147,8 +147,8 @@
    ],
    "meaning": "a declaration inside a page's or a case's function, or a node outside one",
    "fix": {
-    "python": "declare at the module's top level; make nodes in a function given to `app.page`",
-    "lua": "as Python, `ui.page`",
+    "python": "declare at the module's top level; make nodes in a page function, under `with ui.page(TITLE):`",
+    "lua": "declare at the top level; make nodes in the function given to `ui.page(NAME, BUILD)`",
     "c": "inside a `page` node"
    },
    "as_run": "A05 (Lua)"
@@ -171,7 +171,7 @@
    ],
    "meaning": "`&&` and `||` mixed at one bracket level (inline: at all)",
    "fix": {
-    "python": "`app.derive(\"ok\", \"bool\", \"a && (b || c)\")` and `shown=\"ok\"`",
+    "python": "`ui.derive(\"ok\", \"bool\", \"a && (b || c)\")` and `shown=\"ok\"`",
     "lua": "`ui.derive(...)`",
     "c": "a `derive` node"
    },
@@ -219,7 +219,7 @@
    ],
    "meaning": "an app with no `app` declaration",
    "fix": {
-    "python": "`app.app(\"Counter\", icon=\"calc\")`",
+    "python": "`ui.app(\"Counter\", icon=\"calc\")`",
     "lua": "`ui.app(\"Counter\", { icon = \"calc\" })`",
     "c": "an `app` node"
    },
@@ -231,7 +231,7 @@
    ],
    "meaning": "a `slot` not in `slots=`, or `slots=` naming a slot the tree lacks",
    "fix": {
-    "python": "`slots=[\"run\"]` and `app.slot(\"run\")`",
+    "python": "`slots=[\"run\"]` and `ui.slot(\"run\")`",
     "lua": "as Python",
     "c": "as Python"
    },
@@ -255,7 +255,7 @@
    ],
    "meaning": "an enum with no `init=`",
    "fix": {
-    "python": "`app.enum(\"a\", \"b\", init=\"a\")`",
+    "python": "`ui.enum(\"a\", \"b\", init=\"a\")`",
     "lua": "`ui.enum(\"a\", \"b\", { init = \"a\" })`",
     "c": "`moy_ui_prop(\"init\", \"a\")`"
    },
@@ -303,7 +303,7 @@
    ],
    "meaning": "a hook where an action belongs (a button, link, tool, item, card, a dialog's `buttons=`)",
    "fix": {
-    "python": "`app.action(NAME, \"Label\", fn)`",
+    "python": "`ui.action(NAME, \"Label\", fn)`",
     "lua": "`ui.action(...)`",
     "c": "an `action` node"
    },
@@ -387,7 +387,7 @@
    ],
    "meaning": "a lender with no `lent` site, or a frame lending to itself",
    "fix": {
-    "python": "`app.lent(\"bar\")` in the frame",
+    "python": "`ui.lent(\"bar\")` in the frame",
     "lua": "`ui.lent(\"bar\")`",
     "c": "a `lent` node"
    },
@@ -484,7 +484,7 @@
    ],
    "meaning": "two siblings with one key",
    "fix": {
-    "python": "a key of its own: `app.row(\"find_strip\")`",
+    "python": "a key of its own: `ui.row(\"find_strip\")`",
     "lua": "`ui.row(\"find_strip\", ...)`",
     "c": "as Python"
    },
@@ -596,7 +596,7 @@
    ],
    "meaning": "a push names no page",
    "fix": {
-    "python": "`app.page(\"about\", about_page)`",
+    "python": "push the page function: `ui.push(about)`, where `about` opens `with ui.page(\"About\"):`",
     "lua": "`ui.page(\"about\", about_page)`",
     "c": "a `page` node named `about`"
    },
@@ -620,7 +620,7 @@
    ],
    "meaning": "a `push=` action has a handler",
    "fix": {
-    "python": "`app.action(\"about_open\", \"About\", push=\"about\")`",
+    "python": "`ui.action(\"about_open\", \"About\", None, push=about)`",
     "lua": "`ui.action(\"about_open\", \"About\", nil, { push = \"about\" })`",
     "c": "no case for it in `moy_app_action` is needed"
    },
@@ -672,7 +672,7 @@
    ],
    "meaning": "no state with that name",
    "fix": {
-    "python": "declare it in `app.state(...)`",
+    "python": "declare it in `ui.state(...)`",
     "lua": "in `ui.state { ... }`",
     "c": "a state node"
    },
@@ -685,7 +685,7 @@
    ],
    "meaning": "a write of the wrong type, of None or nil to a non-optional, or of a key no row has; C: a bool not 0 or 1, an enum index out of range",
    "fix": {
-    "python": "write the declared type, or declare it `app.opt(...)`",
+    "python": "write the declared type, or declare it `ui.opt(...)`",
     "lua": "as Python, `ui.opt`",
     "c": "`moy_ui_clear` for absence"
    },
@@ -736,7 +736,7 @@
    ],
    "meaning": "a state write outside a handler: in a draw, from a service",
    "fix": {
-    "python": "`app.post(\"indexed\", data)` from the service's callback",
+    "python": "`ui.post(\"indexed\", data)` from the service's callback",
     "lua": "`ui.post(\"indexed\", data)`",
     "c": "`moy_ui_post(hook, arg)`"
    },
@@ -748,7 +748,7 @@
    ],
    "meaning": "a model with no key field, a key field not text or int, or a field named `key`",
    "fix": {
-    "python": "`app.model(key=\"id\", id=\"\", ...)`",
+    "python": "`ui.model(key=\"id\", id=\"\", ...)`",
     "lua": "`ui.model { key = \"id\", id = \"\" }`",
     "c": "`moy_ui_prop(\"key\", \"id\")`"
    },
@@ -798,7 +798,7 @@
    ],
    "meaning": "a `row_of` naming no model",
    "fix": {
-    "python": "`app.row_of(\"nets\")` after `nets=app.model(...)`",
+    "python": "`ui.row_of(\"nets\")` after `nets=ui.model(...)`",
     "lua": "as Python",
     "c": "`moy_ui_prop(\"model\", \"nets\")`"
    },
@@ -823,7 +823,7 @@
    ],
    "meaning": "a declaration whose initial value has no type: `None` or `nil`, a list, a function",
    "fix": {
-    "python": "`app.opt(0)` for a value that may be absent",
+    "python": "`ui.opt(0)` for a value that may be absent",
     "lua": "`ui.opt(0)`",
     "c": "`moy_ui_prop_int(\"opt\", 1)`"
    },

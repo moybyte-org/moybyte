@@ -1,6 +1,6 @@
 """Both UI tree layers against one table: `tests/uitree_contract/contract.json`
 (every error code, node kind and prop, `takes=` value, role, retired name, app
-field and verb of the UI API spec, revision 3).
+field and verb of the UI API spec, revision 4).
 
 Each layer's facts (the codes its source raises, the kinds and props it
 accepts, its `takes=` values and roles) are compared with the table, and every
