@@ -1899,7 +1899,7 @@ SCHEMA = {
     "info": dict(_C, label="text", value="text", icon="text", signal="int"),
     "link": dict(_C, value="text", label="text", icon="text", signal="int", focus="cond"),
     "button": dict(_C, kind="lit", label="text", icon="text", alone="lit", span="lit", arg="lit",
-                   focus="cond", grow="lit", marked="cond"),
+                   focus="cond", grow="lit", marked="cond", w="int"),
     "toggle": dict(_C, label="text", on="action0", focus="cond", hint="text"),
     "slider": dict(_C, label="text", lo="int", hi="int", on="action0", focus="cond", look="lit",
                    icon="text"),
@@ -1953,7 +1953,7 @@ _FN_FIX = {None: "%s=draw, where def draw(cv, x, y, w, h)",
            ("legacy", "keys"): "%s=keys, where def keys(i) returns whether it took the input",
            ("legacy", "hints"): "%s=hints, where def hints() returns the band's hints",
            ("legacy", "gen"): "%s=gen, where def gen() returns an int that moves with its pixels"}
-CHOICES = {"dir": ("row", "col"), "kind": ("normal", "primary", "danger", "tonal"),
+CHOICES = {"dir": ("row", "col"), "kind": ("normal", "primary", "danger", "tonal", "bar"),
            "wrap": ("cut", "word", "char"), "align": ("start", "center", "end"),
            "face": ("ui", "title", "mono", "caption", "result"), "follow": (True, False),
            "syntax": ("plain", "sgr", "python", "lua", "json", "markdown")}

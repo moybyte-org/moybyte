@@ -3303,6 +3303,7 @@ static int ring_reach(const moy_ui_ctx_t *c) {
 int moy_ui_api_button(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label, int kind,
                       const moy_ui_over_t *o) {
     o = mua_over(o);
+    int bar = kind == MOY_UI_BUTTON_BAR;
     if (kind < 0 || kind >= 5) {
         kind = 0;
     }
@@ -3380,7 +3381,11 @@ int moy_ui_api_button(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
             bt.icon = c->row_slot;
             bt.glyph = c->row_glyph;
         }
-        moy_ui_button(s, b, kid, fl, mua_interact(st), &bt, MOY_UI_PHASE_ALL);
+        if (bar) {
+            moy_ui_bar_item(s, b, fl, &bt);
+        } else {
+            moy_ui_button(s, b, kid, fl, mua_interact(st), &bt, MOY_UI_PHASE_ALL);
+        }
         mua_clip_out(&k);
     }
     return (st & MOY_UI_ST_ACTIVATED) != 0;

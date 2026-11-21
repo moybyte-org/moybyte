@@ -793,7 +793,7 @@ const char *const uit_kind_names[UIT_KINDS] = {"", "page", "group", "label", "in
                                                "panes", "pane", "legacy", "slot", "panel", "lent"};
 
 static const char *const TONES[] = {"ink", "dim", "value", "danger"};
-static const char *const BKINDS[] = {"normal", "primary", "tonal", "danger", "toggle"};
+static const char *const BKINDS[] = {"normal", "primary", "tonal", "danger", "toggle", "bar"};   // moy_ui's, then its bar item
 
 static int lit_index(const char *v, const char *const *tab, int n)
 {
@@ -976,7 +976,7 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         tslot = &N->t_value;
     else if ((kind == UIT_CARDS && !strcmp(name, "w")) || (kind == UIT_CARD && !strcmp(name, "sub")) ||
              (kind == UIT_CANVAS && !strcmp(name, "w")) || (kind == UIT_ROW && !strcmp(name, "gap")) ||
-             (kind == UIT_PICTURE && !strcmp(name, "side")) || (kind == UIT_POPOVER && !strcmp(name, "anchor")))
+             (kind == UIT_BUTTON && !strcmp(name, "w")) || (kind == UIT_PICTURE && !strcmp(name, "side")) || (kind == UIT_POPOVER && !strcmp(name, "anchor")))
         tslot = &N->t_value;
     else if ((kind == UIT_CARDS && !strcmp(name, "h")) || (kind == UIT_POPOVER && !strcmp(name, "w")) ||
              (kind == UIT_ROW && !strcmp(name, "pad")) ||
@@ -995,7 +995,7 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
             (kind == UIT_PROGRESS && (!strcmp(name, "value") || !strcmp(name, "max"))) ||
             (kind == UIT_CARDS && name[1] == 0) || (kind == UIT_PICTURE && !strcmp(name, "side")) ||
             (kind == UIT_POPOVER && !strcmp(name, "w")) || (kind == UIT_CANVAS && !strcmp(name, "w")) ||
-            (kind == UIT_ROW && (!strcmp(name, "gap") || !strcmp(name, "pad")))) {
+            (kind == UIT_BUTTON && !strcmp(name, "w")) || (kind == UIT_ROW && (!strcmp(name, "gap") || !strcmp(name, "pad")))) {
             // an int prop: an int template, or the int literal a number lowers to
             const char *d = src + (src[0] == '-');
             int lit_int = T->lit && *d;
@@ -1113,7 +1113,7 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
     if (!strcmp(name, "ground") && kind == UIT_CANVAS)
         return add_prop(e, node, name, src, repr, PK_LIT, 0);     // its front end fills it (a theme role)
     if (!strcmp(name, "kind") && kind == UIT_BUTTON) {
-        int i = lit_index(src, BKINDS, 5);
+        int i = lit_index(src, BKINDS, 6);
         N->lit = (uint8_t)(i < 0 ? 0 : i);
         return add_prop(e, node, name, src, repr, PK_LIT, i);
     }

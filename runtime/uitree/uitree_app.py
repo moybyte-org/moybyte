@@ -36,6 +36,7 @@ import uitree as S
 from uitree import _NOW
 
 EDGE_UP, EDGE_DOWN, EDGE_LEFT, EDGE_RIGHT = 1, 2, 4, 8   # moy_ui_api.h's MOY_UI_EDGE_*
+BAR_KIND = 5                    # moy_ui_api.h's MOY_UI_BUTTON_BAR: the shell's bar item
 
 _UP, _DOWN = 1 << 2, 1 << 3     # the up and down bits of a host's frame buttons (ui_draw._HOST_BUTTONS)
 _IN_REP = 10                    # the frame input's repeat word, a byte a direction (ui_draw._IN_REP)
@@ -1466,7 +1467,13 @@ class Engine(S.Builder):
             o["fit"] = True
         if n.l.get("alone") and ("icon" in n.p or n.act.icon):
             text = ""
-        if _v.button(text, n.l.get("kind", "normal"), o):
+        kind = n.l.get("kind", "normal")
+        if kind == "bar":
+            t = _v._T
+            hit = _v._C.api_button(t[0], t[1], t[2], text, BAR_KIND, _v._over(o))
+        else:
+            hit = _v.button(text, kind, o)
+        if hit:
             self._activate(n, row)
 
     def _two_way(self, n, new, cur):

@@ -172,7 +172,8 @@ def conf(loop):
             ("placed", PLACED_SRC, PLACED_SCRIPT, (uitree_editor.Engine, uitree_c.CEditorEngine)),
             ("text_editor", TE_SRC, TE_SCRIPT, (uitree_editor.Engine, uitree_c.CEditorEngine)),
             ("across", ACROSS_SRC, ACROSS_SCRIPT, (uitree_editor.Engine, uitree_c.CEditorEngine)),
-            ("across_bar", ACROSS_BAR_SRC, ACROSS_BAR_SCRIPT, (uitree_editor.Engine, uitree_c.CEditorEngine))]:
+            ("across_bar", ACROSS_BAR_SRC, ACROSS_BAR_SCRIPT, (uitree_editor.Engine, uitree_c.CEditorEngine)),
+            ("bar_look", BAR_LOOK_SRC, BAR_LOOK_SCRIPT, (uitree_editor.Engine, uitree_c.CEditorEngine))]:
         runs = {}
         for tag, cls in zip(("py", "c"), pair):
             mod = _load("conf_%s_%s" % (name, tag), src)
@@ -401,6 +402,8 @@ TE_SCRIPT = ["k:down", "k:down", "k:right", "k:a", "k:down", "k:a", "k:up"]
 ACROSS_SCRIPT = ["k:right", "k:a", "k:right", "k:a", "k:down", "k:a", "k:up"]
 # a bar's pieces (tests/uitree_fixtures/uitree_across_bar.py): Bump widens a w= and a gap= state
 ACROSS_BAR_SCRIPT = ["k:a", "k:right", "k:a", "k:down", "k:left", "k:a"]
+# the bar's look (tests/uitree_fixtures/uitree_bar_look.py): marked, walked, the clock widened
+BAR_LOOK_SCRIPT = ["k:a", "k:right", "k:right", "k:right", "k:right", "k:a", "k:left", "k:a"]
 
 
 @pytest.fixture(scope="module")
@@ -410,11 +413,13 @@ def result(tmp_path_factory):
     te = (Path(__file__).resolve().parent / "uitree_fixtures" / "uitree_text_editor.py").read_text()
     across = (Path(__file__).resolve().parent / "uitree_fixtures" / "uitree_across.py").read_text()
     across_bar = (Path(__file__).resolve().parent / "uitree_fixtures" / "uitree_across_bar.py").read_text()
+    bar_look = (Path(__file__).resolve().parent / "uitree_fixtures" / "uitree_bar_look.py").read_text()
     more = (DRIVER.replace("@FIXTURES@", repr(_fixtures())) + "\nLONG_SRC = %r\n" % LONG
             + "PLACED_SRC = %r\nPLACED_SCRIPT = %r\nBAR_SRC = %r\n" % (placed, PLACED_SCRIPT, bar_row)
             + "TE_SRC = %r\nTE_SCRIPT = %r\n" % (te, TE_SCRIPT)
             + "ACROSS_SRC = %r\nACROSS_SCRIPT = %r\n" % (across, ACROSS_SCRIPT)
             + "ACROSS_BAR_SRC = %r\nACROSS_BAR_SCRIPT = %r\n" % (across_bar, ACROSS_BAR_SCRIPT)
+            + "BAR_LOOK_SRC = %r\nBAR_LOOK_SCRIPT = %r\n" % (bar_look, BAR_LOOK_SCRIPT)
             + "SETTINGS_KEYS = %r\nSETTINGS_RUNS = %r\n" % (SETTINGS_KEYS, SETTINGS_RUNS))
     info, text = FA._run(tmp_path_factory.mktemp("uitree_c"), entry="conf", more=more,
                          why="the C engine runs on the boards' MicroPython: this is its check there")

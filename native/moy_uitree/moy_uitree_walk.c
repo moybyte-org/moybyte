@@ -2691,6 +2691,8 @@ static int32_t natural(uit_t *e, int k, int model, int row, int32_t h)
     const uit_node_t *N = NODE(k);
     uint32_t n, at;
     if (N->kind == UIT_BUTTON) {
+        if (N->t_value >= 0)
+            return len_of(e, N->t_value, model, row, 0);     // a bar item: its own width
         if (N->t_icon >= 0 && (N->btn & BT_ALONE))
             return h;
         at = text(e, k, 0, model, row, &n);
@@ -2817,8 +2819,8 @@ static void row_cells(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, 
         int32_t cell[4] = {x, r[1] + 2, kw, r[3] - 4};
         int gk = NODE(g)->kind;
         if (gk == UIT_STATUS || gk == UIT_CASE || gk == UIT_SWITCH || gk == UIT_PANEL || gk == UIT_CANVAS ||
-            gk == UIT_ROW)
-            cell[1] = r[1], cell[3] = r[3];     // a band, a region: the row's height
+            gk == UIT_ROW || (gk == UIT_BUTTON && NODE(g)->lit == MOY_UI_BUTTON_BAR))
+            cell[1] = r[1], cell[3] = r[3];     // a band, a region, a bar item: the row's height
         if (e->placing || gk == UIT_ROW)
             place_at(e, c, s, g, model, row, cell);     // a placement records the cells, drawing none
         else if (gk == UIT_BUTTON) {

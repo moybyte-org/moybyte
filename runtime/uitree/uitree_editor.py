@@ -501,6 +501,8 @@ class Engine(uitree_app.Engine):
 
     def _natural(self, k, row, h):
         if k.kind == "button":
+            if k.src.get("w") is not None:
+                return self._len(k, "w", row, 0)    # a bar item: its own width
             if "icon" in k.p and k.l.get("alone"):
                 return h
             return _v.text_size(self._t(k, "label", row))[0] + 28
@@ -601,7 +603,8 @@ class Engine(uitree_app.Engine):
             elif mid is not None and i == mid + 1:
                 x = x1 - sum(ws[mid + 1:]) - gap * (len(kids) - 2 - mid)
             kw = ws[i]
-            r = (x, y, kw, h) if k.kind in _WHOLE else (x, y + 2, kw, h - 4)   # a band, a region: the row's height
+            r = (x, y, kw, h) if k.kind in _WHOLE or (k.kind == "button" and k.l.get("kind") == "bar") \
+                else (x, y + 2, kw, h - 4)      # a band, a region, a bar item: the row's height
             self._put_rect(k.key, r)
             if k.kind == "row" or self.placing:
                 self._draw(k, row, r)       # a placement records the cells, drawing none

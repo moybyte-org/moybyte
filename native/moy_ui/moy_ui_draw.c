@@ -1046,6 +1046,43 @@ int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, i
     return MOY_UI_OK;
 }
 
+int moy_ui_bar_item(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, const moy_ui_button_t *k) {
+    draw_t d;
+    open_draw(s, &d);
+    int fs = k->fs, least = b.w < b.h ? b.w : b.h;
+    int side = least >= 16 ? least / 16 * 16 : 16, u = side / 16;
+    int ink = k->colors[1] != MOY_UI_FROM_STYLE ? k->colors[1]
+                                                : moy_ui_token(d.look, MOY_UI_T_CHROME_INK);
+    if (flags & MOY_UI_F_DISABLED) {
+        ink = moy_ui_token(d.look, MOY_UI_T_CHROME_INK_DIM);
+    }
+    int icon = (flags & MOY_UI_F_ICON) && (k->icon >= 0 || k->glyph >= 0);
+    int cw = icon ? side : t_w(&d.f, k->label.p, k->label.n, fs);
+    int cx = b.x + moy_ui_fdiv(b.w - cw, 2), iy = b.y + moy_ui_fdiv(b.h - side, 2);
+    int mi = -1;
+    if (flags & MOY_UI_F_ON) {
+        moy_ui_box_t m = {(int16_t)(cx - 3 * u), (int16_t)(iy - 3 * u / 2), (int16_t)(cw + 6 * u),
+                          (int16_t)(side + 3 * u)};
+        moy_ui_current(s, m, MOY_UI_ITEM_CELL, 5 * fs, s->shown ? 0 : MOY_UI_MARK_BACK, fs, &mi);
+        ink = mi >= 0 ? mi : ink;
+    }
+    moy_ui_box_t pill = {(int16_t)(cx - 5 * u), b.y, (int16_t)(cw + 10 * u), b.h};
+    if (flags & MOY_UI_F_FOCUS) {
+        moy_ui_focus(s, pill, MOY_UI_ITEM_CELL, 5 * fs, MOY_UI_MARK_PILL, u, NULL, &mi);
+    }
+    if (icon) {
+        moy_ui_box_t ib = {(int16_t)cx, (int16_t)iy, (int16_t)side, (int16_t)side};
+        moy_ui_icon_in(s, k->icon, k->glyph, ib, ink, fs);
+    } else if (k->label.n) {
+        text(&d, k->label.p, k->label.n, cx, b.y + moy_ui_fdiv(b.h - d.f.line * fs, 2), ink);
+    }
+    if (flags & MOY_UI_F_FOCUS) {
+        moy_ui_focus(s, pill, MOY_UI_ITEM_CELL, 5 * fs, MOY_UI_MARK_PILL | MOY_UI_MARK_AFTER, u,
+                     NULL, &mi);
+    }
+    return MOY_UI_OK;
+}
+
 int moy_ui_chip(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int interact,
                 const moy_ui_button_t *k, int phase) {
     draw_t d;

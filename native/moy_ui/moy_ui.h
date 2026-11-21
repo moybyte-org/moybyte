@@ -639,6 +639,15 @@ typedef struct {
 int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int interact,
                   const moy_ui_button_t *k, int phase);
 int moy_ui_button_x(moy_ui_box_t b, int flags, moy_ui_span_t label, int fs);
+// The shell's bar item on box b (a cell the bar's height across): no plate;
+// its icon (F_ICON, k->icon or k->glyph) at the largest multiple of 16 the box
+// holds, else its label in the ui face, centred, in the chrome ink (k->colors[1]
+// where given: a status item's state; the dim chrome ink disabled). A unit is
+// that side's sixteenth. F_ON wears the cell's ON mark on the content and three
+// units along, one and a half across (a popover open from it); F_FOCUS the
+// bar's pill on the content and five units along, the box across: a plate under
+// the content, then a ring two units wide.
+int moy_ui_bar_item(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, const moy_ui_button_t *k);
 // A chip: a glyph, when it has one, REPLACES its label.
 int moy_ui_chip(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int interact,
                 const moy_ui_button_t *k, int phase);

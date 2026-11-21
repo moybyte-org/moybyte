@@ -957,7 +957,10 @@ void moy_ui_api_page(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
 void moy_ui_api_label(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t text,
                       const moy_ui_over_t *o);
 // `kind` a button kind's index (moy_ui_button_kinds: normal, primary, tonal,
-// danger, toggle); an unknown one draws as normal.
+// danger, toggle), or MOY_UI_BUTTON_BAR, the shell's bar item
+// (moy_ui_bar_item: no kind of the style's, no theme leaves); an unknown one
+// draws as normal.
+#define MOY_UI_BUTTON_BAR 5
 int moy_ui_api_button(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label, int kind,
                       const moy_ui_over_t *o);
 int moy_ui_api_toggle(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label, int on,

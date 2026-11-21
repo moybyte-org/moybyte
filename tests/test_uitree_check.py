@@ -38,6 +38,7 @@ PORTED = (
     "uitree_legacy_app",
     "uitree_across",
     "uitree_across_bar",
+    "uitree_bar_look",
     "bar_ui",
     "uitree_two_pages",
     "uitree_placed",
