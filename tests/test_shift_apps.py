@@ -690,3 +690,46 @@ def test_a_cards_drag_draws_none_of_the_cards_it_moved(tmp_path, engine):
     assert kept, "the drag shifted no frame"
     assert min(kept) == len(xs), "a shift frame painted over %d of the %d marked pixels it moved" % (
         len(xs) - min(kept), len(xs))
+
+
+
+
+@pytest.mark.parametrize("bufs", (1, 2, 3))
+@pytest.mark.parametrize("page", ("achievements", "licences"))
+def test_a_page_closed_twice_leaves_the_rows_on_the_glass(tmp_path, page, bufs):
+    """Settings in a desk window on a glass of `bufs` buffers presented in
+    turn, painted when the console's gate says: a page opened from its rows
+    and closed, twice. Each close settles on the same picture, the rows
+    focused on the page's row, never the page left standing in the window."""
+    ws = _console(tmp_path, "settings", True, desk=True)
+    drv = host_app.ConsoleDriver(ws)
+    root = ws.sys_canvas
+    root.RETAINED_FRAMES = bufs
+    held = [bytes(root._buf)]
+
+    def settle():
+        for _ in range(60):
+            _NOW[0] += 33
+            ws.pointer.visible = False
+            k = ws.frame_state.frames_drawn
+            drv.frame(_DT)
+            if ws.frame_state.frames_drawn != k:
+                held.append(bytes(root._buf))
+                if bufs > 1:
+                    root._comp.last = held[-1]
+                    root._buf[:] = held[-bufs] if len(held) > bufs else held[0]
+
+    settle()
+    closed = []
+    for _ in range(2):
+        ws.settings_layer.open_page(page)
+        settle()
+        drv.press("b")
+        settle()
+        assert ws.settings_layer.page is None
+        closed.append(held[-1])
+    if closed[0] != closed[1]:
+        w = root.w
+        at = next(i for i in range(0, len(closed[0]), 2) if closed[0][i:i + 2] != closed[1][i:i + 2]) // 2
+        raise AssertionError("the second close left the glass unlike the first at (%d, %d)"
+                             % (at % w, at // w))
