@@ -95,13 +95,18 @@ _TEXT_PAD = 8          # moy_ui_api_int.h's TEXT_PAD: the view's text inset at t
 
 
 def _clip_in(cv, x, y, w, h, outer):
-    """Clip `cv` to a canvas's rect, inside `outer` where the host gives one."""
+    """Clip `cv` to a canvas's rect, inside `outer` where the host gives one:
+    whether any of it is left to draw (a canvas outside the host's clip,
+    a clock tick's span, is not drawn at all)."""
     if outer is not None:
         x0, y0 = max(x, outer[0]), max(y, outer[1])
         w = max(0, min(x + w, outer[0] + outer[2]) - x0)
         h = max(0, min(y + h, outer[1] + outer[3]) - y0)
         x, y = x0, y0
+        if w <= 0 or h <= 0:
+            return False
     cv.clip(x, y, w, h)
+    return True
 
 
 def _clip_back(cv, outer):
@@ -680,7 +685,8 @@ class Engine(uitree_app.Engine):
         x, y, w, h, _st = _v.part(n.key, 0, 0, {"id": n.key, "bare": True} if self.bare else {"id": n.key})
         self._id(n.key, self._slot(n, None).pair)    # (a bare page's canvases sink no well)
         self.canvases[n.key] = (n, (x, y, w, h))
-        _clip_in(self.cv, x, y, w, h, self.clip_to)
+        if not _clip_in(self.cv, x, y, w, h, self.clip_to):
+            return
         if "ground" in n.l:
             self.cv.rect(x, y, w, h, self.th[n.l["ground"]])
         n.l["draw"](self.cv, x, y, w, h)

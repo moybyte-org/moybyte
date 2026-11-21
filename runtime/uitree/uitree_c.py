@@ -1357,7 +1357,8 @@ class CEditorEngine(CEngine, _ed.Engine):
                 now.app, now.frame = app, frame
             return
         cv = self.cv
-        _ed._clip_in(cv, x, y, w, h, self.clip_to)
+        if not _ed._clip_in(cv, x, y, w, h, self.clip_to):
+            return
         try:
             g = self._grounds.get(node)
             if g:
