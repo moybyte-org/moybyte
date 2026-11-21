@@ -16,6 +16,9 @@ LEFT = ("menu", "chips", "zone")
 RIGHT = ("wifi", "battery", "clock")
 _PAGE = [None]
 SHOWN = {"wifi": "wifi_on", "clock": "clock_on"}     # a widget's shown= state, where not its name
+_SHOWN = tuple((n, SHOWN.get(n, n)) for n in LEFT + RIGHT if n != "battery")
+_DIRTY = [False]                # a state written since the page's store last took the writes
+_LAST = [None] * 8              # the bar `_states` wrote last: names, cs, fs, clock_w, sys_len, n, glyph, wins
 
 
 def _ordered(names, order):
@@ -42,7 +45,7 @@ def _page():
     if p is None:
         import uitree_editor
         p = _PAGE[0] = uitree_editor.page(bar_ui.bar, None, None)
-        _WINS[0] = _ITEMS_W[0] = None       # (a new page's store holds neither)
+        _WINS[0] = _ITEMS_W[0] = _LAST[0] = None    # (a new page's store holds none of them)
     return p
 
 
@@ -51,6 +54,7 @@ def _put(nm, v):
     if s._v[nm] != v:
         s._v[nm] = v
         s._ver[nm] += 1
+        _DIRTY[0] = True
 
 
 def _place(rect, names, cs, fs, clock_w, sys_len, n_items):
@@ -95,34 +99,45 @@ def _items(n):
 def _states(names, cs, fs, clock_w, sys_len, n_items, glyph=None, wins=None):
     """The page's states written for a bar of widgets `names`; `wins` the
     chips' rows where given (a list the window manager keeps while it
-    stands: written again only when it is another)."""
+    stands: written again only when it is another). The bar written last
+    again (`names` the same list) writes nothing."""
     page = _page()
     page._bind()
+    n = min(n_items, _status.CAP)
+    items = _items(n)
+    L = _LAST
+    if (L[0] is names and L[1] == cs and L[2] == fs and L[3] == clock_w and L[4] == sys_len
+            and L[5] == n and L[6] is glyph and (wins is None or wins is _WINS[0])
+            and items is _ITEMS_W[0]):
+        return page
     if wins is not None and wins is not _WINS[0]:
         _WINS[0] = wins
         s._v["wins"] = S._check(s._t["wins"], wins, "s.wins")
         s._ver["wins"] += 1
-    n = min(n_items, _status.CAP)
-    items = _items(n)
+        _DIRTY[0] = True
     if items is not _ITEMS_W[0]:
         _ITEMS_W[0] = items
         s._v["items"] = S._check(s._t["items"], items, "s.items")
         s._ver["items"] += 1
+        _DIRTY[0] = True
     sg = max(6 * cs, 4 * fs)        # a gap between inks (an icon item is its ink wide)
     _put("sg", sg)
     _put("cw", clock_w)
     _put("sys_w", sys_len or 16 * cs)
     _put("status", bool(n) and ("wifi" in names or "battery" in names))
-    for nm in LEFT + RIGHT:
-        if nm != "battery":
-            _put(SHOWN.get(nm, nm), nm in names)
+    tray = False
+    for nm, st in _SHOWN:
+        _put(st, nm in names)
+    for nm in RIGHT:
+        tray = tray or nm in names
     if glyph is not None:
         _put("batt_icon", "battery" in names and not glyph)
         _put("batt_glyph", "battery" in names and glyph)
     elif "battery" not in names or not (s._v["batt_icon"] or s._v["batt_glyph"]):
         _put("batt_icon", "battery" in names)
         _put("batt_glyph", False)
-    _put("tray", any(n in names for n in RIGHT))
+    _put("tray", tray)
+    L[0], L[1], L[2], L[3], L[4], L[5], L[6] = names, cs, fs, clock_w, sys_len, n, glyph
     return page
 
 
@@ -217,6 +232,15 @@ class _NoDamage:
 
 
 _CTX = [None]                   # the bar's own toolkit context (its stops, its kept state)
+_D = [None]
+
+
+def _ui_draw():
+    D = _D[0]
+    if D is None:
+        import ui_draw as D
+        _D[0] = D
+    return D
 _ORIGIN = [0, 0]                # where the page is drawn on its canvas: the bar's origin there
 
 
@@ -228,15 +252,17 @@ def draw(cv, th, rect, names, cs, fs, clock_w, sys_len, n_items, wicon, time, gl
     `clip` (on `cv`, which the caller has clipped to it): the part drawn
     again, every draw inside it, and `cv` left clipped to it. The
     toolkit's target the host's frame set is given back."""
-    import ui_draw as D
     page = _states(names, cs, fs, clock_w, sys_len, n_items, glyph, wins)
     _put("wicon", wicon)
     _put("time", time)
-    pushed = getattr(page, "committed", None)
-    if pushed is not None:
-        pushed()                # the C engine's store takes the writes (the reference reads them)
+    if _DIRTY[0]:
+        _DIRTY[0] = False
+        pushed = getattr(page, "committed", None)
+        if pushed is not None:
+            pushed()            # the C engine's store takes the writes (the reference reads them)
     if page._damage is None:
         page._damage = _NoDamage()
+    D = _ui_draw()
     ctx = _CTX[0]
     if ctx is None:
         ctx = _CTX[0] = D.ui_context()

@@ -596,6 +596,7 @@ class BarLayer:
         # as (bar index, rect in that bar's coordinates).
         self.focus = None
         self.focus_where = None
+        self._page_at = [None, None, None]      # the bar the page draws: where, its rect, its cells
         self.focus_from = None
         self.focus_item = None
         self._items_lgen = -1         # the status items' count the packing holds
@@ -1476,8 +1477,12 @@ class BarLayer:
         names, cw, sys_w, n_items = self._page_names(cells)
         ws = self.ws
         L = ws.layout
-        self._page_at = (where, bar, cells)
-        _bar_ui.PAINT[0] = self._page_paint
+        at = self._page_at
+        at[0], at[1], at[2] = where, bar, cells
+        paint = self._page_painter
+        if paint is None:
+            paint = self._page_painter = self._page_paint
+        _bar_ui.PAINT[0] = paint
         self._page_items(where)
         _bar_engine.draw(cv, ws.theme_colors, bar, names, L.cs, L.fs, cw or L.clock_w, sys_w,
                          n_items, ws.wifi_icon_kind(), self.clock_text(), self._battery_state() != 0,
@@ -1513,10 +1518,21 @@ class BarLayer:
         x, side, step = self._status_x(r, n)
         return [(x + k * step, r[1], side, side) for k in range(n)]
 
-    @staticmethod
-    def _page_names(cells):
+    _names_of = (None, None)
+    _page_painter = None            # `_page_paint` bound once
+
+    def _page_names(self, cells):
         """A packed bar's widgets as the page takes them: their names, the
-        clock's, the system button's widths and the status items' count."""
+        clock's, the system button's widths and the status items' count;
+        the same answer (its names the same list) while `cells` stands."""
+        got = self._names_of
+        if got[0] is cells:
+            return got[1]
+        got = self._names_of = (cells, self._names_made(cells))
+        return got[1]
+
+    @staticmethod
+    def _names_made(cells):
         names = []
         cw = sys_w = n_items = 0
         for name, r, text, _slot in cells:
@@ -1531,8 +1547,8 @@ class BarLayer:
 
     def _wins(self):
         """The chips' rows, the window manager's (`chip_model`), else None."""
-        got = getattr(self.ws.wm, "chip_model", None)
-        return got() if got is not None else None
+        wm = self.ws.wm
+        return wm.chip_model() if hasattr(wm, "chip_model") else None
 
     def page_chip_rects(self, bar, out):
         """The chips of packed bar `bar` placed by the bar page, [(kind,
@@ -1563,7 +1579,8 @@ class BarLayer:
         """A canvas of the bar page: the system button, a hand-drawn
         battery, through their painters in the bar's coordinates
         (the page is drawn at the bar's origin on `cv`)."""
-        where, bar, cells = self._page_at
+        at = self._page_at
+        where, bar, cells = at[0], at[1], at[2]
         ox, oy = _bar_engine._ORIGIN
         box = (0, 0, bar[2], bar[3])
         if ox or oy:
