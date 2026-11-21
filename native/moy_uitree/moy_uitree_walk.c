@@ -3105,3 +3105,237 @@ ids:;
     e->still_ok = !owe;
     return (e->nevs - e->evat) | (owe ? 1 << 16 : 0);
 }
+
+// -- a row lent to a site ---------------------------------------------------------
+
+// The source of node `k`'s prop `name`, else NULL.
+static const char *prop_src(uit_t *e, int k, const char *name)
+{
+    for (int p = NODE(k)->props; p != (int)UIT_NONE; p = e->props[p].next)
+        if (!strcmp(uit_str(e, e->props[p].name), name))
+            return uit_str(e, e->props[p].src);
+    return NULL;
+}
+
+// The shown `tools lend=SITE` under `k` (a hidden node hides its subtree, a switch shows its
+// one case, a list holds none), else -1.
+static int lender(uit_t *e, int k, const char *site)
+{
+    const uit_node_t *N = NODE(k);
+    if (!uit_shown(e, k, -1, -1) || UIT_IS_LIST(N->kind))
+        return -1;
+    if (N->kind == UIT_TOOLS && (N->lit & TL_LEND)) {
+        const char *s = prop_src(e, k, "lend");
+        return s && !strcmp(s, site) ? k : -1;
+    }
+    if (N->kind == UIT_SWITCH) {
+        int cs = uit_case_of(e, k);
+        return cs < 0 ? -1 : lender(e, cs, site);
+    }
+    KIDS(k, g) {
+        int r = lender(e, g, site);
+        if (r >= 0)
+            return r;
+    }
+    return -1;
+}
+
+// Whether tabs node `k` offers value `v`: no offered= for it, or its condition holds.
+static int offered(uit_t *e, int k, const char *v)
+{
+    for (int p = NODE(k)->props; p != (int)UIT_NONE; p = e->props[p].next) {
+        const uit_prop_t *P = &e->props[p];
+        if (P->kind == PK_COND && P->repr != UIT_NONE && !strcmp(uit_str(e, P->name), "offered") &&
+            !strcmp(uit_str(e, P->repr), v))
+            return uit_cond_eval(e, P->idx, -1, -1);
+    }
+    return 1;
+}
+
+// A cell's four texts onto `text` at `*at`: 0, or -1 where they do not fit.
+static int lent_texts(char *text, size_t cap, size_t *at, const char *const t[4], const size_t n[4])
+{
+    for (int i = 0; i < 4; i++) {
+        if (*at + n[i] + 1 > cap)
+            return -1;
+        memcpy(text + *at, t[i], n[i]);
+        text[*at + n[i]] = 0;
+        *at += n[i] + 1;
+    }
+    return 0;
+}
+
+int uit_lent(uit_t *e, const char *site, int32_t *cells, int max, char *text, size_t cap)
+{
+    if (!e->nnodes)
+        return -1;
+    int k = lender(e, 0, site);
+    if (k < 0)
+        return -1;
+    uint32_t mark = e->scratch.n;
+    size_t at = 0;
+    int n = 0, r = 0;
+    KIDS(k, g) {
+        if (n >= max)
+            break;
+        const uit_node_t *G = NODE(g);
+        if (!placed_shown(e, g, -1, -1))
+            continue;
+        const char *key = uit_str(e, G->key);
+        if (G->kind == UIT_TABS) {
+            const uit_slot_t *S = &e->slots[G->slot];
+            const char *v = uit_str(e, S->vals);
+            for (int i = 0; i < S->nvals && n < max; i++, v += strlen(v) + 1) {
+                size_t vn = strlen(v);
+                if (!offered(e, g, v))
+                    continue;
+                const char *t[4] = {key, v, G->cur >= 0 ? uit_label_word(e, G->cur, v, vn) : v,
+                                    G->nbtn ? uit_label_word(e, G->nbtn - 1, v, vn) : ""};
+                size_t tn[4] = {strlen(t[0]), vn, strlen(t[2]), strlen(t[3])};
+                int32_t *c = cells + n * UIT_LC_INTS;
+                c[0] = UIT_LC_TAB, c[1] = g, c[2] = i, c[4] = G->on;
+                c[3] = vn == S->sn && S->s && !memcmp(v, S->s, vn) ? UIT_LC_CUR : 0;
+                if (lent_texts(text, cap, &at, t, tn) < 0)
+                    goto small;
+                n++;
+            }
+        } else if (G->kind == UIT_BUTTON || G->kind == UIT_LABEL) {
+            uint32_t ln = 0, in = 0, la = text_t(e, g, G->t_main, -1, -1, &ln), ia = 0;
+            if (G->kind == UIT_BUTTON && G->t_icon >= 0)
+                ia = uit_tmpl_render(e, G->t_icon, -1, -1, &in);
+            const char *t[4] = {key, "", e->scratch.p + la, in ? e->scratch.p + ia : ""};
+            size_t tn[4] = {strlen(key), 0, ln, in};
+            int32_t *c = cells + n * UIT_LC_INTS;
+            c[0] = G->kind == UIT_LABEL ? UIT_LC_TEXT : UIT_LC_BUTTON, c[1] = g, c[2] = -1, c[3] = 0, c[4] = -1;
+            if (G->kind == UIT_BUTTON) {
+                c[4] = G->act;
+                c[3] = ((G->btn & BT_ALONE) ? UIT_LC_ALONE : 0) | (G->lit == 1 ? UIT_LC_PRIMARY : 0) |
+                       (G->act < 0 || uit_act_can(e, G->act, -1, -1) ? UIT_LC_ON : 0) |
+                       (G->mark >= 0 && uit_cond_eval(e, G->mark, -1, -1) ? UIT_LC_MARKED : 0);
+            }
+            if (lent_texts(text, cap, &at, t, tn) < 0)
+                goto small;
+            n++;
+        } else {
+            r = uit_fail(e, UIT_E_KIND, UIT_MSG("a %s in a row lent to %s: tabs, buttons and a label",
+                                                "%s lent to %s"), uit_kind_names[G->kind], site);
+            break;
+        }
+    }
+    e->scratch.n = mark;
+    return r < 0 ? r : n;
+small:
+    e->scratch.n = mark;
+    return uit_fail(e, UIT_E_ARG, UIT_MSG("the lent row's texts pass %u bytes", "lent %u"), (unsigned)cap);
+}
+
+// The lent row's rule (the bar's zone): its cells pack from the left in their order, the run
+// of buttons at its end stands at the zone's right end, END short of it, and a hairline closes
+// a run of tabs and opens that end run. GAP, LEAST, GROUP and END are at fs 1.
+enum { LZ_GAP = 5, LZ_LEAST = 2, LZ_GROUP = 8, LZ_END = 6 };
+#define LP(i) (cells + (i) * UIT_LP_INTS)
+
+// Whether cell `i` shows its label at `density` (`words`: a button its word at density 1).
+static int lp_named(const int32_t *c, int density, int words)
+{
+    if (!c[2])
+        return 0;
+    if (c[0] == UIT_LC_TAB)
+        return density == 2 || (density == 1 && (c[1] & UIT_LC_CUR));
+    return c[0] == UIT_LC_BUTTON && (density == 2 || (density == 1 && words)) && !(c[1] & UIT_LC_ALONE);
+}
+
+static int32_t lp_width(const int32_t *c, int density, int words, int32_t h, int32_t pad)
+{
+    if (c[0] == UIT_LC_TEXT)
+        return 0;
+    if (lp_named(c, density, words))
+        return c[2];
+    return c[0] == UIT_LC_TAB && (c[1] & UIT_LC_CUR) ? h + 2 * pad : h;
+}
+
+int uit_lent_place(int32_t *cells, int n, int32_t x0, int32_t w, int32_t h, int fs, int32_t pad,
+                   int32_t *hair, int *nhair, int32_t *need)
+{
+    int end = n, lines = 0, tablines = 0, text = 0, density = 2, words = 1;
+    w -= LZ_END * fs;
+    if (w < 0)
+        w = 0;
+    while (end > 0 && LP(end - 1)[0] == UIT_LC_BUTTON)
+        end--;
+    // a line before cell i: after a run of tabs, and before the end run
+#define LINE(i) ((i) > 0 && (i) < n && ((LP((i) - 1)[0] == UIT_LC_TAB && LP(i)[0] != UIT_LC_TAB) || \
+                                        ((i) == end && end > 0)))
+    for (int i = 0; i < n; i++) {
+        text |= LP(i)[0] == UIT_LC_TEXT;
+        lines += LINE(i);
+        tablines += i > 0 && LP(i - 1)[0] == UIT_LC_TAB && LP(i)[0] != UIT_LC_TAB;
+    }
+    int32_t gaps = n - 1 - lines, lg = 0, least = 0;
+    static const uint8_t TRY[4][2] = {{2, 1}, {1, 1}, {1, 0}, {0, 0}};
+    for (int t = 0; t < 4; t++) {
+        density = TRY[t][0], words = TRY[t][1];
+        lg = density == 1 ? 0 : LZ_LEAST * fs;      // the current tab's name goes before the gaps do
+        least = lg * (gaps > 0 ? gaps : 0) + LZ_GROUP * fs * lines;
+        int32_t cur = -1, widest = -1;
+        for (int i = 0; i < n; i++) {
+            int32_t *c = LP(i);
+            least += lp_width(c, density, words, h, pad);
+            if (c[0] == UIT_LC_TAB && (c[1] & UIT_LC_CUR) && cur < 0)
+                cur = lp_width(c, density, words, h, pad);
+            if (c[0] == UIT_LC_TAB && c[2] && c[2] > widest)
+                widest = c[2];
+        }
+        // the buttons keep their words only where every tab named in the current one's place holds them
+        int32_t more = density == 1 && words && cur >= 0 && widest >= 0 && widest > cur ? widest - cur : 0;
+        if (least + more <= w || density == 0)
+            break;
+    }
+    int32_t spare = w - least > 0 ? w - least : 0, gap = lg;
+    if (!text) {
+        int32_t g = spare / (gaps > 1 ? gaps : 1), most = LZ_GAP * fs - lg;
+        gap = lg + (g < most ? g : most);
+    }
+    int nh = 0;
+    int32_t x = x0;
+    for (int i = 0; i < n; i++) {
+        int32_t *c = LP(i);
+        int32_t cw = lp_width(c, density, words, h, pad);
+        if (i) {
+            if (LINE(i)) {
+                x += LZ_GROUP * fs;
+                if (i == end && !text) {
+                    int32_t rest = 0;
+                    for (int j = end; j < n; j++)
+                        rest += lp_width(LP(j), density, words, h, pad);
+                    int32_t at = x0 + w - rest - gap * (n - end - 1);
+                    if (at > x)
+                        x = at;
+                }
+                if (nh < n)
+                    hair[nh++] = x - (LZ_GROUP * fs + fs) / 2;
+            } else {
+                x += gap;
+            }
+        }
+        if (c[0] == UIT_LC_TEXT) {
+            cw = spare;                 // a line of text takes the room left
+            spare = 0;
+        }
+        if (x + cw > x0 + w) {
+            for (int j = i; j < n; j++)
+                LP(j)[4] = -1;
+            break;
+        }
+        c[3] = x, c[4] = cw, c[5] = c[0] == UIT_LC_TEXT || lp_named(c, density, words);
+        x += cw;
+    }
+#undef LINE
+    *nhair = nh;
+    int32_t icons = LZ_LEAST * fs * (n - 1 - tablines > 0 ? n - 1 - tablines : 0) + LZ_GROUP * fs * tablines + LZ_END * fs;
+    for (int i = 0; i < n; i++)
+        icons += lp_width(LP(i), 0, 0, h, pad);
+    *need = icons;
+    return density;
+}
+#undef LP

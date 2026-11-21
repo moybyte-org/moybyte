@@ -109,6 +109,9 @@ int uit_action_row(uit_t *e, int a, int slot);
 int uit_set_int(uit_t *e, int slot, int32_t v);
 int uit_set_num(uit_t *e, int slot, double v);
 int uit_set_text(uit_t *e, int slot, const char *s, size_t n);
+// An optional state (ui.opt) absent: it draws as nothing and is false in a
+// condition until a value is set again.
+int uit_set_absent(uit_t *e, int slot);
 // A model's rows: `n` rows of nf cells, each cell's text NUL-terminated in
 // order (an int field's text its decimal digits).
 int uit_set_model(uit_t *e, int slot, int n, const char *cells, size_t len);
@@ -153,6 +156,31 @@ int uit_place(uit_t *e, int x, int y, int w, int h, int flags, int fs);
 // Where node `key` was placed by the last frame or placement: 1 and its rect
 // into out, else 0 (not placed: hidden, lent, inside a flow).
 int uit_rect(const uit_t *e, const char *key, int32_t out[4]);
+
+// -- a row lent to a site ---------------------------------------------------------
+// The shown `tools lend=SITE` row's cells before layout, its host's to draw
+// (the shell's bar): UIT_LC_INTS ints a cell into `cells` (its kind, node, a
+// tab's value index, its UIT_LC_* flags, the action a take runs or -1) and
+// four texts a cell into `text`, each NUL-ended (its node's key, a tab's
+// value, its label, its icon; "" none). Answers the cells (`max` at most),
+// -1 where no row is lent to the site, UIT_E_ARG where `text` is too small.
+enum { UIT_LC_TAB = 0, UIT_LC_BUTTON, UIT_LC_TEXT };
+enum { UIT_LC_ALONE = 1, UIT_LC_CUR = 2, UIT_LC_ON = 4, UIT_LC_MARKED = 8, UIT_LC_PRIMARY = 16 };
+#define UIT_LC_INTS 5
+int uit_lent(uit_t *e, const char *site, int32_t *cells, int max, char *text, size_t cap);
+// The lent row's layout in a zone `x0` wide `w` at cell height `h` and scale
+// `fs`, the host's widths handed in: UIT_LP_INTS ints a cell, in (its kind,
+// UIT_LC_* flags, its width named: a tab's or a button's with its label, 0
+// where it has none) and out (x, w, labelled: w -1 past the zone's room).
+// The densities, tried in turn: every label; icons with the current tab
+// named and the buttons' words where every tab named in its place holds
+// them; the same with the buttons as icons; icons alone. `pad` widens the
+// current tab's icon each side. Answers the density placed at (2, 1, 0);
+// the hairlines' x into `hair` (`*nhair` of them, n at most) and into
+// `*need` the narrowest zone that holds every cell as an icon at `h`.
+#define UIT_LP_INTS 6
+int uit_lent_place(int32_t *cells, int n, int32_t x0, int32_t w, int32_t h, int fs, int32_t pad,
+                   int32_t *hair, int *nhair, int32_t *need);
 
 // -- the frame ----------------------------------------------------------------
 // One frame of the page into `content` of a frame the host began: answers

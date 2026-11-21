@@ -561,6 +561,7 @@ int uit_set_int(uit_t *e, int slot, int32_t v)
     uit_slot_t *S = &e->slots[slot];
     S->i = v;
     S->f = v;
+    S->absent = 0;
     S->ver++;
     return 0;
 }
@@ -571,6 +572,7 @@ int uit_set_num(uit_t *e, int slot, double v)
         return UIT_E_ARG;
     e->slots[slot].f = v;
     e->slots[slot].i = (int32_t)v;
+    e->slots[slot].absent = 0;
     e->slots[slot].ver++;
     return 0;
 }
@@ -598,8 +600,21 @@ int uit_set_text(uit_t *e, int slot, const char *s, size_t n)
         return UIT_E_ARG;
     int r = uit_set_text_q(e, slot, s, n);
     if (r == 0)
-        e->slots[slot].ver++;
+        e->slots[slot].ver++, e->slots[slot].absent = 0;
     return r;
+}
+
+int uit_set_absent(uit_t *e, int slot)
+{
+    if (!slot_ok(e, slot))
+        return UIT_E_ARG;
+    uit_slot_t *S = &e->slots[slot];
+    S->absent = 1;
+    S->i = 0;
+    S->f = 0;
+    S->sn = 0;
+    S->ver++;
+    return 0;
 }
 
 int uit_set_model(uit_t *e, int slot, int n, const char *cells, size_t len)
@@ -1005,6 +1020,22 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         return uit_fail(e, UIT_E_NAME, UIT_MSG("%s labels=%s: no label table of that name", "%s labels=%s"),
                         uit_kind_names[kind], src);
     }
+    if (!strcmp(name, "icons") && kind == UIT_TABS) {
+        // a label table of an icon a value: its index + 1 in nbtn
+        for (int i = 0; i < e->nlabels; i++)
+            if (!strcmp(uit_str(e, e->labels[i].name), src)) {
+                N->nbtn = (uint16_t)(i + 1);
+                return add_prop(e, node, name, src, repr, PK_LIT, i);
+            }
+        return uit_fail(e, UIT_E_NAME, UIT_MSG("tabs icons=%s: no label table of that name", "icons=%s"), src);
+    }
+    if (!strcmp(name, "offered") && kind == UIT_TABS) {
+        // one prop a value offered on a condition: the condition its source, the value its repr
+        int c = uit_cond_compile(e, src, model);
+        if (c < 0)
+            return c;
+        return add_prop(e, node, name, src, repr ? repr : "", PK_COND, c);
+    }
     if (!strcmp(name, "look") && (kind == UIT_SEG || kind == UIT_SLIDER || kind == UIT_PROGRESS)) {
         if (!strcmp(src, kind == UIT_SEG ? "cycle" : kind == UIT_SLIDER ? "steps" : "count"))
             N->lit |= kind == UIT_SEG ? NL_CYCLE : NL_STEPS;
@@ -1018,7 +1049,7 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         return add_prop(e, node, name, src, repr, PK_LIT, 0);
     }
     if ((!strcmp(name, "on") && (kind == UIT_TOGGLE || kind == UIT_SEG || kind == UIT_SLIDER ||
-                                 kind == UIT_FIELD || kind == UIT_TABLE)) ||
+                                 kind == UIT_FIELD || kind == UIT_TABLE || kind == UIT_TABS)) ||
         (!strcmp(name, "changed") && kind == UIT_FIELD) || (!strcmp(name, "close") && kind == UIT_POPOVER)) {
         for (int a = 0; a < e->nacts; a++)
             if (!strcmp(uit_str(e, e->acts[a].name), src)) {

@@ -69,6 +69,7 @@ typedef struct {
     char *sync;
     uint8_t sync_set;
     uint8_t in_gen;             // the page's gen counts it (all but a cur= nothing else reads)
+    uint8_t absent;             // an optional state (ui.opt) with no value
 } uit_slot_t;
 
 // Template ops.

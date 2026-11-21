@@ -1619,6 +1619,61 @@ class Engine(uitree_app.Engine):
                 or (self.root is not None and self._closer(self.root) is not None)
                 or self._grown() is not None)
 
+    # -- a row lent to a site ------------------------------------------------------
+
+    def lent(self, site):
+        """The shown row lent to `site` (`ui.tools(KEY, lend=SITE)`), its
+        cells before layout: [kind, key, value, label, icon, flags, action]
+        each, kind "tab", "button" or "text" (a label), flags LC_*; a tabs'
+        values each a cell, those its offered= holds. None where no row is
+        lent there."""
+        if self.root is None:
+            self._build()
+        lenders = {}
+        was, _NOW.app = _NOW.app, self
+        try:
+            S.LIVE = S.live_units(self.root, lenders)
+            n = lenders.get(site)
+            return None if n is None else self._lent_cells(n)
+        finally:
+            _NOW.app = was
+
+    def _lent_cells(self, n):
+        out = []
+        for k in n.kids:
+            if not self._shown(k, None):
+                continue
+            if k.kind == "tabs":
+                tab = self.decl.labels[k.l["labels"]]
+                icons = self.decl.labels.get(k.l.get("icons")) or {}
+                offered = k.l.get("offered") or {}
+                now = self.s._v[k.key]
+                for v in self.s._t[k.key].values:
+                    when = offered.get(v)
+                    if when is None or when(None):
+                        out.append(["tab", k.key, v, tab[v], icons.get(v),
+                                    LC_CUR if now == v else 0, k.l.get("on")])
+            elif k.kind == "button":
+                a = k.act
+                flags = (LC_ALONE if k.l.get("alone") else 0) | (
+                    LC_PRIMARY if k.l.get("kind") == "primary" else 0) | (
+                    LC_ON if a is None or a.can(None) else 0) | (
+                    LC_MARKED if "marked" in k.p and k.p["marked"](None) else 0)
+                out.append(["button", k.key, None, self._t(k, "label", None),
+                            self._t(k, "icon", None) or None, flags, a])
+            elif k.kind == "label":
+                out.append(["text", k.key, None, self._t(k, "text", None), None, 0, None])
+            else:
+                raise S.UIError("N03", "a %s in a row lent to the bar" % k.kind, where=k.where,
+                                expected="tabs, button or label",
+                                fix="lend the bar tabs, buttons and a label")
+        return out
+
+    def lent_place(self, cells, x0, w, h, fs, pad):
+        """The lent row's layout (`lent_place`): the rule `uit_lent_place`
+        runs on the C engine."""
+        return lent_place(cells, x0, w, h, fs, pad)
+
     # -- for the scripts --------------------------------------------------------
 
     def divider_at(self, nth=0, sid=None):
@@ -1627,6 +1682,89 @@ class Engine(uitree_app.Engine):
         allv = [r for _k, v in items for r in v]
         r = allv[nth]
         return r[0] + r[2] // 2, r[1] + r[3] // 2
+
+
+# A lent row's cells (`Engine.lent`): their kinds as the rule numbers them,
+# and their flags (native/moy_uitree/moy_uitree.h's UIT_LC_*).
+LC_KINDS = {"tab": 0, "button": 1, "text": 2}
+LC_ALONE, LC_CUR, LC_ON, LC_MARKED, LC_PRIMARY = 1, 2, 4, 8, 16
+
+
+def lent_place(cells, x0, w, h, fs, pad):
+    """The lent row's rule (`BarZone`'s): `cells` (kind, flags, the width
+    named: the look's with its label, 0 where it has none) each, in a zone
+    `x0` wide `w` at cell height `h`. (density, [(x, w, labelled)] a cell, w
+    -1 past the room, the hairlines' x, the narrowest zone holding every cell
+    as an icon). The densities, in turn: every label (2); icons with the
+    current tab named and the buttons' words where every tab named in its
+    place holds them (1); the same, the buttons icons; icons alone (0)."""
+    Z = BarZone
+    n = len(cells)
+    w = max(0, w - Z.END * fs)
+    end = n
+    while end > 0 and cells[end - 1][0] == 1:
+        end -= 1
+    tablines = [i for i in range(1, n) if cells[i - 1][0] == 0 and cells[i][0] != 0]
+    lines = tablines + ([end] if 0 < end < n and end not in tablines else [])
+    text = any(c[0] == 2 for c in cells)
+
+    def named(c, density, words):
+        if not c[2]:
+            return False
+        if c[0] == 0:
+            return density == 2 or (density == 1 and bool(c[1] & LC_CUR))
+        return c[0] == 1 and (density == 2 or (density == 1 and words)) and not c[1] & LC_ALONE
+
+    def width(c, density, words):
+        if c[0] == 2:
+            return 0
+        if named(c, density, words):
+            return c[2]
+        return h + 2 * pad if c[0] == 0 and c[1] & LC_CUR else h
+
+    for density, words in ((2, True), (1, True), (1, False), (0, False)):
+        # the current tab's name goes before the gaps do: it holds at none
+        lg = 0 if density == 1 else Z.LEAST * fs
+        ws = [width(c, density, words) for c in cells]
+        least = sum(ws) + lg * max(0, n - 1 - len(lines)) + Z.GROUP * fs * len(lines)
+        more = 0
+        if density == 1 and words:
+            # the buttons keep their words only where every tab open holds them
+            cur = [ws[i] for i, c in enumerate(cells) if c[0] == 0 and c[1] & LC_CUR]
+            tabs = [c[2] for c in cells if c[0] == 0 and c[2]]
+            more = max(0, max(tabs) - cur[0]) if cur and tabs else 0
+        if least + more <= w or density == 0:
+            break
+    spare = max(0, w - least)
+    if text:
+        gap = lg
+    else:
+        gap = lg + min(Z.GAP * fs - lg, spare // max(1, n - 1 - len(lines)))
+    out, hair = [], []
+    x = x0
+    for i, c in enumerate(cells):
+        if i:
+            if i in lines:
+                x += Z.GROUP * fs
+                if i == end and not text:
+                    # the end run stands at the zone's right end
+                    x = max(x, x0 + w - sum(ws[end:]) - gap * (n - end - 1))
+                hair.append(x - (Z.GROUP * fs + fs) // 2)
+            else:
+                x += gap
+        cw = ws[i]
+        if c[0] == 2:
+            cw = spare           # a line of text takes the room left
+            spare = 0
+        if x + cw > x0 + w:
+            out.extend([(0, -1, 0)] * (n - i))
+            break
+        out.append((x, cw, 1 if c[0] == 2 or named(c, density, words) else 0))
+        x += cw
+    k = len(tablines)
+    need = sum(width(c, 0, False) for c in cells) + Z.LEAST * fs * max(0, n - 1 - k) + \
+        Z.GROUP * fs * k + Z.END * fs
+    return density, out, hair, need
 
 
 class Page(Engine):
@@ -1706,7 +1844,8 @@ class BarZone:
     # -- the lent row -------------------------------------------------------
 
     def _row(self):
-        """The shown lender's node, the states synced and the tree built."""
+        """The shown lender's cells, the states synced first: [kind, key,
+        value, label, icon, flags, action] a cell (`Engine.lent`), else None."""
         e = self.engine
         e._bind()
         if sum(e.s._ver.values()) != self._vers and self._vers >= 0:
@@ -1714,148 +1853,40 @@ class BarZone:
         sync = getattr(self.host, "head_sync", None)
         if sync is not None:
             sync()                      # (what it moves, the host's own zone_gen moved for)
-        if e.root is None:
-            e._build()
-        lenders = {}
-        was, _NOW.app = _NOW.app, e
-        try:
-            S.LIVE = S.live_units(e.root, lenders)
-        finally:
-            _NOW.app = was
+        cells = e.lent(self.site)
         self._vers = sum(e.s._ver.values())
-        return lenders.get(self.site)
+        return cells
 
-    def _items(self, n):
-        """The row's cells before layout: [kind, node, value, label, icon]
-        each, kind "tab", "button", "text"; tabs and a label each a run."""
-        e = self.engine
+    def _spec(self, cells, h):
+        """Each cell as the rule takes it: (kind, flags, its width named:
+        the look's for a tab or a button with its label, else 0)."""
+        look = self.look
         out = []
-        for k in n.kids:
-            if not e._shown(k, None):
-                continue
-            if k.kind == "tabs":
-                tab = e.decl.labels[k.l["labels"]]
-                icons = e.decl.labels.get(k.l.get("icons")) or {}
-                offered = k.l.get("offered") or {}
-                for v in e.s._t[k.key].values:
-                    when = offered.get(v)
-                    if when is None or when(None):
-                        out.append(["tab", k, v, tab[v], icons.get(v)])
-            elif k.kind == "button":
-                icon = e._t(k, "icon", None) or None
-                out.append(["button", k, None, e._t(k, "label", None), icon])
-            elif k.kind == "label":
-                out.append(["text", k, None, e._t(k, "text", None), None])
-            else:
-                raise S.UIError("N03", "a %s in a row lent to the bar" % k.kind, where=k.where,
-                                expected="tabs, button or label",
-                                fix="lend the bar tabs, buttons and a label")
+        for kind, _k, _v, label, icon, flags, _a in cells:
+            named = 0
+            if label and kind == "tab":
+                named = look.tab_width(label, icon, h)
+            elif label and kind == "button":
+                named = look.word_width(label, icon, h)
+            out.append((LC_KINDS[kind], flags, named))
         return out
 
     def _layout(self, rect):
-        """[(rect, kind, node, value, label, icon, labelled)], the
-        hairlines' x and the density the row packed at (2 every label, 1
-        the current tab's name, 0 icons), for the lent row in `rect`."""
-        n = self._row()
-        if n is None:
+        """[(rect, kind, key, value, label, icon, labelled, flags, action)],
+        the hairlines' x and the density the row packed at (2 every label,
+        1 the current tab's name, 0 icons), for the lent row in `rect`:
+        the rule the engine's (`Engine.lent_place`), the widths the look's."""
+        cells = self._row()
+        if not cells:
             return [], [], 0
-        e = self.engine
-        was, _NOW.app = _NOW.app, e
-        try:
-            items = self._items(n)
-        finally:
-            _NOW.app = was
-        return self._place(items, rect)
-
-    def _cur(self, it):
-        e = self.engine
-        return it[0] == "tab" and e.s._v[it[1].key] == it[2]
-
-    def _widths(self, items, h, density, words=False):
-        """Each cell's width at `density`: 2 every label, 1 icons with the
-        current tab named (and the buttons' words where `words`), 0 icons
-        alone; a text cell 0 (it takes the rest)."""
-        look = self.look
-        out = []
-        for it in items:
-            kind, label, icon = it[0], it[3], it[4]
-            if kind == "text":
-                out.append(0)
-            elif self._named(it, density, words):
-                out.append(look.tab_width(label, icon, h) if kind == "tab"
-                           else look.word_width(label, icon, h))
-            elif kind == "tab" and self._cur(it):
-                out.append(h + 2 * look.tab_pad())
-            else:
-                out.append(h)
-        return out
-
-    def _named(self, it, density, words=False):
-        """Whether cell `it` shows its label at `density` (`words`: a
-        button its word at density 1)."""
-        if not it[3]:
-            return False
-        if it[0] == "tab":
-            return density == 2 or (density == 1 and self._cur(it))
-        return it[0] == "button" and (density == 2 or (density == 1 and words)) \
-            and not it[1].l.get("alone")
-
-    def _widest(self, items, ws, h):
-        """How much wider the row is with its widest tab named in the
-        current one's place: the buttons keep their words only where every
-        tab open holds them, so a tab switch never takes them away."""
-        cur = [ws[i] for i, it in enumerate(items) if it[0] == "tab" and self._cur(it)]
-        named = [self.look.tab_width(it[3], it[4], h) for it in items
-                 if it[0] == "tab" and it[3]]
-        return max(0, max(named) - cur[0]) if cur and named else 0
-
-    def _place(self, items, rect):
         x0, y, w, h = rect
-        fs = self.look.zone_scale()
-        w = max(0, w - self.END * fs)
-        n = len(items)
-        end = n
-        while end > 0 and items[end - 1][0] == "button":
-            end -= 1
-        lines = [i for i in range(1, n) if items[i - 1][0] == "tab" and items[i][0] != "tab"]
-        if 0 < end < n and end not in lines:
-            lines.append(end)
-        text = any(it[0] == "text" for it in items)
-        for density, words in ((2, True), (1, True), (1, False), (0, False)):
-            # the current tab's name goes before the gaps do: it holds at none
-            lg = 0 if density == 1 else self.LEAST * fs
-            ws = self._widths(items, h, density, words)
-            least = sum(ws) + lg * max(0, n - 1 - len(lines)) + self.GROUP * fs * len(lines)
-            if least + (self._widest(items, ws, h) if density == 1 and words else 0) <= w \
-                    or density == 0:
+        density, places, hair, _need = self.engine.lent_place(
+            self._spec(cells, h), x0, w, h, self.look.zone_scale(), self.look.tab_pad())
+        out = []
+        for c, (x, cw, labelled) in zip(cells, places):
+            if cw < 0:
                 break
-        spare = max(0, w - least)
-        if text:
-            gap = lg
-        else:
-            gaps = max(1, n - 1 - len(lines))
-            gap = lg + min(self.GAP * fs - lg, spare // gaps)
-        out, hair = [], []
-        x = x0
-        for i, it in enumerate(items):
-            if i:
-                if i in lines:
-                    x += self.GROUP * fs
-                    if i == end and not text:
-                        # the end run stands at the zone's right end
-                        x = max(x, x0 + w - sum(ws[end:]) - gap * (n - end - 1))
-                    hair.append(x - (self.GROUP * fs + fs) // 2)
-                else:
-                    x += gap
-            cw = ws[i]
-            if it[0] == "text":
-                cw = spare           # a line of text takes the room left
-                spare = 0
-            if x + cw > x0 + w:
-                break
-            labelled = it[0] == "text" or self._named(it, density, words)
-            out.append(((x, y, cw, h), it[0], it[1], it[2], it[3], it[4], labelled))
-            x += cw
+            out.append(((x, y, cw, h), c[0], c[1], c[2], c[3], c[4], bool(labelled), c[5], c[6]))
         return out, hair, density
 
     # -- what the bar asks ----------------------------------------------------
@@ -1863,26 +1894,18 @@ class BarZone:
     def draw_zone(self, cv, zone):
         cells, hair, density = self._layout(zone)
         look = self.look
-        e = self.engine
-        was, _NOW.app = _NOW.app, e
-        try:
-            for x in hair:
-                look.draw_line(cv, x, zone)
-            for r, kind, node, v, label, icon, labelled in cells:
-                if kind == "tab":
-                    look.draw_tab(cv, r, e.s._v[node.key] == v, label, icon, labelled, density == 2)
-                elif kind == "text":
-                    look.draw_text(cv, r, label)
-                else:
-                    on = node.act is None or node.act.can(None)
-                    primary = node.l.get("kind") == "primary"
-                    marked = "marked" in node.p and bool(node.p["marked"](None))
-                    if labelled:
-                        look.draw_word(cv, r, label, icon, primary, marked)
-                    else:
-                        look.draw_icon(cv, r, icon, on, primary, marked)
-        finally:
-            _NOW.app = was
+        for x in hair:
+            look.draw_line(cv, x, zone)
+        for r, kind, _key, _v, label, icon, labelled, flags, _a in cells:
+            if kind == "tab":
+                look.draw_tab(cv, r, bool(flags & LC_CUR), label, icon, labelled, density == 2)
+            elif kind == "text":
+                look.draw_text(cv, r, label)
+            elif labelled:
+                look.draw_word(cv, r, label, icon, bool(flags & LC_PRIMARY), bool(flags & LC_MARKED))
+            else:
+                look.draw_icon(cv, r, icon, bool(flags & LC_ON), bool(flags & LC_PRIMARY),
+                               bool(flags & LC_MARKED))
 
     def zone_targets(self, zone):
         return [c[0] for c in self._layout(zone)[0] if c[1] != "text"]
@@ -1890,25 +1913,16 @@ class BarZone:
     def zone_need(self, h):
         """The narrowest zone at band height `h` whose row holds every cell
         as icons, the current tab widened by its pad, at the least gaps."""
-        n = self._row()
-        if n is None:
+        cells = self._row()
+        if not cells:
             return 0
-        e = self.engine
-        was, _NOW.app = _NOW.app, e
-        try:
-            items = self._items(n)
-        finally:
-            _NOW.app = was
-        fs = self.look.zone_scale()
-        k = len(items)
-        lines = sum(1 for i in range(1, k) if items[i - 1][0] == "tab" and items[i][0] != "tab")
-        return sum(self._widths(items, h, 0)) + self.LEAST * fs * max(0, k - 1 - lines) + \
-            self.GROUP * fs * lines + self.END * fs
+        return self.engine.lent_place(self._spec(cells, h), 0, 0, h, self.look.zone_scale(),
+                                      self.look.tab_pad())[3]
 
     def box(self, key, value=None, zone=None):
         """Where the cell for `key` (a tabs' `value`) stands in `zone`, or None."""
         for c in self._layout(zone)[0]:
-            if c[2].key == key and (value is None or c[3] == value):
+            if c[2] == key and (value is None or c[3] == value):
                 return c[0]
         return None
 
@@ -1926,32 +1940,31 @@ class BarZone:
                 break
         if hit is None or hit[1] == "text":
             return False
-        self.activate(hit[2], hit[3])
+        self.activate(hit[1], hit[2], hit[3], hit[8])
         return True
 
-    def activate(self, node, value=None):
+    def activate(self, kind, key, value, act):
         """A cell taken (a tap, the bar's keys): a tab writes its value and
         runs the tabs' `on=` (the current tab again too); a button runs its
         action where it is on."""
         e = self.engine
         e._bind()
         self.zone_opened = False
-        if node.kind == "tabs":
-            key = node.key
+        if kind == "tab":
             old = e.s._v[key]
             if old != value:
                 e.s._v[key] = value
                 e.s._ver[key] += 1
                 S._trace("state", key, "%r -> %r   (from the bar)" % (old, value))
             self.zone_opened = True
-            if "on" in node.l:
-                e.run_action(node.l["on"], (), "tabs %r on the bar" % key)
-        elif node.act is not None:
+            if act is not None:
+                e.run_action(act, (), "tabs %r on the bar" % key)
+        elif act is not None:
             was, _NOW.app = _NOW.app, e
             try:
-                on = node.act.can(None)
+                on = act.can(None)
             finally:
                 _NOW.app = was
             if on:
-                e.run_action(node.act, (), "button %r on the bar" % node.key)
+                e.run_action(act, (), "button %r on the bar" % key)
         self._row()

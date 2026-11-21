@@ -732,9 +732,9 @@ class EditorApp:
         out = []
         for c in self._head()._layout(rect)[0]:
             if c[1] == "tab":
-                out.append(("ws:" + c[3] if c[2].key == "space" else c[3], c[5], c[0]))
+                out.append(("ws:" + c[3] if c[2] == "space" else c[3], c[5], c[0]))
             elif c[1] == "button":
-                out.append((self._HEAD_TAB.get(c[2].key, c[2].key), c[5], c[0]))
+                out.append((self._HEAD_TAB.get(c[2], c[2]), c[5], c[0]))
         return out
 
     def open_zone_tab(self, name):

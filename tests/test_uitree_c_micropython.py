@@ -80,6 +80,63 @@ def _engine(cls, mod):
     return cls(S.decl_of(mod.__name__), mod.build, host, None, Damage()), host
 
 
+class BarLook:
+    """A lent row's look (the bar's), recorded: what each draw was."""
+    zone_gen = 0
+
+    def __init__(self):
+        self.drawn = []
+
+    def zone_scale(self):
+        return 1
+
+    def tab_pad(self):
+        return 3
+
+    def tab_width(self, label, icon, h):
+        return 26 + 6 * len(label)
+
+    def word_width(self, label, icon, h):
+        return 24 + 6 * len(label)
+
+    def draw_tab(self, cv, r, cur, label, icon, labelled, every):
+        self.drawn.append(["tab", list(r), cur, label if labelled else icon])
+
+    def draw_icon(self, cv, r, icon, on, primary, marked=False):
+        self.drawn.append(["icon", list(r), icon, on, marked])
+
+    def draw_word(self, cv, r, label, icon, primary, marked=False):
+        self.drawn.append(["word", list(r), label, marked])
+
+    def draw_text(self, cv, r, text):
+        self.drawn.append(["text", list(r), text])
+
+    def draw_line(self, cv, x, zone):
+        self.drawn.append(["line", x])
+
+
+def bar(out):
+    """The row a page lends the bar (tests/uitree_fixtures/uitree_bar_row.py)
+    in three zones, on both engines: `uit_lent` and `uit_lent_place` on the
+    boards' MicroPython."""
+    import uitree as S
+    import ui_draw
+    import uitree_c
+    import uitree_editor
+    out["bar"] = {}
+    for tag, cls in (("py", uitree_editor.Engine), ("c", uitree_c.CEditorEngine)):
+        mod = _load("bar_%s" % tag, BAR_SRC)
+        eng = cls(S.decl_of(mod.__name__), mod.page, ui_draw.AppHost(), None, Damage())
+        eng.open(hook="none")
+        look = BarLook()
+        z = uitree_editor.BarZone(eng, look)
+        for w in (400, 160, 80):
+            z.draw_zone(None, (0, 0, w, 20))
+        eng.run(setattr, mod.s, "playing", True)
+        z.draw_zone(None, (0, 0, 400, 20))
+        out["bar"][tag] = look.drawn + [z.zone_need(20)]
+
+
 def _use(tag):
     """Engines made after this: "reference", "c" (the C engine, its build
     direct: C compiles every template) or "c_checked" (the reference's
@@ -170,6 +227,7 @@ def conf(loop):
                 "paint_alloc_max": max(alloc), "paint_alloc_median": sorted(alloc)[len(alloc) // 2],
                 "stats": eng.stats() if tag != "py" else None}
             eng = mod = None
+    bar(out)
     out["settings"] = settings(loop)
     print("RESULT " + json.dumps(out))
 
@@ -338,8 +396,9 @@ PLACED_SCRIPT = ["k:right", "k:a", "k:right", "k:a", "k:down", "k:a", "k:down", 
 @pytest.fixture(scope="module")
 def result(tmp_path_factory):
     placed = (Path(__file__).resolve().parent / "uitree_fixtures" / "uitree_placed.py").read_text()
+    bar_row = (Path(__file__).resolve().parent / "uitree_fixtures" / "uitree_bar_row.py").read_text()
     more = (DRIVER.replace("@FIXTURES@", repr(_fixtures())) + "\nLONG_SRC = %r\n" % LONG
-            + "PLACED_SRC = %r\nPLACED_SCRIPT = %r\n" % (placed, PLACED_SCRIPT)
+            + "PLACED_SRC = %r\nPLACED_SCRIPT = %r\nBAR_SRC = %r\n" % (placed, PLACED_SCRIPT, bar_row)
             + "SETTINGS_KEYS = %r\nSETTINGS_RUNS = %r\n" % (SETTINGS_KEYS, SETTINGS_RUNS))
     info, text = FA._run(tmp_path_factory.mktemp("uitree_c"), entry="conf", more=more,
                          why="the C engine runs on the boards' MicroPython: this is its check there")
@@ -363,6 +422,12 @@ def test_the_c_engine_on_the_boards_micropython_draws_the_reference(result):
     for name in ("long", "counter"):
         for tag in ("c", "c_checked"):
             assert info["cost"][name + "_" + tag]["paint_alloc_median"] == 0, info["cost"][name + "_" + tag]
+
+
+def test_a_lent_row_lays_out_alike_on_both_engines_on_the_boards_micropython(result):
+    info, _text = result
+    assert info["bar"]["c"] == info["bar"]["py"]
+    assert len(info["bar"]["c"]) > 10
 
 
 def _median(xs):

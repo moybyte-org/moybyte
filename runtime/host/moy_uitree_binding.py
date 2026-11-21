@@ -35,6 +35,7 @@ _SIGS = (
     ("uit_leave", [_P], _I),
     ("uit_set_int", [_P, _I, c.c_int32], _I),
     ("uit_set_num", [_P, _I, c.c_double], _I),
+    ("uit_set_absent", [_P, _I], _I),
     ("uit_set_text", [_P, _I, _S, _Z], _I),
     ("uit_set_model", [_P, _I, _I, _S, _Z], _I),
     ("uit_get_int", [_P, _I], c.c_int32),
@@ -53,6 +54,8 @@ _SIGS = (
     ("uit_set_ground", [_P, _I, _I, _I, _I], None),
     ("uit_place", [_P, _I, _I, _I, _I, _I, _I], _I),
     ("uit_rect", [_P, _S, _I32], _I),
+    ("uit_lent", [_P, _S, _I32, _I, c.c_char_p, _Z], _I),
+    ("uit_lent_place", [_I32, _I, _I, _I, _I, _I, _I, _I32, c.POINTER(_I), _I32], _I),
     ("uit_frame", [_P, _P, _P, _I, _I, _I, _I, _I, _I, _I], _I),
     ("uit_next", [_P, _I32, c.c_char_p, _Z], _I),
     ("uit_trace_next", [_P, c.c_char_p, _Z], _I),
@@ -119,6 +122,7 @@ class Engine:
         self._e = L.uit_new()
         self._ev = (c.c_int32 * 3)()
         self._buf = c.create_string_buffer(512)
+        self._lent = None
         self._draw = self._cb = self._raised = None
 
     def __del__(self):
@@ -181,6 +185,9 @@ class Engine:
 
     def set_num(self, slot, v):
         return self._L.uit_set_num(self._e, slot, v)
+
+    def set_absent(self, slot):
+        return self._L.uit_set_absent(self._e, slot)
 
     def set_text(self, slot, v):
         raw = b(v)
@@ -306,6 +313,34 @@ class Engine:
         """Where node `key` was placed last, (x, y, w, h), else None."""
         out = (c.c_int32 * 4)()
         return tuple(out) if self._L.uit_rect(self._e, b(key), out) else None
+
+    _LENT = 32          # the cells of a lent row read at most
+
+    def lent(self, site):
+        """The row lent to `site`: [(kind, node, value index, flags, action,
+        key, value, label, icon)] a cell, None where none is lent, a
+        negative answer a refusal."""
+        if self._lent is None:
+            self._lent = ((c.c_int32 * (5 * self._LENT))(), c.create_string_buffer(4096))
+        cells, text = self._lent
+        n = self._L.uit_lent(self._e, b(site), cells, self._LENT, text, 4096)
+        if n < 0:
+            return None if n == -1 else n
+        words = text.raw.split(b"\0")
+        return [tuple(cells[5 * i:5 * i + 5]) + tuple(w.decode("utf-8") for w in words[4 * i:4 * i + 4])
+                for i in range(n)]
+
+    def lent_place(self, cells, x0, w, h, fs, pad):
+        """The lent row's layout (uit_lent_place): `cells` (kind, flags,
+        width named) each; (density, [(x, w, labelled)], hairlines' x, need)."""
+        n = len(cells)
+        io = (c.c_int32 * (6 * n + 1))()
+        for i, (k, f, named) in enumerate(cells):
+            io[6 * i:6 * i + 3] = [k, f, named]
+        hair = (c.c_int32 * (n + 1))()
+        nh, need = c.c_int(0), (c.c_int32 * 1)()
+        d = self._L.uit_lent_place(io, n, x0, w, h, fs, pad, hair, c.byref(nh), need)
+        return d, [tuple(io[6 * i + 3:6 * i + 6]) for i in range(n)], list(hair[:nh.value]), need[0]
 
     def dump(self):
         n = self._L.uit_dump(self._e, None, 0)

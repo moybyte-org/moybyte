@@ -6,6 +6,8 @@ the engine and moves its generation only when what the row reads moved."""
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent / "uitree_fixtures"))
 
 
@@ -49,11 +51,22 @@ class _Look:
         self.drawn.append(("line", x))
 
 
-def _zone():
+@pytest.fixture(params=["reference", "c"])
+def engine(request):
+    """Each test on both engines: the row's cells and its rule are the
+    reference's or the C engine's (`uit_lent`, `uit_lent_place`)."""
+    return request.param
+
+
+def _zone(engine="reference"):
     import ui_draw
     import uitree_editor
     import uitree_bar_row as F
-    page = uitree_editor.Page(F.page, ui_draw.AppHost(), _Damage())
+    if engine == "c":
+        import uitree_c
+        page = uitree_c.CEditorPage(F.page, ui_draw.AppHost(), _Damage())
+    else:
+        page = uitree_editor.Page(F.page, ui_draw.AppHost(), _Damage())
     page.open(hook="none")
     look = _Look()
     return F, page, look, uitree_editor.BarZone(page, look)
@@ -75,8 +88,8 @@ def test_the_bar_asks_an_owner_with_a_lent_row_its_zone():
     assert bl._zone_owner("menu") is z
 
 
-def test_a_wide_zone_shows_the_labels_a_narrow_one_icons():
-    _F, _page, look, z = _zone()
+def test_a_wide_zone_shows_the_labels_a_narrow_one_icons(engine):
+    _F, _page, look, z = _zone(engine)
     z.draw_zone(None, (0, 0, 400, 20))
     assert [d[0] for d in look.drawn] == ["line", "tab", "tab", "icon", "word"]
     assert [d[3] for d in look.drawn if d[0] == "tab"] == ["One", "Two"]   # three not offered
@@ -91,11 +104,11 @@ def test_a_wide_zone_shows_the_labels_a_narrow_one_icons():
     assert [d[3] for d in look.drawn if d[0] == "tab"] == ["edit", "code"]
 
 
-def test_between_the_two_the_buttons_keep_their_words_where_every_tab_holds_them():
+def test_between_the_two_the_buttons_keep_their_words_where_every_tab_holds_them(engine):
     """Where not every label fits, the open tab is named and the buttons
     keep their words if that fits with ANY tab open, so a tab switch never
     takes Play's word away; else they are icons."""
-    F, page, look, z = _zone()
+    F, page, look, z = _zone(engine)
     z.draw_zone(None, (0, 0, 160, 20))
     assert [d[3] for d in look.drawn if d[0] == "tab"] == ["One", "code"]
     assert look.drawn[-1][:3] == ("word", look.drawn[-1][1], "Play")
@@ -111,8 +124,8 @@ def test_between_the_two_the_buttons_keep_their_words_where_every_tab_holds_them
     assert look.drawn[-1][2] == "Play"
 
 
-def test_a_marked_button_is_drawn_marked():
-    F, page, look, z = _zone()
+def test_a_marked_button_is_drawn_marked(engine):
+    F, page, look, z = _zone(engine)
     page.run(setattr, F.s, "playing", True)
     for owed in (False, True):
         page.run(setattr, F.s, "owed", owed)
@@ -123,8 +136,8 @@ def test_a_marked_button_is_drawn_marked():
             assert look.drawn[-1][-1] is owed
 
 
-def test_a_tap_runs_through_the_engine_and_the_generation_follows():
-    F, page, look, z = _zone()
+def test_a_tap_runs_through_the_engine_and_the_generation_follows(engine):
+    F, page, look, z = _zone(engine)
     zone = (0, 0, 400, 20)
     g0 = z.zone_gen
     z.draw_zone(None, zone)
@@ -154,9 +167,50 @@ def test_a_tap_runs_through_the_engine_and_the_generation_follows():
     assert look.drawn[-1][2] == "Stop"
 
 
-def test_the_need_is_every_cell_an_icon():
-    F, page, _look, z = _zone()
+def test_the_need_is_every_cell_an_icon(engine):
+    F, page, _look, z = _zone(engine)
     # three cells of the tabs' two (the current one widened), undo, Play
     assert z.zone_need(20) == (20 + 2 * 3) + 20 + 20 + 20 + 2 * 2 + 8 + 6
     page.run(setattr, F.s, "has_three", True)
     assert z.zone_need(20) == (20 + 2 * 3) + 20 + 20 + 20 + 20 + 3 * 2 + 8 + 6
+
+
+def _head(engine):
+    import ui_draw
+    import uitree_editor
+    import editor_ui
+    if engine == "c":
+        import uitree_c
+        page = uitree_c.CEditorPage(editor_ui.head, ui_draw.AppHost(), _Damage())
+    else:
+        page = uitree_editor.Page(editor_ui.head, ui_draw.AppHost(), _Damage())
+    page.open(hook="none")
+    look = _Look()
+    return editor_ui, page, look, uitree_editor.BarZone(page, look)
+
+
+def test_the_editors_head_row_lays_out_alike_on_both_engines():
+    """The Editor's head row (editor_ui.head): each lender (handheld, theme
+    mode, the desk's workspaces and its theme) in a wide, a middling and a
+    narrow zone, the cells, hairlines and density the C engine's
+    (`uit_lent`, `uit_lent_place`) the reference's, and so the strokes."""
+    got = {}
+    for engine in ("reference", "c"):
+        H, page, look, z = _head(engine)
+        out = []
+        for theme, desk, playing, owed in ((False, False, False, False), (False, False, True, False),
+                                           (True, False, False, False), (False, True, True, True),
+                                           (True, True, False, False)):
+            def put():
+                H.s.theme, H.s.desk, H.s.playing, H.s.restart_owed = theme, desk, playing, owed
+                H.s.theme_name = "Night"
+                H.s.has_music = not desk
+                H.s.can_undo = playing
+            page.run(put)
+            for w in (420, 200, 120):
+                look.drawn = []
+                z.draw_zone(None, (4, 2, w, 20))
+                out.append((theme, desk, w, list(look.drawn), z.zone_need(20)))
+        got[engine] = out
+    assert got["c"] == got["reference"]
+    assert any(d[0] == "text" for o in got["c"] for d in o[3])        # theme mode's name

@@ -160,8 +160,9 @@ class CEngine(Engine):
 
     def _declare(self):
         x, st = self._x, self.s
-        for name, t in st._t.items():
+        for name, decl in st._t.items():
             vals = None
+            t = decl.base if type(decl) is S.Opt else decl     # absent while it holds None (`_push`)
             if t is S.BOOL:
                 ty = BOOL
             elif t is S.INT:
@@ -180,7 +181,7 @@ class CEngine(Engine):
                 raise EngineGap("state %s of %r" % (name, t))
             self._slot[name] = self._ck(x.state(name, ty, vals), "state " + name)
             self._names.append(name)
-            self._types.append(t)
+            self._types.append(decl)
         for name, t in st._t.items():
             if isinstance(t, S.Model):
                 fields = list(t.fields)
@@ -229,6 +230,11 @@ class CEngine(Engine):
         slot = self._slot[name]
         t, v = self._types[slot], self._value(name)
         self._pushed[name] = st._ver.get(name, 0)
+        if type(t) is S.Opt:
+            if v is None:
+                x.set_absent(slot)
+                return
+            t = t.base
         if isinstance(t, S.Model):
             cells = []
             for r in v:
@@ -260,6 +266,8 @@ class CEngine(Engine):
     def _pull(self, slot):
         x, st = self._x, self.s
         name, t = self._names[slot], self._types[slot]
+        if type(t) is S.Opt:
+            t = t.base
         if t is S.BOOL:
             v = bool(x.get_int(slot))
         elif t is S.INT:
@@ -357,10 +365,11 @@ class CEngine(Engine):
         placed, placed_kinds, placed_gaps = self.PLACED, _PLACED_KINDS, _PLACED_GAPS
         grounds = self._grounds = {}
 
-        def node(n, parent):
+        def node(n, parent, lent=False):
             nk, l = n.kind, n.l
             kind = kinds.get(nk)
-            if kind is None or (nk in placed_kinds and not placed) or (placed and nk in placed_gaps):
+            if kind is None or (nk in placed_kinds and not placed) or (
+                    placed and nk in placed_gaps and not (lent and nk == "tabs")):
                 raise EngineGap("a %s node" % nk + ("" if placed or nk not in placed_kinds else
                                                      " outside a placed page"))
             field = l.get("field") if l and nk != "text_view" else None
@@ -410,6 +419,12 @@ class CEngine(Engine):
                         rep = repr(v)
                 if type(src) is str:
                     pass
+                elif k == "offered" and nk == "tabs":
+                    for v, when in src.items():     # one prop a value: its condition, the value its repr
+                        r = cprop(me, k, when, v) if type(when) is str else E_GAP
+                        if r < 0:
+                            fail(r, "ui.tabs offered=%r" % (src,), n.where)
+                    continue
                 elif k == "cols" and nk == "table":
                     for h in src:           # one prop a column's header
                         r = cprop(me, k, str(h), None)
@@ -444,8 +459,9 @@ class CEngine(Engine):
             if nk == "dialog":
                 for a in l["buttons"]:
                     cact(me, aidx[a.name])
+            lends = nk == "tools" and bool(l and l.get("lend"))
             for k in n.kids:
-                node(k, me)
+                node(k, me, lends)
         node(root, -1)
         self._ck(x.build_end(), "the build")
 
@@ -704,6 +720,34 @@ class CEditorEngine(CEngine, _ed.Engine):
     def rect_of(self, key):
         """Where node `key` was placed by the last frame or placement, else None."""
         return self._x.rect(key) if self._x is not None else None
+
+    _LC_KINDS = ("tab", "button", "text")
+
+    def lent(self, site):
+        """The shown row lent to `site`, read from the store (`uit_lent`):
+        the reference's cells, [kind, key, value, label, icon, flags,
+        action], None where none is lent."""
+        self._made()
+        if self._shut:
+            self._resume()
+        self._ready()
+        self.committed()
+        got = self._x.lent(site)
+        if got is None:
+            return None
+        if type(got) is int:
+            self._fail(got, "the row lent to %s" % site, None)
+        kinds, acts, out = self._LC_KINDS, self._acts, []
+        for kind, _node, _vi, flags, a, key, value, label, icon in got:
+            kind = kinds[kind]
+            out.append([kind, key, value if kind == "tab" else None,
+                        label if label or kind != "button" else None, icon or None, flags,
+                        acts[a] if a >= 0 else None])
+        return out
+
+    def lent_place(self, cells, x0, w, h, fs, pad):
+        """The lent row's rule in C (`uit_lent_place`)."""
+        return self._made().lent_place(cells, x0, w, h, fs, pad)
 
     def _draw(self, node, x, y, w, h):
         """A canvas's draw in its rect, clipped to it, over its ground."""

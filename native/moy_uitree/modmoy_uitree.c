@@ -156,6 +156,12 @@ static mp_obj_t eng_set_num(mp_obj_t self, mp_obj_t slot, mp_obj_t v)
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(eng_set_num_obj, eng_set_num);
 
+static mp_obj_t eng_set_absent(mp_obj_t self, mp_obj_t slot)
+{
+    return MP_OBJ_NEW_SMALL_INT(uit_set_absent(eng(self), mp_obj_get_int(slot)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(eng_set_absent_obj, eng_set_absent);
+
 static mp_obj_t eng_set_text(mp_obj_t self, mp_obj_t slot, mp_obj_t v)
 {
     size_t vn;
@@ -287,6 +293,69 @@ static mp_obj_t eng_rect(mp_obj_t self, mp_obj_t key)
     return mp_obj_new_tuple(4, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(eng_rect_obj, eng_rect);
+
+#define LENT_MAX 32
+#define LENT_TEXT 4096
+
+// lent(site) -> [(kind, node, value index, flags, action, key, value, label, icon)], None where
+// none is lent, a negative answer a refusal
+static mp_obj_t eng_lent(mp_obj_t self, mp_obj_t site)
+{
+    int32_t *cells = m_new(int32_t, UIT_LC_INTS * LENT_MAX);
+    char *text = m_new(char, LENT_TEXT);
+    int n = uit_lent(eng(self), CSTR(site), cells, LENT_MAX, text, LENT_TEXT);
+    mp_obj_t out = n == -1 ? mp_const_none : n < 0 ? MP_OBJ_NEW_SMALL_INT(n) : mp_obj_new_list(0, NULL);
+    const char *t = text;
+    for (int i = 0; i < n; i++) {
+        mp_obj_t c[9];
+        for (int j = 0; j < UIT_LC_INTS; j++)
+            c[j] = MP_OBJ_NEW_SMALL_INT(cells[UIT_LC_INTS * i + j]);
+        for (int j = 0; j < 4; j++) {
+            size_t len = strlen(t);
+            c[5 + j] = mp_obj_new_str(t, len);
+            t += len + 1;
+        }
+        mp_obj_list_append(out, mp_obj_new_tuple(9, c));
+    }
+    m_del(int32_t, cells, UIT_LC_INTS * LENT_MAX);
+    m_del(char, text, LENT_TEXT);
+    return out;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(eng_lent_obj, eng_lent);
+
+// lent_place(cells, x0, w, h, fs, pad) -> (density, [(x, w, labelled)], hairlines, need);
+// cells (kind, flags, width named) each
+static mp_obj_t eng_lent_place(size_t na, const mp_obj_t *a)
+{
+    (void)na;
+    size_t n;
+    mp_obj_t *items;
+    mp_obj_get_array(a[1], &n, &items);
+    int32_t *io = m_new(int32_t, UIT_LP_INTS * n + 1), *hair = m_new(int32_t, n + 1), need = 0;
+    for (size_t i = 0; i < n; i++) {
+        mp_obj_t *f;
+        mp_obj_get_array_fixed_n(items[i], 3, &f);
+        for (int j = 0; j < 3; j++)
+            io[UIT_LP_INTS * i + j] = mp_obj_get_int(f[j]);
+    }
+    int nh = 0;
+    int d = uit_lent_place(io, (int)n, mp_obj_get_int(a[2]), mp_obj_get_int(a[3]), mp_obj_get_int(a[4]),
+                           mp_obj_get_int(a[5]), mp_obj_get_int(a[6]), hair, &nh, &need);
+    mp_obj_t places = mp_obj_new_list(0, NULL), hairs = mp_obj_new_list(0, NULL);
+    for (size_t i = 0; i < n; i++) {
+        mp_obj_t t[3];
+        for (int j = 0; j < 3; j++)
+            t[j] = MP_OBJ_NEW_SMALL_INT(io[UIT_LP_INTS * i + 3 + j]);
+        mp_obj_list_append(places, mp_obj_new_tuple(3, t));
+    }
+    for (int i = 0; i < nh; i++)
+        mp_obj_list_append(hairs, MP_OBJ_NEW_SMALL_INT(hair[i]));
+    m_del(int32_t, io, UIT_LP_INTS * n + 1);
+    m_del(int32_t, hair, n + 1);
+    mp_obj_t r[4] = {MP_OBJ_NEW_SMALL_INT(d), places, hairs, MP_OBJ_NEW_SMALL_INT(need)};
+    return mp_obj_new_tuple(4, r);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(eng_lent_place_obj, 7, 7, eng_lent_place);
 
 // frame(ctx, cv, look, x, y, w, h, flags, fs, input) -> events | owe << 30
 static mp_obj_t eng_frame(size_t n, const mp_obj_t *a)
@@ -510,6 +579,9 @@ static const mp_rom_map_elem_t eng_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_ground), MP_ROM_PTR(&eng_ground_obj) },
     { MP_ROM_QSTR(MP_QSTR_place), MP_ROM_PTR(&eng_place_obj) },
     { MP_ROM_QSTR(MP_QSTR_rect), MP_ROM_PTR(&eng_rect_obj) },
+    { MP_ROM_QSTR(MP_QSTR_lent), MP_ROM_PTR(&eng_lent_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_absent), MP_ROM_PTR(&eng_set_absent_obj) },
+    { MP_ROM_QSTR(MP_QSTR_lent_place), MP_ROM_PTR(&eng_lent_place_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame), MP_ROM_PTR(&eng_frame_obj) },
     { MP_ROM_QSTR(MP_QSTR_still), MP_ROM_PTR(&eng_still_obj) },
     { MP_ROM_QSTR(MP_QSTR_next), MP_ROM_PTR(&eng_next_obj) },

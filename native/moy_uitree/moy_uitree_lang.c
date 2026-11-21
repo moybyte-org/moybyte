@@ -224,6 +224,10 @@ static void ref_get(uit_t *e, uint8_t rk, int16_t ref, int16_t f, int model, int
     switch (rk) {
     case RK_SLOT: {
         const uit_slot_t *S = &e->slots[ref];
+        if (S->absent) {
+            v->type = UIT_TEXT;         // absent: drawn as nothing, false in a condition
+            break;
+        }
         v->type = S->type;
         v->i = S->i;
         v->d = S->f;
