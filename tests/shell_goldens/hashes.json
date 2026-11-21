@@ -470,10 +470,10 @@
     "web_console": "edd24865bdf5d1608b3832dc51c26c985dc78980432b53dc2d878c2c32388fd8"
   },
   "p4_1024x600_cs2_fs1_music": {
-    "music_desk": "f3455376e572d43b1ce2579d46338a81bd7b256fdc69bf4db405cecbf95fe127",
-    "music_desk_failed": "1685f9c841d281288632690e26402697cdaf045f36f228ae9fee89ecc7287339",
-    "music_desk_files": "06e67d64f51e42dc3fda65ce832770198baffa411366f00cb651a31749e35baa",
-    "music_desk_menu": "6faf89202cbda54d6ac801a79968bc545bd420d9cf50531b81594c709aaac60e"
+    "music_desk": "a98948286381fccbdf6afffd43663e6338551877c1d960322a2f59f2b889f121",
+    "music_desk_failed": "f870dec089f9435a5bdc3c184f7ce482fcb93cb0c3fa6eb17f4d4d7097cff346",
+    "music_desk_files": "ea4823c5683bf640ddec5bd784f9d97f88ae788d08e03c62ea0302f39ddc919b",
+    "music_desk_menu": "b5d34e893d528a0d9e24d0355c952837cfa3394db0e4db2f552dc8324a0fc2d1"
   },
   "p4_1024x600_cs2_fs1_popovers": {
     "desk_window_calc": "80222e5a646be2cde94134b5a00eb226f5e760b5c5f9dda5b5c64c767e1f980c",
@@ -487,9 +487,9 @@
     "desk_two_games": "e0f7679f477bf01993e38cc1006be07376bf5d53b37418b813e8539b4cac21db"
   },
   "p4_1024x600_cs2_fs1_status": {
-    "status_desk_bar": "6c31f27471b568eb6a8e9f3db20c0169c62462bc48afc2c162f7f4611f447ccd",
-    "status_desk_menu": "3fe2adc9b96b6e40c49484a99312abbc48b78d24463ed65041c71f7de2dd585b",
-    "status_desk_panel": "af52402c2ba4c41eff9e6ee5f667ca90bb6a3fcb671ae4bac2ab180a6f521067"
+    "status_desk_bar": "d480de578be92ac6f5159c58cc490c24f17d267a55052b8d786b60c07e57a302",
+    "status_desk_menu": "1e4061c1c83e9e866dbd9c0e15e56f5be6440cd85b2f2a1bebe771ffc6f6b585",
+    "status_desk_panel": "b7d09c7cc41da7cd641a43c7fa0f5cdfc33617b0454200548deecba00f3a9a59"
   },
   "p4_1024x600_cs2_fs1_tasks": {
     "note_banner": "78ce52b2f1823eafca3ee2e9bff1fa5cb11ac478ac71d9e414a0c26dec5ed0bf",
@@ -644,14 +644,14 @@
     "web_console": "edd24865bdf5d1608b3832dc51c26c985dc78980432b53dc2d878c2c32388fd8"
   },
   "p4_1024x600_fs2_desk_popovers": {
-    "music_desk_menu": "55858d22e3d70a35e5b16fd00803f22651cde478229381f3161f4cec28c43c2b",
+    "music_desk_menu": "af7bf27050e9d9b1b0b9ff5c1d62d7d9870f4fbf9c5aab84d7e7990a4e68227a",
     "popover_battery": "29d8e9450753665653df4ac5be59343ae5b7288b919e1ad9f392c4133bb4a289",
     "popover_clock": "379aaa7167ae4c8db8d2ed8b08cd1da8affa9d23c3a080ad37359213e8d8148c",
     "popover_clock_six": "667e3199f8e9da903c5324384eb15a605c36ba56f820331d6ec5afba40f9dab1",
     "popover_wifi": "1451b921499841b67c12a54c5762159a93738d2a458ddc6a9152f6ff64042eff",
     "popover_wifi_many": "777f02bd397af2797a09d729c60b85b70a31f442c6b2cce71b1bac0ef92d4277",
-    "status_desk_panel": "9c85e831004d27f98f0b5baddacd56ad6c66244ded8709b36ee7209c9fcd1254",
-    "status_desk_panel_full": "675134f74364bf715e05ff23f629f12907d6691fced8642cad86a11e5f171f39"
+    "status_desk_panel": "1b4270ae5b778abb0c17a3e3322583e5976229a4fafc8fd6437973543683313e",
+    "status_desk_panel_full": "442e732a9efe2e6725d2f046ae58fc07925ae64f25b6acc86a0f06c56c3c73f5"
   },
   "p4_1024x600_fs2_windowed": {
     "about": "a887d93cb34270544d3dd2c672692b4463fb2006843138b1175dd3bce46631ea",

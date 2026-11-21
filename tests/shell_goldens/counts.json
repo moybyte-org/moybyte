@@ -470,10 +470,10 @@
     "web_console": [297, 8]
   },
   "p4_1024x600_cs2_fs1_music": {
-    "music_desk": [0, 12],
-    "music_desk_failed": [0, 18],
-    "music_desk_files": [28, 56],
-    "music_desk_menu": [38, 24]
+    "music_desk": [0, 14],
+    "music_desk_failed": [0, 20],
+    "music_desk_files": [28, 58],
+    "music_desk_menu": [38, 26]
   },
   "p4_1024x600_cs2_fs1_popovers": {
     "desk_window_calc": [0, 12],
@@ -487,9 +487,9 @@
     "desk_two_games": [2, 18]
   },
   "p4_1024x600_cs2_fs1_status": {
-    "status_desk_bar": [0, 3],
-    "status_desk_menu": [9, 17],
-    "status_desk_panel": [13, 13]
+    "status_desk_bar": [0, 4],
+    "status_desk_menu": [9, 19],
+    "status_desk_panel": [13, 14]
   },
   "p4_1024x600_cs2_fs1_tasks": {
     "note_banner": [6, 34],
@@ -644,14 +644,14 @@
     "web_console": [297, 8]
   },
   "p4_1024x600_fs2_desk_popovers": {
-    "music_desk_menu": [38, 24],
+    "music_desk_menu": [38, 26],
     "popover_battery": [35, 31],
     "popover_clock": [8, 56],
     "popover_clock_six": [28, 63],
     "popover_wifi": [26, 36],
     "popover_wifi_many": [29, 38],
-    "status_desk_panel": [13, 22],
-    "status_desk_panel_full": [20, 26]
+    "status_desk_panel": [13, 24],
+    "status_desk_panel_full": [20, 28]
   },
   "p4_1024x600_fs2_windowed": {
     "about": [9, 6],
