@@ -379,7 +379,7 @@ ui.action("outdent", "Outdent", outdent, hint="")
 ui.action("gutter", "Line numbers", gutter, hint="")
 ui.action("undo", "Undo", undo, hint="")
 ui.action("redo", "Redo", redo, hint="")
-ui.hook("symbol", symbol, takes="row")
+ui.hook("symbol", symbol, takes="pointer")
 
 
 # -- the page ---------------------------------------------------------------------

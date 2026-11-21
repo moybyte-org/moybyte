@@ -1713,8 +1713,9 @@ SHIFT_ENTER = "shift+enter"
 
 
 # What a handler is handed (`takes=`), and its parameter count.
-TAKES = {"none": 0, "row": 1, "arg": 1, "char": 1}
-_HANDED = {"none": "nothing", "row": "the row", "arg": "the site's arg=", "char": "the typed character"}
+TAKES = {"none": 0, "row": 1, "arg": 1, "char": 1, "pointer": 1}
+_HANDED = {"none": "nothing", "row": "the row", "arg": "the site's arg=", "char": "the typed character",
+           "pointer": "a pointer event (ui.Ev: kind, x, y, source)"}
 OFFS = ("hide", "grey")
 
 
@@ -1933,7 +1934,7 @@ class Node:
             b.ctx = Ctx()
 
 
-# the props each kind takes: text, int, cond, choice, lit, fn, action0/1
+# the props each kind takes: text, int, cond, choice, lit, fn, action0/1/p (none, the row, a pointer event)
 _C = {"shown": "cond"}
 SCHEMA = {
     "page": {"title": "text"},
@@ -1971,7 +1972,7 @@ SCHEMA = {
     "split": dict(_C, dir="choice", sizes="ints", pad="lit", gap="lit", align="lit"),
     "grid": dict(_C, cols="lit", rows="lit", gap="lit", pad="lit"),
     "panel": dict(_C),
-    "canvas": dict(_C, draw="fn", h="lit", w="int", grow="lit", pointer="action1", focus="cond", ground="lit"),
+    "canvas": dict(_C, draw="fn", h="lit", w="int", grow="lit", pointer="actionp", focus="cond", ground="lit"),
     "foot": dict(_C, look="lit"),
     "scroll": dict(_C),
     "switch": dict(_C),
@@ -2059,8 +2060,8 @@ def _node(kind, key, props, where, act=None):
                 raise UIError("N01", "ui.%s %s= is a dict of a condition a value" % (kind, k),
                               where=where, found=repr(v), fix='%s={"blocks": "has_blocks"}' % k)
             n.l[k] = {x: cond(c, b.ctx, where) for x, c in v.items()}
-        elif pt in ("action0", "action1"):
-            want = "row" if pt == "action1" else "none"
+        elif pt in ("action0", "action1", "actionp"):
+            want = "row" if pt == "action1" else "pointer" if pt == "actionp" else "none"
             n.l[k] = _action(v, want, "ui.%s %s=" % (kind, k), where, seen=False)
         elif pt == "texts":
             if isinstance(v, str) or not isinstance(v, (list, tuple)):
