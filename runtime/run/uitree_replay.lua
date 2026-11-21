@@ -606,7 +606,11 @@ local function replay(p)
 end
 
 -- a kind or a prop only the C engine draws: refused by name, never drawn wrong
-local C_KINDS, C_PROPS = I.C_KINDS, I.C_PROPS
+local C_KINDS = { progress = 1, seg = 1, text_view = 1, menu = 1, item = 1, table = 1, col = 1, split = 1, grid = 1,
+                  panel = 1, canvas = 1, tabs = 1, cards = 1, card = 1 }
+local C_PROPS = { group = { close = 1 }, row = { close = 1, gap = 1, pad = 1, mid = 1 },
+                  button = { marked = 1, tone = 1, w = 1 }, slider = { look = 1 },
+                  rows = { changed = 1, filter = 1, group = 1, dir = 1 } }
 local function refuse(n)
   if C_KINDS[n.kind] then
     fail("E00", n.at, "the reference back end does not draw ui." .. n.kind, "the C engine", "the reference",

@@ -28,7 +28,8 @@
  *   e:error() e:error_code() e:free()
  *
  * Included by native/moycore/moycore_lua.c and opened beside the UI API's
- * face when the build has native/moy_uitree (MOYCORE_UITREE). */
+ * face when the build has native/moy_uitree (MOYCORE_UITREE), with the prop
+ * check's global beside it (moycore_uitree_check.h). */
 #ifndef MOYCORE_UITREE_H
 #define MOYCORE_UITREE_H
 
@@ -39,6 +40,7 @@
 
 #include "moy_uitree.h"
 #include "moycore_lua.h"
+#include "moycore_uitree_check.h"
 
 #define MOYCORE_UIT_MT "moy.uitree"
 
@@ -497,6 +499,7 @@ static void moycore_uitree_open(lua_State *L)
     lua_pop(L, 1);
     lua_pushcfunction(L, l_uit_new);
     lua_setglobal(L, "__moy_uitree");
+    moycore_uitree_check_open(L);
 }
 
 #endif /* MOYCORE_UITREE_H */

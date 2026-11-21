@@ -93,7 +93,7 @@ PART = native_build.Part("lua", list(_RASTER) + [
     "moy_tick.h", "moy_tick.c", "moy_match.h", "moy_match.c", "moy_match_kernel.c",
     "moy_crash.h", "moy_chrome.h", "moy_chrome.c",
     "moy_ui.h", "moy_ui_glyph.c", "moy_ui_tables.h", "moy_ui_tables.c",
-    "moycore_ui.h", "moycore_ui_rows.h", "moycore_uitree.h", "moy_ui.c", "moy_ui_draw.c", "moy_ui_paint.c", "moy_ui_depth.c",
+    "moycore_ui.h", "moycore_ui_rows.h", "moycore_uitree.h", "moycore_uitree_check.h", "moy_ui.c", "moy_ui_draw.c", "moy_ui_paint.c", "moy_ui_depth.c",
     "moy_ui_parts.c", "moy_ui_interact.c", "moy_ui_api.h", "moy_ui_over_keys.h", "moy_ui_api_int.h", "moy_ui_api.c",
     "moy_ui_api_text.c", "moy_ui_api_kept.c", "moy_ui_api_table.c", "moy_ui_api_pop.c",
     "moy_ui_api_host.c",

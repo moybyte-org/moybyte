@@ -7,7 +7,9 @@ Two halves, the spec's checker for Lua (its section 23):
 
 1. The run. The app's scripts run once, in a host Lua built from the
    console's own (native/moy_lua/lua, LUA_32BITS) with the debug library the
-   console leaves out, over a stub engine: every declaration is checked at
+   console leaves out and the C prop check the console opens beside the layer
+   (native/moycore/moycore_uitree_check.h), over a stub engine: every
+   declaration is checked at
    its call, a handler's parameters against its takes (A03), and every
    registered page and every switch and row case is built
    (runtime/run/uitree_check.lua, ui._check).
@@ -30,6 +32,10 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 LUA_SRC = os.path.join(ROOT, "native", "moy_lua", "lua")
+# the prop check the console's moycore opens beside the layer (__moy_uitree_check)
+CHECK_SRC = [os.path.join(ROOT, "native", "moy_uitree", n) for n in
+             ("moy_uitree_check.c", "moy_uitree_schema.h", "moy_uitree_check.h")] + \
+            [os.path.join(ROOT, "native", "moycore", "moycore_uitree_check.h")]
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 from board_config import runtime_file  # noqa: E402
@@ -45,9 +51,11 @@ MAIN_C = r"""
 #include "lauxlib.h"
 #include "lualib.h"
 #include <stdio.h>
+#include "moycore_uitree_check.h"
 int main(int argc, char **argv) {
   lua_State *L = luaL_newstate();
   luaL_openlibs(L);
+  moycore_uitree_check_open(L);
   lua_newtable(L);
   for (int i = 2; i < argc; i++) { lua_pushstring(L, argv[i]); lua_rawseti(L, -2, i - 1); }
   lua_setglobal(L, "arg");
@@ -70,7 +78,7 @@ def hostlua():
     srcs = [os.path.join(LUA_SRC, n) for n in sorted(os.listdir(LUA_SRC))
             if n.endswith(".c") and n not in ("lua.c", "luac.c")]
     h = hashlib.sha1(MAIN_C.encode())
-    for p in srcs + [os.path.join(LUA_SRC, n) for n in sorted(os.listdir(LUA_SRC)) if n.endswith(".h")]:
+    for p in srcs + [os.path.join(LUA_SRC, n) for n in sorted(os.listdir(LUA_SRC)) if n.endswith(".h")] + CHECK_SRC:
         with open(p, "rb") as f:
             h.update(f.read())
     out = os.path.join(BUILD, "lua-" + h.hexdigest()[:12])
@@ -80,7 +88,8 @@ def hostlua():
     main = os.path.join(BUILD, "main.c")
     with open(main, "w") as f:
         f.write(MAIN_C)
-    subprocess.check_call(["cc", "-O1", "-w", "-I" + LUA_SRC, "-o", out + ".tmp", main] + srcs + ["-lm"])
+    subprocess.check_call(["cc", "-O1", "-w", "-I" + LUA_SRC] + ["-I" + os.path.dirname(p) for p in CHECK_SRC[2:]] +
+                          ["-o", out + ".tmp", main, CHECK_SRC[0]] + srcs + ["-lm"])
     os.replace(out + ".tmp", out)
     return out
 

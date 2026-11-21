@@ -2025,10 +2025,17 @@ _FN_FIX = {None: "%s=draw, where def draw(cv, x, y, w, h)",
            ("legacy", "keys"): "%s=keys, where def keys(i) returns whether it took the input",
            ("legacy", "hints"): "%s=hints, where def hints() returns the band's hints",
            ("legacy", "gen"): "%s=gen, where def gen() returns an int that moves with its pixels"}
+def _vclass(v):
+    """A value's class as the contract's check names them (moy_uitree_check.h's UIT_VC_*)."""
+    t = type(v)
+    return 1 if t is str else 3 if t is bool else 2 if t is int else 7 if t is float else \
+        4 if t is tuple or t is list else 5 if t is dict else 6 if callable(v) else 0
+
+
 def _checked(kind, k, v, where):
-    """The contract's check of prop `k` of a `kind` node: N01 or N04 at the call's line. The
-    value's class is the reference's own check (`_prop`, `_direct_src`), so it goes as any (0)."""
-    bad = _check_prop and _check_prop(kind, k, 0, v if type(v) is str else None)
+    """The contract's check of prop `k` of a `kind` node, its value's class included: N01, N04
+    or T03 at the call's line."""
+    bad = _check_prop and _check_prop(kind, k, _vclass(v), v if type(v) is str else None)
     if bad is not None:
         code, what, expected, fix = bad
         raise UIError(code, what, expected=expected or None, fix=fix, where=where)

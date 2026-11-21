@@ -19,7 +19,10 @@
   "text": "a literal text",
   "word:A,B": "one of the words",
   "list:T": "a list of T",
-  "conds": "a condition a value (a dict in Python, a table in Lua)"
+  "conds": "a condition a value (a dict in Python, a table in Lua)",
+  "list|conds": "a list, or one a value (a dict in Python, a table in Lua)",
+  "int|word:A,B": "an int, or one of the words",
+  "int|name": "an int, or a declared name of an int state"
  },
  "common_props": {
   "shown": {
@@ -1558,7 +1561,7 @@
    "section": "7.2",
    "props": {
     "side": {
-     "type": "tpl",
+     "type": "int",
      "level": 2
     },
     "icon": {
@@ -1577,7 +1580,7 @@
    "section": "7.2",
    "props": {
     "max": {
-     "type": "tpl",
+     "type": "int",
      "level": 2
     },
     "label": {
@@ -2065,15 +2068,15 @@
      "level": 2
     },
     "w": {
-     "type": "tpl",
+     "type": "int",
      "level": 2
     },
     "h": {
-     "type": "tpl",
+     "type": "int",
      "level": 2
     },
     "cols": {
-     "type": "tpl",
+     "type": "int",
      "level": 2
     },
     "new": {
@@ -2193,7 +2196,7 @@
      "level": 1
     },
     "w": {
-     "type": "tpl",
+     "type": "int",
      "level": 1
     },
     "close": {
@@ -2257,11 +2260,11 @@
      "level": 1
     },
     "gap": {
-     "type": "int",
+     "type": "int|word:s,m,l,0",
      "level": 1
     },
     "pad": {
-     "type": "int",
+     "type": "int|word:s,m,l,0",
      "level": 1
     },
     "align": {
@@ -2284,11 +2287,11 @@
      "level": 1
     },
     "gap": {
-     "type": "int",
+     "type": "int|word:s,m,l,0",
      "level": 1
     },
     "pad": {
-     "type": "int",
+     "type": "int|word:s,m,l,0",
      "level": 2
     }
    }
@@ -2307,7 +2310,7 @@
      "level": 2
     },
     "start": {
-     "type": "int",
+     "type": "int|name",
      "level": 2
     },
     "min": {
@@ -2358,7 +2361,7 @@
      "level": 2
     },
     "start": {
-     "type": "int",
+     "type": "int|name",
      "level": 2
     },
     "grow": {
@@ -2366,7 +2369,7 @@
      "level": 2
     },
     "min": {
-     "type": "list",
+     "type": "list|conds",
      "level": 2
     },
     "unit": {
@@ -2413,7 +2416,7 @@
      "level": 2
     },
     "gutter": {
-     "type": "bool",
+     "type": "cond",
      "level": 2
     },
     "focus": {

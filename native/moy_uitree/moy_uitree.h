@@ -19,6 +19,7 @@
 
 #include "moy_ui.h"
 #include "moy_ui_api.h"
+#include "moy_uitree_check.h"
 
 // Answers below 0.
 enum {
@@ -88,21 +89,7 @@ const char *uit_error(const uit_t *e);
 // The spec's code of the last error when it was UIT_E_CHECK ("T02"), else "".
 const char *uit_error_code(const uit_t *e);
 
-// -- the API's prop check (moy_uitree_check.c) --------------------------------
-// One table, the contract's (moy_uitree_schema.h, generated from
-// tests/uitree_contract/contract.json), every front checks a node's props
-// against: no engine is needed, so a front checks at the call that names the
-// prop and raises at that call's line. A value's class as its front sees it:
-enum { UIT_VC_ANY = 0, UIT_VC_TEXT, UIT_VC_INT, UIT_VC_BOOL, UIT_VC_LIST, UIT_VC_DICT, UIT_VC_FN };
-// NULL where kind `kind` takes prop `prop` with a value of class `vc`
-// (UIT_VC_ANY: not checked) whose text is `word` (NULL: not a text). Else the
-// spec's code ("N01" no such kind or prop, a word not the prop's, a value of
-// a class its type does not take; "N04" a retired prop; "T03" an int prop
-// given something else), with `out` holding WHAT, EXPECTED and FIX, each
-// ended by a 0x1F (an empty one where the message has none).
-const char *uit_check_prop(const char *kind, const char *prop, int vc, const char *word, char *out, size_t n);
-// The words of word prop `prop` of kind `kind`, comma-separated, or NULL.
-const char *uit_prop_words(const char *kind, const char *prop);
+// -- the API's prop check: moy_uitree_check.h ----------------------------------
 
 // -- declarations (once, at open) ------------------------------------------
 // A state slot: its index. `values` an enum's values, NUL-separated.

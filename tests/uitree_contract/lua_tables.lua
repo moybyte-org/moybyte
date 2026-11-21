@@ -2,8 +2,9 @@
 --
 --   hostlua lua_tables.lua LAYER_FILE
 --
--- KIND k, PROP k p, COMMON p, WORD p w, ACTION p, HOOK p, PAGE p, APP f,
--- TAKES t, ROLE r, SHELLROLE r, VERB v (every name the layer's `ui` table has).
+-- OWN k|k.p true|false, CHILD p k, ACTION p, HOOK p, PAGE p, APP f, TAKES t, ROLE r, SHELLROLE r,
+-- VERB v (every name the layer's `ui` table has). Its kinds and props are the contract table's
+-- (the C check's) but where OWN and CHILD say the layer differs.
 
 ui = setmetatable({ CUT = 4 }, { __index = function() return function() end end })
 moybyte = setmetatable({ log = function() end }, { __index = function() return function() end end })
@@ -22,14 +23,8 @@ local function keys(t)
 end
 
 local c = ui._contract()
-for _, k in ipairs(keys(c.props)) do
-  print("KIND " .. k)
-  for _, p in ipairs(keys(c.props[k])) do print("PROP " .. k .. " " .. p) end
-end
-for _, p in ipairs(keys(c.common)) do print("COMMON " .. p) end
-for _, p in ipairs(keys(c.words)) do
-  for _, v in ipairs(keys(c.words[p])) do print("WORD " .. p .. " " .. v) end
-end
+for _, k in ipairs(keys(c.own)) do print("OWN " .. k .. " " .. tostring(c.own[k])) end
+for _, p in ipairs(keys(c.child)) do print("CHILD " .. p .. " " .. c.child[p]) end
 for tag, t in pairs({ ACTION = c.action, HOOK = c.hook, PAGE = c.page, APP = c.app, TAKES = c.takes,
                       ROLE = c.roles, SHELLROLE = c.shell_roles }) do
   for _, k in ipairs(keys(t)) do print(tag .. " " .. k) end

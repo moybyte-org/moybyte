@@ -14,7 +14,8 @@ import test_uitree_contract as K
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KINDS = K.TABLE["kinds"]
-ANY, TEXT, INT, BOOL, LIST, DICT, FN = range(7)
+ANY, TEXT, INT, BOOL, LIST, DICT, FN, NUM = range(8)
+BUILDS = 16      # the front builds what the spec only designs
 
 
 @pytest.fixture(scope="module")
@@ -91,6 +92,23 @@ def test_a_value_of_a_class_its_type_does_not_take(m):
     assert m.check_prop("button", "alone", BOOL, None) is None
     assert m.check_prop("button", "alone", TEXT, "yes")[0] == "N01"
     assert m.check_prop("button", "arg", DICT, None) is None          # a literal: any value
+
+
+def test_an_int_takes_a_template_a_text_takes_no_int_and_a_front_may_build_a_designed_entry(m):
+    assert m.check_prop("label", "lines", TEXT, "{n}") is None
+    assert m.check_prop("label", "lines", TEXT, "two")[:2] == ("N01", "ui.label lines='two' is a text, not an int")
+    assert m.check_prop("label", "lines", NUM, None)[0] == "T03"
+    assert m.check_prop("info", "value", INT, None)[0] == "N01"          # a template is a text
+    assert m.check_prop("progress", "max", INT, None) is None           # an int template: an int or a text
+    assert m.check_prop("grid", "gap", TEXT, "m") is None
+    assert m.check_prop("grid", "gap", TEXT, "x")[0] == "N01"
+    assert m.check_prop("pane", "start", TEXT, "col_w") is None         # an int, or an int state's name
+    assert m.check_prop("pane", "min", DICT, None) is None              # (w, h), or one a tab
+    assert m.check_prop("pane", "min", LIST, None) is None
+    assert m.check_prop("text_editor", "gutter", TEXT, "lines") is None  # a condition
+    assert m.check_prop("scroll", "snap", BOOL, None)[0] == "N01"       # designed
+    assert m.check_prop("scroll", "snap", BOOL | BUILDS, None) is None
+    assert m.check_prop("bubble", "side", TEXT | BUILDS, "{s}") is None
 
 
 def test_an_unknown_prop_gets_difflib_s_near_names(m):

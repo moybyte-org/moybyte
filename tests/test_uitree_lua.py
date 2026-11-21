@@ -446,6 +446,7 @@ CASES = {
     "D01": (APP + 'ui.app("T2", { icon = "calc" })' + PAGE, 2, None),
     "D02": ('ui.app("T", { icon = "calc", size = 3 })' + PAGE, 1, None),
     "D04": (PAGE, "load", None),
+    "E00": (APP + 'ui.page("p", function() ui.label("x", { span = 2 }) end)\n', 2, None),
     "E01": (APP + 'local s = ui.state { e = ui.enum("a", "b") }' + PAGE, 2, None),
     "E02": (APP + 'local s = ui.state { e = ui.enum("a", "b", { init = "c" }) }' + PAGE, 2, None),
     "E03": (APP + 'local s = ui.state { e = ui.enum("a", 3, { init = "a" }) }' + PAGE, 2, None),

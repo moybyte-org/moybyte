@@ -18,12 +18,17 @@ HEADER = os.path.join(ROOT, "native", "moy_uitree", "moy_uitree_schema.h")
 
 # a contract type's number in the table (moy_uitree.h's UIT_T_*); `word:A,B` is WORD with its words
 TYPES = ("tpl", "cond", "name", "action", "hook", "action|hook", "int", "bool", "list", "lit", "fn",
-         "key", "table", "takes", "text", "word", "list:tpl", "list:action", "conds")
+         "key", "table", "takes", "text", "word", "list:tpl", "list:action", "conds", "list|conds", "int|word", "int|name")
 F_DESIGNED = 1          # the spec designs it; no engine builds it yet
 
 
+def _words(t):
+    """A word type's words, comma-separated (`word:A,B`, `int|word:A,B`), or None."""
+    return t.split(":", 1)[1] if t.startswith(("word:", "int|word:")) else None
+
+
 def _type(t):
-    return TYPES.index("word" if t.startswith("word:") else t) + 1
+    return TYPES.index(t.split(":", 1)[0] if _words(t) else t) + 1
 
 
 def _c(s):
@@ -56,19 +61,34 @@ def render(contract):
            "    " + ",\n    ".join("UIT_T_%s%s" % (t.replace("|", "_").replace(":", "_").upper(), " = 1" if i == 0 else "")
                                   for i, t in enumerate(TYPES)),
            "};", "#define UIT_SF_DESIGNED %d       // the spec designs it; no engine builds it yet" % F_DESIGNED, "",
-           "typedef struct {", "    const char *name;",
-           "    const char *words;          // a word prop's words, comma-separated; else NULL",
-           "    uint8_t type;               // UIT_T_*", "    uint8_t flags;              // UIT_SF_*",
-           "} uit_sprop_t;", "",
-           "typedef struct {", "    const char *name;", "    uint16_t first;             // its props: UIT_SPROPS[first, first + n)",
-           "    uint8_t n;", "    uint8_t flags;", "} uit_skind_t;", "",
-           "static const uit_sprop_t UIT_SPROPS[] = {"]
-    for p, t, f in props:
-        words = _c(t[5:]) if t.startswith("word:") else "NULL"
-        out.append("    {%s, %s, %d, %d}," % (_c(p), words, _type(t), f))
+           "// the table's names and words, each once, NUL-ended: a row holds offsets into it (0: none)",
+           "static const char UIT_SSTR[] ="]
+    blob, at = [""], {"": 0}
+    size = 1
+
+    def off(text):
+        nonlocal size
+        if text not in at:
+            at[text] = size
+            blob.append(text)
+            size += len(text) + 1
+        return at[text]
+    prow = [(off(p), off(_words(t)) if _words(t) else 0, _type(t), f) for p, t, f in props]
+    krow = [(off(k), first, n, f) for k, first, n, f in rows]
+    assert size < 0x10000
+    out += ['    "\\0"'] + ['    %s\\0"' % _c(text)[:-1] for text in blob[1:]] + ['    ;', "",
+            "typedef struct {", "    uint16_t name;              // UIT_SSTR + name",
+            "    uint16_t words;             // a word prop's words, comma-separated: UIT_SSTR + words; else 0",
+            "    uint8_t type;               // UIT_T_*", "    uint8_t flags;              // UIT_SF_*",
+            "} uit_sprop_t;", "",
+            "typedef struct {", "    uint16_t name;", "    uint16_t first;             // its props: UIT_SPROPS[first, first + n)",
+            "    uint8_t n;", "    uint8_t flags;", "} uit_skind_t;", "",
+            "static const uit_sprop_t UIT_SPROPS[] = {"]
+    for p, w, t, f in prow:
+        out.append("    {%d, %d, %d, %d}," % (p, w, t, f))
     out += ["};", "", "static const uit_skind_t UIT_SKINDS[] = {"]
-    for k, first, n, f in rows:
-        out.append("    {%s, %d, %d, %d}," % (_c(k), first, n, f))
+    for k, first, n, f in krow:
+        out.append("    {%d, %d, %d, %d}," % (k, first, n, f))
     out += ["};", "",
             "// a retired prop (NAME, or NAME@KIND for one kind's) and what replaces it",
             "static const char *const UIT_SRETIRED[][2] = {"]
@@ -79,9 +99,11 @@ def render(contract):
             "static const char *const UIT_STYPES[] = {"]
     names = contract["types"]
     for t in TYPES:
-        key = "word:A,B" if t == "word" else "list:T" if t.startswith("list:") else t
+        key = t + ":A,B" if t.endswith("word") else "list:T" if t.startswith("list:") else t
         what = names[key] if not t.startswith("list:") else "a list of " + names[t[5:]].split(" ", 1)[1] + "s"
         out.append("    %s," % _c(what))
+    out += ["};", "", "// each type's name in the contract (UIT_T_* - 1)", "static const char *const UIT_SKEYS[] = {"]
+    out += ["    %s," % _c(t) for t in TYPES]
     out += ["};", "", "#endif", ""]
     return "\n".join(out)
 

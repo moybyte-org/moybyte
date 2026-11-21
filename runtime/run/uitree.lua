@@ -1461,71 +1461,35 @@ end
 -- -- nodes -----------------------------------------------------------------------------
 
 local NodeMT = {}
-local COMMON = { shown = 1 }
-local PROPS = {
-  group = { close = 1 }, row = { close = 1, gap = 1, pad = 1, mid = 1 }, scroll = { follow = 1, new = 1 },
-  foot = { look = 1 },
-  label = { tone = 1, icon = 1, face = 1, size = 1, wrap = 1, lines = 1, align = 1 }, rule = {},
-  info = { value = 1, icon = 1, signal = 1, tag = 1, tone = 1 },
-  note = { icon = 1, lines = 1 }, empty = { icon = 1, lines = 1 },
-  bubble = { side = 1, head = 1, status = 1, signal = 1, tone = 1, max = 1, lines = 1, on = 1, cut = 1 },
-  button = { kind = 1, label = 1, icon = 1, arg = 1, alone = 1, span = 1, focus = 1, marked = 1, tone = 1, w = 1 },
-  link = { label = 1, value = 1, icon = 1, signal = 1, tag = 1, tone = 1, focus = 1 },
-  toggle = { label = 1, hint = 1, on = 1, focus = 1, when = 1, off = 1 },
-  slider = { label = 1, lo = 1, hi = 1, on = 1, focus = 1, when = 1, off = 1, icon = 1, look = 1 },
-  field = { label = 1, max = 1, secret = 1, hint = 1, grow = 1, commit = 1, on = 1, changed = 1, input = 1,
-            focus = 1, when = 1, off = 1 },
-  rows = { cur = 1, current = 1, check = 1, empty = 1, by = 1, changed = 1, filter = 1, group = 1, dir = 1 },
-  dialog = { buttons = 1, default = 1 }, popover = { anchor = 1, w = 1, close = 1, wash = 1 },
-  switch = {}, case = {},
-  -- the C engine's kinds (uitree_engine.lua); the reference back end draws none of them
-  progress = { max = 1, label = 1, look = 1 },
-  seg = { label = 1, labels = 1, on = 1, focus = 1, look = 1, text = 1 },
-  text_view = { wrap = 1, follow = 1, syntax = 1, face = 1 },
-  menu = {}, item = { icon = 1, label = 1, mkind = 1 },
-  table = { cols = 1, cur = 1, on = 1, changed = 1, empty = 1, focus = 1, hint = 1 }, col = {},
-  split = { dir = 1, sizes = 1, gap = 1, pad = 1, align = 1 }, grid = { cols = 1, rows = 1, gap = 1, pad = 1 },
-  panel = {}, canvas = { draw = 1, h = 1, w = 1, focus = 1, ground = 1, pointer = 1 },
-  tabs = { labels = 1, icons = 1, on = 1, focus = 1, offered = 1 },
-  cards = { cur = 1, current = 1, w = 1, h = 1, cols = 1, new = 1, changed = 1, group = 1 },
-  card = { label = 1, sub = 1, badge = 1, icon = 1, tone = 1 },
-}
--- the kinds only the C engine draws
-local C_KINDS = { progress = 1, seg = 1, text_view = 1, menu = 1, item = 1, table = 1, col = 1, split = 1, grid = 1,
-                  panel = 1, canvas = 1, tabs = 1, cards = 1, card = 1 }
--- the props only the C engine draws, by kind
-local C_PROPS = { group = { close = 1 }, row = { close = 1, gap = 1, pad = 1, mid = 1 },
-                  button = { marked = 1, tone = 1, w = 1 }, slider = { look = 1 },
-                  rows = { changed = 1, filter = 1, group = 1, dir = 1 } }
-local COND_PROPS = { shown = 1, focus = 1, when = 1, marked = 1 }
-local NAME_PROPS = { key = 1, on = 1, cut = 1, changed = 1, commit = 1, current = 1, cur = 1, by = 1, new = 1,
-                     buttons = 1, default = 1, close = 1, off = 1, kind = 1, face = 1, size = 1, wrap = 1,
-                     align = 1, input = 1, wash = 1, anchor = 1, arg = 1, look = 1, labels = 1, syntax = 1,
-                     mkind = 1, dir = 1, ground = 1, filter = 1, icons = 1, pointer = 1 }
-local NUM_PROPS = { max = 1, lines = 1, lo = 1, hi = 1, span = 1, w = 1, gap = 1, pad = 1, rows = 1, h = 1 }
--- a function the engine calls inside its frame
-local FN_PROPS = { draw = 1 }
--- a list of texts or ints, one prop a value
-local LIST_PROPS = { sizes = 1 }
-local BOOL_PROPS = { follow = 1, check = 1, grow = 1, secret = 1, alone = 1, mid = 1 }
-local WORDS = { kind = { normal = 1, primary = 1, danger = 1, tonal = 1 }, off = { hide = 1, grey = 1 },
-                face = { ui = 1, title = 1, mono = 1, caption = 1, result = 1 }, size = { fit = 1 },
-                wrap = { cut = 1, word = 1 }, align = { start = 1, center = 1, ["end"] = 1 },
-                input = { text = 1, number = 1, password = 1 }, wash = { page = 1, view = 1, none = 1 },
-                look = { ["end"] = 1, share = 1 }, mkind = { danger = 1 }, dir = { row = 1, col = 1 },
-                syntax = { plain = 1, sgr = 1, python = 1, lua = 1, json = 1, markdown = 1 },
-                ground = { surface = 1, surface_alt = 1, surface_light = 1, panel = 1, lcd = 1, desktop = 1 } }
--- a prop that is another type, or takes other words, on one kind
--- ("row": a template over the list's rows, compiled once the rows' context is in)
-local KIND_TYPE = { progress = { max = "int" }, table = { cols = "list" }, grid = { cols = "num" },
-                    rows = { group = "row" }, cards = { group = "row", w = "int", h = "int", cols = "int" },
-                    tabs = { offered = "conds" } }
-local KIND_WORDS = { look = { seg = { seg = 1, cycle = 1 }, progress = { count = 1 }, slider = { bar = 1, steps = 1 } },
-                     wrap = { text_view = { cut = 1, word = 1 } }, face = { text_view = { ui = 1, mono = 1 } },
-                     dir = { rows = { row = 1 } } }
-local RETIRED_PROPS = { ink = "tone = \"...\"", disabled = "when = \"...\" with off = \"grey\" on the action",
-                        does = "hint = \"...\" on the action", below = "new = \"NAME\"", current_tool = 1 }
+-- the contract's table (native/moy_uitree's schema) checks every prop's name, class and words:
+-- __moy_uitree_check(kind, prop, class, text) answers its type, or nil and the code and message
+local CHECK = __moy_uitree_check
+__moy_uitree_check = nil
+if CHECK == nil then
+  fail("E00", "load", "the UI tree's checks are not in this build", "a build with native/moy_uitree", "none")
+end
+-- where this layer differs from the table: what the table only designs and the layer builds
+-- (true; a kind's every prop), and what the table has that the layer does not build yet (false)
+local OWN = { bubble = true, ["dialog.default"] = true, ["field.grow"] = true, ["field.input"] = true,
+              ["field.when"] = true, ["field.off"] = true, ["info.tag"] = true, ["info.tone"] = true,
+              ["link.tag"] = true, ["link.tone"] = true, ["popover.wash"] = true, ["rows.by"] = true,
+              ["rows.check"] = true, ["scroll.new"] = true, ["scroll.follow"] = true, ["slider.when"] = true,
+              ["slider.off"] = true, ["toggle.when"] = true, ["toggle.off"] = true, ["card.image"] = false }
+-- a parent's prop the table lets every child carry: the one kind the layer builds it on
+local CHILD = { span = "button", grow = "field" }
+local BUILDS = 16
 local STOPS = { button = 1, link = 1, toggle = 1, slider = 1, field = 1, bubble = 1, rows = 1 }
+
+-- a value's class, as the table's check names them (moy_uitree_check.h's UIT_VC_*)
+local function vclass(v)
+  local t = type(v)
+  if t == "string" then return 1 end
+  if t == "number" then return math.type(v) == "integer" and 2 or 7 end
+  if t == "boolean" then return 3 end
+  if t == "function" then return 6 end
+  if t == "table" then return (v[1] ~= nil or next(v) == nil) and 4 or 5 end
+  return 0
+end
 
 local function check_opts(kind, o, at)
   if o == nil then return {} end
@@ -1536,94 +1500,48 @@ local function check_opts(kind, o, at)
     fail("N01", at, "ui." .. kind .. " is given a positional prop " .. describe(o[1]), "the head positional, every other prop named",
          describe(o[1]), "name it: { value = ... }")
   end
-  local allowed = PROPS[kind]
   for k, v in pairs(o) do
-    if RETIRED_PROPS[k] then fail("N04", at, "ui." .. kind .. "'s " .. q(k) .. " is retired", RETIRED_PROPS[k], q(k), RETIRED_PROPS[k]) end
-    if (k == "when" or k == "off") and not allowed[k] then
-      fail("O04", at, "ui." .. kind .. " has " .. k .. ", and it is neither an action's site nor a two-way control",
-           "when and off on the action", q(k), "ui.action(NAME, LABEL, fn, { when = ..., off = \"grey\" })")
+    local own = OWN[kind .. "." .. k]
+    if own == false or (CHILD[k] and CHILD[k] ~= kind) then
+      fail("E00", at, "the Lua layer does not build ui." .. kind .. "'s " .. k .. " yet",
+           CHILD[k] and "it on ui." .. CHILD[k] .. " alone" or "a prop this layer builds", q(k), "drop it")
     end
-    if not (COMMON[k] or allowed[k]) then
-      local ks = sorted_keys(COMMON)
-      for n in pairs(allowed) do ks[#ks + 1] = n end
-      table.sort(ks)
-      local n = near(k, ks)
-      fail("N01", at, "ui." .. kind .. " has no prop " .. q(k), "one of " .. table.concat(ks, ", "), q(k),
-           n and "did you mean " .. q(n) .. "?" or nil)
+    local vc = vclass(v)
+    if own or OWN[kind] then vc = vc | BUILDS end
+    local ty, code, what, expected, fix = CHECK(kind, k, vc, type(v) == "string" and v or nil)
+    if code then
+      if not ty and (k == "when" or k == "off") then
+        fail("O04", at, "ui." .. kind .. " has " .. k .. ", and it is neither an action's site nor a two-way control",
+             "when and off on the action", q(k), "ui.action(NAME, LABEL, fn, { when = ..., off = \"grey\" })")
+      end
+      fail(code, at, what, expected ~= "" and expected or fix, ty and describe(v) or q(k), fix ~= "" and fix or nil)
     end
-    local kt = KIND_TYPE[kind] and KIND_TYPE[kind][k]
-    local kw = KIND_WORDS[k] and KIND_WORDS[k][kind]
-    if FN_PROPS[k] then
-      if type(v) ~= "function" then
-        fail("N01", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "a function: draw = function(x, y, w, h) ... end", describe(v))
-      end
-    elseif kw then
-      if not kw[v] then fail("N01", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "one of " .. table.concat(sorted_keys(kw), ", "), describe(v)) end
-    elseif kt == "row" then
-      if type(v) ~= "string" then fail("N01", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "a template (a text)", describe(v)) end
-    elseif kt == "conds" then
-      if type(v) ~= "table" or getmetatable(v) ~= nil or v[1] ~= nil then
-        fail("N01", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "a table of value = condition", describe(v))
-      end
+    -- the table took the value: compile its templates and conditions here, at the call's line
+    if ty == "cond" then compile_cond(v, nil, at)
+    elseif ty == "conds" then
       for _, c in pairs(v) do
         if type(c) ~= "string" then fail("N01", at, "ui." .. kind .. "'s " .. k .. " holds " .. describe(c), "a condition (a text)", describe(c)) end
         compile_cond(c, nil, at)
       end
-    elseif kt == "tpl" then
-      if type(v) ~= "string" then fail("N01", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "a template (a text)", describe(v)) end
-      compile_tpl(v, nil, at)
-    elseif kt == "int" then
-      if type(v) == "string" and v:find("{", 1, true) then compile_tpl(v, nil, at)
-      elseif math.type(v) ~= "integer" then
-        fail("T03", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "an int, or \"{NAME}\" of an int", describe(v))
-      end
-    elseif kt == "num" then
-      if math.type(v) ~= "integer" or v < 1 then fail("N01", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "an int, at least 1", describe(v)) end
-    elseif kt == "list" or LIST_PROPS[k] then
-      if type(v) ~= "table" or #v == 0 then fail("N01", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "a list: { ... }", describe(v)) end
+    elseif ty == "list" or ty == "list:tpl" then
+      if ty == "list" and #v == 0 then fail("N01", at, "ui." .. kind .. "'s " .. k .. " is an empty table", "a list: { ... }", "{}") end
       for _, x in ipairs(v) do
-        local ok = type(x) == "string" or (k == "sizes" and math.type(x) == "integer")
-        if not ok then fail("N01", at, "ui." .. kind .. "'s " .. k .. " holds " .. describe(x), k == "sizes" and "ints or weights (\"2*\")" or "texts", describe(x)) end
-        if kt == "list" then compile_tpl(x, false, at) end
+        if not (type(x) == "string" or (k == "sizes" and math.type(x) == "integer")) then
+          fail("N01", at, "ui." .. kind .. "'s " .. k .. " holds " .. describe(x), k == "sizes" and "ints or weights (\"2*\")" or "texts", describe(x))
+        end
+        if k ~= "sizes" then compile_tpl(x, ty == "list:tpl" and nil or false, at) end
       end
-    elseif COND_PROPS[k] then compile_cond(v, nil, at)
-    elseif (k == "lines" and kind ~= "bubble" and kind ~= "label") or k == "buttons" then
-    elseif k == "signal" then
-      -- an int: a literal, or the whole reference to an int ({bars}, {.bars})
-      local ref = type(v) == "string" and v:match("^{([%w_.@]+)}$")
-      if math.type(v) ~= "integer" and not ref then
-        fail("N01", at, "ui." .. kind .. "'s signal is " .. describe(v), "an int, or {NAME} of an int", describe(v))
-      end
+    elseif ty == "int" and type(v) == "string" then
+      local ref = k == "signal" and v:match("^{([%w_.@]+)}$")
       if ref then
-        local _, ty = operand(ref, v, ROWCTX, at)
-        if ty.t ~= "int" then
-          fail("T03", at, "ui." .. kind .. "'s signal reads " .. q(ref) .. ", which is " .. tname(ty), "an int", tname(ty))
-        end
-        compile_tpl(v, nil, at)
+        local _, rt = operand(ref, v, ROWCTX, at)
+        if rt.t ~= "int" then fail("T03", at, "ui." .. kind .. "'s signal reads " .. q(ref) .. ", which is " .. tname(rt), "an int", tname(rt)) end
       end
-    elseif NUM_PROPS[k] then
-      if math.type(v) ~= "integer" and not (type(v) == "string" and v:match("^{%.[%w_]+}$")) then
-        fail("N01", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "an int", describe(v))
-      end
-      if type(v) == "string" then compile_tpl(v, nil, at) end
-    elseif BOOL_PROPS[k] then
-      if type(v) ~= "boolean" then fail("N01", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "true or false", describe(v)) end
-    elseif NAME_PROPS[k] then
-      if k == "commit" then
-        if type(v) ~= "boolean" then
-          fail("N01", at, "ui.field's commit is " .. describe(v), "true or false", describe(v),
-               type(v) == "string" and "{ commit = true, on = \"" .. v .. "\" }" or nil)
-        end
-      elseif type(v) ~= "string" then fail("N01", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "a name", describe(v))
-      elseif WORDS[k] and not WORDS[k][v] then
-        fail("N01", at, "ui." .. kind .. "'s " .. k .. " is " .. q(v), "one of " .. table.concat(sorted_keys(WORDS[k]), ", "), q(v))
-      end
-    elseif type(v) == "string" then compile_tpl(v, nil, at)
-    else fail("N01", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "a template (a text)", describe(v)) end
-  end
-  if o.lines ~= nil and kind ~= "bubble" and kind ~= "label" then
-    if type(o.lines) ~= "table" then fail("N01", at, "ui." .. kind .. "'s lines are " .. describe(o.lines), "{ \"line\", ... }", describe(o.lines)) end
-    for _, l in ipairs(o.lines) do compile_tpl(l, nil, at) end
+      compile_tpl(v, nil, at)
+    elseif ty == "int" and kind == "grid" and v < 1 then
+      fail("N01", at, "ui.grid's " .. k .. " is " .. describe(v), "an int, at least 1", describe(v))
+    elseif ty == "tpl" and k ~= "group" then compile_tpl(v, nil, at)   -- a group's caption compiles over its rows
+    end
   end
   return o
 end
@@ -2693,7 +2611,7 @@ end
 -- the layer's own tables, which tests/test_uitree_contract.py holds against
 -- the contract table both layers obey
 function T._contract()
-  return { props = PROPS, common = COMMON, words = WORDS, action = ACTION_OPTS, hook = HOOK_OPTS,
+  return { own = OWN, child = CHILD, action = ACTION_OPTS, hook = HOOK_OPTS,
            page = PAGE_OPTS, app = APP_FIELDS, takes = TAKES_N, roles = APP_ROLES, shell_roles = SHELL_ROLES }
 end
 
@@ -2727,7 +2645,7 @@ end
 -- clears it before a cart's own scripts run
 T._in = {
   E = E, T = T, V = V, VER = VER, DECL = DECL, ACTIONS = ACTIONS, ACTION_ORDER = ACTION_ORDER, LABELS = LABELS,
-  KEYMAP = KEYMAP, SYS = SYS, STOPS = STOPS, C_KINDS = C_KINDS, C_PROPS = C_PROPS, DERIVED = DERIVED, ENGINE_OWNED = ENGINE_OWNED, stack = stack, R = R,
+  KEYMAP = KEYMAP, SYS = SYS, STOPS = STOPS, DERIVED = DERIVED, ENGINE_OWNED = ENGINE_OWNED, stack = stack, R = R,
   BACK = BACK, ModelMT = ModelMT,
   fail = fail, q = q, show = show, trace = trace, lookup = lookup, render = render, cond = cond, truthy = truthy,
   frozen = frozen, event = event, setv = setv, fire = fire, fire_placed = fire_placed, fire_fn = fire_fn, build_page = build_page, page_title = page_title,

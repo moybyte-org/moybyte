@@ -82,16 +82,15 @@ def lua_facts():
     r = subprocess.run([checker.hostlua(), os.path.join(CONTRACT, "lua_tables.lua"), checker.LAYER],
                        capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stderr
-    f = {"kinds": {}, "common": set(), "action": set(), "hook": set(), "page": set(), "app": set(),
-         "takes": set(), "roles": set(), "shell_roles": set(), "verbs": set()}
+    f = {"kinds": {}, "common": set(TABLE["common_props"]), "action": set(), "hook": set(), "page": set(),
+         "app": set(), "takes": set(), "roles": set(), "shell_roles": set(), "verbs": set()}
+    own = {}
     for line in r.stdout.splitlines():
         tag, *rest = line.split()
-        if tag == "KIND":
-            f["kinds"][rest[0]] = set()
-        elif tag == "PROP":
-            f["kinds"][rest[0]].add(rest[1])
-        elif tag in ("COMMON", "ACTION", "HOOK", "PAGE", "APP", "TAKES", "VERB"):
-            f[{"COMMON": "common", "ACTION": "action", "HOOK": "hook", "PAGE": "page", "APP": "app",
+        if tag == "OWN":
+            own[rest[0]] = rest[1] == "true"
+        elif tag in ("ACTION", "HOOK", "PAGE", "APP", "TAKES", "VERB"):
+            f[{"ACTION": "action", "HOOK": "hook", "PAGE": "page", "APP": "app",
                "TAKES": "takes", "VERB": "verbs"}[tag]].add(rest[0])
         elif tag == "ROLE":
             f["roles"].add(rest[0])
@@ -101,6 +100,12 @@ def lua_facts():
         src = fh.read()
     stubs = set(re.findall(r"^T\.(\w+) = (?:retired|not_here)\(", src, re.M))
     f["verbs"] -= stubs
+    # the layer checks its props against the table (the C check), so what it builds is the table's
+    # built kinds and props, a verb's each, but where its OWN says it differs
+    for k, d in TABLE["kinds"].items():
+        if (k in f["verbs"] or "made_by" in d) and (not d.get("designed") or own.get(k)):
+            f["kinds"][k] = {p for p, pd in d["props"].items()
+                             if own.get("%s.%s" % (k, p), not pd.get("designed") or own.get(k))}
     f["kinds"]["page"] = f["page"]
     f["codes"] = _codes(LUA_FILES)
     f["retired_live"] = {v for v in TABLE["retired"]["verbs"] if v in f["verbs"]}
