@@ -62,7 +62,6 @@ SHARED = {
     ("moy_ui.c", "s_danger_ink"): BLOCK,
     ("moy_ui.c", "s_font"): BLOCK,
     ("moy_ui.c", "s_icon_font"): BLOCK,
-    ("moy_ui.c", "s_icon_code"): BLOCK,
     ("moy_ui.c", "s_moy"): BLOCK,
     ("moy_ui.c", "s_moy_clear"): BLOCK,
     ("moy_ui.c", "s_calls"): "a count, a relaxed atomic add",

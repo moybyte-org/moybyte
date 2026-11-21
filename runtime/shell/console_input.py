@@ -682,11 +682,11 @@ class InputRouter:
         else the content layer."""
         ws = self.ws
         if ws.windowed_chrome:
-            win = ws.wm._focus_win()
-            if win is not None:
-                if win.minimized:
-                    return None
-                return ws.wm.content_for(win.kind)
+            kind = ws.wm.input_kind()
+            if kind == "":
+                return None             # a minimised window holds the focus
+            if kind is not None:
+                return ws.wm.content_for(kind)
         return ws.content_layer()
 
     def _pause_bar(self):
