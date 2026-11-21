@@ -203,6 +203,16 @@ def release(i=None):
             rel()
 
 
+def reset():
+    """Everything the strip keeps of a console given back: its layers, the
+    canvas it last stamped onto, its toolkit context and its page (a new
+    console, a console whose windows all went)."""
+    release()
+    _STAMPS[0] = None
+    _CTX[0] = None
+    _PAGE[0] = None
+
+
 def draw(cv, th, rect, unit, title, icon, tone, back, inset, full=False):
     """A frame of the strip page onto `cv` at `rect` (the strip of a frame
     drawn bare, or a full-screen window's row: `full`, its maximise drawn

@@ -34,6 +34,7 @@ from wm_chrome import _SHADOW
 from widgets import _Blit, _ticks_ms
 import layout_base as _layout_base
 import ui_draw as _ui_draw
+import wm_strip as _strip
 
 
 class WindowPaint:
@@ -75,6 +76,7 @@ class WindowPaint:
         for win in self.windows.values():
             self._drop_win(win)
         self.windows.clear()
+        _strip.reset()              # no strip shows: its layers go back
 
     def drop_backdrop(self):
         cache = self._backdrop

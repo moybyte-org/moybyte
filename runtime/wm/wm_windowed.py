@@ -95,6 +95,7 @@ from shell_layout import WIDGETS as _LAYOUT_WIDGETS
 from notifications import NOTES as _NOTES
 import layout_base as _layout_base
 import ui_draw as _ui_draw
+import wm_strip as _strip
 
 
 # The desk's default OUTER sizes of the apps the 2026-10 look sizes to their
@@ -146,6 +147,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
 
     def __init__(self, ws):
         FullscreenStackWM.__init__(self, ws)
+        _strip.reset()                # (what another console's windows kept)
         if ws.bound_sys_canvas is None:
             raise ValueError("WindowedWM needs a distinct (big) system canvas")
         # THE MODE (docs/theme_and_shell_2026-11.md §8.1): "desktop" -- the desk
@@ -778,6 +780,7 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
             for g in list(self.windows):
                 if g not in alive:
                     self._drop_win(self.windows.pop(g))
+                    _strip.release()    # the layers the gone window's strip kept go back
                     self.ws.procs.dropped(g)    # a running set's game ends with it
             pushed = keys[-1] if keys and keys[-1] not in self.windows else None
             for depth, g in enumerate(keys):
