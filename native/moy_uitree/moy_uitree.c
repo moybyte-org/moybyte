@@ -216,12 +216,58 @@ const char *uit_str(const uit_t *e, uint16_t off)
     return off == UIT_NONE ? "" : e->pool.p + off;
 }
 
-static int pool_put(uit_t *e, const char *s, size_t n)
+// A page's texts repeat (its props' names, their sources, a label table's words): the pool keeps
+// each once while it is declared and built, found by hash through `intern`, made at the first put
+// and let go when the build ends (a loaded blob's pool is the compile's, already one copy each).
+enum { INTERN = 2048, INTERN_FULL = 1536 };      // past FULL texts a new one is not kept (a copy each)
+
+int uit_pool_put(uit_t *e, const char *s, size_t n)
 {
+    if (n && memchr(s, 0, n)) {
+        // a list of texts (an enum's values, a label table's keys) is kept as it is: its order is
+        // a dict's on some Pythons, and a copy shared by chance would make the pool's size so too
+        int at = uit_buf_put(&e->pool, s, n);
+        return at < 0 || at >= (int)UIT_NONE ? -1 : at;
+    }
+    if (!e->intern && (e->intern = UIT_MALLOC(INTERN * sizeof *e->intern)) != NULL) {
+        memset(e->intern, 0xff, INTERN * sizeof *e->intern);
+        e->intern[2166136261u & (INTERN - 1)] = 0;      // the empty text, offset 0 (uit_new)
+        e->ninterned = 1;
+    }
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < n; i++)
+        h = (h ^ (uint8_t)s[i]) * 16777619u;
+    uint16_t *slot = NULL;
+    for (int i = 0; e->intern && i < INTERN; i++) {
+        uint16_t *q = &e->intern[(h + (uint32_t)i) & (INTERN - 1)];
+        if (*q == UIT_NONE) {
+            slot = q;
+            break;
+        }
+        // an offset a build truncated away, or overwritten since, fails the compare
+        if ((size_t)*q + n < e->pool.n && !e->pool.p[*q + n] && !memcmp(e->pool.p + *q, s, n))
+            return *q;
+    }
     int at = uit_buf_put(&e->pool, s, n);
     if (at < 0 || at >= (int)UIT_NONE)
         return -1;
+    if (slot && e->ninterned < INTERN_FULL) {
+        *slot = (uint16_t)at;
+        e->ninterned++;
+    }
     return at;
+}
+
+static void intern_drop(uit_t *e)
+{
+    UIT_FREE(e->intern);
+    e->intern = NULL;
+    e->ninterned = 0;
+}
+
+static int pool_put(uit_t *e, const char *s, size_t n)
+{
+    return uit_pool_put(e, s, n);
 }
 
 static int pool_puts(uit_t *e, const char *s)
@@ -237,7 +283,7 @@ uit_t *uit_new(void)
     if (!e)
         return NULL;
     memset(e, 0, sizeof *e);
-    pool_put(e, "", 0);         // offset 0 is the empty text
+    uit_buf_put(&e->pool, "", 0);       // offset 0 is the empty text
     e->ccur = -1;
     e->pane_cur = -1;
     return e;
@@ -346,6 +392,7 @@ void uit_free(uit_t *e)
 {
     if (!e)
         return;
+    intern_drop(e);
     for (int i = 0; i < e->nslots; i++) {
         UIT_FREE(e->slots[i].s);
         UIT_FREE(e->slots[i].cells);
@@ -1496,6 +1543,7 @@ static void gen_of_build(uit_t *e)
 
 int uit_build_end(uit_t *e)
 {
+    intern_drop(e);
     e->has_panes = 0;
     for (int k = 0; k < e->nnodes; k++) {
         if (e->nodes[k].kind == UIT_PANES || e->nodes[k].kind == UIT_LEGACY)

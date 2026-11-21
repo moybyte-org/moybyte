@@ -300,6 +300,8 @@ struct uit {
     // where the declarations end: a build is truncated back to these
     int decl_done;
     uint32_t m_pool;
+    uint16_t *intern;           // while declaring and building: the pool's texts by hash (uit_pool_put)
+    int ninterned;
     int m_tmpls, m_ops, m_conds, m_terms;
     // the build
     uint16_t page_id;
@@ -402,6 +404,9 @@ int uit_fail(uit_t *e, int code, const char *fmt, ...);
 // A mistake the spec names: UIT_E_CHECK, its code kept for uit_error_code.
 int uit_check_fail(uit_t *e, const char *code, const char *fmt, ...);
 const char *uit_str(const uit_t *e, uint16_t off);
+// `n` bytes of `s` in the pool, NUL after: the offset of the same bytes where the declarations or
+// the build put them already, else of a new copy; -1 no memory or no 16-bit offset left.
+int uit_pool_put(uit_t *e, const char *s, size_t n);
 
 // moy_uitree_lang.c
 int uit_tmpl_compile(uit_t *e, const char *src, int model);   // a template's index
