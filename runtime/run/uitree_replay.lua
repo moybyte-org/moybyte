@@ -605,12 +605,18 @@ local function replay(p)
   if want then E.focus(want) end
 end
 
--- a kind only the C engine draws: refused by name, never drawn wrong
-local C_KINDS = I.C_KINDS
+-- a kind or a prop only the C engine draws: refused by name, never drawn wrong
+local C_KINDS, C_PROPS = I.C_KINDS, I.C_PROPS
 local function refuse(n)
   if C_KINDS[n.kind] then
     fail("E00", n.at, "the reference back end does not draw ui." .. n.kind, "the C engine", "the reference",
          "run this app on the C engine: uitree_app.use_engine(\"c\")")
+  end
+  for k in pairs(C_PROPS[n.kind] or {}) do
+    if n.o[k] ~= nil then
+      fail("E00", n.at, "the reference back end does not draw ui." .. n.kind .. "'s " .. k, "the C engine", "the reference",
+           "run this app on the C engine: uitree_app.use_engine(\"c\")")
+    end
   end
   for _, k in ipairs(n.kids) do refuse(k) end
   if n.body then refuse(n.body) end

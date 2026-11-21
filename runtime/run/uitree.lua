@@ -1463,18 +1463,19 @@ end
 local NodeMT = {}
 local COMMON = { shown = 1 }
 local PROPS = {
-  group = {}, row = {}, scroll = { follow = 1, new = 1 }, foot = { look = 1 },
+  group = { close = 1 }, row = { close = 1, gap = 1, pad = 1, mid = 1 }, scroll = { follow = 1, new = 1 },
+  foot = { look = 1 },
   label = { tone = 1, icon = 1, face = 1, size = 1, wrap = 1, lines = 1, align = 1 }, rule = {},
   info = { value = 1, icon = 1, signal = 1, tag = 1, tone = 1 },
   note = { icon = 1, lines = 1 }, empty = { icon = 1, lines = 1 },
   bubble = { side = 1, head = 1, status = 1, signal = 1, tone = 1, max = 1, lines = 1, on = 1, cut = 1 },
-  button = { kind = 1, label = 1, icon = 1, arg = 1, alone = 1, span = 1, focus = 1 },
+  button = { kind = 1, label = 1, icon = 1, arg = 1, alone = 1, span = 1, focus = 1, marked = 1, tone = 1, w = 1 },
   link = { label = 1, value = 1, icon = 1, signal = 1, tag = 1, tone = 1, focus = 1 },
   toggle = { label = 1, hint = 1, on = 1, focus = 1, when = 1, off = 1 },
-  slider = { label = 1, lo = 1, hi = 1, on = 1, focus = 1, when = 1, off = 1, icon = 1 },
+  slider = { label = 1, lo = 1, hi = 1, on = 1, focus = 1, when = 1, off = 1, icon = 1, look = 1 },
   field = { label = 1, max = 1, secret = 1, hint = 1, grow = 1, commit = 1, on = 1, changed = 1, input = 1,
             focus = 1, when = 1, off = 1 },
-  rows = { cur = 1, current = 1, check = 1, empty = 1, by = 1 },
+  rows = { cur = 1, current = 1, check = 1, empty = 1, by = 1, changed = 1 },
   dialog = { buttons = 1, default = 1 }, popover = { anchor = 1, w = 1, close = 1, wash = 1 },
   switch = {}, case = {},
   -- the C engine's kinds (uitree_engine.lua); the reference back end draws none of them
@@ -1489,7 +1490,10 @@ local PROPS = {
 -- the kinds only the C engine draws
 local C_KINDS = { progress = 1, seg = 1, text_view = 1, menu = 1, item = 1, table = 1, col = 1, split = 1, grid = 1,
                   panel = 1 }
-local COND_PROPS = { shown = 1, focus = 1, when = 1 }
+-- the props only the C engine draws, by kind
+local C_PROPS = { group = { close = 1 }, row = { close = 1, gap = 1, pad = 1, mid = 1 },
+                  button = { marked = 1, tone = 1, w = 1 }, slider = { look = 1 }, rows = { changed = 1 } }
+local COND_PROPS = { shown = 1, focus = 1, when = 1, marked = 1 }
 local NAME_PROPS = { key = 1, on = 1, cut = 1, changed = 1, commit = 1, current = 1, cur = 1, by = 1, new = 1,
                      buttons = 1, default = 1, close = 1, off = 1, kind = 1, face = 1, size = 1, wrap = 1,
                      align = 1, input = 1, wash = 1, anchor = 1, arg = 1, look = 1, labels = 1, syntax = 1,
@@ -1497,7 +1501,7 @@ local NAME_PROPS = { key = 1, on = 1, cut = 1, changed = 1, commit = 1, current 
 local NUM_PROPS = { max = 1, lines = 1, lo = 1, hi = 1, span = 1, w = 1, gap = 1, pad = 1, rows = 1 }
 -- a list of texts or ints, one prop a value
 local LIST_PROPS = { sizes = 1 }
-local BOOL_PROPS = { follow = 1, check = 1, grow = 1, secret = 1, alone = 1 }
+local BOOL_PROPS = { follow = 1, check = 1, grow = 1, secret = 1, alone = 1, mid = 1 }
 local WORDS = { kind = { normal = 1, primary = 1, danger = 1, tonal = 1 }, off = { hide = 1, grey = 1 },
                 face = { ui = 1, title = 1, mono = 1, caption = 1, result = 1 }, size = { fit = 1 },
                 wrap = { cut = 1, word = 1 }, align = { start = 1, center = 1, ["end"] = 1 },
@@ -1506,7 +1510,7 @@ local WORDS = { kind = { normal = 1, primary = 1, danger = 1, tonal = 1 }, off =
                 syntax = { plain = 1, sgr = 1, python = 1, lua = 1, json = 1, markdown = 1 } }
 -- a prop that is another type, or takes other words, on one kind
 local KIND_TYPE = { progress = { max = "int" }, table = { cols = "list" }, grid = { cols = "num" } }
-local KIND_WORDS = { look = { seg = { seg = 1, cycle = 1 }, progress = { count = 1 } },
+local KIND_WORDS = { look = { seg = { seg = 1, cycle = 1 }, progress = { count = 1 }, slider = { bar = 1, steps = 1 } },
                      wrap = { text_view = { cut = 1, word = 1 } }, face = { text_view = { ui = 1, mono = 1 } } }
 local RETIRED_PROPS = { ink = "tone = \"...\"", disabled = "when = \"...\" with off = \"grey\" on the action",
                         does = "hint = \"...\" on the action", below = "new = \"NAME\"", current_tool = 1 }
@@ -1659,6 +1663,7 @@ local function container(kind, has_head, needs_body)
     if has_head then n.a[1] = head_text(kind, args[1], at, "caption"); from = 2 end
     local o, body = tail(kind, args, from, at)
     n.o = check_opts(kind, o, at)
+    if n.o.close ~= nil then use_action(n.o.close, "none", at, "ui." .. kind .. "'s close", false) end
     if needs_body or body then run_body(n, body) end
     return n
   end
@@ -1675,6 +1680,7 @@ function T.row(...)
   local o, body = tail("row", args, from, at)
   n.o = check_opts("row", o, at)
   if n.o_key then n.o.key = n.o_key end
+  if n.o.close ~= nil then use_action(n.o.close, "none", at, "ui.row's close", false) end
   run_body(n, body)
   local grow = 0
   for _, k in ipairs(n.kids) do if k.o.grow then grow = grow + 1 end end
@@ -1856,6 +1862,7 @@ function T.rows(name, o, body)
     end
   end
   if n.o.check and n.o.current == nil then fail("N01", at, "ui.rows has check and no current", "check with current", "check alone") end
+  if n.o.changed ~= nil then use_action(n.o.changed, "row", at, "ui.rows' changed", false) end
   local ctx = { fields = m.fields, order = m.order, name = name }
   n.ctx = ctx
   local sr = ROWCTX
@@ -2564,7 +2571,7 @@ end
 -- clears it before a cart's own scripts run
 T._in = {
   E = E, T = T, V = V, VER = VER, DECL = DECL, ACTIONS = ACTIONS, ACTION_ORDER = ACTION_ORDER, LABELS = LABELS,
-  KEYMAP = KEYMAP, SYS = SYS, STOPS = STOPS, C_KINDS = C_KINDS, DERIVED = DERIVED, ENGINE_OWNED = ENGINE_OWNED, stack = stack, R = R,
+  KEYMAP = KEYMAP, SYS = SYS, STOPS = STOPS, C_KINDS = C_KINDS, C_PROPS = C_PROPS, DERIVED = DERIVED, ENGINE_OWNED = ENGINE_OWNED, stack = stack, R = R,
   BACK = BACK, ModelMT = ModelMT,
   fail = fail, q = q, show = show, trace = trace, lookup = lookup, render = render, cond = cond, truthy = truthy,
   frozen = frozen, setv = setv, fire = fire, fire_placed = fire_placed, fire_fn = fire_fn, build_page = build_page, page_title = page_title,

@@ -195,6 +195,46 @@ def test_a_split_a_grid_and_a_panel_draw_on_the_c_engine(tmp_path):
     assert err and "error[E00] main.lua:5:" in err and "ui.grid" in err, err
 
 
+def test_the_props_only_the_c_engine_draws_lower_and_draw(tmp_path):
+    """A button's marked, tone and w, a group's and a row's close, a row's
+    gap, pad and mid, a slider's look and a rows' changed: each
+    page opens on the C engine and draws, and the reference refuses one by
+    name (E00)."""
+    import uitree_app
+    from runtime import host_app
+    uitree_app.use_engine("c")
+    carts = str(tmp_path / "carts")
+    host_app.moy_carts.ensure_dirs(carts)
+    head = ('ui.app("%s", { icon = "calc" })\n'
+            'local s = ui.state { on = true, v = 3, q = "", items = ui.model { key = "id", id = "" } }\n'
+            'ui.action("a", "Add", function() end)\nui.action("x", "Close", function() end)\n'
+            'ui.action("pick", "Pick", function(row) end, { takes = "row" })\n'
+            'ui.hook("opened", function() s.items:set({ { id = "one" }, { id = "two" } }) end)\n'
+            'ui.page("p", function()\n%s\nend)\n')
+    pages = {
+        "Marked": '  ui.button("a", { marked = "on", tone = "danger", w = 60 })',
+        "Closer": '  ui.group("G", { close = "x" }, function() ui.label("in") end)',
+        "Spaced": '  ui.foot(function() ui.row({ close = "x", gap = 4, pad = 2, mid = true }, function() ui.button("a") end) end)',
+        "Steps": '  ui.slider("v", { label = "Level", lo = 0, hi = 9, look = "steps" })',
+        "Picked": '  ui.rows("items", { changed = "pick" }, function() ui.label("{.id}") end)',
+    }
+    for name, page in pages.items():
+        _cart(carts, name, head % (name, page))
+    ws, drv, frame, open_cart = _console(carts)
+    for name in pages:
+        open_cart(ws, name)
+        for _ in range(4):
+            frame()
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
+        ws.spine.exit_to_caller()
+    uitree_app.use_engine("reference")
+    open_cart(ws, "Steps")
+    for _ in range(4):
+        frame()
+    err = ws.run.player.cart_error
+    assert err and "error[E00] main.lua:8:" in err and "ui.slider's look" in err, err
+
+
 def test_a_cancelled_timer_runs_nothing(tmp_path):
     from runtime import host_app
     from runtime.host import moy_log
