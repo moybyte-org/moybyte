@@ -42,9 +42,22 @@ def test_every_system_page_compiles(compiled):
         assert any(k.startswith(m + ".") for k in compiled.pages), m
 
 
+def _board_order(monkeypatch):
+    """Every model's fields in another dict order than the one the blobs were
+    compiled with, as a board's dicts keep them."""
+    import uitree as S
+    for m in MODULES:
+        for t in S.decl_of(__import__(m)).state._t.values():
+            if isinstance(t, S.Model):
+                monkeypatch.setattr(t, "fields", dict(reversed(list(t.fields.items()))))
+
+
+@pytest.mark.parametrize("order", ("host", "board"))
 @pytest.mark.parametrize("name", PORTS.C_RUNS)
-def test_a_c_run_draws_its_record_with_its_pages_loaded(name, compiled, tmp_path, monkeypatch):
+def test_a_c_run_draws_its_record_with_its_pages_loaded(name, order, compiled, tmp_path, monkeypatch):
     import uitree_app
+    if order == "board":
+        _board_order(monkeypatch)
     run = [r for r in PORTS.RUNS if r[0] == name][0]
     monkeypatch.setattr(uitree_aot, "BLOBS", compiled.pages)
     loaded, built = [], []

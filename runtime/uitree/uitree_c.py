@@ -268,7 +268,7 @@ class CEngine(Engine):
             self._types.append(decl)
         for name, t in st._t.items():
             if isinstance(t, S.Model):
-                fields = list(t.fields)
+                fields = t.order
                 types = bytes([self._ftype(t.fields[f], name) for f in fields])
                 self._ck(x.model(self._slot[name], "\0".join(fields).encode("utf-8"), types,
                                  fields.index(t.key)), "model " + name)
@@ -338,8 +338,8 @@ class CEngine(Engine):
         if isinstance(t, S.Model):
             cells = []
             for r in v:
-                for f, ft in t.fields.items():
-                    c = r._f[f]
+                for f in t.order:
+                    c, ft = r._f[f], t.fields[f]
                     cells.append(("1" if c else "0") if ft is S.BOOL else repr(c) if ft is S.NUM else str(c))
             raw = ("\0".join(cells) + "\0").encode("utf-8") if cells else b""
             self._ck(x.set_model(slot, len(v), raw), "model " + name)
@@ -418,7 +418,7 @@ class CEngine(Engine):
         row made again with it, as the reference's `_row_write` makes it."""
         st = self.s
         name, t = self._names[slot], self._types[slot]
-        f = list(t.fields)[fi]
+        f = t.order[fi]
         ft, raw = t.fields[f], self._x.get_cell(slot, ri, fi)
         v = raw == "1" if ft is S.BOOL else int(raw) if ft is S.INT else float(raw) if ft is S.NUM else raw
         rows = st._v[name]

@@ -279,6 +279,10 @@ class Model(T):
         self.zero = {k: _decl(v, k)[1] for k, v in fields.items()}
         self.init = ()
         self.cells = tuple((k,) + _accept(t) for k, t in self.fields.items())
+        # The fields in one order on every Python: a board's dicts (and so its
+        # keyword arguments) keep another order than CPython's, and the C
+        # store's field indexes, a compiled page's among them, are this order's.
+        self.order = tuple(sorted(self.fields))
 
 
 class RowOf(T):
