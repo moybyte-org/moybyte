@@ -235,6 +235,50 @@ def test_the_props_only_the_c_engine_draws_lower_and_draw(tmp_path):
     assert err and "error[E00] main.lua:8:" in err and "ui.slider's look" in err, err
 
 
+def test_a_canvas_draws_with_the_carts_verbs_inside_the_frame(tmp_path):
+    """A canvas's draw runs inside the C engine's frame at the canvas's rect
+    and draws with the cart's own verbs; a draw that writes state stops the
+    run at its line (S06), as a mistake in a draw does. The reference back
+    end refuses a canvas by name (E00)."""
+    import uitree_app
+    from runtime import host_app
+    uitree_app.use_engine("c")
+    carts = str(tmp_path / "carts")
+    host_app.moy_carts.ensure_dirs(carts)
+    head = ('ui.app("%s", { icon = "calc" })\n'
+            'local s = ui.state { n = 0 }\n'
+            'ui.page("p", function()\n%s\nend)\n')
+    pages = {
+        "Bare": '  ui.label("x")',
+        "Pad": '  ui.label("x")\n  ui.canvas("pad", { h = 40, draw = function(x, y, w, h) rect(x, y, w, h, 8) end })',
+        "Writes": '  ui.canvas("pad", { h = 40, draw = function(x, y, w, h)\n    s.n = 1\n  end })',
+    }
+    for name, page in pages.items():
+        _cart(carts, name, head % (name, page))
+    ws, drv, frame, open_cart = _console(carts)
+    shots = {}
+    for name in ("Bare", "Pad"):
+        open_cart(ws, name)
+        for _ in range(4):
+            frame()
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
+        shots[name] = bytes(drv.rgb888())
+        ws.spine.exit_to_caller()
+    assert shots["Pad"] != shots["Bare"]
+    open_cart(ws, "Writes")
+    for _ in range(4):
+        frame()
+    err = ws.run.player.cart_error
+    assert err and "error[S06] main.lua:5:" in err, err
+    ws.spine.exit_to_caller()
+    uitree_app.use_engine("reference")
+    open_cart(ws, "Pad")
+    for _ in range(4):
+        frame()
+    err = ws.run.player.cart_error
+    assert err and "error[E00] main.lua:5:" in err and "ui.canvas" in err, err
+
+
 def test_a_cancelled_timer_runs_nothing(tmp_path):
     from runtime import host_app
     from runtime.host import moy_log

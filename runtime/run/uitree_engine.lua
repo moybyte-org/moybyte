@@ -30,7 +30,7 @@ local E_CHECK = -6
 local KINDS = { page = 1, group = 2, label = 3, info = 4, link = 5, button = 6, toggle = 7, rows = 8, dialog = 9,
                 seg = 10, slider = 11, field = 12, empty = 13, progress = 14, text_view = 15, scroll = 16, menu = 17,
                 item = 18, split = 19, switch = 22, case = 23, table = 24, col = 25, foot = 26, popover = 30,
-                row = 32, panel = 39, rule = 41, note = 42, grid = 43 }
+                canvas = 20, row = 32, panel = 39, rule = 41, note = 42, grid = 43 }
 local BASE = { bool = BOOL, int = INT, number = NUM, text = TEXT, enum = ENUM, rowof = ROWOF, model = MODEL }
 local FIELD = { bool = BOOL, int = INT, number = NUM, text = TEXT, enum = TEXT }
 -- a prop whose value is a literal the dump prints as one (its Python repr)
@@ -44,6 +44,7 @@ local AIDX, ACTS = {}, {}       -- an action's index by name; the action by inde
 local PUSHED = {}               -- each state's write count (a derive's value) as last pushed
 local LOWERED = nil             -- the page whose tree the store holds
 local KEYS = {}                 -- the keys of the lowered page's nodes
+local DRAWS = {}                -- a canvas's node -> its draw
 local ROWS = false              -- the lowered page lists rows (whose keys are data)
 
 if NEW == nil then
@@ -266,6 +267,7 @@ local SHAPE = {
   col = { last = function(n) return { pair("text", n.a[1]) } end },
   split = { takes = { "dir", "sizes" }, last = function(n) return { pair("dir", n.o.dir), pair("sizes", n.o.sizes) } end },
   grid = { takes = { "cols", "rows" }, last = function(n) return { pair("cols", n.o.cols), pair("rows", n.o.rows) } end },
+  canvas = { takes = { "draw" }, last = function(n) return { pair("draw", "draw") } end },
 }
 -- a prop given as a list that is one prop: its values joined, as the Python layer joins a tuple
 local JOINED = { sizes = 1 }
@@ -313,6 +315,7 @@ local function lower_node(n, parent, path)
     local h = shape.last(n)
     for i = 1, 4 do if h[i] then prop(h[i][1], h[i][2]) end end
   end
+  if n.kind == "canvas" then DRAWS[me] = n.o.draw end
   if n.action then check(X:node_action(me, AIDX[n.action]), "ui." .. n.kind .. " " .. q(key) .. "'s action", n.at) end
   if n.kind == "dialog" then
     for _, b in ipairs(n.o.buttons) do check(X:node_action(me, AIDX[b]), "ui.dialog's button " .. q(b), n.at) end
@@ -343,7 +346,7 @@ local function anchors(n)
 end
 
 local function lower(p)
-  KEYS, ROWS = {}, false
+  KEYS, ROWS, DRAWS = {}, false, {}
   X:build_begin(string.format("%d %s", #stack, p.def.name):sub(1, 31))
   lower_node(p.root, -1, p.def.name)
   check(X:build_end(), "the page " .. q(p.def.name), p.def.at)
@@ -355,6 +358,10 @@ end
 local function made()
   if X then return X end
   X = NEW()
+  X:on_draw(function(node, x, y, w, h)
+    local f = DRAWS[node]
+    if f then f(x, y, w, h) end
+  end)
   declare()
   for name in pairs(DECL) do push(name) end
   X:open()
