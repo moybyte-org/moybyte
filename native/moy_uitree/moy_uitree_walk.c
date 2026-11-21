@@ -4335,7 +4335,8 @@ int uit_frame(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int x, int y, i
         e->rect[0] = x, e->rect[1] = y, e->rect[2] = w, e->rect[3] = h;
     uit_buf_t hb = {0};
     if (e->placed) {
-        placed_band(e, c, s, &hb, pages ? pages : 1);
+        if (flags & UIT_F_BAND)
+            placed_band(e, c, s, &hb, pages ? pages : 1);
         goto ids;
     }
     // what focus is on as the page begins

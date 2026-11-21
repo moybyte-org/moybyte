@@ -2088,6 +2088,13 @@ def on_bar(on=None):
     return _ON_BAR[0]
 
 
+def focus_on(ctx, id):
+    """Context `ctx`'s focus on the stop `id`, before its frame begins: a
+    page whose keys its host walks (the shell's bar) shows its focus mark
+    there."""
+    _C.api_focus(ctx, id)
+
+
 # The board's tap floor (#203): its chrome stands over its font scale on the
 # handheld's metrics, so a bar icon is chrome.MIN_TAP_MM across on its glass
 # (the Guition S3). Every frame begins with it (moy_ui.h's MOY_UI_TAP; an app

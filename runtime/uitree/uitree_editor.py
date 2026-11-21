@@ -197,7 +197,7 @@ class Engine(uitree_app.Engine):
         if g is not None:
             rect = tuple(self.content)
         hint = self._hints()
-        if hint and _v.hints_width(hint) > 0:
+        if hint and self.band and _v.hints_width(hint) > 0:
             # the page's band: under everything it stacks
             band, rect = _v.cut_bottom(rect, self._h_row())
             _v.at(*band)
@@ -249,7 +249,7 @@ class Engine(uitree_app.Engine):
         try:
             self._frame_setup(self.root)
             rect = tuple(self.content) if self.ground is not None else tuple(content)
-            hint = self._hints()
+            hint = self._hints() if self.band else None
             if hint and self._band_w(hint, cv, th) > 0:
                 rect = (rect[0], rect[1], rect[2], rect[3] - self._h_row())
             self._place_walk(rect)

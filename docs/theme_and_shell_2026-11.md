@@ -1931,7 +1931,13 @@ the cell's focus keyline outside it, with no plate, so the item keeps its
 own ink -- a fill would blot a 16-pixel icon out. On the OS widgets it
 is one height, the system tile's, centred across the bar
 (`BarLayer._pill`); on a handheld the status cluster wears one ring round
-its icons; on the zone's targets it is their rect and a ring round it. The
+its icons; on the zone's targets it is their rect and a ring round it. On
+a bar the bar page draws (`runtime/shell/bar_ui.py`), an item that is a
+bar item (Wi-Fi, the battery, the clock, a status item) wears the bar
+item's own focus mark instead, drawn by the page: the theme's pill tint
+under the item and its ring, the cell's height (owner call 2026-11-21:
+the engine's one look stands where it differs from an old bar detail),
+and confirm runs the page's action for it. The
 bar's item whose popover is open (the cluster's control center, a desk
 status item's menu) wears the cell's `on` mark (§1.5); on an opaque fill
 (Contrast's) the items in it take the fill's ink.

@@ -149,6 +149,8 @@ _TAPPED = ("clock", "menu", "wifi", "battery", "close", "status")
 # The widgets a handheld's status cluster joins into one focus stop, which
 # opens the control center (the `battery` widget's component).
 _CLUSTER = ("status", "wifi", "battery")
+# The focus items that are stops of the bar page on a bar it draws.
+_PAGE_STOPS = ("status", "wifi", "battery", "clock")
 # A bar's titles where no running cart names one.
 _TITLES = {"projects": "PROJECTS", "settings": "SETTINGS", "desk": "DESK",
            "webconsole": "Web console", "tasks": "Tasks"}
@@ -600,7 +602,10 @@ class BarLayer:
         self.focus_from = None
         self.focus_item = None
         self._items_lgen = -1         # the status items' count the packing holds
+        self._hooks = None            # the bar page's actions' ways out (`_page_draw`)
+        self._stop_rects = []         # the page's status item rects (`_page_stop`)
         _ui_draw.on_bar(False)
+        _bar_engine.forget()          # (what another console's bar handed the page)
 
     def invalidate(self):
         """Repaint every cached bar strip on the next frame: something its key
@@ -1293,7 +1298,8 @@ class BarLayer:
         are on where it is in this bar (`focus_item`, key field 12): the
         pill, its plate under the item and its ring round it."""
         f = key[12]
-        pill = self._pill(key[0], i, f) if f is not None and f[0] == i else None
+        pill = self._pill(key[0], i, f) if f is not None and f[0] == i \
+            and self._page_stop(key[0], f) is None else None
         self._render_bar(cv, key, i)
         if pill is not None:
             _ui_draw.focus(cv, self.ws.theme_colors, pill[0], r=pill[1], fs=pill[2],
@@ -1318,9 +1324,17 @@ class BarLayer:
             # (a bar with a title cell and no zone shows the field too: whole)
             rect = bar if z is None else (z[0] - 2 * fs, 0, z[2] + 4 * fs, bar[3])
         f = key[12]
-        pill = self._pill(where, i, f) if f is not None and f[0] == i else None
+        pill = self._pill(where, i, f) if f is not None and f[0] == i \
+            and self._page_stop(where, f) is None else None
         for it in (old, f):
             if it is not None and it[0] == i:
+                if it is not f or pill is None:
+                    if self._page_stop(where, it) is not None:
+                        # the page's mark: its bar item's pill and ring, the bar's height
+                        r = it[1]
+                        m = bar[3] // 2
+                        rect = _union(rect, (r[0] - m, 0, r[2] + 2 * m, bar[3]))
+                        continue
                 p = pill if it is f else self._pill(where, i, it)
                 b = p[0]
                 m = 2 * p[2] + 2 * fs
@@ -1483,10 +1497,72 @@ class BarLayer:
         if paint is None:
             paint = self._page_painter = self._page_paint
         _bar_ui.PAINT[0] = paint
+        hooks = self._hooks
+        if hooks is None:
+            hooks = self._hooks = (self.page_tap, self._chip_tap, self._item_tap)
+        _bar_ui.TAP[0], _bar_ui.CHIP[0], _bar_ui.ITEM[0] = hooks
         self._page_items(where)
+        f = self.focus_item
+        focus = self._page_stop(where, f) if f is not None and self.focus_where == where else None
         _bar_engine.draw(cv, ws.theme_colors, bar, names, L.cs, L.fs, cw or L.clock_w, sys_w,
                          n_items, ws.wifi_icon_kind(), self.clock_text(), self._battery_state() != 0,
-                         clip, self._wins())
+                         clip, self._wins(), focus)
+
+    def page_tap(self, name):
+        """The bar page's open of an OS widget (`bar_ui.TAP`): its component,
+        the control center for any of a handheld's cluster; the clock's tap
+        also counts toward its Easter egg."""
+        ws = self.ws
+        if name == "clock":
+            ws.ach_ui._tap_clock()
+        else:
+            ws.ach_ui._clock_taps = 0
+        ws.widget_tap("battery" if name in _CLUSTER and self._cluster() else name)
+
+    def _chip_tap(self, kind):
+        """The bar page's tap of a window's chip (`bar_ui.CHIP`): the window
+        manager's."""
+        tap = getattr(self.ws.wm, "chip_tap", None)
+        if tap is not None:
+            tap(kind)
+
+    def _item_tap(self, k):
+        """The bar page's open of status item `k`'s menu (`bar_ui.ITEM`)."""
+        it = _ITEMS.at(k)
+        if it is not None:
+            self.ws.notices.open_status_menu(it)
+
+    def _page_stop(self, where, item):
+        """The id of the bar page's stop under focus item `item` of
+        `where`'s bars (`focus_items`), or None where the page draws no stop
+        there (the system button, the zone's targets, a handheld's cluster, a
+        hand-drawn battery, a bar the page does not draw)."""
+        name = item[2]
+        if name not in _PAGE_STOPS:
+            return None
+        bar = self._packed(where)[item[0]]
+        if not _paged(bar[0], bar[3]) or self._in_window(where):
+            return None
+        if name == "status":
+            rects = self.page_item_rects(bar, self._stop_rects)
+            x = item[1][0]
+            for k in range(len(rects)):
+                if rects[k][0] == x:
+                    return _bar_engine.item_key(k)
+            return None
+        if name == "battery" and self._battery_state():
+            return None
+        return name
+
+    def _page_fire(self, where, item):
+        """The bar page's action of the stop under focus item `item`, run
+        as the page runs it on a confirm: True, or False where the page
+        draws no stop there."""
+        stop = self._page_stop(where, item)
+        if stop is None:
+            return False
+        _bar_engine.fire(stop)
+        return True
 
     def _page_items(self, where):
         """What the bar page's status items show beyond the items: which one's
@@ -2547,7 +2623,8 @@ class BarLayer:
             owner = self._zone_owner(where)
             if getattr(owner, "zone_opened", None) is not None:
                 owner.zone_opened = False
-            self._tap_bar(where, bar, mid, r[1] + r[3] // 2)
+            if not self._page_fire(where, items[max(0, min(len(items) - 1, self.focus))]):
+                self._tap_bar(where, bar, mid, r[1] + r[3] // 2)
             ws = self.ws
             ws.mark_dirty()
             if ws.router.bar_where() != where or getattr(owner, "zone_opened", False):

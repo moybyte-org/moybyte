@@ -45,8 +45,17 @@ def _page():
     if p is None:
         import uitree_editor
         p = _PAGE[0] = uitree_editor.page(bar_ui.bar, None, None)
-        _WINS[0] = _ITEMS_W[0] = _LAST[0] = None    # (a new page's store holds none of them)
+        forget()                # (a new page's store holds none of them)
     return p
+
+
+def forget():
+    """What the page was last handed, forgotten: the next draw writes every
+    state again. A new page and a new console's bar start here."""
+    _WINS[0] = _ITEMS_W[0] = _ITEMS[0] = None
+    for i in range(len(_LAST)):
+        _LAST[i] = None
+    _DIRTY[0] = True
 
 
 def _put(nm, v):
@@ -220,6 +229,27 @@ def chip_rects(rect, names, cs, fs, clock_w, sys_len, n_items, wins, out):
     return out
 
 
+def item_key(k):
+    """The id of status item `k`'s stop on the page."""
+    return _KEYS[k] + "/item"
+
+
+def fire(stop):
+    """The action of the page's stop `stop` (an id `_page_stop` named: a
+    widget's name, `item_key(k)`) run as the page runs it."""
+    page = _page()
+    page._bind()
+    acts = page.actions
+    if stop.endswith("/item"):
+        k = stop[:-5]
+        for row in s._v["items"]:
+            if row.k == k:
+                page.run_action(acts["item"], (row,), "the bar's keys")
+                return
+        return
+    page.run_action(acts[stop], (), "the bar's keys")
+
+
 class _NoDamage:
     """The page's damage: a bar's strip is drawn again when its key moves
     (`BarLayer._draw_bar`), never because the page asked."""
@@ -245,13 +275,15 @@ _ORIGIN = [0, 0]                # where the page is drawn on its canvas: the bar
 
 
 def draw(cv, th, rect, names, cs, fs, clock_w, sys_len, n_items, wicon, time, glyph, clip=None,
-         wins=None):
+         wins=None, focus=None):
     """A frame of the bar page drawn onto `cv` at `rect` (a bar's, on its
     strip at 0, 0 or on a canvas the bar lies on), placed as `pack` placed
     it, the canvases drawn by `bar_ui.PAINT` in the bar's own coordinates.
     `clip` (on `cv`, which the caller has clipped to it): the part drawn
     again, every draw inside it, and `cv` left clipped to it. The
-    toolkit's target the host's frame set is given back."""
+    toolkit's target the host's frame set is given back. `focus`: the id
+    of the page's stop the keys are on (its bar item draws the focus mark),
+    None while they are elsewhere."""
     page = _states(names, cs, fs, clock_w, sys_len, n_items, glyph, wins)
     _put("wicon", wicon)
     _put("time", time)
@@ -272,9 +304,12 @@ def draw(cv, th, rect, names, cs, fs, clock_w, sys_len, n_items, wicon, time, gl
     _ORIGIN[1] = rect[1]
     page.clip_to = clip
     try:
-        D.ui_frame(ctx, cv, th, rect=rect, desk=True, elsewhere=True)
+        if focus is not None:
+            D.focus_on(ctx, focus)
+        D.ui_frame(ctx, cv, th, rect=rect, desk=True, elsewhere=focus is None)
         page.unit = cs
         page.bare = True
+        page.band = False       # the keys' names are the host's strip's (`ui_draw.BAR_KEYS`)
         page.paint(0, cv, th, rect, True)
     finally:
         page.clip_to = None
