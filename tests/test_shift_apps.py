@@ -692,8 +692,6 @@ def test_a_cards_drag_draws_none_of_the_cards_it_moved(tmp_path, engine):
         len(xs) - min(kept), len(xs))
 
 
-
-
 @pytest.mark.parametrize("bufs", (1, 2, 3))
 @pytest.mark.parametrize("page", ("achievements", "licences"))
 def test_a_page_closed_twice_leaves_the_rows_on_the_glass(tmp_path, page, bufs):
