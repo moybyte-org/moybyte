@@ -6,7 +6,7 @@
 // says (run(), moy_app_wasm.c); a toolkit row is native/moy_ui's own,
 // weak here, so an image without the toolkit answers NULL for it.
 
-#define MOY_APP_WASM_N 116
+#define MOY_APP_WASM_N 140
 
 int32_t moy_ui_wasm_page(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t, uint8_t *,
                          uint32_t) UI_WEAK;
@@ -83,6 +83,37 @@ int32_t moy_ui_wasm_note(void *, const uint8_t *, uint32_t, const uint8_t *, uin
 int32_t moy_ui_wasm_bubble(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
                            const uint8_t *, uint32_t, const uint8_t *, uint32_t, const uint8_t *,
                            uint32_t, uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_uitree_wasm_state(void *, const uint8_t *, uint32_t, int32_t, const uint8_t *,
+                              uint32_t) UI_WEAK;
+int32_t moy_uitree_wasm_model(void *, int32_t, const uint8_t *, uint32_t, const uint8_t *,
+                              uint32_t, int32_t) UI_WEAK;
+int32_t moy_uitree_wasm_row_of(void *, int32_t, int32_t) UI_WEAK;
+int32_t moy_uitree_wasm_labels(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
+                               const uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_uitree_wasm_action(void *, const uint8_t *, uint32_t, const uint8_t *, uint32_t,
+                               const uint8_t *, uint32_t, const uint8_t *, uint32_t, int32_t,
+                               int32_t, const uint8_t *, uint32_t, const uint8_t *,
+                               uint32_t) UI_WEAK;
+int32_t moy_uitree_wasm_action_row(void *, int32_t, int32_t) UI_WEAK;
+int32_t moy_uitree_wasm_build(void *, const uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_uitree_wasm_node(void *, int32_t, const uint8_t *, uint32_t, int32_t) UI_WEAK;
+int32_t moy_uitree_wasm_prop(void *, int32_t, const uint8_t *, uint32_t, const uint8_t *,
+                             uint32_t) UI_WEAK;
+int32_t moy_uitree_wasm_node_action(void *, int32_t, int32_t) UI_WEAK;
+int32_t moy_uitree_wasm_build_end(void *) UI_WEAK;
+int32_t moy_uitree_wasm_open(void *) UI_WEAK;
+int32_t moy_uitree_wasm_focus(void *, const uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_uitree_wasm_frame(void *, int32_t) UI_WEAK;
+int32_t moy_uitree_wasm_next(void *, uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_uitree_wasm_set_int(void *, int32_t, int32_t) UI_WEAK;
+int32_t moy_uitree_wasm_set_text(void *, int32_t, const uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_uitree_wasm_set_absent(void *, int32_t) UI_WEAK;
+int32_t moy_uitree_wasm_set_model(void *, int32_t, int32_t, const uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_uitree_wasm_get_int(void *, int32_t) UI_WEAK;
+int32_t moy_uitree_wasm_get_text(void *, int32_t, uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_uitree_wasm_get_cell(void *, int32_t, int32_t, int32_t, uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_uitree_wasm_error(void *, uint8_t *, uint32_t) UI_WEAK;
+int32_t moy_uitree_wasm_dump(void *, uint8_t *, uint32_t) UI_WEAK;
 
 static int32_t w_theme_token(void *e, int32_t role) {
     uint8_t q_role[4];
@@ -537,6 +568,30 @@ static const moy_app_native_t NATIVES[MOY_APP_WASM_N] = {
     { "ui_text_view", FN(moy_ui_wasm_text_view), "(*~*~*~*~*~)i", NULL },
     { "ui_toggle", FN(moy_ui_wasm_toggle), "(*~i*~)i", NULL },
     { "ui_tool", FN(moy_ui_wasm_tool), "(*~*~*~)i", NULL },
+    { "uitree_action", FN(moy_uitree_wasm_action), "(*~*~*~*~ii*~*~)i", NULL },
+    { "uitree_action_row", FN(moy_uitree_wasm_action_row), "(ii)i", NULL },
+    { "uitree_build", FN(moy_uitree_wasm_build), "(*~)i", NULL },
+    { "uitree_build_end", FN(moy_uitree_wasm_build_end), "()i", NULL },
+    { "uitree_dump", FN(moy_uitree_wasm_dump), "(*~)i", NULL },
+    { "uitree_error", FN(moy_uitree_wasm_error), "(*~)i", NULL },
+    { "uitree_focus", FN(moy_uitree_wasm_focus), "(*~)i", NULL },
+    { "uitree_frame", FN(moy_uitree_wasm_frame), "(i)i", NULL },
+    { "uitree_get_cell", FN(moy_uitree_wasm_get_cell), "(iii*~)i", NULL },
+    { "uitree_get_int", FN(moy_uitree_wasm_get_int), "(i)i", NULL },
+    { "uitree_get_text", FN(moy_uitree_wasm_get_text), "(i*~)i", NULL },
+    { "uitree_labels", FN(moy_uitree_wasm_labels), "(*~*~*~)i", NULL },
+    { "uitree_model", FN(moy_uitree_wasm_model), "(i*~*~i)i", NULL },
+    { "uitree_next", FN(moy_uitree_wasm_next), "(*~)i", NULL },
+    { "uitree_node", FN(moy_uitree_wasm_node), "(i*~i)i", NULL },
+    { "uitree_node_action", FN(moy_uitree_wasm_node_action), "(ii)i", NULL },
+    { "uitree_open", FN(moy_uitree_wasm_open), "()i", NULL },
+    { "uitree_prop", FN(moy_uitree_wasm_prop), "(i*~*~)i", NULL },
+    { "uitree_row_of", FN(moy_uitree_wasm_row_of), "(ii)i", NULL },
+    { "uitree_set_absent", FN(moy_uitree_wasm_set_absent), "(i)i", NULL },
+    { "uitree_set_int", FN(moy_uitree_wasm_set_int), "(ii)i", NULL },
+    { "uitree_set_model", FN(moy_uitree_wasm_set_model), "(ii*~)i", NULL },
+    { "uitree_set_text", FN(moy_uitree_wasm_set_text), "(i*~)i", NULL },
+    { "uitree_state", FN(moy_uitree_wasm_state), "(*~i*~)i", NULL },
 };
 static const int16_t NATIVE_ROWS[MOY_APP_WASM_N] = {
     MOY_T_CLIPBOARD_KIND, MOY_T_CLIPBOARD_PUT_TEXT, MOY_T_CLIPBOARD_SEQ, MOY_T_CLIPBOARD_TEXT,
@@ -568,5 +623,11 @@ static const int16_t NATIVE_ROWS[MOY_APP_WASM_N] = {
     MOY_T_UI_SEG, MOY_T_UI_SLIDER, MOY_T_UI_SLOT, MOY_T_UI_SLOT_NEXT, MOY_T_UI_SLOTS,
     MOY_T_UI_SPLIT, MOY_T_UI_SWATCHES, MOY_T_UI_TABLE, MOY_T_UI_TABLE_DIST,
     MOY_T_UI_TABLE_FLOOR, MOY_T_UI_TABLE_PART, MOY_T_UI_TABS, MOY_T_UI_TEXT_VIEW,
-    MOY_T_UI_TOGGLE, MOY_T_UI_TOOL,
+    MOY_T_UI_TOGGLE, MOY_T_UI_TOOL, MOY_T_UITREE_ACTION, MOY_T_UITREE_ACTION_ROW,
+    MOY_T_UITREE_BUILD, MOY_T_UITREE_BUILD_END, MOY_T_UITREE_DUMP, MOY_T_UITREE_ERROR,
+    MOY_T_UITREE_FOCUS, MOY_T_UITREE_FRAME, MOY_T_UITREE_GET_CELL, MOY_T_UITREE_GET_INT,
+    MOY_T_UITREE_GET_TEXT, MOY_T_UITREE_LABELS, MOY_T_UITREE_MODEL, MOY_T_UITREE_NEXT,
+    MOY_T_UITREE_NODE, MOY_T_UITREE_NODE_ACTION, MOY_T_UITREE_OPEN, MOY_T_UITREE_PROP,
+    MOY_T_UITREE_ROW_OF, MOY_T_UITREE_SET_ABSENT, MOY_T_UITREE_SET_INT, MOY_T_UITREE_SET_MODEL,
+    MOY_T_UITREE_SET_TEXT, MOY_T_UITREE_STATE,
 };

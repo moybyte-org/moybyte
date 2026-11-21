@@ -102,6 +102,10 @@ standing only where it lists the reason.
 - `include/moybyte/game.h`: a native game's screen: `moy_game_screen` maps
   a screen-sized buffer and puts a libmoy canvas over it, and `moy_present`
   hands the screen over. It includes `frame.h` and libmoy's `moy.h`.
+- `include/moybyte/uitree.h`: the UI tree for a C app compiled to wasm, over
+  app.h's `uitree_*` imports (`native/moy_uitree/moy_uitree_wasm.h`): the
+  engine's numbers (held to `native/moy_uitree/moy_uitree.h` by
+  `tests/test_uitree_wasm.py`) and `ut_*` helpers that take C strings.
 - `include/moybyte/ui.h` (generated): the public UI API for a native app
   (a manifest of type `app`) and a WASI app (type `app` with `"wasi": true`,
   `runtime/run/wasi_run.py`), every `ui` row under app.h's name and

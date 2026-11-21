@@ -22,6 +22,7 @@ source, native/os_calls.json (docs/os_2026-11/tiers.md section 1):
                                     permission map
     native/moy_app/moy_app_wasm_rows.h  the moybyte.app imports: each native
     native/moy_ui/moy_ui_wasm_rows.h    the ui imports, served by native/moy_ui
+    native/moy_uitree/moy_uitree_wasm_rows.h  the uitree imports, served by native/moy_uitree
     native/moy_app/moy_app_lua_rows.h   the names a Lua run and a Lua service hold
     native/moy_app/moy_app_err.h    the answer codes and what each face makes of one
                                     (the errors)
@@ -91,13 +92,13 @@ from gen_os import TableError  # noqa: E402,F401
 from gen_os.table import *  # noqa: E402,F401,F403
 from gen_os.table import (APP_CONTEXT, APP_DOC, APP_H, APP_PERMS, APP_WASM_SDK_H, CHECK_C,  # noqa: E402
                           KERNEL_C, KERNEL_H, LUA_EXT, LUA_H, LUA_STUB, PLUGIN_TABLE, PY_STUBS, ROOT,
-                          ROWS_H, SCHEDULER, SDK_H, SHELL_SERVERS, STUBS_C, UI_H, UI_SDK_H, WASI_OS_H,
-                          WASM_H, WILD_H, ERR_H, EVQ_CODES_H, FACE_ERRORS, check, elf, load)
+                          ROWS_H, SCHEDULER, SDK_H, SHELL_SERVERS, STUBS_C, UI_H, UI_SDK_H, UITREE_H,
+                          WASI_OS_H, WASM_H, WILD_H, ERR_H, EVQ_CODES_H, FACE_ERRORS, check, elf, load)
 from gen_os.elf import (evq_block, gen_check_c, gen_kernel_c, gen_kernel_h, gen_rows_h,  # noqa: E402,F401
                         gen_sdk_h, gen_stubs_c, gen_wild_h)
 from gen_os.wasi import gen_wasi_h  # noqa: E402
 from gen_os.errors import check_errors, gen_err_h, gen_evq_codes_h, gen_face_errors  # noqa: E402
-from gen_os.app import gen_app_h, gen_ui_h, gen_wasm_h  # noqa: E402
+from gen_os.app import gen_app_h, gen_ui_h, gen_uitree_h, gen_wasm_h  # noqa: E402
 from gen_os.lua import gen_lua_h, lua_names, lua_own, lua_run_calls  # noqa: E402,F401
 from gen_os.py import gen_app_context, gen_app_perms, gen_calls, gen_door_args, gen_lua_ext  # noqa: E402
 from gen_os.docs import gen_doc  # noqa: E402
@@ -136,6 +137,7 @@ def outputs(src=None):
             (STUBS_C, gen_stubs_c(table)), (CHECK_C, gen_check_c(table)),
             (WILD_H, gen_wild_h(table)),
             (APP_H, gen_app_h(src)), (WASM_H, gen_wasm_h(src)), (UI_H, gen_ui_h(src)),
+            (UITREE_H, gen_uitree_h(src)),
             (LUA_H, gen_lua_h(src)), (WASI_OS_H, gen_wasi_h(src)),
             (ERR_H, gen_err_h(src)), (EVQ_CODES_H, gen_evq_codes_h(src)),
             (FACE_ERRORS, gen_face_errors(src)),

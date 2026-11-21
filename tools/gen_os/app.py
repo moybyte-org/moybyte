@@ -2,7 +2,7 @@
 
 
 from . import TableError
-from .table import FLOOR_ROLE, cap_packed, door_rows, ident, params, role_of, roles, upper, verb_of, wasm_sig
+from .table import FLOOR_ROLE, cap_packed, direct_native, door_rows, ident, params, role_of, roles, upper, verb_of, wasm_sig
 from .cproto import HEAD, c_decl, wrap
 
 
@@ -128,8 +128,7 @@ def gen_wasm_h(src):
     for r in rows:
         if r["how"] != "direct":
             continue
-        o += c_decl("int32_t moy_ui_wasm_%s" % verb_of(r), ui_c_params(r).split(", "),
-                     " UI_WEAK;")
+        o += c_decl("int32_t %s" % direct_native(r), ui_c_params(r).split(", "), " UI_WEAK;")
     o.append("")
     for r in rows:
         if r["how"] == "direct":
@@ -164,7 +163,7 @@ def gen_wasm_h(src):
     o += ["", "// The natives, in their import names' order, and the table row each serves.",
           "static const moy_app_native_t NATIVES[MOY_APP_WASM_N] = {"]
     for r in wasm_natives(src):
-        fn = ("moy_ui_wasm_" + verb_of(r)) if r["how"] == "direct" else "w_" + ident(r["name"])
+        fn = direct_native(r) if r["how"] == "direct" else "w_" + ident(r["name"])
         o.append('    { "%s", FN(%s), "%s", NULL },' % (ident(r["name"]), fn, wasm_sig(r)))
     o += ["};", "static const int16_t NATIVE_ROWS[MOY_APP_WASM_N] = {"]
     o += wrap(["MOY_T_%s" % upper(r["name"]) for r in wasm_natives(src)])
@@ -173,7 +172,7 @@ def gen_wasm_h(src):
 
 
 def gen_ui_h(src):
-    rows = [r for r in wasm_rows(src) if r["how"] == "direct"]
+    rows = [r for r in wasm_rows(src) if role_of(r) == "ui"]
     o = [HEAD,
          "// The toolkit's moybyte.app imports (native/moy_ui/moy_ui_wasm.h states each\n"
          "// verb's contract): their count, each native's prototype, which must be\n"
@@ -187,4 +186,19 @@ def gen_ui_h(src):
     for r in rows:
         o.append('    { "%s", FN(moy_ui_wasm_%s) }, \\' % (ident(r["name"]), verb_of(r)))
     o += ["}", "", "#endif // MOY_UI_WASM_ROWS_H", ""]
+    return "\n".join(o)
+
+
+def gen_uitree_h(src):
+    rows = [r for r in wasm_rows(src) if role_of(r) == "uitree"]
+    o = [HEAD,
+         "// The UI engine's moybyte.app imports (native/moy_uitree/moy_uitree_wasm.h\n"
+         "// states each row's contract): each native's prototype, which the engine's\n"
+         "// definitions are compiled against, in the role table's order.\n",
+         "#ifndef MOY_UITREE_WASM_ROWS_H", "#define MOY_UITREE_WASM_ROWS_H", "",
+         "#include <stdint.h>", "",
+         "#define MOY_UITREE_WASM_ROWS %d" % len(rows), ""]
+    for r in rows:
+        o += c_decl("int32_t %s" % direct_native(r), ui_c_params(r).split(", "), ";")
+    o += ["", "#endif // MOY_UITREE_WASM_ROWS_H", ""]
     return "\n".join(o)

@@ -6,7 +6,10 @@ native/moy_ui's verbs. `runtime/uitree/uitree_c.py` is its Python front end;
 `runtime/host/moy_uitree_binding.py` binds it on the host, `modmoy_uitree.c`
 on MicroPython. A Lua app's pages reach it through `native/moycore/moycore_uitree.h`
 (its store as a Lua object) and `runtime/run/uitree_engine.lua`, the Lua
-layer's front end.
+layer's front end. A compiled (wasm) app is its own front end: the `uitree`
+rows of `native/os_calls.json` (`moy_uitree_wasm.h`) are the engine's calls
+as `moybyte.app` imports, one store a run, and the app's header is
+`sdk/include/moybyte/uitree.h`.
 
 | file | holds |
 |---|---|
@@ -15,6 +18,7 @@ layer's front end.
 | `moy_uitree_walk.c` | the frame: the walk, focus, hints, dialogs, the placed layout |
 | `moy_uitree_aot.c` | a page compiled ahead of time: `uit_save`, `uit_load` |
 | `moy_uitree_run.c` | a page's frame on a run (`uit_run_frame`): the walk over the RUN face's context and sink, a Lua or compiled app's |
+| `moy_uitree_wasm.c` | a compiled app's rows (`moy_uitree_wasm.h`): its store, its refusals, the trace of its handlers' writes |
 
 ## A compiled page
 

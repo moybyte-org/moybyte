@@ -231,6 +231,44 @@ def test_lua_on_the_c_engine_writes_the_references_trace(name, config):
     assert [l for l in lua if not own.match(l)] == [l for l in _expected(name, "trace.txt") if not own.match(l)]
 
 
+# the fixtures with a compiled half (NAME/NAME_wasm.moy, C over the uitree rows)
+WASM = tuple(n for n in NAMES if C.wasm_fixture(n))
+
+
+def _wasm_or_skip():
+    from runtime import wasm_binding, wasm_host
+    if not wasm_host.available():
+        why = wasm_binding.why_unavailable() or "unknown"
+        if os.environ.get("CI") or os.environ.get("MOYBYTE_REQUIRE_HOST_WASM"):
+            pytest.fail("the host wasm binding did not build: %s" % why)
+        pytest.skip("no host wasm binding: %s" % why)
+
+
+@pytest.mark.parametrize("name,config", _params("trace", names=WASM))
+def test_a_compiled_app_on_the_c_engine_writes_the_references_trace(name, config):
+    """A compiled app is its own front end over the uitree rows: its trace is
+    the engine's and the reference's line for line, the reference's build line
+    left out (the compiled front builds through the engine and writes none)."""
+    _wasm_or_skip()
+    own = re.compile(r"^(build|open) |^action opened from ")
+    got, _ = C.run_wasm(name, SMALL, _script(name))
+    assert [l for l in got if not own.match(l)] == [l for l in _expected(name, "trace.txt") if not own.match(l)]
+
+
+@pytest.mark.parametrize("name,config", _params("wasm_glass", names=WASM, configs=C.CONFIGS))
+def test_a_compiled_app_draws_the_lua_apps_glass(name, config):
+    """Both are app carts on the run's canvas, so every frame of the script is
+    the Lua half's on the C engine, pixel for pixel, bar and band included."""
+    _wasm_or_skip()
+    import uitree_app
+    if uitree_app.engine_in_use() != "c":
+        pytest.skip("the Lua layer runs on the reference here")
+    got = C.run_wasm(name, config, _script(name))[1]
+    lua = _run("lua", name, config)[1]
+    assert len(got) == len(lua)
+    assert [C.differing(a, b) for a, b in zip(got, lua)] == [(None, 0)] * len(lua)
+
+
 @pytest.mark.parametrize("name,config", _params("dump"))
 def test_lua_dump_is_the_references(name, config):
     assert C.dump_lua(name)[1].splitlines() == _expected(name, "dump.txt")

@@ -13,6 +13,7 @@ native/moy_elf/moy_os_check.c linguist-generated=true
 native/moy_app/moy_app_*rows.h linguist-generated=true
 native/moy_app/moy_app_err.h linguist-generated=true
 native/moy_ui/moy_ui_wasm_rows.h linguist-generated=true
+native/moy_uitree/moy_uitree_wasm_rows.h linguist-generated=true
 native/moy_ui/moy_ui_tables.[ch] linguist-generated=true
 native/moy_spine/moy_str_table.[ch] linguist-generated=true
 native/moy_ui/moy_ui_over_keys.h linguist-generated=true

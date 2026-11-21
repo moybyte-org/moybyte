@@ -344,6 +344,66 @@ int32_t moybyte_aes_ccm_open(const void *key, uint32_t key_n, const void *sealed
 int32_t moybyte_name(void *name, uint32_t name_cap) MOYBYTE_APP_IMPORT(moybyte_name);
 // moybyte.clock
 int32_t moybyte_clock(int32_t local) MOYBYTE_APP_IMPORT(moybyte_clock);
+// uitree.state
+int32_t uitree_state(const char *name, uint32_t name_n, int32_t type, const char *values,
+                     uint32_t values_n) MOYBYTE_APP_IMPORT(uitree_state);
+// uitree.model
+int32_t uitree_model(int32_t slot, const char *names, uint32_t names_n, const void *types,
+                     uint32_t types_n, int32_t key) MOYBYTE_APP_IMPORT(uitree_model);
+// uitree.row_of
+int32_t uitree_row_of(int32_t slot, int32_t model) MOYBYTE_APP_IMPORT(uitree_row_of);
+// uitree.labels
+int32_t uitree_labels(const char *name, uint32_t name_n, const char *keys, uint32_t keys_n,
+                      const char *words, uint32_t words_n) MOYBYTE_APP_IMPORT(uitree_labels);
+// uitree.action
+int32_t uitree_action(const char *name, uint32_t name_n, const char *label, uint32_t label_n,
+                      const char *hint, uint32_t hint_n, const char *when, uint32_t when_n,
+                      int32_t off, int32_t flags, const char *letters, uint32_t letters_n,
+                      const char *icon, uint32_t icon_n) MOYBYTE_APP_IMPORT(uitree_action);
+// uitree.action_row
+int32_t uitree_action_row(int32_t a, int32_t slot) MOYBYTE_APP_IMPORT(uitree_action_row);
+// uitree.build
+int32_t uitree_build(const char *page, uint32_t page_n) MOYBYTE_APP_IMPORT(uitree_build);
+// uitree.node
+int32_t uitree_node(int32_t kind, const char *key, uint32_t key_n,
+                    int32_t parent) MOYBYTE_APP_IMPORT(uitree_node);
+// uitree.prop
+int32_t uitree_prop(int32_t node, const char *name, uint32_t name_n, const char *src,
+                    uint32_t src_n) MOYBYTE_APP_IMPORT(uitree_prop);
+// uitree.node_action
+int32_t uitree_node_action(int32_t node, int32_t a) MOYBYTE_APP_IMPORT(uitree_node_action);
+// uitree.build_end
+int32_t uitree_build_end(void) MOYBYTE_APP_IMPORT(uitree_build_end);
+// uitree.open
+int32_t uitree_open(void) MOYBYTE_APP_IMPORT(uitree_open);
+// uitree.focus
+int32_t uitree_focus(const char *key, uint32_t key_n) MOYBYTE_APP_IMPORT(uitree_focus);
+// uitree.frame
+int32_t uitree_frame(int32_t flags) MOYBYTE_APP_IMPORT(uitree_frame);
+// uitree.next
+int32_t uitree_next(void *ev, uint32_t ev_cap) MOYBYTE_APP_IMPORT(uitree_next);
+// uitree.set_int
+int32_t uitree_set_int(int32_t slot, int32_t v) MOYBYTE_APP_IMPORT(uitree_set_int);
+// uitree.set_text
+int32_t uitree_set_text(int32_t slot, const char *s,
+                        uint32_t s_n) MOYBYTE_APP_IMPORT(uitree_set_text);
+// uitree.set_absent
+int32_t uitree_set_absent(int32_t slot) MOYBYTE_APP_IMPORT(uitree_set_absent);
+// uitree.set_model
+int32_t uitree_set_model(int32_t slot, int32_t n, const void *cells,
+                         uint32_t cells_n) MOYBYTE_APP_IMPORT(uitree_set_model);
+// uitree.get_int
+int32_t uitree_get_int(int32_t slot) MOYBYTE_APP_IMPORT(uitree_get_int);
+// uitree.get_text
+int32_t uitree_get_text(int32_t slot, void *out,
+                        uint32_t out_cap) MOYBYTE_APP_IMPORT(uitree_get_text);
+// uitree.get_cell
+int32_t uitree_get_cell(int32_t slot, int32_t row, int32_t f, void *out,
+                        uint32_t out_cap) MOYBYTE_APP_IMPORT(uitree_get_cell);
+// uitree.error
+int32_t uitree_error(void *out, uint32_t out_cap) MOYBYTE_APP_IMPORT(uitree_error);
+// uitree.dump
+int32_t uitree_dump(void *out, uint32_t out_cap) MOYBYTE_APP_IMPORT(uitree_dump);
 
 #ifdef __cplusplus
 }

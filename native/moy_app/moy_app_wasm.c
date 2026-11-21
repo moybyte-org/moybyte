@@ -353,8 +353,8 @@ static int admit_one(void *ctx, const uint8_t *mod, size_t mn, const uint8_t *na
         return 1;
     }
     int role = moy_app_table_role((uint32_t)row);
-    if (role == MOY_ROLE_UI) {
-        return 0;                   // the toolkit's rows: every compiled app's, no grant
+    if (role == MOY_ROLE_UI || role == MOY_ROLE_UITREE) {
+        return 0;                   // the toolkit's and the UI engine's rows: every compiled app's, no grant
     }
     // The console calls are every grant's (MOY_ROLE_FLOOR), each answered under
     // the permission it names; the theme's reads need none.
