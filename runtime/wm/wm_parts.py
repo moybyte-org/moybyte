@@ -132,7 +132,7 @@ class _Win:
         self._chrome_gen = 0
         self._frame_rect = [0, 0, 0, 0]   # (x, y, w, h) handed to the frame's draw
         self._shown = [0, 0, 0, 0]        # `_shown_rect`'s answer, kept
-        self._icon_rect = [0, 0, 0, 0]    # the strip's icon slot, kept
+        self._strip_rect = [0, 0, 0, 0]   # the strip the strip page is drawn on, kept
 
     def full(self):
         """Whether the window is full screen (maximised, docs/media/look_2026-10/

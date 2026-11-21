@@ -230,16 +230,7 @@ class WindowRoute:
             if name is not None:
                 self._grab = 1
                 ws.mark_dirty()
-                if name == "close":
-                    self._close_window(win.kind)
-                elif name == "back":
-                    self._win_back(win)
-                elif name == "max":
-                    self.toggle_max(win)
-                elif name == "min":
-                    self.minimize(win, True)
-                    if focused:
-                        self.move_focus(None)
+                self.strip_run(win, name, focused)
                 return True
             if (win.saved is None and py < win.y + 1 + win.title_h) \
                     or self._on_row_head(win, px, py):

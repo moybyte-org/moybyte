@@ -1349,7 +1349,7 @@ def paint(cv, th, rect, part, state=REST):
 # one, its title alignment and its button order.
 
 FRAME_BUTTONS = ("close", "max", "min", "back")     # MOY_UI_FB_*
-FRAME_MIN, FRAME_BACK, FRAME_MATTE, FRAME_FULL = 1, 2, 8, 16   # MOY_UI_FRAME_*
+FRAME_MIN, FRAME_BACK, FRAME_MATTE, FRAME_FULL, FRAME_BARE = 1, 2, 8, 16, 32   # MOY_UI_FRAME_*
 
 
 def frame(cv, th, rect, title_h, title, active, btns, fs):
@@ -1359,7 +1359,8 @@ def frame(cv, th, rect, title_h, title, active, btns, fs):
     a minimise), FRAME_MATTE for a content rect standing in from the
     sides by the foot, whose columns the depth's body then paints too, and
     FRAME_FULL for a full-screen window's row: the title and the buttons
-    alone, on what is under them, maximise drawn as restore."""
+    alone, on what is under them, maximise drawn as restore; FRAME_BARE for
+    nothing on the strip (the window manager's strip page draws it)."""
     _C.frame(cv, _LOOK if th is _TH else _look(th), rect, title_h, title, active, int(btns), fs)
 
 

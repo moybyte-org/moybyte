@@ -152,6 +152,19 @@ See `wm_desk.py` above: the other half of the windowed WM, imported only by
 `wm_windowed.py`."""
 
 [[modules.shared.deny]]
+file = "wm_strip.py"
+kind = "tier"
+why  = """
+See `wm_desk.py` above: a window's title strip on the engine, imported only
+by `wm_chrome.py`."""
+
+[[modules.shared.deny]]
+file = "wm_strip_ui.py"
+kind = "tier"
+why  = """
+See `wm_desk.py` above: the strip's page, imported only by `wm_strip.py`."""
+
+[[modules.shared.deny]]
 file = "wm_parts.py"
 kind = "tier"
 why  = """
