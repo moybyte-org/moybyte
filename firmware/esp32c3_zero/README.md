@@ -58,11 +58,11 @@ file is what the chip changes.
   modules frozen here for it; each request's buffers (each index read whole,
   one at a time, and the cart's download) are made for it and given back
   when it ends, and a cart its store has no room for is refused with the
-  sizes before anything is fetched. Its image carries no CA bundle (the
-  XIAO's `sdkconfig.board` does), so the kernel's client refuses every https
-  fetch but a signed one (`moy_conn_verifies`), and those fetches -- the
-  release's index on GitHub, moybyte-org/carts on GitHub Pages -- are
-  https: its page's Get Carts finds every shelf away.
+  sizes before anything is fetched. Its image carries ESP-IDF's common CA bundle, as the XIAO's does
+  (`sdkconfig.board`), so the kernel's client verifies the https fetches
+  its Get Carts makes -- the release's index on GitHub, moybyte-org/carts on
+  GitHub Pages -- against it, the signed fetches that need no certificate
+  aside (`moy_conn_verifies`).
 - **SSH, without SFTP.** The server and the shell's face run in the same
   internal heap, so a build without PSRAM sizes them to what a session was
   measured to use there: the server's and the face's stacks and the session's

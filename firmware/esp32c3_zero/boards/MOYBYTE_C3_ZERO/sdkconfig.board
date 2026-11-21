@@ -27,6 +27,13 @@ CONFIG_ESP_COREDUMP_ENABLE_TO_NONE=y
 # those buffers into PSRAM, and mbedTLS's external allocator is PSRAM's; this
 # chip has none, so every buffer is internal and ESP-IDF's defaults stand.
 
+# THE CA BUNDLE, as the XIAO's (its fragment has the reason): ESP-IDF's common
+# bundle, so the page's Get Carts reaches its indexes and carts over https.
+# The bundle is read from flash one certificate at a time while a handshake
+# verifies, and this chip's one internal heap pays for the handshake.
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y
+
 # THE USB CONSOLE: USB-Serial/JTAG as the PRIMARY console, which is what gives
 # esptool a reset it can use (the XIAO's reason, 2026-08-30).
 CONFIG_ESP_CONSOLE_UART_DEFAULT=
