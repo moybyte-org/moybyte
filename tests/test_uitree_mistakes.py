@@ -55,6 +55,7 @@ PY = {
     "S03": (H + "s = ui.state(m=ui.model(key=\"id\", id=\"\", label=\"\"))\ndef pick(row):\n"
             "    row.label = \"x\"\nui.action(\"pick\", \"Pick\", pick, takes=\"row\")\n", 4),
     "S07": (H + "s = ui.state(m=ui.model(key=\"id\", name=\"\"))\n", 2),
+    "S11": (H + "s = ui.state(cur=ui.row_of(\"nets\"))\n", 2),
     "S13": (H + "s = ui.state(pick=None)\n", 2),
     "T01": (H + "s = ui.state(n=0)\n" + PAGE + "        ui.label(\"{n|nope}\")\n", 5),
     "T02": (H + "s = ui.state(n=0)\n" + PAGE + "        ui.label(\"{nope}\")\n", 5),

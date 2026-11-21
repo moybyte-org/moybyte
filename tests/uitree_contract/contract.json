@@ -828,7 +828,7 @@
     "lua": "as Python",
     "c": "`moy_ui_prop(\"model\", \"nets\")`"
    },
-   "as_run": "S07"
+   "as_run": ""
   },
   "S12": {
    "stage": [

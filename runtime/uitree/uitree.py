@@ -673,7 +673,7 @@ class State:
             t[k], v[k] = _decl(x, k)
         for k, x in t.items():
             if isinstance(x, RowOf) and not isinstance(t.get(x.model), Model):
-                raise UIError("S07", "%s=ui.row_of(%r): no model named %r" % (k, x.model, x.model),
+                raise UIError("S11", "%s=ui.row_of(%r): no model named %r" % (k, x.model, x.model),
                               expected="a model name: " + (", ".join(
                                   n for n, y in t.items() if isinstance(y, Model)) or "none declared"), fix='declare the model too: %s=ui.model(key=..., ...)' % x.model)
         for k in v:
