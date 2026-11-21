@@ -1404,7 +1404,7 @@
      "level": 1
     },
     "signal": {
-     "type": "tpl",
+     "type": "int",
      "level": 1
     },
     "tag": {
@@ -1471,7 +1471,7 @@
      "level": 1
     },
     "signal": {
-     "type": "tpl",
+     "type": "int",
      "level": 1
     },
     "tone": {
@@ -1668,7 +1668,7 @@
      "level": 1
     },
     "signal": {
-     "type": "tpl",
+     "type": "int",
      "level": 1
     },
     "tag": {

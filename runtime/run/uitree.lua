@@ -1509,6 +1509,19 @@ local function check_opts(kind, o, at)
     end
     if COND_PROPS[k] then compile_cond(v, nil, at)
     elseif (k == "lines" and kind ~= "bubble" and kind ~= "label") or k == "buttons" then
+    elseif k == "signal" then
+      -- an int: a literal, or the whole reference to an int ({bars}, {.bars})
+      local ref = type(v) == "string" and v:match("^{([%w_.@]+)}$")
+      if math.type(v) ~= "integer" and not ref then
+        fail("N01", at, "ui." .. kind .. "'s signal is " .. describe(v), "an int, or {NAME} of an int", describe(v))
+      end
+      if ref then
+        local _, ty = operand(ref, v, ROWCTX, at)
+        if ty.t ~= "int" then
+          fail("T03", at, "ui." .. kind .. "'s signal reads " .. q(ref) .. ", which is " .. tname(ty), "an int", tname(ty))
+        end
+        compile_tpl(v, nil, at)
+      end
     elseif NUM_PROPS[k] then
       if math.type(v) ~= "integer" and not (type(v) == "string" and v:match("^{%.[%w_]+}$")) then
         fail("N01", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "an int", describe(v))

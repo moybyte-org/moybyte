@@ -253,6 +253,8 @@ CASES = {
     "T01": (APP + 'local s = ui.state { n = 0 }\nui.page("p", function() ui.label("{n|nope}") end)\n', 3, None),
     "T02": (APP + 'ui.page("p", function() ui.label("{@nope}") end)\n', 2, None),
     "T03": (APP + 'local s = ui.state { n = 0 }\nui.page("p", function() ui.label("{n.x}") end)\n', 3, None),
+    "T03 signal": (APP + 'local s = ui.state { t = "" }\nui.page("p", function() ui.info("Signal", { signal = "{t}" }) end)\n', 3, None),
+    "N01 signal": (APP + 'ui.page("p", function() ui.info("Signal", { signal = "3 bars" }) end)\n', 2, None),
     "T04": (APP + 'local s = ui.state { e = ui.enum("a", "b", { init = "a" }) }\nui.labels("L", { a = "A" })\n'
             'ui.page("p", function() ui.label("{e|map L}") end)\n', 4, None),
     "T05": (APP + 'ui.page("p", function() ui.label("{.x}") end)\n', 2, None),
