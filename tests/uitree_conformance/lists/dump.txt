@@ -1,0 +1,9 @@
+page 'page'  title='Lists'
+  tabs 'tab'  labels='TABS'
+  group 'group#1'  caption='Things'
+    rows 'items'
+      [0 rows of items]
+  group 'group#2'  caption='Shelf'
+    cards 'items'  cur='sel'  w=96  h=64
+      [0 rows of items]
+  label 'label#3'  text='{picked}' = ''

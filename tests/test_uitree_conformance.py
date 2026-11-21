@@ -25,10 +25,10 @@ import pytest
 
 import uitree_conf as C
 
-NAMES = ("counter", "list", "pages", "gates", "kinds")
+NAMES = ("counter", "list", "pages", "gates", "kinds", "lists")
 # the fixtures whose Lua half only the C engine draws (level 2's kinds): on the
 # reference engine the Lua layer refuses them (E00), so the checks that run it skip
-C_ONLY = ("kinds",)
+C_ONLY = ("kinds", "lists")
 ON_REFERENCE = os.environ.get("MOYBYTE_UI_ENGINE") == "reference"
 LUA_CHECKS = ("events", "content", "glass", "trace")
 SMALL, DESK = C.CONFIGS
@@ -79,6 +79,7 @@ LUA_DUMP = ("the dump's grammar is open (F-30); Lua keys nodes by kind (`info`),
 KNOWN = {
     ("dump", "counter", None): LUA_DUMP, ("dump", "list", None): LUA_DUMP,
     ("dump", "pages", None): LUA_DUMP, ("dump", "gates", None): LUA_DUMP, ("dump", "kinds", None): LUA_DUMP,
+    ("dump", "lists", None): LUA_DUMP,
 }
 for _n in NAMES:
     KNOWN[("content", _n, DESK)] = LUA_SCALE
