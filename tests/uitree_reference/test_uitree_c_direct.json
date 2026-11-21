@@ -1,0 +1,382 @@
+{
+ "case/&& and || mixed": [
+  "C02",
+  22
+ ],
+ "case/@input's no value": [
+  "T03",
+  22
+ ],
+ "case/@input's truth": [
+  "T03",
+  22
+ ],
+ "case/@input's value": [
+  null,
+  0
+ ],
+ "case/a bool alone": [
+  "T03",
+  22
+ ],
+ "case/a bool compared": [
+  "T03",
+  22
+ ],
+ "case/a bool compared in a condition": [
+  "T03",
+  22
+ ],
+ "case/a bool in a text": [
+  "T03",
+  22
+ ],
+ "case/a bool's table": [
+  null,
+  0
+ ],
+ "case/a bool's table without True": [
+  "T04",
+  22
+ ],
+ "case/a choice condition": [
+  "C01",
+  22
+ ],
+ "case/a choice in a branch": [
+  "T01",
+  22
+ ],
+ "case/a choice of one branch": [
+  "T01",
+  22
+ ],
+ "case/a choice of references": [
+  null,
+  0
+ ],
+ "case/a choice of three branches": [
+  "T01",
+  22
+ ],
+ "case/a field of an int": [
+  "T03",
+  22
+ ],
+ "case/a field outside a list in a condition": [
+  "T05",
+  22
+ ],
+ "case/a list's bool empty": [
+  "T03",
+  22
+ ],
+ "case/a model alone": [
+  "T03",
+  22
+ ],
+ "case/a model compared": [
+  "T03",
+  22
+ ],
+ "case/a negated comparison": [
+  null,
+  0
+ ],
+ "case/a non-text label": [
+  "T01",
+  22
+ ],
+ "case/a number compared to a word": [
+  "T03",
+  22
+ ],
+ "case/a number compared to a word in a condition": [
+  "T03",
+  22
+ ],
+ "case/a number condition": [
+  "C01",
+  22
+ ],
+ "case/a row's bool": [
+  "T03",
+  23
+ ],
+ "case/a row's field": [
+  null,
+  0
+ ],
+ "case/a row's missing field": [
+  "T02",
+  23
+ ],
+ "case/a single &": [
+  "C01",
+  22
+ ],
+ "case/a slider's choice lo": [
+  null,
+  0
+ ],
+ "case/a slider's int-text lo": [
+  "T03",
+  22
+ ],
+ "case/a slider's text lo": [
+  "T03",
+  22
+ ],
+ "case/a table past the enum": [
+  "T04",
+  22
+ ],
+ "case/a table short of the enum": [
+  "T04",
+  22
+ ],
+ "case/a template condition": [
+  "C01",
+  22
+ ],
+ "case/a text compared": [
+  null,
+  0
+ ],
+ "case/a toggle's bool label": [
+  "T03",
+  22
+ ],
+ "case/an empty condition": [
+  "C01",
+  22
+ ],
+ "case/an empty term": [
+  "T02",
+  22
+ ],
+ "case/an empty transform": [
+  "T01",
+  22
+ ],
+ "case/an enum's no value": [
+  "T03",
+  22
+ ],
+ "case/an enum's no value in a condition": [
+  "T03",
+  22
+ ],
+ "case/an enum's table": [
+  null,
+  0
+ ],
+ "case/an enum's truth": [
+  "T03",
+  22
+ ],
+ "case/an enum's truth in a condition": [
+  "T03",
+  22
+ ],
+ "case/an enum's value": [
+  null,
+  0
+ ],
+ "case/an escaped colon": [
+  null,
+  0
+ ],
+ "case/an info's bool value": [
+  "T03",
+  22
+ ],
+ "case/an int compared to a word": [
+  "T03",
+  22
+ ],
+ "case/an int compared to a word in a condition": [
+  "T03",
+  22
+ ],
+ "case/an int's table": [
+  null,
+  0
+ ],
+ "case/an int's table without _": [
+  "T04",
+  22
+ ],
+ "case/brackets": [
+  "C03",
+  22
+ ],
+ "case/brackets in a condition": [
+  "C03",
+  22
+ ],
+ "case/bytes not last": [
+  "T03",
+  22
+ ],
+ "case/bytes of a text": [
+  "T03",
+  22
+ ],
+ "case/count of an int": [
+  "T03",
+  22
+ ],
+ "case/count then plural": [
+  null,
+  0
+ ],
+ "case/current outside a list": [
+  "T05",
+  22
+ ],
+ "case/field outside a list": [
+  "T05",
+  22
+ ],
+ "case/fmt %.1f of a number": [
+  null,
+  0
+ ],
+ "case/fmt %d of a text": [
+  "T03",
+  22
+ ],
+ "case/fmt %s of an int": [
+  null,
+  0
+ ],
+ "case/fmt of no conversion": [
+  "T01",
+  22
+ ],
+ "case/fmt of two specs": [
+  "T01",
+  22
+ ],
+ "case/fmt with no %": [
+  "T01",
+  22
+ ],
+ "case/lone close": [
+  "T01",
+  22
+ ],
+ "case/no field of a row_of": [
+  "T02",
+  22
+ ],
+ "case/no label table": [
+  "T02",
+  22
+ ],
+ "case/no state": [
+  "T02",
+  22
+ ],
+ "case/no state in a condition": [
+  "T02",
+  22
+ ],
+ "case/no system value": [
+  "T02",
+  22
+ ],
+ "case/no transform": [
+  "T01",
+  22
+ ],
+ "case/open brace": [
+  "T01",
+  22
+ ],
+ "case/plural of a text": [
+  "T03",
+  22
+ ],
+ "case/plural of one form": [
+  "T01",
+  22
+ ],
+ "case/plural with an empty form": [
+  "T01",
+  22
+ ],
+ "case/retired system value": [
+  "N04",
+  22
+ ],
+ "case/two transforms": [
+  "T01",
+  22
+ ],
+ "planted/A01": [
+  "A01",
+  5
+ ],
+ "planted/A02": [
+  "A02",
+  9
+ ],
+ "planted/B01": [
+  "B01",
+  5
+ ],
+ "planted/B02": [
+  "B02",
+  5
+ ],
+ "planted/B03": [
+  "B03",
+  7
+ ],
+ "planted/C01": [
+  "C01",
+  5
+ ],
+ "planted/C02": [
+  "C02",
+  5
+ ],
+ "planted/C03": [
+  "C03",
+  5
+ ],
+ "planted/H01": [
+  "H01",
+  8
+ ],
+ "planted/N01": [
+  "N01",
+  5
+ ],
+ "planted/N02": [
+  "N02",
+  9
+ ],
+ "planted/T01": [
+  "T01",
+  5
+ ],
+ "planted/T02": [
+  "T02",
+  5
+ ],
+ "planted/T03": [
+  "T03",
+  5
+ ],
+ "planted/T04": [
+  "T04",
+  6
+ ],
+ "planted/T05": [
+  "T05",
+  5
+ ]
+}

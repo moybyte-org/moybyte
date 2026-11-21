@@ -1,0 +1,481 @@
+{
+ "bar": [
+  [
+   "line",
+   317
+  ],
+  [
+   "tab",
+   [
+    0,
+    0,
+    44,
+    20
+   ],
+   true,
+   "One"
+  ],
+  [
+   "tab",
+   [
+    49,
+    0,
+    44,
+    20
+   ],
+   false,
+   "Two"
+  ],
+  [
+   "icon",
+   [
+    321,
+    0,
+    20,
+    20
+   ],
+   "undo",
+   false,
+   false
+  ],
+  [
+   "word",
+   [
+    346,
+    0,
+    48,
+    20
+   ],
+   "Play",
+   false
+  ],
+  [
+   "line",
+   77
+  ],
+  [
+   "tab",
+   [
+    0,
+    0,
+    44,
+    20
+   ],
+   true,
+   "One"
+  ],
+  [
+   "tab",
+   [
+    49,
+    0,
+    20,
+    20
+   ],
+   false,
+   "code"
+  ],
+  [
+   "icon",
+   [
+    81,
+    0,
+    20,
+    20
+   ],
+   "undo",
+   false,
+   false
+  ],
+  [
+   "word",
+   [
+    106,
+    0,
+    48,
+    20
+   ],
+   "Play",
+   false
+  ],
+  [
+   "line",
+   52
+  ],
+  [
+   "tab",
+   [
+    0,
+    0,
+    26,
+    20
+   ],
+   true,
+   "edit"
+  ],
+  [
+   "tab",
+   [
+    28,
+    0,
+    20,
+    20
+   ],
+   false,
+   "code"
+  ],
+  [
+   "line",
+   317
+  ],
+  [
+   "tab",
+   [
+    0,
+    0,
+    44,
+    20
+   ],
+   true,
+   "One"
+  ],
+  [
+   "tab",
+   [
+    49,
+    0,
+    44,
+    20
+   ],
+   false,
+   "Two"
+  ],
+  [
+   "icon",
+   [
+    321,
+    0,
+    20,
+    20
+   ],
+   "undo",
+   false,
+   false
+  ],
+  [
+   "word",
+   [
+    346,
+    0,
+    48,
+    20
+   ],
+   "Stop",
+   false
+  ],
+  104
+ ],
+ "conf/across": [
+  [
+   "build build page (builds 1)",
+   "action flip from button 'flip' on ''",
+   "state mode 'words' -> 'rows' (in flip)",
+   "drew status 'Line {n} \u00b7 {mode} \u00b7 all fine \u00b7 the last field' -> 'Line 0 \u00b7 rows \u00b7 all fine \u00b7 the last field'"
+  ],
+  [
+   "53fb873f2471ac7b2c5065b18b4bf17a1382091557cef79b24968dcdc9ab159d",
+   "9fd095e2f81bcfdadbb4cd118561abe4fd5da34cb2bb9b1eac870d5c252cf707",
+   "b4bec49581d2d9c3e906c85681f6f49b63ea421bd1e2bcda36005120c4dfb380",
+   "aa928ddfa50e8d3bcfa77280cf73ca39447d652ec8b4622364e6a5ac6eb1a0b5",
+   "580dab49b9efc1bf7d583e39efb2f1bac4b1815bc6ad093813a2c34f48bec121",
+   "fcf98c74d1175ff416e6f888c50ee1bada1592b1aa5b710611ff35ae41584f0a",
+   "fcf98c74d1175ff416e6f888c50ee1bada1592b1aa5b710611ff35ae41584f0a",
+   "580dab49b9efc1bf7d583e39efb2f1bac4b1815bc6ad093813a2c34f48bec121"
+  ]
+ ],
+ "conf/across_bar": [
+  [
+   "build build page (builds 1)",
+   "action bump from button 'bump' on ''",
+   "state n 0 -> 1 (in bump)",
+   "state cw 40 -> 52 (in bump)",
+   "state sg 6 -> 9 (in bump)"
+  ],
+  [
+   "f17a0bb006639f07200bfab29239f5d80fb4cb2b38512934e7c7d094526b1a54",
+   "d95dc256f976eec45bfa93960a438696d39a727f56f218174138d3477a748395",
+   "56116a7631ed2c78374f0e46d887aeebfa3d0378423c7f7c0d0e054c476cd694",
+   "88dac2622cbc8c22995c1cd0c2f6b84a7c442930f4b95014bdddcf565bb7f183",
+   "13a8338412f1aa6ce52304a0ca26d21636e391ab8f8a8533dfc03488c3783da6",
+   "bb0f66736bdb9ef3194373570c2b256882eba1cbd2641892963619d1f980eba4",
+   "bb0f66736bdb9ef3194373570c2b256882eba1cbd2641892963619d1f980eba4"
+  ]
+ ],
+ "conf/bar_look": [
+  [
+   "build build page (builds 1)",
+   "action menu from button 'menu' on ''",
+   "state open False -> True (in menu)",
+   "state wicon 'wifi' -> 'wifi_off' (in menu)",
+   "action tick from button 'tick' on ''",
+   "state clock '9:41' -> '10:41' (in tick)",
+   "state cw 40 -> 52 (in tick)",
+   "drew button '{clock}' -> '10:41'"
+  ],
+  [
+   "40da6816607a4fb11cb38f89a89ba8e0180732ca78bc56851f6c41a7d63bc14f",
+   "c929ffc905744279e9a6ede974ab1da2d968248d2a3c361117fb757f76c5e75b",
+   "e28910e856c2814f82348986b2bbf6b0aac9602b90c4ed9f44d0ee9e7e703332",
+   "53b862928887ae4b131b78b050fb24db8fb4463c335f6360eeadf1dc456ee4f6",
+   "daf27e4d1745172a2c01b3a776d861d5d1af73207527465efae0d659b6049bc2",
+   "312931cd8340676112ad066b67927201dbdddff0085d3c12e6475a625d7219d9",
+   "036b9b365b4f6e63a7ebaa41f1c0e56da73a81952a51a59cbaa139ec62fb9212",
+   "917a368a41be4839276e743221216f388f632f95a47f0fea20efbff69581dec8",
+   "2a956b673b94aa9009a8669319155c4bee3778adf3ed6ae8ae6c4211c3e6d416"
+  ]
+ ],
+ "conf/counter": [
+  [
+   "build build page (builds 1)",
+   "state loud False -> True (from toggle 'loud')",
+   "drew label '{count|plural press,presses} so far, {loud?loud:quiet}' -> '0 presses so far, loud'",
+   "state loud True -> False (from toggle 'loud')",
+   "drew label '{count|plural press,presses} so far, {loud?loud:quiet}' -> '0 presses so far, quiet'",
+   "action add from link 'add' on 'Counter'",
+   "state count 0 -> 1 (in add)",
+   "drew info '{count}' -> '1'",
+   "drew label '{count|plural press,presses} so far, {loud?loud:quiet}' -> '1 press so far, quiet'",
+   "action add from link 'add' on 'Counter'",
+   "state count 1 -> 2 (in add)",
+   "drew info '{count}' -> '2'",
+   "drew label '{count|plural press,presses} so far, {loud?loud:quiet}' -> '2 presses so far, quiet'",
+   "state loud False -> True (from toggle 'loud')",
+   "drew label '{count|plural press,presses} so far, {loud?loud:quiet}' -> '2 presses so far, loud'"
+  ],
+  [
+   "e7a8f40b740ce45193b00216a6ed921365a178539415d33383161eeebfd13ed8",
+   "300a3d99ef8a2a3169a82f90859cadedd238329b3c0790d4a3d66398b54e6011",
+   "e7a8f40b740ce45193b00216a6ed921365a178539415d33383161eeebfd13ed8",
+   "7503dd4dd18ba993f495cad4deda7939c0d12e4d7a38b8782cea33410d322b1e",
+   "7503dd4dd18ba993f495cad4deda7939c0d12e4d7a38b8782cea33410d322b1e",
+   "7503dd4dd18ba993f495cad4deda7939c0d12e4d7a38b8782cea33410d322b1e",
+   "942cbf75ff18ba87ab76e33ce9835d1e0ad522975759e4f19bbf2a2454bbaceb",
+   "942cbf75ff18ba87ab76e33ce9835d1e0ad522975759e4f19bbf2a2454bbaceb",
+   "e1d10efd99f215687863f6e73bd7f3ae313bd7f856ceca083ca87b3adf5840d9",
+   "c2c17c624740131d30004695ca49cafd3cbf5fa349619e63ba114f0b172f5fc1"
+  ]
+ ],
+ "conf/gates": [
+  [
+   "build build page (builds 1)",
+   "state open False -> True (from toggle 'open')",
+   "action add from link 'add' on 'Gates'",
+   "state n 0 -> 1 (in add)",
+   "drew label '{n} inside' -> '1 inside'",
+   "action add from link 'add' on 'Gates'",
+   "state n 1 -> 2 (in add)",
+   "drew label '{n} inside' -> '2 inside'",
+   "action take from link 'take' on 'Gates'",
+   "state n 2 -> 1 (in take)",
+   "drew label '{n} inside' -> '1 inside'",
+   "state open True -> False (from toggle 'open')"
+  ],
+  [
+   "0df17b41debe0cfd513f3a1cc0655f9247737d61b4e94169db7b863f1bec520f",
+   "3ffca0a2f498e5f85aef3a4df29567f50e5bc3b3fb2ca2b64047910b183a734a",
+   "5c133c5c08f1a51b734963d9e0a29e3e139cc334f2631462526a448f0af8b712",
+   "5c133c5c08f1a51b734963d9e0a29e3e139cc334f2631462526a448f0af8b712",
+   "b1636fd7c8c15c564a8712da190d8075966ccbdff1f7aa693869143cd4e92237",
+   "9eab9b5df226f88f92b730cb8d7a51a622fc85a8152e4939fb705425710d1845",
+   "9eab9b5df226f88f92b730cb8d7a51a622fc85a8152e4939fb705425710d1845",
+   "b1636fd7c8c15c564a8712da190d8075966ccbdff1f7aa693869143cd4e92237",
+   "83d7045d0aed9fd2ac1eec24c6f4efd609e50e2cc984a6ecf19031759cdc4b28",
+   "6f2991bd177b2470c1fae41cf8b9b732c11abbebe932c78c9d4b79b762170664"
+  ]
+ ],
+ "conf/grid": [
+  [
+   "build build page (builds 1)",
+   "action zero from button 'zero' on 'Grid'",
+   "state n 0 -> 1 (in zero)",
+   "action seven from button 'seven' on 'Grid'",
+   "state wide True -> False (in seven)",
+   "action seven from button 'seven' on 'Grid'",
+   "state wide False -> True (in seven)"
+  ],
+  [
+   "d6bf04c7ce4719b5868c96c4ee435f13079bf4ee40383f4a4f7707e250a8af76",
+   "61c942683443d32568c5739214c098d1f8e2e699a993016662b6d949e69bcfd9",
+   "6806011e605142b9c837c7675452dbd46a7526e8b315f027024a5ac26e8afcaa",
+   "4237caa9a7467e2199cac735f2dd21b8cecce85ae3a2e2dbf35783b8745aa706",
+   "408e3e349191a645d052ef517ebe21a422f5dc9ea60ce83cc7623c14bcfb3a92",
+   "4a02128376d3236fada42b1577c6879174718a871e86dd865b69f4929b21e2f4",
+   "cd61ef6da5f3e40f76980c4fbf5434bb12effa5923a072a45e4df6e0b04db29e",
+   "79b6d1b9ae899589240d9861ca03aae47bc3d600ba7d4ebfadd290dc4b581a8a",
+   "79b6d1b9ae899589240d9861ca03aae47bc3d600ba7d4ebfadd290dc4b581a8a"
+  ]
+ ],
+ "conf/list": [
+  [
+   "state items [3 rows] +3 -0 ~0 moved 0 (in opened)",
+   "build build page (builds 1)",
+   "state sel '' -> 'a' (focus)",
+   "action pick from link 'a/pick' on 'Shopping'",
+   "state msg '' -> 'Picked Apples' (in pick)",
+   "drew label '{msg}' -> 'Picked Apples'",
+   "state sel 'a' -> 'b' (focus)",
+   "action pick from link 'b/pick' on 'Shopping'",
+   "state msg 'Picked Apples' -> 'Picked Bread' (in pick)",
+   "drew label '{msg}' -> 'Picked Bread'",
+   "state sel 'b' -> 'c' (focus)",
+   "action pick from link 'c/pick' on 'Shopping'",
+   "state msg 'Picked Bread' -> 'Picked Cheese' (in pick)",
+   "drew label '{msg}' -> 'Picked Cheese'",
+   "state sel 'c' -> 'b' (focus)",
+   "action pick from link 'b/pick' on 'Shopping'",
+   "state msg 'Picked Cheese' -> 'Picked Bread' (in pick)"
+  ],
+  [
+   "b9759dc082d3367d79adf8bd9b54a0222be95fdbebff579a08b4b6c2f96df7b3",
+   "b9759dc082d3367d79adf8bd9b54a0222be95fdbebff579a08b4b6c2f96df7b3",
+   "a857eefee06236bfdf41b1442d98e03db38d31c7683aaef294fcdf34a16013c0",
+   "a857eefee06236bfdf41b1442d98e03db38d31c7683aaef294fcdf34a16013c0",
+   "8c8ffe0991a1fa0f589d58a675915578c15a666b8e0dfc576e5ea661e361af28",
+   "8c8ffe0991a1fa0f589d58a675915578c15a666b8e0dfc576e5ea661e361af28",
+   "9bc8abf8f21555b932445259ff45b08c33462ea29266a84ecf63c34039a2736d",
+   "9bc8abf8f21555b932445259ff45b08c33462ea29266a84ecf63c34039a2736d"
+  ]
+ ],
+ "conf/model_row": [
+  [
+   "state wins [2 rows] +2 -0 ~0 moved 0 (in opened)",
+   "build build page (builds 1)",
+   "action add from button 'add' on ''",
+   "state n 2 -> 4 (in add)",
+   "state wins [4 rows] +2 -0 ~2 moved 0 (in add)",
+   "action add from button 'add' on ''",
+   "state n 4 -> 6 (in add)",
+   "state wins [6 rows] +2 -0 ~0 moved 0 (in add)",
+   "action chip from button 'w3/chip' on ''",
+   "state wins [6 rows] +0 -0 ~2 moved 0 (in chip)"
+  ],
+  [
+   "cd488ebd42b03ca544d4d1db3581bc95dbb9f54856ea18195cf1c4892af6f8c9",
+   "9de48047bf4bc80652590bdc3f1fd7cb306e155c03b800d3ce444ac81e1e8092",
+   "90cd51c9d765466c1befff3f3712ddcf9745bdb97cd2b024081db1f20f86fc63",
+   "bfd36de7e717670e3dc5b238563734c1da5f1d971b7d510e8f7df0a82060e893",
+   "2e2c0e18f0e2e3018e53b0a3022ffcdb4f2516052ed0633e610263bc7ead798c",
+   "b5f3d5c1f0fee536e210a7ca61abc7d2ca464e62f34f8df6d38df884d5d9b177",
+   "7e77a8d97971aed4f5f36e4d994cd3f0d1445052ab27bed60160aab379c3ed3b",
+   "7d772421b7dbb96d9ced0af0b34bf10ac8927bd515217e764e056ac5658e0731",
+   "1ee19c5bfec91f14999f977fbcdfec1cf3f98e905e37efe88a93b7f2db2e6d0e"
+  ]
+ ],
+ "conf/pages": [
+  [
+   "build build page (builds 1)",
+   "action add from link 'add' on 'Pages'",
+   "state count 0 -> 1 (in add)",
+   "drew info '{count}' -> '1'",
+   "action add from link 'add' on 'Pages'",
+   "state count 1 -> 2 (in add)",
+   "drew info '{count}' -> '2'",
+   "action ask from link 'ask' on 'Pages'",
+   "state asking False -> True (in ask)",
+   "action keep from back on dialog 'dialog#1'",
+   "state asking True -> False (in keep)",
+   "action more from link 'more' on 'Pages'",
+   "page push page 2, opened from 'more'",
+   "build details page (builds 2)",
+   "page back page 1, focus back to 'more'",
+   "build build page (builds 3)"
+  ],
+  [
+   "8f636fcad9aaac886d911d187bcb334fc9de10b8e1796659611f35a693461a79",
+   "8f636fcad9aaac886d911d187bcb334fc9de10b8e1796659611f35a693461a79",
+   "241ed1238b6db3763c8e5101d01d10b71fc6b5de8af5e149dc4986929bd0f1cd",
+   "038db80e48733d3090dc8dd5664b24014e6ddefa47348a0191e4072305fd52e1",
+   "038db80e48733d3090dc8dd5664b24014e6ddefa47348a0191e4072305fd52e1",
+   "8805cd320b764bfb45ec67d649dadfa2d81625f9d1a3c4ec152afda5aba1b243",
+   "f4d729985034cce6314ba685cabfd6d27e33894f33bf8a39906d24eb4e53487b",
+   "d7ba4645118ed33ddc36291354cab5e53ab3fb1f6c66b140a3823ab9cc1e1a6b",
+   "3df7cd8b21639a7997880383d0275f9d22a157be2a4477e5344b659a856bb198",
+   "93b6fbc78d3d0933901956774e36d8b8c1daccf74395208b7d896ea6f46fac77",
+   "033c70db21603bd4cc4460b8e511ef8dff8286ff351f68aca16ff75903f0ac6c",
+   "b9a683f64f38c3addf7574fe21e13209f725dee4001a4715a304ec927f5b9757"
+  ]
+ ],
+ "conf/placed": [
+  [
+   "build build page (builds 1)",
+   "action bump from button 'bump' on ''",
+   "state n 0 -> 1 (in bump)",
+   "state marked False -> True (in bump)",
+   "drew status 'Line {n} \u00b7 {mode} \u00b7 all fine \u00b7 the last field' -> 'Line 1 \u00b7 words \u00b7 all fine \u00b7 the last field'",
+   "action flip from button 'flip' on ''",
+   "state mode 'words' -> 'rows' (in flip)",
+   "drew status 'Line {n} \u00b7 {mode} \u00b7 all fine \u00b7 the last field' -> 'Line 1 \u00b7 rows \u00b7 all fine \u00b7 the last field'",
+   "action look from button 'look' on ''",
+   "state n 1 -> 2 (in look)",
+   "state marked True -> False (in look)",
+   "drew status 'Line {n} \u00b7 {mode} \u00b7 all fine \u00b7 the last field' -> 'Line 2 \u00b7 rows \u00b7 all fine \u00b7 the last field'"
+  ],
+  [
+   "5f737e2c9bf1cdb5c9233148a63eb013d5449ba3063d5abb4fd7f21f5fabac38",
+   "9fe532738075c4f3e3b32de32e342b2df2ad675eb10c9c343702ca9e64aecbf4",
+   "8f982cac53e0849720e23c8f955da37c51ea1c767fc7fe623c3f0c267a3c3ee9",
+   "92a8257285fa6de518951a3bd3da79034eccbd101f8d7d97bd0ae1de85b6beef",
+   "8d192a6d55be612d9def677fc34b34efc3c3708ae1b11e885ca09c0b54a12e18",
+   "685538349da2184c3d1924ebc92cc949c2c933a6164668b97580605ee4e177b9",
+   "2d48229964fd4ca8a281f13af311468e1f74b218f6e5f8d9b26a4749b892ca13",
+   "426abd8170063c1af4979249339e5b3d494f6f8c6e06b86334c3099ed3a3435b",
+   "885eb9f416ebc98928afba063800de777fcf494b5662b198dee50829a5107ebb"
+  ]
+ ],
+ "conf/text_editor": [
+  [
+   "build build page (builds 1)",
+   "drew status 'Ln {code.line}, Col {code.col} \u00b7 {code.lines} lines \u00b7 {issue?1 issue:No issues}' -> 'Ln 2, Col 1 \u00b7 37 lines \u00b7 No issues'",
+   "drew status 'Ln {code.line}, Col {code.col} \u00b7 {code.lines} lines \u00b7 {issue?1 issue:No issues}' -> 'Ln 3, Col 1 \u00b7 37 lines \u00b7 No issues'",
+   "drew status 'Ln {code.line}, Col {code.col} \u00b7 {code.lines} lines \u00b7 {issue?1 issue:No issues}' -> 'Ln 4, Col 1 \u00b7 37 lines \u00b7 No issues'",
+   "action gutter from button 'gutter' on ''",
+   "state gutter_on True -> False (in gutter)",
+   "drew status 'Ln {code.line}, Col {code.col} \u00b7 {code.lines} lines \u00b7 {issue?1 issue:No issues}' -> 'Ln 5, Col 1 \u00b7 37 lines \u00b7 No issues'",
+   "action gutter from button 'gutter' on ''",
+   "state gutter_on False -> True (in gutter)",
+   "drew status 'Ln {code.line}, Col {code.col} \u00b7 {code.lines} lines \u00b7 {issue?1 issue:No issues}' -> 'Ln 4, Col 1 \u00b7 37 lines \u00b7 No issues'"
+  ],
+  [
+   "be8cc7d2d731b6513bcf35094d898fd5d547ecceb3a42391a5c14f8c52c7a89d",
+   "aa9e36d100a8124223985b19e5d547fead0b50ab39f29b47f74fe472c0cb998b",
+   "d8811731c49ff3f47fabfad7fd8b42640af7b4ecc14c529984e1f9d8e9dfe2d5",
+   "6f95292de122618fdd4748c092fcbac7de948d3af189e17dce1fb0c72b96c49a",
+   "6f95292de122618fdd4748c092fcbac7de948d3af189e17dce1fb0c72b96c49a",
+   "57b5acf4d03092982e09002968355b25d8e6052e918c3a3e46a2e644aadfae53",
+   "57b5acf4d03092982e09002968355b25d8e6052e918c3a3e46a2e644aadfae53",
+   "6f95292de122618fdd4748c092fcbac7de948d3af189e17dce1fb0c72b96c49a"
+  ]
+ ],
+ "settings_rows": [
+  "06d3d947769c265445209c676b4ba0417b8efe1e9dc6c10f0857b3ef22314a12",
+  "88470cdbc0cacdcea3d3ae1e09a4b9f6327829a4fe4e1317e0ce7812a58e03b4",
+  "5085ef95af77d2a54726d39ea2a83b4c4922ef5cde0bb23d3cb72a54b6a0a903",
+  "3c3fda7e3b2ae80811febb76120419fb73cf7e11412ece099dcec0472ac013ad",
+  "5085ef95af77d2a54726d39ea2a83b4c4922ef5cde0bb23d3cb72a54b6a0a903",
+  "fab84b423d0de29ee154390c33fc8868080de4de8b003ddc29084db1758c9464",
+  "49dcf389e5a64b6efc8073066cc371c9d17da61691ec9848a976981afdd1154d",
+  "fab84b423d0de29ee154390c33fc8868080de4de8b003ddc29084db1758c9464",
+  "432fc0eb70b6810b69d4bcd2d0382c77d5a403ddde821a75338468ecd2f68769",
+  "2dd856dc31b95db9f979b0ac45b08989390a582702325c16e746943a8fba7213",
+  "b3043f53d0cde0caee00474e2434fecd729ddfc81c0443ccbf1942ead19d1a41",
+  "2dd856dc31b95db9f979b0ac45b08989390a582702325c16e746943a8fba7213",
+  "432fc0eb70b6810b69d4bcd2d0382c77d5a403ddde821a75338468ecd2f68769",
+  "a14fc9c622481cc740ccc43206692f829d9adbb2c77aeb3dd077282ea0ff9aa6",
+  "2c00dc740f70afe49a5041a81410c1d6c734ed70cd1cfc4da86b538d7bd26aad",
+  "d48a802f5c515f2a8bbc828493560feb7b7370a5c838c28b99727f0f6338e63d",
+  "2c00dc740f70afe49a5041a81410c1d6c734ed70cd1cfc4da86b538d7bd26aad",
+  "a14fc9c622481cc740ccc43206692f829d9adbb2c77aeb3dd077282ea0ff9aa6",
+  "432fc0eb70b6810b69d4bcd2d0382c77d5a403ddde821a75338468ecd2f68769"
+ ],
+ "settings_shift_median": 432
+}

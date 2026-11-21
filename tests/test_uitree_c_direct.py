@@ -17,6 +17,8 @@ import sys
 
 import pytest
 
+import uitree_reference as R
+
 STATE = '''import uitree as ui
 
 s = ui.state(n=0, x=1.5, t="", b=False, e=ui.enum("a", "b", init="a"),
@@ -185,6 +187,7 @@ def _both(name, src, tmp_path):
 def test_a_mistake_raises_its_code_on_the_direct_build(case, tmp_path):
     src = STATE + "        " + CASES[case] + "\n"
     (ref, ref_line), (c, c_line) = _both("direct_%d" % sorted(CASES).index(case), src, tmp_path)
+    R.held(__file__, "case/" + case, [ref, ref_line])
     if case in C_DIFFERS:
         assert (ref, c) == C_DIFFERS[case], "C now answers as the reference: drop the case from C_DIFFERS"
         return
@@ -206,6 +209,7 @@ def test_the_planted_mistakes_raise_their_codes_on_the_direct_build(code, tmp_pa
     src, line = M.PY[code]
     try:
         (ref, ref_line), (c, c_line) = _both("planted_" + code.lower(), src, tmp_path)
+        R.held(__file__, "planted/" + code, [ref, ref_line])
     except S.UIError as e:            # the module's declarations: the same Python on every engine
         assert e.code == code
         return

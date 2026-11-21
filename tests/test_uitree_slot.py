@@ -4,11 +4,22 @@ a fill, its rect reads back (`rect_of`), and neither engine draws in it.
 And a growing button (`grow=`): a fill of its placed row, as a window's
 title takes what its buttons leave."""
 
+import pytest
+
 import uitree as ui
+import uitree_reference as R
 
 s = ui.state(title="Notes")
 for _n in ("head", "close"):
     ui.action(_n, _n.title(), lambda: None)
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _console(tmp_path_factory):
+    """A console built first: the theme and icon set its pages measure by
+    are a booted console's, whatever ran before in this process."""
+    from runtime import host_app
+    host_app.build_workstation(str(tmp_path_factory.mktemp("console")), sys_size=(320, 240), font_scale=1)
 
 
 def _foot(cv, x, y, w, h):
@@ -41,7 +52,9 @@ def test_a_slot_is_a_fill_of_its_stack_read_back_alike_on_both_engines():
     for rect in ((10, 20, 400, 300), (0, 0, 1024, 600), (5, 5, 120, 90)):
         for unit in (1, 2):
             c = _placed("c", rect, unit)
-            assert c == _placed("reference", rect, unit), (rect, unit)
+            r = _placed("reference", rect, unit)
+            R.held(__file__, "slot/%r/%d" % (rect, unit), r)
+            assert c == r, (rect, unit)
             x, y, w, h = rect
             sx, sy, sw, sh = c["body"]
             assert (sx, sw) == (x, w)
@@ -70,6 +83,7 @@ def test_a_growing_bar_item_takes_what_the_row_leaves_alike_on_both_engines():
             got.append((p.rect_of("head"), p.rect_of("close")))
         finally:
             uitree_app.use_engine("c")
+    R.held(__file__, "grown", got[1])
     assert got[0] == got[1]
     (hx, _, hw, _), (cx, _, cw, _) = got[0]
     assert hx == 4 and cx + cw == 296 and hx + hw + 4 == cx       # pad and gap 2 units of 2: the head fills

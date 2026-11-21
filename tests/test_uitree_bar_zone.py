@@ -10,6 +10,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "uitree_fixtures"))
 
+import uitree_reference as R  # noqa: E402
+
 
 class _Damage:
     def all(self):
@@ -214,5 +216,6 @@ def test_the_editors_head_row_lays_out_alike_on_both_engines():
                 z.draw_zone(None, (4, 2, w, 20))
                 out.append((theme, desk, w, list(look.drawn), z.zone_need(20)))
         got[engine] = out
+    R.held(__file__, "head", got["reference"])
     assert got["c"] == got["reference"]
     assert any(d[0] == "text" for o in got["c"] for d in o[3])        # theme mode's name

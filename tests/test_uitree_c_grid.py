@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent / "uitree_fixtures"))
 
 import uitree_parity as P  # noqa: E402
+import uitree_reference as R  # noqa: E402
 
 CONFIGS = ("tdeck_320x240_fs1_dark", "p4_1024x600_fs2_windowed", "big_800x480_fs3_dark",
            "p4_1024x600_cs2_fs1_windowed")
@@ -39,6 +40,7 @@ def test_a_grid_draws_alike_on_both_engines(config, tmp_path):
     import uitree_ref
     import uitree_c
     ref = _run(uitree_ref.Engine, config)
+    R.held(__file__, "grid/" + config, ref)
     c = _run(uitree_c.CEngine, config)
     states = [f.state for f in ref]
     assert any(s.endswith(" 1 True") for s in states) and any(s.endswith(" False") for s in states), states

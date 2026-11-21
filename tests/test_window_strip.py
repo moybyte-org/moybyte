@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from test_wm_windowed import _drv, _moy_desk  # noqa: E402
 
+import uitree_reference as R  # noqa: E402
 import wm_strip as SE  # noqa: E402
 
 
@@ -43,6 +44,7 @@ def test_the_strip_s_buttons_are_the_page_s_alike_on_both_engines(tmp_path):
     finally:
         uitree_app.use_engine("c")
         SE._PAGE[0] = None
+    R.held(__file__, "frame_buttons", got[1])
     assert got[0] == got[1]
     assert [n for n, _r, _s in got[0]] == ["min", "max", "close"]
     sx, sy, sw, sh = _strip(ws, win)

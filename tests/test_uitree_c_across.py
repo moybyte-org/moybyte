@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent / "uitree_fixtures"))
 
 import uitree_parity as P  # noqa: E402
+import uitree_reference as R  # noqa: E402
 
 CONFIGS = ("tdeck_320x240_fs1_dark", "p4_1024x600_fs2_windowed", "big_800x480_fs3_dark",
            "p4_1024x600_cs2_fs1_windowed")
@@ -40,6 +41,7 @@ def test_a_row_lays_its_cells_out_by_the_rule_alike_on_both_engines(config, tmp_
     import uitree_c
     import uitree_ref_editor
     ref = _run(uitree_ref_editor.Engine, config)
+    R.held(__file__, "row/" + config, ref)
     c = _run(uitree_c.CEditorEngine, config)
     assert "rows" in {f.state.split()[1] for f in ref}, "the script never reached the switch's other case"
     first = ref[0].state
@@ -90,6 +92,7 @@ def test_a_bar_s_pieces_lay_out_alike_on_both_engines(config, tmp_path):
     import uitree_c
     import uitree_ref_editor
     ref = _run_bar(uitree_ref_editor.Engine, config)
+    R.held(__file__, "bar/" + config, ref)
     c = _run_bar(uitree_c.CEditorEngine, config)
     assert [f.state for f in c] == [f.state for f in ref]
     P.compare(ref, c, tmp_path, "across_bar")

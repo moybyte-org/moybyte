@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+import uitree_reference as R
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent / "uitree_fixtures"))
 
@@ -97,6 +99,7 @@ RIGHT_LEFT = ["down", "right", "down", "left", "right"]
 def test_the_keys_cross_between_two_engines_pages_as_between_two_references(glass, kinds, across):
     script = RIGHT_LEFT if across else DOWN_UP
     ref, ref_seen = _session(glass, ("ref", "ref"), across, script)
+    R.held(__file__, "two_refs/" + ("side_by_side" if across else "stacked"), [ref, ref_seen])
     got, seen = _session(glass, kinds, across, script)
     assert seen == ref_seen
     assert [i for i in range(len(ref)) if ref[i] != got[i]] == []

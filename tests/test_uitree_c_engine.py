@@ -14,6 +14,7 @@ import os
 import pytest
 
 import uitree_conf as C
+import uitree_reference as R
 
 NAMES = ("counter", "list", "pages", "gates")
 
@@ -58,6 +59,7 @@ def test_the_c_trace_is_the_references(name):
 def test_the_c_glass_is_the_references(name, config):
     tc, fc, _ = _run("c", name, config)
     tp, fp, _ = _run("python", name, config)
+    R.held(__file__, "glass/%s/%s" % (name, config), [tp, fp])
     assert tc == tp
     assert len(fc) == len(fp)
     bad = [(a.step, C.differing(a, b)) for a, b in zip(fp, fc) if a.buf != b.buf]
@@ -262,6 +264,7 @@ def test_a_long_list_walks_past_its_fortieth_row_alike_on_both_engines(tmp_path,
     import uitree_parity as P
     script = ["k:down"] * 46 + ["k:a", "swipe:200", "f:20", "k:down", "swipe:-300", "f:20", "k:up"]
     ref = _long(tmp_path, "python", n, script)
+    R.held(__file__, "long/%d" % n, ref)
     c = _long(tmp_path, "c", n, script)
     assert ref[46].state.split()[0] == "r46/go", ref[46].state
     assert ref[47].state.split() == ["r46/go", "r46"], ref[47].state

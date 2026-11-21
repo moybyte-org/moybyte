@@ -5,8 +5,11 @@ the reference and on the C engine, but for the tray's icons, each its ink
 wide with the tray's gap between inks (and the fills beside them, which take
 what the tray leaves): the same on both engines."""
 
+import pytest
+
 import layout_base as LB
 import shell_layout as SL
+import uitree_reference as R
 
 THEMES = (("top", LB.BAR_ROWS, ("menu", "chips", "zone"), (), ("wifi", "battery", "clock"), ()),)
 GLASS = ((1024, 600, 40, 2, 1), (1024, 600, 40, 2, 2), (1280, 800, 40, 2, 1), (800, 480, 40, 2, 3),
@@ -15,6 +18,14 @@ WITHOUT = ((), ("wifi",), ("wifi", "battery"), ("chips",), ("wifi", "battery", "
 
 
 _INKED = ("wifi", "battery", "status", "chips", "zone")
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _console(tmp_path_factory):
+    """A console built first: the theme and icon set its pages measure by
+    are a booted console's, whatever ran before in this process."""
+    from runtime import host_app
+    host_app.build_workstation(str(tmp_path_factory.mktemp("console")), sys_size=(320, 240), font_scale=1)
 
 
 def _packs(engine):
@@ -50,7 +61,9 @@ def _packs(engine):
 
 
 def test_the_engine_places_the_themes_bar_where_pack_does():
-    assert _packs("c") == _packs("reference")
+    ref = _packs("reference")
+    R.held(__file__, "packs", ref)
+    assert _packs("c") == ref
 
 
 def test_a_layout_the_page_does_not_hold_is_pack_s():

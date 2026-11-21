@@ -1,0 +1,582 @@
+{
+ "glass/counter/p4_1024x600_fs2_windowed": [
+  [
+   "build build page (builds 1)",
+   "state loud False -> True (from toggle 'loud')",
+   "drew label '{count|plural press,presses} so far, {loud?loud:quiet}' -> '0 presses so far, loud'",
+   "state loud True -> False (from toggle 'loud')",
+   "drew label '{count|plural press,presses} so far, {loud?loud:quiet}' -> '0 presses so far, quiet'",
+   "action add from link 'add' on 'Counter'",
+   "state count 0 -> 1 (in add)",
+   "drew info '{count}' -> '1'",
+   "drew label '{count|plural press,presses} so far, {loud?loud:quiet}' -> '1 press so far, quiet'",
+   "action reset from link 'reset' on 'Counter'",
+   "state count 1 -> 0 (in reset)",
+   "drew info '{count}' -> '0'",
+   "drew label '{count|plural press,presses} so far, {loud?loud:quiet}' -> '0 presses so far, quiet'",
+   "state loud False -> True (from toggle 'loud')",
+   "drew label '{count|plural press,presses} so far, {loud?loud:quiet}' -> '0 presses so far, loud'"
+  ],
+  [
+   [
+    "(open)",
+    "b64ae3a6b6fc707b497639cd98ef3764b1e283ece3803bbfca76a42db912bdf6",
+    ""
+   ],
+   [
+    "k:a",
+    "980f89ad9082033e9ed90f42a93222111f37895e6e2e203841a1538aa67499c2",
+    ""
+   ],
+   [
+    "k:a",
+    "b64ae3a6b6fc707b497639cd98ef3764b1e283ece3803bbfca76a42db912bdf6",
+    ""
+   ],
+   [
+    "k:down",
+    "500b607d3c3bebe16ad9ffb62a263d08e3e7368e9ecf69fe79a2080042e970a1",
+    ""
+   ],
+   [
+    "k:down",
+    "500b607d3c3bebe16ad9ffb62a263d08e3e7368e9ecf69fe79a2080042e970a1",
+    ""
+   ],
+   [
+    "k:a",
+    "f441d321ffb59924c3812808769dd15e5127f965e1884f637d1dfecfb37ca0c9",
+    ""
+   ],
+   [
+    "k:down",
+    "7a70828f7f5900fa13dca7f2802b7d3fc274e4d750d28d47e1d7edd0ea97275d",
+    ""
+   ],
+   [
+    "k:a",
+    "500b607d3c3bebe16ad9ffb62a263d08e3e7368e9ecf69fe79a2080042e970a1",
+    ""
+   ],
+   [
+    "k:up",
+    "b64ae3a6b6fc707b497639cd98ef3764b1e283ece3803bbfca76a42db912bdf6",
+    ""
+   ],
+   [
+    "k:a",
+    "980f89ad9082033e9ed90f42a93222111f37895e6e2e203841a1538aa67499c2",
+    ""
+   ]
+  ]
+ ],
+ "glass/counter/tdeck_320x240_fs1_dark": [
+  [
+   "build build page (builds 1)",
+   "state loud False -> True (from toggle 'loud')",
+   "drew label '{count|plural press,presses} so far, {loud?loud:quiet}' -> '0 presses so far, loud'",
+   "state loud True -> False (from toggle 'loud')",
+   "drew label '{count|plural press,presses} so far, {loud?loud:quiet}' -> '0 presses so far, quiet'",
+   "action add from link 'add' on 'Counter'",
+   "state count 0 -> 1 (in add)",
+   "drew info '{count}' -> '1'",
+   "drew label '{count|plural press,presses} so far, {loud?loud:quiet}' -> '1 press so far, quiet'",
+   "action reset from link 'reset' on 'Counter'",
+   "state count 1 -> 0 (in reset)",
+   "drew info '{count}' -> '0'",
+   "drew label '{count|plural press,presses} so far, {loud?loud:quiet}' -> '0 presses so far, quiet'",
+   "state loud False -> True (from toggle 'loud')",
+   "drew label '{count|plural press,presses} so far, {loud?loud:quiet}' -> '0 presses so far, loud'"
+  ],
+  [
+   [
+    "(open)",
+    "25484ed6bab4d616661b908597ac7f23d4ae340af4eba7b92385c3adb2745bce",
+    ""
+   ],
+   [
+    "k:a",
+    "ee45e0fc9dd1b9b4ae76b2186f54b02d77d07af7b4c4871a5b5bc13cd41926e9",
+    ""
+   ],
+   [
+    "k:a",
+    "25484ed6bab4d616661b908597ac7f23d4ae340af4eba7b92385c3adb2745bce",
+    ""
+   ],
+   [
+    "k:down",
+    "27e93403ebb8d24be45eaba369fa5e23c0f069e63d1cc20c22eb4febcadfe872",
+    ""
+   ],
+   [
+    "k:down",
+    "27e93403ebb8d24be45eaba369fa5e23c0f069e63d1cc20c22eb4febcadfe872",
+    ""
+   ],
+   [
+    "k:a",
+    "0abbb2fd5f557e460488abc4f5fba1c02e46d5f20514db6cdd42ea1dde5bf6d5",
+    ""
+   ],
+   [
+    "k:down",
+    "9e673ce99d3af70f91581a1932bd1fb948531860494b588a555ef79c33ee2450",
+    ""
+   ],
+   [
+    "k:a",
+    "27e93403ebb8d24be45eaba369fa5e23c0f069e63d1cc20c22eb4febcadfe872",
+    ""
+   ],
+   [
+    "k:up",
+    "25484ed6bab4d616661b908597ac7f23d4ae340af4eba7b92385c3adb2745bce",
+    ""
+   ],
+   [
+    "k:a",
+    "ee45e0fc9dd1b9b4ae76b2186f54b02d77d07af7b4c4871a5b5bc13cd41926e9",
+    ""
+   ]
+  ]
+ ],
+ "glass/gates/p4_1024x600_fs2_windowed": [
+  [
+   "build build page (builds 1)",
+   "state open False -> True (from toggle 'open')",
+   "action add from link 'add' on 'Gates'",
+   "state n 0 -> 1 (in add)",
+   "drew label '{n} inside' -> '1 inside'",
+   "action add from link 'add' on 'Gates'",
+   "state n 1 -> 2 (in add)",
+   "drew label '{n} inside' -> '2 inside'",
+   "action take from link 'take' on 'Gates'",
+   "state n 2 -> 1 (in take)",
+   "drew label '{n} inside' -> '1 inside'",
+   "state open True -> False (from toggle 'open')"
+  ],
+  [
+   [
+    "(open)",
+    "5f1a8bdffcdbc62456e5c878c4554fc65c6ea85d7966628f6c2c2b4b6d6c36c5",
+    ""
+   ],
+   [
+    "k:a",
+    "c6857b94fdb44ad12f1b520e0a9376e2d2e6ee3d57c9cdd3da2012b97362713a",
+    ""
+   ],
+   [
+    "k:down",
+    "2074c08f63d8bee55d78114b3e81ba655e920aa26cf8993bc26443e6505209b0",
+    ""
+   ],
+   [
+    "k:a",
+    "9c908b4c13039570eeef4249990b4dfd483df95c9993f9e6a3a574b2cc88a899",
+    ""
+   ],
+   [
+    "k:a",
+    "1e959fd387bbdf3f3b11c0f1bb015f2c55f03d5393dc995122591d7e5e72242c",
+    ""
+   ],
+   [
+    "k:down",
+    "29c7c14b607526711829b1be6b301a0dff6645476606021110d911acb1874703",
+    ""
+   ],
+   [
+    "k:a",
+    "6d86ae55abef5f0fbd32904b0d97b508f2b14c061610a41ddfbb415f3584d9b7",
+    ""
+   ],
+   [
+    "k:up",
+    "9c908b4c13039570eeef4249990b4dfd483df95c9993f9e6a3a574b2cc88a899",
+    ""
+   ],
+   [
+    "k:up",
+    "8eb150e1b0b0ab03e3c039caf67cacf3f8c8bccb8a32ff345c146043ac5d792d",
+    ""
+   ],
+   [
+    "k:a",
+    "d60a015bbb33fa1938e8ca364fffa4d7ecbe3435a653b9846f8d30d27ceef356",
+    ""
+   ]
+  ]
+ ],
+ "glass/gates/tdeck_320x240_fs1_dark": [
+  [
+   "build build page (builds 1)",
+   "state open False -> True (from toggle 'open')",
+   "action add from link 'add' on 'Gates'",
+   "state n 0 -> 1 (in add)",
+   "drew label '{n} inside' -> '1 inside'",
+   "action add from link 'add' on 'Gates'",
+   "state n 1 -> 2 (in add)",
+   "drew label '{n} inside' -> '2 inside'",
+   "action take from link 'take' on 'Gates'",
+   "state n 2 -> 1 (in take)",
+   "drew label '{n} inside' -> '1 inside'",
+   "state open True -> False (from toggle 'open')"
+  ],
+  [
+   [
+    "(open)",
+    "4e36c05d7fa8a1a1f1389427a54cd1c821d5335e081f412bee7a69926c277e1b",
+    ""
+   ],
+   [
+    "k:a",
+    "dd6f44bc783f6d8c39392c81dd1b9bc24f27538aa57d57e2a98fd488368fe6f4",
+    ""
+   ],
+   [
+    "k:down",
+    "a56e678a8b6b78f243afb0190840415f08aa9e9e2b5e1bc48b74b34e89967071",
+    ""
+   ],
+   [
+    "k:a",
+    "60a74cc2c0690597c15132a63a04c86487a08f88fd9c65d7b7433b535917e9c1",
+    ""
+   ],
+   [
+    "k:a",
+    "2e37e36837ec1e5b016cc2dd72b46b0d8253c6c82d26020ad32975b75babc8bc",
+    ""
+   ],
+   [
+    "k:down",
+    "fd7e2878dd526496d111010201a75b59dfbf907ac09344303499a9d59b8ef3d9",
+    ""
+   ],
+   [
+    "k:a",
+    "724ac6d45ff5a0bab2911b68933ebffe4deef9a65a26b1023719d7ca9aea20e6",
+    ""
+   ],
+   [
+    "k:up",
+    "60a74cc2c0690597c15132a63a04c86487a08f88fd9c65d7b7433b535917e9c1",
+    ""
+   ],
+   [
+    "k:up",
+    "8c83a3599312f011ec535620b5b445cf2adde345df44910ae86cb734c95b437c",
+    ""
+   ],
+   [
+    "k:a",
+    "785b4b7219af1c3a5661d709813966a3a3c48785e0c6d496539a4bc1ffb80c32",
+    ""
+   ]
+  ]
+ ],
+ "glass/list/p4_1024x600_fs2_windowed": [
+  [
+   "state items [3 rows] +3 -0 ~0 moved 0 (in opened)",
+   "build build page (builds 1)",
+   "state sel '' -> 'a' (focus)",
+   "action pick from link 'a/pick' on 'Shopping'",
+   "state msg '' -> 'Picked Apples' (in pick)",
+   "drew label '{msg}' -> 'Picked Apples'",
+   "state sel 'a' -> 'b' (focus)",
+   "action pick from link 'b/pick' on 'Shopping'",
+   "state msg 'Picked Apples' -> 'Picked Bread' (in pick)",
+   "drew label '{msg}' -> 'Picked Bread'",
+   "state sel 'b' -> 'c' (focus)",
+   "action pick from link 'c/pick' on 'Shopping'",
+   "state msg 'Picked Bread' -> 'Picked Cheese' (in pick)",
+   "drew label '{msg}' -> 'Picked Cheese'",
+   "state sel 'c' -> 'b' (focus)",
+   "action pick from link 'b/pick' on 'Shopping'",
+   "state msg 'Picked Cheese' -> 'Picked Bread' (in pick)",
+   "drew label '{msg}' -> 'Picked Bread'"
+  ],
+  [
+   [
+    "(open)",
+    "4663d8d2a7c6ed670dca020b8a753da830d7f6fc2f7f1c95baa653f0d9aa9440",
+    ""
+   ],
+   [
+    "k:a",
+    "9defc27d489810d7771dff04683776fc5c65ad412756f6f92da6932cc2d539c5",
+    ""
+   ],
+   [
+    "k:down",
+    "94903a6a7c67b43a95f46d174b0e3ed37d610f718acd370707965c18c1bcc342",
+    ""
+   ],
+   [
+    "k:a",
+    "3cb8c58a2fbcdbade64bc913c4ae4880615bf64a38b822ff2e8f0c1e552840e4",
+    ""
+   ],
+   [
+    "k:down",
+    "c3c0f15382ad63aaff1702451807ae37f15d8a0b00eb2e3826d0f8faea788192",
+    ""
+   ],
+   [
+    "k:a",
+    "64532fdb09c145d9fbc385c712298206bccf896d325dc9caa380be43162c6792",
+    ""
+   ],
+   [
+    "k:up",
+    "f4509c111da28fa68b04c4cef2147ea504dfa394b369e4b55c0a9874f0bc36ce",
+    ""
+   ],
+   [
+    "k:a",
+    "3cb8c58a2fbcdbade64bc913c4ae4880615bf64a38b822ff2e8f0c1e552840e4",
+    ""
+   ]
+  ]
+ ],
+ "glass/list/tdeck_320x240_fs1_dark": [
+  [
+   "state items [3 rows] +3 -0 ~0 moved 0 (in opened)",
+   "build build page (builds 1)",
+   "state sel '' -> 'a' (focus)",
+   "action pick from link 'a/pick' on 'Shopping'",
+   "state msg '' -> 'Picked Apples' (in pick)",
+   "drew label '{msg}' -> 'Picked Apples'",
+   "state sel 'a' -> 'b' (focus)",
+   "action pick from link 'b/pick' on 'Shopping'",
+   "state msg 'Picked Apples' -> 'Picked Bread' (in pick)",
+   "drew label '{msg}' -> 'Picked Bread'",
+   "state sel 'b' -> 'c' (focus)",
+   "action pick from link 'c/pick' on 'Shopping'",
+   "state msg 'Picked Bread' -> 'Picked Cheese' (in pick)",
+   "drew label '{msg}' -> 'Picked Cheese'",
+   "state sel 'c' -> 'b' (focus)",
+   "action pick from link 'b/pick' on 'Shopping'",
+   "state msg 'Picked Cheese' -> 'Picked Bread' (in pick)",
+   "drew label '{msg}' -> 'Picked Bread'"
+  ],
+  [
+   [
+    "(open)",
+    "c13547d1868a5dea62a3668f9ad0eee6b32d684482fa16def65a854ef6407744",
+    ""
+   ],
+   [
+    "k:a",
+    "0e3df17719889f242cd57273c0f0904c2023072c24f543658478634538958620",
+    ""
+   ],
+   [
+    "k:down",
+    "7f89e5d16c4862bda532b7d23746758edc22e8252c289ef7713f8bfb36e73389",
+    ""
+   ],
+   [
+    "k:a",
+    "eab025b5cec229ff18c2247301d514a19027b3affe6c5a527356577a5a4cecaf",
+    ""
+   ],
+   [
+    "k:down",
+    "be1a71c91655753f73206d582b7407a1c17f5b618e8063a389a7a29b672b512e",
+    ""
+   ],
+   [
+    "k:a",
+    "d37182438bfe720d7b937d60f9647c70e27851651641abd8d402d97ce1e25398",
+    ""
+   ],
+   [
+    "k:up",
+    "d99b6800ab082eb11e804963fd7e3ca45c0a78c02b72c224e8f287785d3dae9d",
+    ""
+   ],
+   [
+    "k:a",
+    "eab025b5cec229ff18c2247301d514a19027b3affe6c5a527356577a5a4cecaf",
+    ""
+   ]
+  ]
+ ],
+ "glass/pages/p4_1024x600_fs2_windowed": [
+  [
+   "build build page (builds 1)",
+   "action add from link 'add' on 'Pages'",
+   "state count 0 -> 1 (in add)",
+   "drew info '{count}' -> '1'",
+   "action add from link 'add' on 'Pages'",
+   "state count 1 -> 2 (in add)",
+   "drew info '{count}' -> '2'",
+   "action ask from link 'ask' on 'Pages'",
+   "state asking False -> True (in ask)",
+   "action keep from back on dialog 'dialog#1'",
+   "state asking True -> False (in keep)",
+   "action ask from link 'ask' on 'Pages'",
+   "state asking False -> True (in ask)",
+   "action keep from button 'keep' of dialog 'Reset the count?'",
+   "state asking True -> False (in keep)",
+   "action more from link 'more' on 'Pages'",
+   "page push page 2, opened from 'more'",
+   "build details page (builds 2)",
+   "page back page 1, focus back to 'more'",
+   "build build page (builds 3)"
+  ],
+  [
+   [
+    "(open)",
+    "9efdbd16f5431da7198f8cfd5f297165e6238dea02bd2e76578477865d977ee3",
+    ""
+   ],
+   [
+    "k:a",
+    "2e03dba163feb7c175e147cd7a5ee982ff06b724573c3bcd28f6f7f99b305329",
+    ""
+   ],
+   [
+    "k:a",
+    "cc9843a48f3eb389b16f2b3b4c6fefca2ed83fc65c89b709feca5d0c4e1b7c5d",
+    ""
+   ],
+   [
+    "k:down",
+    "7377a06adf70c5dfdc0d16ef1768e9983b56e7a529aa78ad78460d6f1e7bd062",
+    ""
+   ],
+   [
+    "k:a",
+    "d7406d74ee18579fcc7383baf2d718f54e20f4bf53f5260f14b7609bd2b8b590",
+    ""
+   ],
+   [
+    "back",
+    "7377a06adf70c5dfdc0d16ef1768e9983b56e7a529aa78ad78460d6f1e7bd062",
+    ""
+   ],
+   [
+    "k:a",
+    "d7406d74ee18579fcc7383baf2d718f54e20f4bf53f5260f14b7609bd2b8b590",
+    ""
+   ],
+   [
+    "k:down",
+    "d7406d74ee18579fcc7383baf2d718f54e20f4bf53f5260f14b7609bd2b8b590",
+    ""
+   ],
+   [
+    "k:a",
+    "7377a06adf70c5dfdc0d16ef1768e9983b56e7a529aa78ad78460d6f1e7bd062",
+    ""
+   ],
+   [
+    "k:down",
+    "1b666797bbf5c1551441cd197a744e0d50de99332a2a798a34d6613fbf4fdafe",
+    ""
+   ],
+   [
+    "k:a",
+    "db6e6bf53956a07e0859d06eee3bbdbef1a1091187963ec0b6fe5dd38310a220",
+    ""
+   ],
+   [
+    "back",
+    "1b666797bbf5c1551441cd197a744e0d50de99332a2a798a34d6613fbf4fdafe",
+    ""
+   ]
+  ]
+ ],
+ "glass/pages/tdeck_320x240_fs1_dark": [
+  [
+   "build build page (builds 1)",
+   "action add from link 'add' on 'Pages'",
+   "state count 0 -> 1 (in add)",
+   "drew info '{count}' -> '1'",
+   "action add from link 'add' on 'Pages'",
+   "state count 1 -> 2 (in add)",
+   "drew info '{count}' -> '2'",
+   "action ask from link 'ask' on 'Pages'",
+   "state asking False -> True (in ask)",
+   "action keep from back on dialog 'dialog#1'",
+   "state asking True -> False (in keep)",
+   "action ask from link 'ask' on 'Pages'",
+   "state asking False -> True (in ask)",
+   "action keep from button 'keep' of dialog 'Reset the count?'",
+   "state asking True -> False (in keep)",
+   "action more from link 'more' on 'Pages'",
+   "page push page 2, opened from 'more'",
+   "build details page (builds 2)",
+   "page back page 1, focus back to 'more'",
+   "build build page (builds 3)"
+  ],
+  [
+   [
+    "(open)",
+    "8177114dd331936b8fa0c6c79389e8edc2807bd3b366bba7ecda7fa3225f52ae",
+    ""
+   ],
+   [
+    "k:a",
+    "cc12d9008c0c8fb67e0fb74b242b6f1f1410da86e64dc324181ca23026253440",
+    ""
+   ],
+   [
+    "k:a",
+    "b0381a8bad8e13fc318574e4a7b7ad2ae4a4f0ccab80f029686915b7f6f8e62a",
+    ""
+   ],
+   [
+    "k:down",
+    "688c19faa6d7facbcb5ba29f768d4f211656b853813c697785d882b2d63ffb44",
+    ""
+   ],
+   [
+    "k:a",
+    "7c0c1245da909868dd5b4321d29e598528b06d9c3b46618b2b468bd497506ab5",
+    ""
+   ],
+   [
+    "back",
+    "688c19faa6d7facbcb5ba29f768d4f211656b853813c697785d882b2d63ffb44",
+    ""
+   ],
+   [
+    "k:a",
+    "7c0c1245da909868dd5b4321d29e598528b06d9c3b46618b2b468bd497506ab5",
+    ""
+   ],
+   [
+    "k:down",
+    "7c0c1245da909868dd5b4321d29e598528b06d9c3b46618b2b468bd497506ab5",
+    ""
+   ],
+   [
+    "k:a",
+    "688c19faa6d7facbcb5ba29f768d4f211656b853813c697785d882b2d63ffb44",
+    ""
+   ],
+   [
+    "k:down",
+    "8afa6bc995e70f98fb51e8636937e6b398265fc857e81e1d6566ef0873eb885e",
+    ""
+   ],
+   [
+    "k:a",
+    "41070ea982f6d795ae7efedd9bd6bf3093435ea9942a69c3fc8ab7ab08540f22",
+    ""
+   ],
+   [
+    "back",
+    "8afa6bc995e70f98fb51e8636937e6b398265fc857e81e1d6566ef0873eb885e",
+    ""
+   ]
+  ]
+ ],
+ "long/120": "sha256:8d6cfa6db994a2d4aec66a7109621780aea8327acf49dac2ce176e6e050c8a2f",
+ "long/50": "sha256:cab36758ffece5ace4d98ff40d3f4e1ce8880084d2e7c943d8713e879a25d05d"
+}

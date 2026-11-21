@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent / "uitree_fixtures"))
 
 import uitree_parity as P  # noqa: E402
+import uitree_reference as R  # noqa: E402
 
 CONFIGS = ("tdeck_320x240_fs1_dark", "p4_1024x600_fs2_windowed", "big_800x480_fs3_dark",
            "p4_1024x600_cs2_fs1_windowed")
@@ -50,6 +51,7 @@ def test_a_text_editor_draws_and_types_alike_on_both_engines(config, tmp_path):
     import uitree_c
     import uitree_ref_editor
     _, ref = _run(uitree_ref_editor.Engine, config)
+    R.held(__file__, "text_editor/" + config, ref)
     _, c = _run(uitree_c.CEditorEngine, config)
     states = [f.state for f in ref]
     assert " L1:1 0 " in states[0] and any("gutter=False" in t for t in states), states
@@ -58,3 +60,16 @@ def test_a_text_editor_draws_and_types_alike_on_both_engines(config, tmp_path):
     assert any(t.split()[0].startswith("repr") or t.split()[0].startswith("range") for t in states), states
     assert [f.state for f in c] == [f.state for f in ref]
     P.compare(ref, c, tmp_path, "text_editor")
+
+
+def test_two_shown_units_answering_one_chord_is_u08():
+    """A typed chord two live actions answer: the checker proves no page
+    shows both, and the C engine refuses it by name if one does."""
+    import types
+    import uitree as S
+    import uitree_c
+    eng = uitree_c.CEditorEngine.__new__(uitree_c.CEditorEngine)
+    eng._acts = [types.SimpleNamespace(name=n, keys=("ctrl+s",), live=lambda: True) for n in ("save", "store")]
+    with pytest.raises(S.UIError) as e:
+        eng._chord(S._chord_byte("ctrl+s"))
+    assert e.value.code == "U08" and "save and store" in str(e.value)

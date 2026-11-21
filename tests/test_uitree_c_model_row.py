@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent / "uitree_fixtures"))
 
 import uitree_parity as P  # noqa: E402
+import uitree_reference as R  # noqa: E402
 
 CONFIGS = ("tdeck_320x240_fs1_dark", "p4_1024x600_fs2_windowed", "big_800x480_fs3_dark",
            "p4_1024x600_cs2_fs1_windowed")
@@ -43,6 +44,7 @@ def test_a_row_from_a_model_draws_alike_on_both_engines(config, tmp_path):
     import uitree_c
     import uitree_ref_editor
     ref = _run(uitree_ref_editor.Engine, config)
+    R.held(__file__, "model_row/" + config, ref)
     c = _run(uitree_c.CEditorEngine, config)
     assert [f.state for f in c] == [f.state for f in ref]
     P.compare(ref, c, tmp_path, "model_row")

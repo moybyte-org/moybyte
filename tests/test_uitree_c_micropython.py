@@ -18,6 +18,7 @@ sys.path.insert(0, str(HERE))
 
 import test_frame_alloc as FA  # noqa: E402
 import uitree_conf as C  # noqa: E402
+import uitree_reference as R  # noqa: E402
 
 LONG = '''
 import uitree as ui
@@ -148,6 +149,12 @@ def _use(tag):
     uitree_app.use_engine("reference" if tag == "reference" else "c")
 
 
+def _digest(buf):
+    import binascii
+    import hashlib
+    return binascii.hexlify(hashlib.sha256(buf).digest()).decode()
+
+
 def _frame(eng, host, cv, th, box):
     import ui
     host.begin(cv, th, box)
@@ -196,7 +203,9 @@ def conf(loop):
             runs[tag] = (list(eng.trace), frames)
         same = [i for i in range(len(runs["py"][1])) if runs["py"][1][i] == runs["c"][1][i]]
         out["fixtures"][name] = {"trace_py": runs["py"][0], "trace_c": runs["c"][0],
-                                 "frames": len(runs["py"][1]), "same": len(same)}
+                                 "frames": len(runs["py"][1]), "same": len(same),
+                                 "digests_py": [_digest(b) for b in runs["py"][1]],
+                                 "digests_c": [_digest(b) for b in runs["c"][1]]}
         runs = None
         gc.collect()
     S.TRACING = False
@@ -329,6 +338,7 @@ def settings(loop):
         _use("reference")
         ws.open_settings()
         _steps(loop, 20)
+        r["digests"] = [_digest(b) for b in frames]
         if first is None:
             first = frames
         else:
@@ -448,6 +458,7 @@ def test_the_c_engine_on_the_boards_micropython_draws_the_reference(result):
     info, text = result
     for name, f in info["fixtures"].items():
         assert C.norm_trace(f["trace_c"]) == C.norm_trace(_latin(f["trace_py"])), name
+        R.held(__file__, "conf/" + name, [C.norm_trace(_latin(f["trace_py"])), f["digests_py"]])
         assert f["same"] == f["frames"], (name, f["same"], f["frames"])
     for k, v in sorted(info["cost"].items()):
         print(k, json.dumps(v))
@@ -459,6 +470,7 @@ def test_the_c_engine_on_the_boards_micropython_draws_the_reference(result):
 
 def test_a_lent_row_lays_out_alike_on_both_engines_on_the_boards_micropython(result):
     info, _text = result
+    R.held(__file__, "bar", info["bar"]["py"])
     assert info["bar"]["c"] == info["bar"]["py"]
     assert len(info["bar"]["c"]) > 10
 
@@ -478,6 +490,7 @@ def test_settings_rows_on_the_c_engine_draw_the_reference_and_shift_cheaper(resu
     st = info["settings"]
     ref, c = st["reference"], st["c"]
     assert c["engine"] == "CPage" and st["c_checked"]["engine"] == "CPage" and ref["engine"] == "Page"
+    R.held(__file__, "settings_rows", ref["digests"])
     for r in (c, st["c_checked"]):
         assert len(r["same"]) == r["frames"], ("frames that differ", sorted(set(range(r["frames"])) - set(r["same"])))
     for tag, r in (("reference", ref), ("c", c), ("c_checked", st["c_checked"])):
@@ -491,5 +504,6 @@ def test_settings_rows_on_the_c_engine_draw_the_reference_and_shift_cheaper(resu
                                "held_bytes": r["held_bytes"]}))
         assert len(drawn) > 30 and len(shifted) > len(drawn) // 2, (tag, len(shifted), len(drawn))
     assert c["shift_median"] < FA.SETTINGS_FRAME, c["shift_median"]
+    R.held(__file__, "settings_shift_median", ref["shift_median"])
     assert c["shift_median"] <= ref["shift_median"], (c["shift_median"], ref["shift_median"])
 
