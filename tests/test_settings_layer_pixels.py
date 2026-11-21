@@ -254,11 +254,7 @@ def capture(cfg, carts_dir):
 
     sl._draw_page()
 
-    def order(n):                                       # the page's nodes, top to bottom
-        yield n.key
-        for k in n.kids:
-            yield from order(k)
-    at = {k: i for i, k in enumerate(order(sl.rows.engine.root))}
+    at = {k: i for i, k in enumerate(sl.rows.engine.stop_kinds())}    # the page's stops, top to bottom
     for key, _label, _kind in sorted(sl._settings_rows(), key=lambda r: at[r[0]]):
         out["row_" + key] = page(focus=key)             # a row's node is keyed by its row key
     out["row_achievements"] = page(focus="achievements")
@@ -570,18 +566,16 @@ def test_under_touch_the_name_row_reads_the_default_name_over_its_note(tmp_path,
     # the next group's first row in view puts the note and the Name row
     # above it on the screen too
     ws.settings_layer.show_row("steady")
-    infos = []
-    ui = settings_layer._ui
-    real = ui.info
-    ui.info = lambda label, value, o=None: (infos.append((label, value)), real(label, value, o))
-    try:
-        for _ in range(3):
-            ws.mark_dirty()
-            drv.frame(_DT)
-    finally:
-        ui.info = real
+    for _ in range(3):
+        ws.mark_dirty()
+        drv.frame(_DT)
     import ssh_service
-    assert ("Name", ssh_service.default_name()) in infos, infos
+    eng = ws.settings_layer.rows.engine
+    drawn = eng.stop_kinds()
+    shown = [k for k, kind in drawn.items() if kind == "info" and k.startswith("info#")]
+    assert len(shown) == 1, drawn                            # the Name row, drawn as an info row
+    assert "name" not in drawn, "the Name field drawn under touch"
+    assert eng.s.name_shown == ssh_service.default_name()   # what the info row reads
     cv = ws.sys_canvas
     buf = bytes(cv._buf)
 
