@@ -973,15 +973,18 @@ int moy_ui_table_row(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_tgeo_t
 // picture -- a lifted card's grown and raised, *content where the app draws
 // it -- and its title and `sub` centred under the picture. *gnd is the
 // colour around the picture, which moy_ui_card_end cuts its corners to;
-// `desk` takes MOY_UI_WINDOW as the page's ground does.
+// `desk` takes MOY_UI_WINDOW as the page's ground does. The labels are
+// cut to a band `lw` (at least `b.w`) wide centred on the card, to `b.w`
+// where a solid current mark inks them for its fill.
 // `tone` (MOY_UI_TONE_*) is the sub line's ink: the dim ink, else `value`
-// or the danger ink. With F_WRAP a title wider than the card breaks at its
+// or the danger ink. With F_WRAP a title wider than the band breaks at its
 // last word that fits onto a second line, where the card's foot holds it.
-int moy_ui_card(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_box_t pic, moy_ui_span_t title,
-                moy_ui_span_t sub, int flags, int fs, int desk, int tone, moy_ui_box_t *content,
-                uint16_t *gnd);
-// The pixels a card `bw` wide adds under its picture for `title`: the
-// second line's step where F_WRAP breaks it, else 0. Measures, draws nothing.
+int moy_ui_card(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_box_t pic, int lw,
+                moy_ui_span_t title, moy_ui_span_t sub, int flags, int fs, int desk, int tone,
+                moy_ui_box_t *content, uint16_t *gnd);
+// The pixels a card's label band `bw` wide adds under its picture for
+// `title`: the second line's step where F_WRAP breaks it, else 0. Measures,
+// draws nothing.
 int moy_ui_card_wrap(const moy_ui_sink_t *s, int bw, moy_ui_span_t title, int fs, int desk);
 // After the app drew into `content`: its corners cut to the card radius over
 // `gnd` and its ring, then a lifted picture's rim (F_FOCUS) round `pic`.
