@@ -1299,8 +1299,15 @@
     },
     "pad": {
      "type": "int",
-     "level": 2,
-     "designed": true
+     "level": 2
+    },
+    "gap": {
+     "type": "int",
+     "level": 2
+    },
+    "mid": {
+     "type": "bool",
+     "level": 2
     }
    },
    "head_optional": true
@@ -1645,7 +1652,7 @@
    "section": "7.3",
    "props": {
     "kind": {
-     "type": "word:normal,primary,danger,tonal",
+     "type": "word:normal,primary,danger,tonal,bar",
      "level": 1
     },
     "label": {
@@ -1674,6 +1681,10 @@
     },
     "marked": {
      "type": "cond",
+     "level": 2
+    },
+    "w": {
+     "type": "int",
      "level": 2
     }
    }
