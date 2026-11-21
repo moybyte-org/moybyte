@@ -2520,17 +2520,39 @@ class Page(Engine):
 # -- which engine ------------------------------------------------------------------
 
 ENGINES = ("reference", "c")
-# The host's default is the C engine; a board's stays the reference until its pass moves it.
-DEFAULT = "reference" if sys.implementation.name == "micropython" else "c"
+# The file whose word ("reference" or "c") picks a board's engine at boot, for diagnosis.
+ENGINE_FILE = "/uitree_engine"
+
+
+def _default():
+    """The C engine on the host and on every board whose image carries
+    native/moy_uitree; the reference on a board without it, or where
+    `ENGINE_FILE` names it."""
+    if sys.implementation.name != "micropython":
+        return "c"
+    try:
+        with open(ENGINE_FILE) as f:
+            name = f.read().strip()
+        if name in ENGINES:
+            return name
+    except OSError:
+        pass
+    try:
+        import moy_uitree  # noqa: F401
+    except ImportError:
+        return "reference"
+    return "c"
+
+
+DEFAULT = _default()
 _IN_USE = [DEFAULT]
 
 
 def use_engine(name):
     """The engine the apps and hosted pages made from now on run on:
     "reference" (this module's replay, which the host checker and the
-    CPython tests keep) or "c" (native/moy_uitree, through uitree_c). The
-    host starts on "c", a board on the reference (`DEFAULT`); an app made
-    with `engine=` keeps its own."""
+    CPython tests keep) or "c" (native/moy_uitree, through uitree_c). It
+    starts on `DEFAULT`; an app made with `engine=` keeps its own."""
     if name not in ENGINES:
         raise S.UIError("N01", "uitree_app.use_engine(%r)" % (name,), expected=", ".join(ENGINES),
                         fix='use_engine("reference") or use_engine("c")')
