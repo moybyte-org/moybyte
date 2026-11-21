@@ -425,7 +425,9 @@ def frames(loop):
                 steps(2)
             opener()
             steps(6)
-            shot = b"".join(bytes(moy_lcd.fb(i)) for i in range(moy_lcd.nfbs()))     # the glass's buffers
+            # the glass's buffers, in no order: a frame owed in one round and not the other
+            # swaps which buffer holds the last frame, not what it shows
+            shot = b"".join(sorted(bytes(moy_lcd.fb(i)) for i in range(moy_lcd.nfbs())))
             if arm == "built":
                 shots[name] = shot
             elif arm == "loaded" and name != "log":         # the log's lines grow between rounds

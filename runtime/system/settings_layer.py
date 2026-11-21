@@ -1463,7 +1463,7 @@ class SettingsLayer(Layer):
             _PAGES[view][3](self)
             self._sub_focused = _ui.focus()
         _ui.end()                     # the fade where the rows run on below
-        if ws.frame_state.dirty or self.page != view or host.owed or host.tap == 2:
+        if ws.frame_state.dirty or self.page != view or host.owed or host.owes() or host.tap == 2:
             ws.request_frame()        # an answer changed what the page shows
         ws.frame_state.dirty = was or ws.frame_state.dirty
 

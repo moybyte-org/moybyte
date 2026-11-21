@@ -266,3 +266,20 @@ def test_a_key_step_paints_once(tmp_path):
             assert 2 <= paints <= 12, "a glide's frames, then rest: %d" % paints
             kinds.add("glide")
     assert kinds == {"still", "glide"}
+
+
+def test_the_time_zone_page_opens_on_its_zone_with_no_frame_forced(tmp_path):
+    """The Time zone picker focuses the zone in force as it opens, a row below
+    what its first frame shows: the frame that focus owes is painted on its
+    own (no key, no mark_dirty), and it scrolls that row into view."""
+    ws = _ws(tmp_path)
+    ws.toggles.set_time_zone("CET-1CEST,M3.5.0,M10.5.0/3", persist=False)
+    drv = _drv(ws)
+    ws.settings_layer.open_page("tz")
+    for _ in range(30):
+        drv.frame(_DT)
+    sl, lay = ws.settings_layer, ws.layout
+    fid = sl._sub_focused
+    assert fid and fid.startswith("CET-1CEST"), fid
+    x, y, w, h = sl._sub.box(fid)
+    assert lay.cy <= y and y + h <= lay.cy + lay.ch, ((x, y, w, h), (lay.cy, lay.ch))
