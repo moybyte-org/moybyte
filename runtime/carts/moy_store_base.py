@@ -249,9 +249,13 @@ VENDOR_FIELDS = ("type", "system", "order", "permissions", "required", "handles"
 # The console API level (docs/app_api_v1.md, "The API level"): one integer that
 # goes up whenever any app-facing table grows or changes. A cart names the level
 # it needs as `"moybyte": {"api": N}`; one that names none needs API_LOWEST.
-# tools/api_level.py writes the line below it, the fingerprint of the tables at
-# this level, and tests/test_api_level.py fails a table that moves without it.
+# tools/api_level.py writes the fingerprint line below, the tables at this level,
+# and tests/test_api_level.py fails a table that moves without it (once frozen,
+# without a bump).
 API_LEVEL = 1
+# The API is frozen from the first public release; until then the level stays
+# and the fingerprint is re-pinned freely.
+API_FROZEN = False
 # API fingerprint: level 1 sha256 74bc6d309b19c4457242a672af74a8fe5db15e3fb7a43e3b49bc989397630126
 API_LOWEST = 1
 

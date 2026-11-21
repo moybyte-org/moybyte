@@ -3,11 +3,15 @@
 
 The level is runtime/carts/moy_store_base.py's API_LEVEL; the line below it
 holds the fingerprint, the sha256 of every table in TABLES, as this writes it.
-A table that changes without the level going up fails --check (and
-tests/test_api_level.py), and writing refuses to re-pin it until the level is
-bumped: what an app can rely on and the number a cart names move together.
+While API_FROZEN is False (the API is still being built) the level stays and
+the fingerprint is re-pinned freely: --check fails only when the pin is stale.
+Once API_FROZEN is True, a table that changes without the level going up fails
+--check (and tests/test_api_level.py), and writing refuses to re-pin it until
+the level is bumped: what an app can rely on and the number a cart names move
+together.
 
-    tools/api_level.py           re-pin the fingerprint (after bumping API_LEVEL)
+    tools/api_level.py           re-pin the fingerprint (after bumping API_LEVEL
+                                 once the API is frozen)
     tools/api_level.py --check   exit 1 when the pin does not match the tables
 """
 
@@ -35,6 +39,7 @@ PLAYER_FIT = _module_file("player_fit")
 OS_CALLS_PRIVATE = ("about", "doc", "example", "prompt", "server", "how", "lua_own", "door")
 
 _LEVEL = re.compile(r"^API_LEVEL = (\d+)$", re.M)
+_FROZEN = re.compile(r"^API_FROZEN = (True|False)$", re.M)
 _PIN = re.compile(r"^# API fingerprint: level (\d+) sha256 ([0-9a-f]{64})$", re.M)
 _FORMAT = re.compile(r"^FORMAT_LEVEL = (\d+)$", re.M)
 
@@ -106,12 +111,22 @@ def pinned(text):
     return int(lv.group(1)), (None if pin is None else (int(pin.group(1)), pin.group(2)))
 
 
+def frozen(text):
+    """True when the level file's `text` has the API frozen (API_FROZEN)."""
+    fz = _FROZEN.search(text)
+    if fz is None:
+        raise PinError("%s names no API_FROZEN" % LEVEL_FILE)
+    return fz.group(1) == "True"
+
+
 def check(text, fp):
     """None when the level file's `text` pins fingerprint `fp` at its own
     API_LEVEL, else what to do."""
     level, pin = pinned(text)
     if pin is not None and pin == (level, fp):
         return None
+    if not frozen(text):
+        return "re-pin the fingerprint with tools/api_level.py"
     if pin is not None and pin[0] == level:
         return ("an app-facing table changed (native/os_calls.json, "
                 "moy_store_base.VENDOR_FIELDS, player_fit.FORMAT_LEVEL or another of "
@@ -124,11 +139,12 @@ def check(text, fp):
 
 def repin(text, fp):
     """The level file's `text` with fingerprint `fp` pinned at its API_LEVEL.
-    Raises PinError when the tables moved and the level did not."""
+    Raises PinError when the API is frozen and the tables moved while the
+    level did not."""
     level, pin = pinned(text)
     if pin is None:
         raise PinError("%s has no '# API fingerprint:' line under API_LEVEL" % LEVEL_FILE)
-    if pin[1] != fp and pin[0] >= level:
+    if frozen(text) and pin[1] != fp and pin[0] >= level:
         raise PinError("the tables changed at API level %d: bump the API level in "
                        "runtime/carts/moy_store_base.py first" % level)
     line = "# API fingerprint: level %d sha256 %s" % (level, fp)

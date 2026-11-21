@@ -27,6 +27,10 @@ def _level_text():
         return f.read()
 
 
+def _frozen_text():
+    return _level_text().replace("API_FROZEN = False\n", "API_FROZEN = True\n")
+
+
 def _tables_with(name, value):
     return [[n, value if n == name else t] for n, t in api_level.tables()]
 
@@ -41,23 +45,37 @@ def test_the_pinned_fingerprint_is_the_tables_at_this_level():
     assert level == moy_store_base.API_LEVEL and pin[0] == level
 
 
-def test_a_table_that_changes_without_a_bump_is_red_and_names_the_fix():
+def test_a_table_that_changes_without_a_bump_is_red_once_frozen_and_names_the_fix():
     calls = api_level.os_calls_table()
     calls["rows"] = calls["rows"] + [{"name": "moybyte.new_verb", "in": [], "ret": "int"}]
     fp = api_level.fingerprint(_tables_with("os_calls", calls))
-    why = api_level.check(_level_text(), fp)
+    why = api_level.check(_frozen_text(), fp)
     assert why is not None
     assert "bump the API level in runtime/carts/moy_store_base.py" in why
     assert "API_LEVEL = %d" % (moy_store_base.API_LEVEL + 1) in why
     assert "re-pin the fingerprint with tools/api_level.py" in why
     with pytest.raises(api_level.PinError, match="bump the API level"):
-        api_level.repin(_level_text(), fp)
+        api_level.repin(_frozen_text(), fp)
+
+
+def test_unfrozen_a_table_change_re_pins_without_a_bump_and_a_stale_pin_fails_the_check():
+    text = _level_text()
+    assert api_level.frozen(text) is moy_store_base.API_FROZEN is False
+    assert api_level.frozen(_frozen_text()) is True
+    calls = api_level.os_calls_table()
+    calls["rows"] = calls["rows"] + [{"name": "moybyte.new_verb", "in": [], "ret": "int"}]
+    fp = api_level.fingerprint(_tables_with("os_calls", calls))
+    why = api_level.check(text, fp)
+    assert why == "re-pin the fingerprint with tools/api_level.py"
+    new = api_level.repin(text, fp)
+    assert api_level.check(new, fp) is None
+    assert api_level.pinned(new) == (moy_store_base.API_LEVEL, (moy_store_base.API_LEVEL, fp))
 
 
 def test_a_bump_re_pins_and_the_check_then_holds():
     fp = api_level.fingerprint(_tables_with("manifest", api_level.manifest_table() + ["x"]))
     level = moy_store_base.API_LEVEL
-    bumped = _level_text().replace("API_LEVEL = %d\n" % level, "API_LEVEL = %d\n" % (level + 1))
+    bumped = _frozen_text().replace("API_LEVEL = %d\n" % level, "API_LEVEL = %d\n" % (level + 1))
     assert "re-pin" in api_level.check(bumped, api_level.fingerprint()), \
         "a bump alone is not pinned yet"
     new = api_level.repin(bumped, fp)

@@ -198,6 +198,10 @@ fingerprint of those tables on the line below the level, and
 `tests/test_api_level.py` fails a table that changes while the level stands; the
 fix it names is to bump `API_LEVEL` and re-pin with `tools/api_level.py`.
 
+The level is 1, and until the API is frozen at the first public release
+(`API_FROZEN` beside it) the fingerprint is re-pinned freely without a bump;
+from then on every change bumps the level and the API is add-only.
+
 A cart names the level it needs as `"moybyte": {"api": N}`, the lowest level
 that has everything it uses; a cart that names none needs the lowest, 1. A
 console at that level or above runs it and lists it. Below it:
