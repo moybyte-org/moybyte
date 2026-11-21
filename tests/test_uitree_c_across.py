@@ -60,3 +60,66 @@ def test_fixed_cells_take_their_width_and_the_fills_share_the_rest():
     assert rects["logo"][2] == 40 and rects["side"][2] == 56, rects
     assert rects["left"][3] == rects["body"][3] == rects["side"][3], rects
     assert rects["body"][3] > rects["bar"][3], rects
+
+
+BAR_KEYS = ("bar", "zone", "chips", "chip", "clock", "bump", "tray", "wifi", "batt", "mid_bar", "lfill",
+            "centre", "title", "flip", "rfill", "rfix", "ends", "lead", "space", "tail", "body")
+# Bump (focused first) widens the clock (w= a state) and the tray's gap (gap= a state)
+BAR_SCRIPT = ["k:a", "k:right", "k:a", "k:down", "k:right", "k:left", "k:a"]
+
+
+def _run_bar(engine, config):
+    import uitree_across_bar as F
+    seen = {}
+    cls = F.layer(engine)
+
+    def opened(ws):
+        seen["app"] = P.host(ws, cls)
+
+    def probe(ws):
+        e = seen["app"].engine
+        return "%s %r" % (e.focus_key, [(k, e.rect_of(k)) for k in BAR_KEYS])
+    return P.frames(config, P.Surface(opened, probe=probe), BAR_SCRIPT)
+
+
+@pytest.mark.parametrize("config", CONFIGS)
+def test_a_bar_s_pieces_lay_out_alike_on_both_engines(config, tmp_path):
+    """pad=, gap= (a literal and a state), w= from a state, a row in a row,
+    a spacer, a mid of fills and a mid of fixed cells: the same rects and
+    pixels on both engines."""
+    import uitree_c
+    import uitree_editor
+    ref = _run_bar(uitree_editor.Engine, config)
+    c = _run_bar(uitree_c.CEditorEngine, config)
+    assert [f.state for f in c] == [f.state for f in ref]
+    P.compare(ref, c, tmp_path, "across_bar")
+
+
+def test_the_bar_s_pieces_place_by_their_rule():
+    """On the desk (unit 1): the pad and gap literal, the clock as wide as
+    its state, the tray's gap its state, the chips centred on the bar and
+    clearing both sides, the centre run centred with each side's fill
+    sharing its own side, the spacer pushing the tail to the row's end."""
+    import ast
+    import uitree_editor
+    f = _run_bar(uitree_editor.Engine, "p4_1024x600_cs2_fs1_windowed")
+    r = dict(ast.literal_eval(f[0].state.split(" ", 1)[1]))
+    bx, _, bw, _ = r["bar"]
+    assert r["bump"][0] == bx + 2 and r["zone"][0] == r["bump"][0] + r["bump"][2] + 2, r
+    assert r["clock"][2] == 40 and r["wifi"][2] == 16, r
+    assert r["batt"][0] - (r["wifi"][0] + 16) == 6, r
+    assert r["batt"][0] + 16 == bx + bw - 2, r
+    cx = bx + bw // 2
+    assert r["chips"][0] + r["chips"][2] // 2 == cx, r
+    assert r["chips"][0] + r["chips"][2] + 2 == r["clock"][0], r
+    assert r["zone"][0] + r["zone"][2] + 2 == r["chips"][0], r
+    mx, _, mw, _ = r["mid_bar"]
+    assert abs(r["centre"][0] + r["centre"][2] // 2 - (mx + mw // 2)) <= 1, r
+    assert r["lfill"][0] == mx + 4 and r["lfill"][0] + r["lfill"][2] + 4 == r["centre"][0], r
+    assert r["rfill"][0] == r["centre"][0] + r["centre"][2] + 4, r
+    assert r["rfix"][0] + 24 == mx + mw - 4, r
+    ex, _, ew, _ = r["ends"]
+    assert r["tail"][0] + r["tail"][2] == ex + ew, r
+    later = [dict(ast.literal_eval(x.state.split(" ", 1)[1])) for x in f]
+    later = next(x for x in later if x["clock"][2] != 40)
+    assert later["clock"][2] == 52 and later["batt"][0] - (later["wifi"][0] + 16) == 9, later

@@ -409,6 +409,14 @@ static mp_obj_t eng_panes_set(size_t n, const mp_obj_t *a)
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(eng_panes_set_obj, 5, 5, eng_panes_set);
 
+// set_unit(unit)
+static mp_obj_t eng_set_unit(mp_obj_t self, mp_obj_t u)
+{
+    uit_set_unit(eng(self), u == mp_const_none ? 0 : mp_obj_get_int(u));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(eng_set_unit_obj, eng_set_unit);
+
 #define PANES_MAX 2048
 
 // panes() -> [ints]: the last pass's panes (uit_panes)
@@ -679,6 +687,7 @@ static const mp_rom_map_elem_t eng_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_ground), MP_ROM_PTR(&eng_ground_obj) },
     { MP_ROM_QSTR(MP_QSTR_place), MP_ROM_PTR(&eng_place_obj) },
     { MP_ROM_QSTR(MP_QSTR_panes_set), MP_ROM_PTR(&eng_panes_set_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_unit), MP_ROM_PTR(&eng_set_unit_obj) },
     { MP_ROM_QSTR(MP_QSTR_panes), MP_ROM_PTR(&eng_panes_obj) },
     { MP_ROM_QSTR(MP_QSTR_splits), MP_ROM_PTR(&eng_splits_obj) },
     { MP_ROM_QSTR(MP_QSTR_absent), MP_ROM_PTR(&eng_absent_obj) },

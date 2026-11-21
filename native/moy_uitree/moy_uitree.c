@@ -975,9 +975,11 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
     else if (!strcmp(name, "hint") && kind == UIT_TABLE)
         tslot = &N->t_value;
     else if ((kind == UIT_CARDS && !strcmp(name, "w")) || (kind == UIT_CARD && !strcmp(name, "sub")) ||
+             (kind == UIT_CANVAS && !strcmp(name, "w")) || (kind == UIT_ROW && !strcmp(name, "gap")) ||
              (kind == UIT_PICTURE && !strcmp(name, "side")) || (kind == UIT_POPOVER && !strcmp(name, "anchor")))
         tslot = &N->t_value;
     else if ((kind == UIT_CARDS && !strcmp(name, "h")) || (kind == UIT_POPOVER && !strcmp(name, "w")) ||
+             (kind == UIT_ROW && !strcmp(name, "pad")) ||
              ((kind == UIT_CARD || kind == UIT_PICTURE) && !strcmp(name, "tone")))
         tslot = &N->t_aux;
     else if ((!strcmp(name, "empty") && UIT_IS_LIST(kind)) ||
@@ -992,7 +994,8 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         if ((kind == UIT_SLIDER && (!strcmp(name, "lo") || !strcmp(name, "hi"))) ||
             (kind == UIT_PROGRESS && (!strcmp(name, "value") || !strcmp(name, "max"))) ||
             (kind == UIT_CARDS && name[1] == 0) || (kind == UIT_PICTURE && !strcmp(name, "side")) ||
-            (kind == UIT_POPOVER && !strcmp(name, "w"))) {
+            (kind == UIT_POPOVER && !strcmp(name, "w")) || (kind == UIT_CANVAS && !strcmp(name, "w")) ||
+            (kind == UIT_ROW && (!strcmp(name, "gap") || !strcmp(name, "pad")))) {
             // an int prop: an int template, or the int literal a number lowers to
             const char *d = src + (src[0] == '-');
             int lit_int = T->lit && *d;
@@ -1043,14 +1046,19 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
             N->btn = (uint16_t)i, N->nbtn |= LT_LINES;
         return add_prop(e, node, name, src, repr, PK_LIT, i);
     }
-    if (kind == UIT_CANVAS && (!strcmp(name, "draw") || !strcmp(name, "h") || !strcmp(name, "w"))) {
-        // draw= names the front end's function (uit_on_draw); h= its height in a stack, w= its
-        // width in a row
+    if (kind == UIT_CANVAS && (!strcmp(name, "draw") || !strcmp(name, "h"))) {
+        // draw= names the front end's function (uit_on_draw); h= its height in a stack
         if (name[0] == 'h')
             N->btn = (uint16_t)strtol(src, NULL, 10);
-        else if (name[0] == 'w')
-            N->nbtn = (uint16_t)strtol(src, NULL, 10);
         return add_prop(e, node, name, src, repr, PK_LIT, 0);
+    }
+    if (kind == UIT_ROW && !strcmp(name, "mid")) {
+        // a row in a row centred on it (RW_MID)
+        if (strcmp(src, "True") && strcmp(src, "False") && strcmp(src, "1") && strcmp(src, "0"))
+            return uit_fail(e, UIT_E_KIND, UIT_MSG("row mid=%s: True or False", "row mid=%s"), src);
+        if (src[0] == 'T' || src[0] == '1')
+            N->lit |= RW_MID;
+        return add_prop(e, node, name, src, repr, PK_LIT, (N->lit & RW_MID) != 0);
     }
     if (kind == UIT_SPLIT && (!strcmp(name, "pad") || !strcmp(name, "gap") || !strcmp(name, "align"))) {
         static const char *const GAPS[] = {"s", "m", "l", "0"}, *const ALIGNS[] = {"start", "center", "end"};

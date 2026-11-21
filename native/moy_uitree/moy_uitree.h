@@ -205,6 +205,9 @@ int uit_lent_place(int32_t *cells, int n, int32_t x0, int32_t w, int32_t h, int 
 // `du` (pixels), the pane the keys reach (its key, "" none), whether the
 // pointer hovers and the host's clock in ms (a divider's double tap).
 void uit_panes_set(uit_t *e, int du, const char *pane_cur, int mouse, uint32_t clock);
+// A placed page's unit, which a row's literal gap=, pad= and a canvas's w= are in (0: the
+// engine's own, 1 on a desk and the font scale on a handheld).
+void uit_set_unit(uit_t *e, int unit);
 // The last pass's panes as ints into `out` (`max` at most): UIT_PN_HEAD
 // words (the outermost panes' node or -1, the pane the placement stood
 // alone or -1, the least size's w and h, then the counts of the four lists

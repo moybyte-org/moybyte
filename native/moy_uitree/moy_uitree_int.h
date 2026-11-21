@@ -137,6 +137,7 @@ enum { GAP_S = 0, GAP_M, GAP_L, GAP_0 };
 enum { TV_FOLLOW = 1, TV_WRAP = 2, TV_PROSE = 4 };
 // A tools row lent to a site (`lit`); a button drawn as its icon alone (`btn`).
 enum { TL_LEND = 1, BT_ALONE = 1 };
+enum { RW_MID = 1 };            // a row's lit: centred on the row it is a cell of
 enum { LT_WORD = 1, LT_CHAR = 2, LT_WRAP = 3, LT_FACE_SHIFT = 2, LT_ALIGN_SHIFT = 5, LT_LINES = 256 };
 
 typedef struct {
@@ -351,6 +352,7 @@ struct uit {
     uit_arr_t *arr;             // the panes' answers (a page with panes or a hosted body)
     uint8_t has_panes;
     int16_t du;                 // the desk unit the host hands (`uit_panes_set`)
+    int16_t unit;               // a placed row's unit the host hands (0: 1 on a desk, else fs)
     int16_t pane_cur;           // the pane the keys reach, -1 none
     int16_t late[8];            // the popovers and dialogs a stack draws last, over it
     int nlate;

@@ -63,6 +63,7 @@ _SIGS = (
     ("uit_lent_place", [_I32, _I, _I, _I, _I, _I, _I, _I32, c.POINTER(_I), _I32], _I),
     ("uit_frame", [_P, _P, _P, _I, _I, _I, _I, _I, _I, _I], _I),
     ("uit_panes_set", [_P, _I, _S, _I, c.c_uint32], None),
+    ("uit_set_unit", [_P, _I], None),
     ("uit_panes", [_P, _I32, _I], _I),
     ("uit_splits", [_P, _P, _P, _I, _I32], _I),
     ("uit_absent", [_P, _I], _I),
@@ -272,6 +273,9 @@ class Engine:
             x, self._raised = self._raised, None
             raise x
         return r
+
+    def set_unit(self, unit):
+        self._L.uit_set_unit(self._e, int(unit or 0))
 
     def panes_set(self, du, pane_cur, mouse, clock):
         self._L.uit_panes_set(self._e, du, b(pane_cur or ""), 1 if mouse else 0, clock & 0xffffffff)

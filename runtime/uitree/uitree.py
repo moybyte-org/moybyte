@@ -1925,7 +1925,7 @@ SCHEMA = {
     "split": dict(_C, dir="choice", sizes="ints", pad="lit", gap="lit", align="lit"),
     "grid": dict(_C, cols="lit", rows="lit", gap="lit", pad="lit"),
     "panel": dict(_C),
-    "canvas": dict(_C, draw="fn", h="lit", w="lit", pointer="action1", focus="cond", ground="lit"),
+    "canvas": dict(_C, draw="fn", h="lit", w="int", pointer="action1", focus="cond", ground="lit"),
     "foot": dict(_C, look="lit"),
     "scroll": dict(_C),
     "switch": dict(_C),
@@ -1940,7 +1940,7 @@ SCHEMA = {
     "slot": dict(_C, min="lit"),
     # §7.7's bridge: a surface still on today's verbs hosted in one node
     "legacy": dict(_C, draw="fn", pointer="fn", keys="fn", hints="fn", gen="fn"),
-    "row": dict(_C, close="action0"),
+    "row": dict(_C, close="action0", gap="int", pad="int", mid="lit"),
     "tools": dict(_C, lend="lit"),
     "lent": dict(_C),
     "status": dict(_C, text="text"),
@@ -2709,7 +2709,11 @@ def slot(name, **p):
 
 def row(key, **p):
     """Children side by side; a field grows, the rest take their size.
-    close= is what Back does while the row is shown (a find strip's close)."""
+    close= is what Back does while the row is shown (a find strip's close).
+    On a placed page: gap= between cells and pad= at each end (a literal in
+    the page's unit, an int state in pixels the host measured); a row in a
+    row is a region of its own (an empty one a spacer), and mid=True
+    centres it on its parent, each side's fills sharing that side's room."""
     return _node("row", key, p, _caller())
 
 

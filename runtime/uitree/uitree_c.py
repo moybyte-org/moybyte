@@ -134,6 +134,7 @@ class CEngine(Engine):
     handlers stay the reference's."""
 
     PLACED = False          # the page is stacked by the engine's layout (uit_set_placed)
+    unit = 0                # a placed page's unit, the host's (0: the engine's own)
 
     def __init__(self, *a, **k):
         Engine.__init__(self, *a, **k)
@@ -738,6 +739,7 @@ class CEngine(Engine):
         kind = _v.input_kind()
         self.input = kind if kind in S.INPUTS else "keys"
         t = _D.UI_TARGET
+        x.set_unit(self.unit)
         r = x.frame(t[0], cv, t[2], content[0], content[1], content[2], content[3], self._flags(desk), fs,
                     INPUTS.index(self.input))
         self._buttons = 0
@@ -1163,6 +1165,7 @@ class CEditorEngine(CEngine, _ed.Engine):
         handed to the engine before it lays the panes out or draws a divider."""
         self.du = self.unit or max(1, _ed._lb.chrome_size(getattr(self, "fs", 1)) // _ed._lb.render_scale())
         self._x.panes_set(self.du, self.pane_cur, self._mouse(), self.clock)
+        self._x.set_unit(self.unit)
 
     def _pane_read(self):
         """The engine's panes (`uit_panes`) as `uitree_editor.Engine` keeps

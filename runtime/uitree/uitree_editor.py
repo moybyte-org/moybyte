@@ -43,7 +43,7 @@ _FILL = ("switch", "panes", "pane", "text_editor", "slot", "panel", "case", "can
 # what the hosted phase walks to place the legacy nodes: the regions
 _PLACED = ("case", "switch", "panes", "pane", "panel", "legacy")
 _REGIONS = ("case", "switch", "panel")          # a row's cells that stack their own children
-_WHOLE = _REGIONS + ("status", "canvas")        # a row's cells the row's whole height
+_WHOLE = _REGIONS + ("status", "canvas", "row")     # a row's cells the row's whole height
 _BARE = {"bare": True}      # a page whose bodies its host drew opens over them
 # The panes' sizes in desk units (runtime/editors/editor_panes.py's, the
 # desk Editor's): the gutter, a pane's header, a divider's handle drawn and
@@ -513,8 +513,17 @@ class Engine(uitree_app.Engine):
                 return _ud.print_width(self._t(k, "text", row), self.fs) + 2 * pad + 2
             finally:
                 _ud.print_font(was)
-        if k.kind == "canvas" and k.l.get("w"):
-            return k.l["w"] * (1 if self.desk else self.fs)     # a fixed cell along x, as h= down
+        if k.kind == "canvas" and k.src.get("w"):
+            return self._len(k, "w", row, 0)        # a fixed cell along x, as h= down
+        if k.kind == "row":
+            # a row in a row: its cells' widths and gaps where none grows;
+            # one with nothing shown a spacer
+            kids = self._row_kids(k, row)
+            nat = [self._natural(c, row, h) for c in kids]
+            if not kids or any(v is None for v in nat):
+                return None
+            return sum(nat) + self._len(k, "gap", row, self._row_gap()) * max(0, len(kids) - 1) + \
+                2 * self._len(k, "pad", row, 0)
         if k.kind == "tabs":
             st = self.s._t[k.key]
             tab = self.decl.labels[k.l["labels"]]
@@ -522,10 +531,25 @@ class Engine(uitree_app.Engine):
                        for v in st.values)
         return None
 
-    def _r_row(self, n, row, rect):
-        x, y, w, h = rect
-        if n.key:
-            self.anchors[n.key] = rect
+    def _unit(self):
+        """A placed row's unit: the host's (`unit`), else 1 on a desk and
+        the font scale on a handheld."""
+        return self.unit or (1 if self.desk else self.fs)
+
+    def _row_gap(self):
+        return 4 if self.desk else 2
+
+    def _len(self, n, k, row, dflt):
+        """Length prop `k` of `n` in pixels: a literal in the page's unit,
+        an int state as the host measured it; `dflt` (pixels) where unset."""
+        v = n.src.get(k)
+        if v is None:
+            return dflt
+        if type(v) is int:
+            return v * self._unit()
+        return n.p[k](row)
+
+    def _row_kids(self, n, row):
         kids = []
         for k in n.kids:                # a lent site: the shown lender's buttons, in its place
             if k.kind == "lent":
@@ -533,26 +557,65 @@ class Engine(uitree_app.Engine):
                 kids += [b for b in t.kids if self._shown(b, row)] if t is not None else []
             elif self._shown(k, row):
                 kids.append(k)
+        return kids
+
+    def _r_row(self, n, row, rect):
+        x, y, w, h = rect
+        if n.key:
+            self.anchors[n.key] = rect
+        kids = self._row_kids(n, row)
         if any(k.kind == "status" for k in n.kids) and not any(k.kind == "status" for k in kids):
             _ud.status_row(self.cv, self.th, rect, ())     # a status row's band, its line hidden
         nat = [self._natural(k, row, h) for k in kids]
-        grow = [i for i, v in enumerate(nat) if v is None]
-        if not grow:
-            grow = [i for i, k in enumerate(kids) if k.kind == "tabs"][:1]
-            for i in grow:
+        if not any(v is None for v in nat):
+            for i in [i for i, k in enumerate(kids) if k.kind == "tabs"][:1]:
                 nat[i] = None
-        gap = 4 if self.desk else 2
-        rest = w - sum(v for v in nat if v) - gap * max(0, len(kids) - 1)
+        gap = self._len(n, "gap", row, self._row_gap())
+        pad = self._len(n, "pad", row, 0)
+        x0, x1 = x + pad, x + w - pad
+        mid = next((i for i, k in enumerate(kids) if k.kind == "row" and k.l.get("mid")), None)
+        ws = [0] * len(kids)
+        if mid is None:
+            self._share(nat, ws, 0, len(kids), x1 - x0 - gap * max(0, len(kids) - 1))
+        else:
+            # the mid centred on the row: each side's fills share that side's room
+            a = x0 + sum(v or 0 for v in nat[:mid]) + gap * mid
+            b = x1 - sum(v or 0 for v in nat[mid + 1:]) - gap * (len(kids) - 1 - mid)
+            c = x + w // 2
+            if nat[mid] is None:        # a mid of fills: the widest span centred that clears both
+                half = max(0, min(c - a, b - c))
+                ms, ws[mid] = c - half, 2 * half
+            else:
+                ms, ws[mid] = x + (w - nat[mid]) // 2, nat[mid]
+            self._share(nat, ws, 0, mid, ms - x0 - gap * mid)
+            self._share(nat, ws, mid + 1, len(kids), x1 - (ms + ws[mid]) - gap * (len(kids) - 1 - mid))
         for i, k in enumerate(kids):
-            kw = nat[i] if nat[i] is not None else max(0, rest // max(1, len(grow)))
+            if i == 0:
+                x = x0
+            if mid is not None and i == mid:
+                x = ms
+            elif mid is not None and i == mid + 1:
+                x = x1 - sum(ws[mid + 1:]) - gap * (len(kids) - 2 - mid)
+            kw = ws[i]
             r = (x, y, kw, h) if k.kind in _WHOLE else (x, y + 2, kw, h - 4)   # a band, a region: the row's height
             self._put_rect(k.key, r)
             if k.kind == "button":
                 self._r_button(k, row, rect, at=r)
+            elif k.kind == "row":
+                self._draw(k, row, r)
             else:
                 _v.at(*r)
                 self._draw(k, row, r)
             x += kw + gap
+
+    @staticmethod
+    def _share(nat, ws, i0, i1, room):
+        """Cells i0..i1 their widths: a fixed one its own, the fills an even
+        share of what `room` leaves."""
+        grow = sum(1 for v in nat[i0:i1] if v is None)
+        rest = room - sum(v for v in nat[i0:i1] if v is not None)
+        for i in range(i0, i1):
+            ws[i] = nat[i] if nat[i] is not None else max(0, rest // max(1, grow))
 
     def _r_tools(self, n, row, rect):
         if n.l.get("lend"):
