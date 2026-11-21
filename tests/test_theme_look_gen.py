@@ -66,8 +66,9 @@ def _world(tmp_path, desk):
     _quiet(ws)
     if desk:
         ws.home.open_desk()
+        ws.home.open_projects()          # a window whose strip is the bar's
         assert ws.spine.open_app(ws.app("files"))
-        ws.open_settings()               # focused; files stays behind it
+        ws.open_settings()               # focused; projects and files behind it
     return ws
 
 
