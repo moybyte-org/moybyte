@@ -443,11 +443,14 @@ class ConsoleDriver:
         on a text surface the typed byte 27, which its field takes; anywhere
         else the `stop` button, which is the console's back
         (`InputPolicy.back`): a menu steps back or closes, a fullscreen game
-        pauses, a surface steps back a page or is left. The host's buttons
-        are the first eight and carry no `stop`, so it calls the back the
-        router gives a board's."""
+        pauses, a surface steps back a page or is left, the keys come off
+        the shell's bar. The host's buttons are the first eight and carry no
+        `stop`, so it calls what the router does with a board's."""
         policy = self.ws.input_policy
-        if self.input.text_mode:
+        bl = self.ws.bar_layer
+        if bl.focus is not None and self.ws.modal_layer() is None and not self.ws.about:
+            bl.focus_leave()
+        elif self.input.text_mode:
             self.type_char(0x1B)
         elif (policy.takes_stop(policy.holder()) or self.ws.modal_layer() is not None
               or self.ws.about):
