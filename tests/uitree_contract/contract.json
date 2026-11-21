@@ -1221,7 +1221,11 @@
  },
  "kinds": {
   "page": {
-   "head": "name",
+   "head": {
+    "python": "tpl",
+    "lua": "name",
+    "c": "name"
+   },
    "level": 1,
    "section": "7.1",
    "props": {
@@ -1242,7 +1246,8 @@
      "level": 2,
      "designed": true
     }
-   }
+   },
+   "heads": "Python: a page is a function opening `with ui.page(TITLE):`, pushed as `ui.push(FUNCTION)` (L2); Lua and C: a named page, `ui.page(NAME, BUILD, { title = ... })`, pushed by its name"
   },
   "group": {
    "head": "tpl",
@@ -1285,7 +1290,7 @@
    "head_optional": true
   },
   "scroll": {
-   "head": null,
+   "head": "key",
    "level": 1,
    "section": "7.1",
    "props": {

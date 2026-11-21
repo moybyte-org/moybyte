@@ -1632,11 +1632,15 @@ function T.row(...)
   return n
 end
 
-function T.scroll(...)
+function T.scroll(key, ...)
   local at = where()
   local n = node("scroll", at)
+  if type(key) ~= "string" or not key:match("^[%a_][%w_]*$") then
+    fail("N01", at, "ui.scroll's key is " .. describe(key), "a word: ui.scroll(\"list\", function() ... end)", describe(key))
+  end
   local o, body = tail("scroll", table.pack(...), 1, at)
   n.o = check_opts("scroll", o, at)
+  n.o.key = key
   if n.o.new ~= nil then
     local b = n.o.new
     local ty = DECL[b]

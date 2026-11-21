@@ -133,7 +133,7 @@ def test_a_foot_that_shares_its_width_and_a_slider_icon_draw(tmp_path):
             'local s = ui.state { v = 3 }\n'
             'ui.action("a", "Add", function() end)\nui.action("b", "Back", function() end)\n'
             'ui.page("p", function()\n'
-            '  ui.scroll(function() ui.slider("v", { label = "Level", lo = 0, hi = 9%s }) end)\n'
+            '  ui.scroll("body", function() ui.slider("v", { label = "Level", lo = 0, hi = 9%s }) end)\n'
             '  ui.foot({%s}, function() ui.row(function() ui.button("a") ui.button("b") end) end)\n'
             'end)\n')
     shots = {}
@@ -220,6 +220,7 @@ CASES = {
             'ui.action("stop", "Stop", function() end, { keys = { "s" } })' + PAGE, 3, None),
     "K03": (APP + 'ui.action("go", "Go", function() end, { keys = { "alt+x" } })' + PAGE, 2, None),
     "N01": (APP + 'ui.page("p", function() ui.label("x", { nope = 1 }) end)\n', 2, None),
+    "N01 scroll": (APP + 'ui.page("p", function() ui.scroll(function() ui.label("x") end) end)\n', 2, None),
     "N01 derive": (APP + 'local s = ui.state { n = 0 }\nui.derive("big", "bool", "n>3")' + PAGE, 3, None),
     "N01 text derive": (APP + 'local s = ui.state { n = 0 }\nui.derive("left", { text = "{n} left" })\n'
                         'ui.derive("big", { cond = "n>3", text = "x" })' + PAGE, 4, None),
@@ -246,7 +247,7 @@ CASES = {
     "S09": (APP + 'local s = ui.state { n = 0 }\nui.derive("big", { cond = "n>3" })\n'
             'ui.action("go", "Go", function()\n  s.big = true\nend)' + PAGE, 5, 'ui._fire("go")\n'),
     "S10": (APP + 'local s = ui.state { unread = 0 }\nui.action("go", "Go", function()\n  s.unread = 0\nend)\n'
-            'ui.page("p", function() ui.scroll({ new = "unread" }, function() ui.label("x") end) end)\n', 4,
+            'ui.page("p", function() ui.scroll("list", { new = "unread" }, function() ui.label("x") end) end)\n', 4,
             'ui._fire("go")\n'),
     "S11": (APP + 'local s = ui.state { r = ui.row_of(3) }' + PAGE, 2, None),
     "S13": (APP + 'local s = ui.state { x = print }' + PAGE, 2, None),

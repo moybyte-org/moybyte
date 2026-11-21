@@ -214,7 +214,7 @@ local function thread()
       ui.link("channel", { label = "{t.label}", value = "", tag = "{t.public?Public:}", icon = "{t.public?:lock}" })
     end,
   })
-  ui.scroll({ follow = true }, function()
+  ui.scroll("thread", { follow = true }, function()
     ui.label("{t.first}", { icon = "{t.first_icon}", shown = "t.first && msgs" })
     ui.rows("msgs", { by = "kind" }, {
       day = function() ui.label("{.text}") end,
@@ -269,7 +269,7 @@ local function thread()
 end
 
 local function message()
-  ui.scroll(function()
+  ui.scroll("message", function()
     ui.bubble("{msg.text}", { max = 1, lines = 0, head = "{msg.head}", signal = "{msg.bars}" })
     ui.switch("pick.dir", {
       ["in"] = function()
