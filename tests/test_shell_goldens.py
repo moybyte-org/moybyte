@@ -643,6 +643,8 @@ def _build(cfg, carts_dir):
     music_app.STREAM._end()             # nor what Music played
     music_app.STREAM.face = None
     music_app.STREAM.stations = music_app.STATIONS
+    music_app.STREAM.section = None     # nor the last console's section and app
+    music_app.STREAM.on_change = None
     for it in ITEMS.slots:              # no app's status item outlives its config
         if it.pid:
             ITEMS._free(it)
