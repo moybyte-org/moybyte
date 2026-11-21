@@ -119,11 +119,17 @@ REFRESH_MS = 600000
 # Where a card stands, as its sub line and its badge say it; a cart that is
 # only for the getting says its size instead.
 STATE_WORD = {"installed": "On console", "update": "Update ready", "taken": "Name taken",
-              "revoked": "Taken back", "too_big": "Too big", "noplay": "Can't play"}
+              "revoked": "Taken back", "too_big": "Too big", "noplay": "Can't play",
+              "newer": "Needs update"}
 BADGE = {"installed": "check", "update": "getcarts", "taken": "warn", "revoked": "warn",
-         "too_big": "warn", "noplay": "warn"}
+         "too_big": "warn", "noplay": "warn", "newer": "warn"}
 # The states a card's sub line and badge say in the danger ink, its cover veiled.
-BLOCKED = ("taken", "revoked", "too_big", "noplay")
+BLOCKED = ("taken", "revoked", "too_big", "noplay", "newer")
+
+# The shelf caption's words when an index lists the browser console for other
+# builds and none for this image's page: an image its release did not publish
+# (cart_index.addon_unfit). Every other cart lists whatever the build.
+NO_ADDON = "no browser console for this build"
 
 # A verb's words and icon, by its name.
 VERB = {"GET": ("Get", "getcarts"), "UPDATE": ("Update", "getcarts"),
@@ -368,6 +374,7 @@ class GetCartsAppLayer(ListShellApp):
         self.indexes = ()
         self.unreached = 0
         self.starved = False          # an index failed for want of memory
+        self.no_addon = False         # an index lists browser consoles, none for this image
         self.free = None              # (bytes, block) of the store
         self.cur = None               # the CART page's row (the desk's pane)
         self.job = None
@@ -388,7 +395,7 @@ class GetCartsAppLayer(ListShellApp):
         self.thumbs = {}              # cover sha256 -> (side, RGB565) or None
         self._pane_k = None           # the desk pane's parts (`_pane_parts`)
         self._whole = (0, 0, 0, 0)    # the page's rect, the canvas's
-        self._caption_key = (-1, None, None, "", "", "", 0)   # the shelf's caption, as last made
+        self._caption_key = (-1, None, None, "", "", "", 0, False)   # the shelf's caption, as last made
         self._covers = []             # the covers this check still fetches
         self._work = None             # the decode's scratch, while checking
         self._found = []
@@ -508,6 +515,7 @@ class GetCartsAppLayer(ListShellApp):
         self._work = None
         self.unreached = 0
         self.starved = False
+        self.no_addon = False
         self._step = 0
         self._go("checking")
 
@@ -691,8 +699,9 @@ class GetCartsAppLayer(ListShellApp):
                 data = self._fetched(lambda: _ci.index_fetch(net, url), ("index", i))
                 if data is None:
                     return
-                self._found.extend(_ci.fitting(_ci.parse_index(data, url, self._inst.own(),
-                                                               self._revoked)))
+                got = _ci.parse_index(data, url, self._inst.own(), self._revoked)
+                self.no_addon = self.no_addon or _ci.addon_unfit(got)
+                self._found.extend(_ci.fitting(got))
             except _ci.InstallError as exc:
                 self.unreached += 1
                 self.starved = self.starved or exc.text == _ci.NET_MEMORY
@@ -1579,8 +1588,11 @@ class GetCartsAppLayer(ListShellApp):
 
     def _shown(self, row):
         """Where a card stands as it says it: a cart only for the getting
-        that this console cannot take is Too big or Can't play."""
+        or the updating that needs a newer firmware is Needs update, one only
+        for the getting that this console cannot take Too big or Can't play."""
         st = row["state"]
+        if st in ("get", "update") and _ci.newer_why(row["cart"]) is not None:
+            return "newer"
         if st == "get" and not row["runs"]:
             return "noplay"
         if st == "get" and (row["fit"] or self._no_room(row)):
@@ -1603,6 +1615,8 @@ class GetCartsAppLayer(ListShellApp):
         if self.unreached:
             left += " · %d shelf away" % self.unreached if ui.has_symbols() \
                 else " - %d shelf away" % self.unreached
+        if self.no_addon:
+            left += (" · " if ui.has_symbols() else " - ") + NO_ADDON
         right = "%s free" % _mb(self.free[0]) if self.free is not None else ""
         return left, right
 
@@ -1637,12 +1651,13 @@ class GetCartsAppLayer(ListShellApp):
     def _shelf(self, cv):
         lay = self.layout
         key = self._caption_key
-        if key[0] != len(self.rows) or key[1] != self.unreached or key[2] is not self.free:
+        if key[0] != len(self.rows) or key[1] != self.unreached or key[2] is not self.free \
+                or key[7] != self.no_addon:
             left, right = self._caption()
             dot = " · " if ui.has_symbols() else " - "
             self._caption_key = (len(self.rows), self.unreached, self.free, left, right,
                                  left + (dot + right if right else ""),
-                                 ui.text_size(right)[0] if right else 0)
+                                 ui.text_size(right)[0] if right else 0, self.no_addon)
             key = self._caption_key
         x, y, w, h = lay.caption
         if lay.desk:
@@ -1742,6 +1757,10 @@ class GetCartsAppLayer(ListShellApp):
         c = row["cart"]
         st = row["state"]
         arrow = " → " if ui.has_symbols() else " -> "
+        if st in ("get", "update"):
+            newer = _ci.newer_why(c)
+            if newer is not None:
+                return (newer, "warn", "danger")
         if st == "update":
             if row.get("had"):
                 return ("Update ready: %s%s%s" % (row["had"], arrow, c["version"]),

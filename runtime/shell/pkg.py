@@ -176,6 +176,9 @@ def blocker(inst, cart, plan, free, runs, fit=None):
     console carries its runtime; `fit` a `fit_why` answer already made."""
     if not inst.writable() or inst.root() is None:
         return "This console has nowhere to keep carts."
+    newer = _ci.newer_why(cart)
+    if newer is not None:
+        return newer
     if not runs:
         return "This console can't play this kind of cart."
     if _ci.is_revoked(cart):

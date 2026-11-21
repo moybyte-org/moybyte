@@ -200,10 +200,18 @@ fix it names is to bump `API_LEVEL` and re-pin with `tools/api_level.py`.
 
 A cart names the level it needs as `"moybyte": {"api": N}`, the lowest level
 that has everything it uses; a cart that names none needs the lowest, 1. A
-console at that level or above runs it. Below it, the launch is refused
-before any of the cart's code runs, on the "Needs a newer console." notice a
-newer `format` gets (the Player), or with the refusal a service, command or
-install reads (`runtime/shell/app_perms.py`).
+console at that level or above runs it and lists it. Below it:
+
+- the launch is refused before any of the cart's code runs, on the "Needs a
+  newer console." notice a newer `format` gets (the Player), or with the
+  refusal a service, command or install reads (`runtime/shell/app_perms.py`);
+- Get Carts still lists it, as "Needs update", saying which level it needs
+  and which this console has (`cart_index.newer_why`), and will not get it.
+
+An official cart (a seed cart its release publishes, `tools/web_pack.py`) needs
+the level of the build that published it, so a console a release ahead or
+behind lists its release's carts by level, whatever its build; only the browser
+console add-on is matched to the image's own page (#271).
 
 **The rule, from the first public release (owner, 2026-11-21):** the API is
 add-only. A level adds; it never removes or repurposes anything a lower level

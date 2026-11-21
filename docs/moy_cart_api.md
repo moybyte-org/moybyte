@@ -55,7 +55,8 @@ The game verbs are moy-spec's and `format` is their level. What a cart uses of
 Moybyte's own (an app's calls, permissions and manifest fields) has its own level,
 the console API level, which the cart names as `"moybyte": {"api": N}`: none
 named is the lowest, and a console below it refuses the cart on the same notice
-(`docs/app_api_v1.md` §2, "The API level").
+and lists it in Get Carts as needing a newer firmware (`docs/app_api_v1.md` §2,
+"The API level").
 
 Three more manifest fields say what the cart is in a list (SPEC.md §3.7), and
 none of them is ever a reason to refuse it: `description` (plain text, at most

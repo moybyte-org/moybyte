@@ -83,6 +83,32 @@ def test_the_shelf_says_where_each_cart_stands(tmp_path):
     assert app._caption()[0].endswith("1 shelf away")
 
 
+def test_a_cart_for_a_newer_api_level_is_listed_as_needing_an_update(tmp_path):
+    """#271: an entry whose `moybyte.api` is above this console's level is
+    on the shelf, says so and cannot be got; one that names none needs the
+    lowest and lists as any other."""
+    from runtime import cart_index as ci, moy_store_base, pkg
+    repo, net = _shelf()
+    ws, app = _ws(tmp_path, net, [repo.url("index.json")])
+    _open(ws, app)
+    rows = {r["cart"]["name"]: r for r in app.rows}
+    zap, jet = rows["Zap"], rows["Jet Pot"]
+    level = moy_store_base.API_LEVEL + 1
+    zap["cart"]["moybyte"] = {"api": level}
+    assert app._shown(zap) == "newer" and gc.STATE_WORD["newer"] == "Needs update"
+    why = ci.newer_why(zap["cart"])
+    assert "API level %d" % level in why and "Update in Settings" in why
+    assert app._state_line(zap) == (why, "warn", "danger")
+    assert app.blocker(zap) == why
+    assert app._shown(jet) == "get" and ci.newer_why(jet["cart"]) is None
+    zap["state"] = "update"
+    assert app._shown(zap) == "newer", "an update that needs a newer firmware waits too"
+    assert pkg.blocker(app._inst, zap["cart"], zap["plan"], None, True) == why
+    assert not app.no_addon
+    app.no_addon = True
+    assert app._caption()[0].endswith(gc.NO_ADDON)
+
+
 def test_a_card_opens_its_page_and_back_lands_on_it(tmp_path):
     repo, net = _shelf()
     ws, app = _ws(tmp_path, net, [repo.url("index.json")])

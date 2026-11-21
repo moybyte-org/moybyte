@@ -62,7 +62,9 @@ What it does differently, because a console is not a PC:
     §6) and nothing runs, or the browser console add-on ("runtime": "web"),
     whose pack only the webhost reads and only when its head names the page
     this image names (native/moy_net/moy_page.h); an index lists one of those
-    a page and a console lists only the one that fits it (`fitting`). A
+    a page and a console lists only the one that fits it (`fitting`); every
+    other entry lists, and one whose `moybyte.api` names a console API level
+    above this console's says it needs a newer firmware (`newer_why`). A
     board's TLS checks the server's certificate,
     but a server is not proof of what it serves; what lands is sandboxed,
     signed or validated data -- and Python carts (`runs_on`), which share
@@ -176,7 +178,7 @@ except ImportError:  # pragma: no cover
 
 from ticks import _ticks_ms, _ticks_diff
 from moy_store_base import (_sibling_path, _is_dir, COVER_MAX_BYTES,
-                            builtin_ns, cart_path)
+                            builtin_ns, cart_path, api_above, api_text)
 from moy_fs import _exists, _mkdir, _read, _read_recover, _write_atomic, _write_atomic_steps
 import moy_carts as _store
 import cart_files as _cart_files
@@ -662,22 +664,43 @@ def page_want():
 
 
 def fits_here(c, want=None):
-    """Whether this console can use index entry `c`: one that names no page
-    (`moybyte.fits`) and is no "web" cart, else only where it fits the page
-    this image names -- the browser console add-on, and an official entry,
-    which is its release's and so its image's (the page digest names the
-    build that published it)."""
-    fits = (c.get("moybyte") or {}).get("fits")
-    if c.get("runtime") != "web" and not fits:
+    """Whether this console lists index entry `c`: every entry but a "web"
+    one, the browser console add-on, which lists only where it is the page
+    this image names (`moybyte.fits`, the bundle's digest: identity, since the
+    webhost serves only that page). Whether a listed cart runs here is its API
+    level's question (`newer_why`)."""
+    if c.get("runtime") != "web":
         return True
     want = page_want() if want is None else want
-    return bool(want) and fits == want
+    return bool(want) and (c.get("moybyte") or {}).get("fits") == want
 
 
 def fitting(carts, want=None):
-    """parse_index's `carts` this console can use (fits_here)."""
+    """parse_index's `carts` this console lists (fits_here)."""
     want = page_want() if want is None else want
     return [c for c in carts if fits_here(c, want)]
+
+
+def addon_unfit(carts, want=None):
+    """Whether parse_index's `carts` hold a browser console add-on and none
+    for the page this image names: an image its release did not publish."""
+    want = page_want() if want is None else want
+    web = [c for c in carts if c.get("runtime") == "web"]
+    return bool(web) and not any(fits_here(c, want) for c in web)
+
+
+def api_level(c):
+    """The console API level index entry `c` needs (`moybyte.api`), raw: None
+    when it names none, which is the lowest."""
+    m = c.get("moybyte")
+    return m.get("api") if isinstance(m, dict) else None
+
+
+def newer_why(c):
+    """Why index entry `c` waits for a newer firmware (its API level is above
+    this console's: moy_store_base.API_LEVEL), or None."""
+    level = api_above(api_level(c))
+    return None if level is None else api_text(level)
 
 
 def runs_on(c, have):

@@ -520,7 +520,8 @@ def listing(c, state=None, had=None):
     what its install takes in the store, without the asset urls and digests
     only the board's install reads; with `state` (cart_index.cart_state's
     word, as the board's own store has it) and `had` (the version its record
-    holds)."""
+    holds). Its `moybyte.api` stays, so the page says when it needs a newer
+    firmware."""
     out = {}
     for key in ("id", "name", "version", "folder", "runtime", "description", "genre",
                 "tags", "memory", "depends", "index", "shelf", "external", "revoked"):
@@ -531,6 +532,8 @@ def listing(c, state=None, had=None):
     out["official"] = _ci.is_official(c)
     out["reviewed"] = _ci.is_reviewed(c)
     out["core"] = bool((c.get("moybyte") or {}).get("core"))
+    if _ci.api_level(c) is not None:
+        out["moybyte"] = {"api": _ci.api_level(c)}
     out["assets"] = [{"size": a["size"],
                       "files": dict((fn, {"size": m["size"]}) for fn, m in a["files"].items())}
                      for a in c["assets"]]
@@ -875,6 +878,8 @@ class OfficialCarts:
             return self._end(missing)
         if not _ci.runs_on(cart, _ci.RUNTIMES):
             return self._end("This console can't play this kind of cart.")
+        if _ci.newer_why(cart) is not None:
+            return self._end(_ci.newer_why(cart))
         if _ci.is_revoked(cart):
             return self._end(_ci.REVOKED)
         if self.action == "licence":

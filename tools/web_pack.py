@@ -38,10 +38,12 @@ Beside every payload, whether or not any console has the add-on installed:
                                    prune_carts)
     carts-<board>.json             an index in moy-spec's format (cartindex.py,
                                    version 1): an entry per official cart of
-                                   THIS build, then one per add-on ever published
-                                   for the board, newest first, each naming
-                                   its page's digest in moybyte.fits; signed as
-                                   a carts index is when the key is there
+                                   THIS build, naming its API level in
+                                   moybyte.api, then one per add-on ever
+                                   published for the board, newest first, each
+                                   naming its page's digest in moybyte.fits;
+                                   signed as a carts index is when the key is
+                                   there
     moybyte_web-licence.md         the licence the entries name
 An official compiled cart carries its source alone. A release builds its
 main.wasm, and each board's firmware build, which has its chip's toolchain,
@@ -57,12 +59,12 @@ running image names. An index lists an id once, so each add-on entry's id
 carries its digest's first 12 hex (cart_id).
 
 An official entry is the seed cart of the build that published it: an app is
-Python against the shell's own API, so it belongs to its firmware, and
-`moybyte.fits` names that build's page as the add-on's does, which is how a
-console lists only its own release's (cart_index.fits_here; the digest is the
-web bundle's, which carries the shell and the seed carts). The index keeps no
-earlier build's: a console a step behind lists none of them and keeps the
-ones its image seeds. `moybyte.core` marks the ones a console never removes
+Python against the shell's own API, so its `moybyte.api` is that build's
+console API level (moy_store_base.API_LEVEL, docs/app_api_v1.md "The API
+level"). A console at that level or above lists it and can get it; one below
+lists it as needing a newer firmware (cart_index.newer_why). The add-on alone
+is gated on its page's digest, which is identity: the webhost serves only the
+page its image names. The index keeps no earlier build's official carts. `moybyte.core` marks the ones a console never removes
 (moy_seed.CORE). A test fixture (`"moybyte": {"fixture": true}`,
 gen_device_carts.is_fixture: Bench and the others the perf ledger, the
 on-glass suites and the tests run) is seeded on the host alone and is no
@@ -86,6 +88,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import board_config  # noqa: E402
 import gen_device_carts  # noqa: E402
 import gen_web_blob as gwb  # noqa: E402
+from runtime.moy_store_base import API_LEVEL, api_above, api_of  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PACK_FILE = "moybyte_web.pack"     # the build's pack beside its image, and in the cart
@@ -348,13 +351,17 @@ def _file_sha(path):
         return hashlib.sha256(f.read()).hexdigest()
 
 
-def seed_entry(src, digest, folder, core=(), modules=None):
-    """The official entry of the seed cart folder `src` for the page
-    `digest`, its zip and its cover written into `folder` (a name already
-    there is the same bytes, by its digest). `core` is moy_seed.CORE;
-    `modules` is collected_modules' answer, or None (built_seed)."""
+def seed_entry(src, folder, core=(), modules=None):
+    """The official entry of the seed cart folder `src`, its zip and its
+    cover written into `folder` (a name already there is the same bytes, by
+    its digest). `core` is moy_seed.CORE; `modules` is collected_modules'
+    answer, or None (built_seed). Its `moybyte.api` is this build's
+    API_LEVEL; a seed cart naming a higher one is a PageError."""
     man = _seed_manifest(src)
     cid = man["id"]
+    if api_above(api_of(man)) is not None:
+        raise PageError("%s needs API level %d and this build is at %d"
+                        % (cid, api_of(man), API_LEVEL))
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
         files = seed_files(built_seed(src, os.path.join(tmp, cid + ".moy"),
@@ -376,7 +383,7 @@ def seed_entry(src, digest, folder, core=(), modules=None):
         "licence": dict(LICENCE, url=LICENCE_NAME, **licence),
         "assets": [dict(name=name, url=name, files={fn: _sized(b) for fn, b in files.items()},
                         **_sized(data))],
-        "moybyte": {"fits": digest, "core": cid in core},
+        "moybyte": {"api": API_LEVEL, "core": cid in core},
     }
     for key in LISTING:
         if man.get(key):
@@ -416,13 +423,13 @@ def official_carts(seeds=SEED_DIR):
     return out
 
 
-def official_entries(digest, folder, seeds=SEED_DIR, modules=None):
+def official_entries(folder, seeds=SEED_DIR, modules=None):
     """The official entry of every official cart under `seeds`
-    (official_carts) for the page `digest`, in folder order, their zips and
-    covers written into `folder` (which holds the licence already), a
-    compiled one's native modules `modules` (seed_entry)."""
+    (official_carts), in folder order, their zips and covers written into
+    `folder` (which holds the licence already), a compiled one's native
+    modules `modules` (seed_entry)."""
     core = board_config.core_carts()
-    return [seed_entry(os.path.join(seeds, n), digest, folder, core, modules)
+    return [seed_entry(os.path.join(seeds, n), folder, core, modules)
             for n in official_carts(seeds)]
 
 
@@ -528,7 +535,7 @@ def publish_addon(page, folder, board, version, key_pem=None, earlier=None,
             earlier = f.read()
     shutil.copyfile(LICENCE_SRC, os.path.join(folder, LICENCE_NAME))
     cart = publish_cart(page, folder)
-    official = official_entries(page[1], folder, seeds, modules) if seeds else []
+    official = official_entries(folder, seeds, modules) if seeds else []
     doc = index_doc(board, index_entry(page[1], version, cart, folder), earlier,
                     official)
     if key_pem:

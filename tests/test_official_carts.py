@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from cart_store_fixtures import MemNet
-from runtime import cart_index as ci, moy_carts, moy_catalogue, moy_seed, pkg, web_addon
+from runtime import cart_index as ci, moy_carts, moy_catalogue, moy_seed, moy_store_base, pkg, web_addon
 
 ROOT = Path(__file__).resolve().parent.parent
 SEEDS = ROOT / "system_carts"
@@ -267,7 +267,7 @@ def test_every_seed_cart_but_a_fixture_is_an_official_entry_of_its_release(tmp_p
         "a fixture's zip or cover was published"
     assert set(board_flash.offered_carts()) == {cid + ".moy" for cid in mans}
     for cid, c in official.items():
-        assert c["moybyte"]["fits"] == digest
+        assert c["moybyte"]["api"] == moy_store_base.API_LEVEL and "fits" not in c["moybyte"]
         assert c["moybyte"]["core"] == (cid in moy_seed.CORE)
         assert c["version"] == mans[cid]["version"] and c["name"] == mans[cid]["title"]
         assert c["runtime"] == mans[cid].get("runtime", "python")
@@ -297,10 +297,30 @@ def test_only_the_console_s_own_signed_index_is_trusted_with_built_ins(tmp_path,
     (tmp_path / "u").mkdir()
     _, unsigned = _release(tmp_path / "u", key=False)
     assert [c for c in ci.parse_index(unsigned[OWN], OWN, OWN) if c["runtime"] != "web"] == []
-    # another build's console lists none of them
+
+
+def test_another_build_lists_its_release_s_official_carts_by_api_level(tmp_path, keys,
+                                                                       monkeypatch):
+    """#271: a console whose image is not the release's (a dev build, a local
+    build) lists the release's official carts at its API level or below, and
+    only the browser console add-on stays matched to the image's own page."""
+    digest, routes = _release(tmp_path)
     monkeypatch.setattr(ci, "page_want", lambda: "f" * 64)
-    assert [c for c in ci.fitting(ci.parse_index(routes[OWN], OWN, OWN))
-            if ci.is_official(c)] == []
+    got = ci.fitting(ci.parse_index(routes[OWN], OWN, OWN))
+    official = [c for c in got if ci.is_official(c)]
+    assert {c["id"] for c in official} == set(_official())
+    assert all(ci.newer_why(c) is None for c in official)
+    assert not [c for c in got if c["runtime"] == "web"], "the add-on is another page's"
+    assert ci.addon_unfit(ci.parse_index(routes[OWN], OWN, OWN))
+    monkeypatch.setattr(ci, "page_want", lambda: digest)
+    assert not ci.addon_unfit(ci.parse_index(routes[OWN], OWN, OWN))
+    # a release a level ahead: listed, each saying it needs a newer firmware
+    monkeypatch.setattr(moy_store_base, "API_LEVEL", moy_store_base.API_LEVEL - 1)
+    ahead = [c for c in ci.fitting(ci.parse_index(routes[OWN], OWN, OWN)) if ci.is_official(c)]
+    assert len(ahead) == len(official)
+    for c in ahead:
+        assert "Needs a newer firmware" in ci.newer_why(c)
+        assert "API level %d" % (moy_store_base.API_LEVEL + 1) in ci.newer_why(c)
 
 
 def test_a_python_built_in_from_anywhere_else_is_still_refused():

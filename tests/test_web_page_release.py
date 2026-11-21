@@ -334,8 +334,12 @@ def test_an_earlier_signed_index_keeps_its_entries(tmp_path):
     addons = [c for c in doc["carts"] if c["runtime"] == web_pack.CART_RUNTIME]
     assert [c["moybyte"]["fits"] for c in addons] == [other, digest]
     assert [c["version"] for c in addons] == [8, 7]
-    assert {c["moybyte"]["fits"] for c in doc["carts"] if c not in addons} == {other}, \
+    official = [c for c in doc["carts"] if c not in addons]
+    assert len({c["id"] for c in official}) == len(official) and official, \
         "the official entries are this build's alone"
+    assert {c["moybyte"]["api"] for c in official} == {web_pack.API_LEVEL}
+    assert not any("fits" in c["moybyte"] for c in official), \
+        "an official entry names its API level, not a page"
 
 
 def test_a_signed_release_signs_the_index(tmp_path, monkeypatch):
