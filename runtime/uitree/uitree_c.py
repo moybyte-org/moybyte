@@ -20,6 +20,7 @@ import ui_draw as _D
 
 import uitree as S
 from uitree_app import Engine, Page
+import uitree_aot as _aot
 
 try:
     from moy_uitree import Engine as _New        # the board's module, or the host's face of it
@@ -153,6 +154,7 @@ class CEngine(Engine):
         self._held = None       # (key, action, rect): the canvas a press holds until its release
         self._pop_lists = {}    # a popover's key -> (model, cur) of the list the arrows walk in it
         self._pop_fields = {}   # a popover's key -> whether a field of its own takes typed keys
+        self._loaded = False    # the store came from a compiled page whose build is not yet counted
 
     def _made(self):
         """The store, made and declared at the first way in that needs it."""
@@ -165,8 +167,32 @@ class CEngine(Engine):
             self._docs = {}
             self._drawing = False
             self._bind()            # the module's state holds this engine's values before any is pushed
-            self._declare()
+            if not self._load(x):
+                self._declare()
         return x
+
+    def _load(self, x):
+        """The first page's compiled blob (uitree_aot), where the image has
+        one: the store filled with no declaration, build or lowering call. A
+        blob this front end does not take is said once and the page built."""
+        blob = None if self.PLACED else _aot.blob_for(self.pages[0])
+        if blob is None:
+            return False
+        try:
+            _aot.load(self, x, blob)
+        except _aot.Refused as e:
+            print("uitree: %s: compiled page refused (%s); built" % (_aot.key(self.pages[0]), e))
+            return False
+        self._lowered, self._loaded = self.pages[0], True
+        return True
+
+    def _built_as_loaded(self):
+        self.builds += 1
+        was, S._NOW.app = S._NOW.app, self
+        try:
+            S._trace("build", getattr(self.pages[0], "__name__", "page"), "page (builds %d)" % self.builds)
+        finally:
+            S._NOW.app = was
 
     def close(self):
         """The visit is over (its host left the page): the store frees what
@@ -452,6 +478,9 @@ class CEngine(Engine):
     def _ready(self):
         """The page built and checked by the reference's Builder, lowered into
         the store, and the Python tree let go: `root` is then `LOWERED`."""
+        if self._loaded:            # the build a compiled page stands for, counted and traced as one
+            self._loaded = False
+            self._built_as_loaded()
         if self.root is None:
             self._made()
             self._build()

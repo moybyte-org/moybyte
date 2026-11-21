@@ -630,7 +630,18 @@ static mp_obj_t eng_stats(mp_obj_t self)
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(eng_stats_obj, eng_stats);
 
+// load(blob, page_id, variant) -> 0 or UIT_E_BLOB: a new store filled from a compiled page
+static mp_obj_t eng_load(size_t n, const mp_obj_t *a)
+{
+    (void)n;
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(a[1], &bi, MP_BUFFER_READ);
+    return MP_OBJ_NEW_SMALL_INT(uit_load(eng(a[0]), bi.buf, bi.len, CSTR(a[2]), CSTR(a[3])));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(eng_load_obj, 4, 4, eng_load);
+
 static const mp_rom_map_elem_t eng_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_load), MP_ROM_PTR(&eng_load_obj) },
     { MP_ROM_QSTR(MP_QSTR___del__), MP_ROM_PTR(&eng_del_obj) },
     { MP_ROM_QSTR(MP_QSTR_error), MP_ROM_PTR(&eng_error_obj) },
     { MP_ROM_QSTR(MP_QSTR_error_code), MP_ROM_PTR(&eng_error_code_obj) },
@@ -717,11 +728,20 @@ static mp_obj_t uit_mod_peak_reset(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(uit_mod_peak_reset_obj, uit_mod_peak_reset);
 
+// layout() -> this engine's layout hash (a compiled page names the one it was made by)
+static mp_obj_t uit_mod_layout(void)
+{
+    return mp_obj_new_int_from_uint(uit_layout_hash());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(uit_mod_layout_obj, uit_mod_layout);
+
 static const mp_rom_map_elem_t uit_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_uitree) },
     { MP_ROM_QSTR(MP_QSTR_Engine), MP_ROM_PTR(&eng_type) },
     { MP_ROM_QSTR(MP_QSTR_mem), MP_ROM_PTR(&uit_mod_mem_obj) },
     { MP_ROM_QSTR(MP_QSTR_peak_reset), MP_ROM_PTR(&uit_mod_peak_reset_obj) },
+    { MP_ROM_QSTR(MP_QSTR_layout), MP_ROM_PTR(&uit_mod_layout_obj) },
+    { MP_ROM_QSTR(MP_QSTR_FORMAT), MP_ROM_INT(UIT_FORMAT) },
 };
 static MP_DEFINE_CONST_DICT(uit_globals, uit_globals_table);
 

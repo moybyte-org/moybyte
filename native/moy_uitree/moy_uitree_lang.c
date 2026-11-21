@@ -397,7 +397,7 @@ int uit_cond_compile(uit_t *e, const char *src, int model)
         size_t len = q ? (size_t)(q - p) : strlen(p);
         if (uit_grow((void **)&e->terms, &e->cterms, e->nterms + 1, sizeof *e->terms))
             return UIT_E_NOMEM;
-        uit_term_t t;
+        uit_term_t t = {0};         // a field its kind of test leaves unset reads 0 (a compiled page is reproducible)
         int r = term_parse(e, p, len, model, &t);
         if (r < 0)
             return r;

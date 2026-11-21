@@ -28,6 +28,7 @@ enum {
     UIT_E_NOMEM = -4,
     UIT_E_ARG = -5,         // a handle out of range, a value of the wrong type
     UIT_E_CHECK = -6,       // a mistake the spec names (T01-T05, C01-C02, N04): `uit_error_code`
+    UIT_E_BLOB = -7,        // a compiled page this engine does not read (`uit_load`)
 };
 
 // State types.
@@ -294,6 +295,27 @@ int uit_leave(uit_t *e);
 int uit_dump(uit_t *e, char *buf, size_t cap);
 // Bytes the store holds: nodes, templates, ops, the pool, state.
 int uit_stats(const uit_t *e, int32_t out[8]);
+
+// A page compiled ahead of time (moy_uitree_aot.c; the format is
+// native/moy_uitree/README.md's "A compiled page"). UIT_FORMAT moves with any
+// change to what a blob holds; the layout hash is this engine's own, over
+// every record's fields and widths and the numbers they hold, and a blob of
+// another format or layout is refused, never read.
+#define UIT_FORMAT 1
+#define UIT_BLOB_HEAD 32
+uint32_t uit_layout_hash(void);
+// The store after a build's lowering (its declarations and its one page) as
+// a blob: its length (at most `cap` bytes are written, none where it does not
+// fit). `variant` and `source` are the compiler's (the layout variant, a hash
+// of what it was built from); `front` is the front end's own bytes, kept
+// whole at the blob's end (the header's front offset and length).
+int uit_save(uit_t *e, char *buf, size_t cap, const char *variant, uint32_t source, const char *front,
+             size_t nfront);
+// A new store filled from a blob of page `page_id`, variant `variant`, as
+// uit_build_end leaves a build: 0, or UIT_E_BLOB naming why it is refused
+// (format, layout, damage, another page, a store not new). The blob is
+// copied; the caller may let it go.
+int uit_load(uit_t *e, const char *blob, size_t n, const char *page_id, const char *variant);
 // Every engine's blocks together: [0] bytes live, [1] the most live since the
 // last uit_mem_peak_reset, [2] blocks live. A block's count is what was asked.
 void uit_mem(uint32_t out[3]);

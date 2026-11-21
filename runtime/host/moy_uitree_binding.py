@@ -12,7 +12,8 @@ import native_build
 _DIR = os.path.join(native_build.ROOT, "native", "moy_uitree")
 
 PART = native_build.Part("uitree", ("moy_uitree.h", "moy_uitree_int.h", "moy_uitree.c",
-                                    "moy_uitree_lang.c", "moy_uitree_walk.c"), (_DIR,))
+                                    "moy_uitree_lang.c", "moy_uitree_walk.c", "moy_uitree_aot.c"),
+                          (_DIR,))
 
 _P, _I, _S, _Z = c.c_void_p, c.c_int, c.c_char_p, c.c_size_t
 _I32 = c.POINTER(c.c_int32)
@@ -76,6 +77,9 @@ _SIGS = (
     ("uit_still", [_P, _P, _I, _I, _I, _I, _I, _I, _I], _I),
     ("uit_dump", [_P, c.c_char_p, _Z], _I),
     ("uit_stats", [_P, _I32], _I),
+    ("uit_layout_hash", [], c.c_uint32),
+    ("uit_save", [_P, c.c_char_p, _Z, _S, c.c_uint32, c.c_char_p, _Z], _I),
+    ("uit_load", [_P, c.c_char_p, _Z, _S, _S], _I),
     ("uit_mem", [c.POINTER(c.c_uint32)], None),
     ("uit_mem_peak_reset", [], None),
     ("moy_ui_api_ctx", [_P, _Z], _P),
@@ -98,6 +102,14 @@ def lib():
 
 def b(s):
     return s.encode("utf-8") if isinstance(s, str) else s
+
+
+def layout():
+    """This engine's layout hash (uit_layout_hash)."""
+    return lib().uit_layout_hash()
+
+
+FORMAT = 1                      # UIT_FORMAT
 
 
 def mem():
@@ -412,3 +424,15 @@ class Engine:
         out = (c.c_int32 * 8)()
         self._L.uit_stats(self._e, out)
         return tuple(out)
+
+    def save(self, variant, source, front):
+        """The store as a compiled page (uit_save): bytes, or an int below 0."""
+        n = self._L.uit_save(self._e, None, 0, b(variant), source, front, len(front))
+        if n < 0:
+            return n
+        buf = c.create_string_buffer(n)
+        self._L.uit_save(self._e, buf, n, b(variant), source, front, len(front))
+        return buf.raw
+
+    def load(self, blob, page_id, variant):
+        return self._L.uit_load(self._e, blob, len(blob), b(page_id), b(variant))

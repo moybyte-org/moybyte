@@ -1556,6 +1556,9 @@ def _isint(x):
 # -- actions ------------------------------------------------------------------
 
 class Action:
+    def __repr__(self):
+        return "<action %s>" % self.name
+
     def __init__(self, name, label, fn, when, hint, row, where):
         self.name, self.label, self.fn = name, label, fn
         self.letters = self.icon = ""
