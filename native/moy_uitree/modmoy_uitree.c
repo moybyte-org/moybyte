@@ -272,6 +272,16 @@ static mp_obj_t eng_ground(size_t n, const mp_obj_t *a)
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(eng_ground_obj, 5, 5, eng_ground);
 
+// legacy_hints(text): the band's hints while a legacy stop holds focus, NUL-separated
+static mp_obj_t eng_legacy_hints(mp_obj_t self, mp_obj_t t)
+{
+    size_t n;
+    const char *s = mp_obj_str_get_data(t, &n);
+    uit_set_legacy_hints(eng(self), s, n);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(eng_legacy_hints_obj, eng_legacy_hints);
+
 // place(x, y, w, h, flags, fs): the layout alone, nothing drawn
 static mp_obj_t eng_place(size_t n, const mp_obj_t *a)
 {
@@ -446,6 +456,18 @@ static mp_obj_t eng_splits(size_t n, const mp_obj_t *a)
     return l;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(eng_splits_obj, 5, 5, eng_splits);
+
+// split_held() -> [UIT_SP_* words]: what the last frame's own dividers answered
+static mp_obj_t eng_split_held(mp_obj_t self)
+{
+    int32_t out[UIT_SP_N];
+    uit_split_held(eng(self), out);
+    mp_obj_t l = mp_obj_new_list(UIT_SP_N, NULL);
+    for (int i = 0; i < UIT_SP_N; i++)
+        mp_obj_list_store(l, MP_OBJ_NEW_SMALL_INT(i), MP_OBJ_NEW_SMALL_INT(out[i]));
+    return l;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(eng_split_held_obj, eng_split_held);
 
 // pane_ask(node, what, arg) (uit_pane_ask)
 static mp_obj_t eng_pane_ask(size_t n, const mp_obj_t *a)
@@ -742,11 +764,13 @@ static const mp_rom_map_elem_t eng_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_want_focus), MP_ROM_PTR(&eng_want_focus_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_placed), MP_ROM_PTR(&eng_set_placed_obj) },
     { MP_ROM_QSTR(MP_QSTR_ground), MP_ROM_PTR(&eng_ground_obj) },
+    { MP_ROM_QSTR(MP_QSTR_legacy_hints), MP_ROM_PTR(&eng_legacy_hints_obj) },
     { MP_ROM_QSTR(MP_QSTR_place), MP_ROM_PTR(&eng_place_obj) },
     { MP_ROM_QSTR(MP_QSTR_panes_set), MP_ROM_PTR(&eng_panes_set_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_unit), MP_ROM_PTR(&eng_set_unit_obj) },
     { MP_ROM_QSTR(MP_QSTR_panes), MP_ROM_PTR(&eng_panes_obj) },
     { MP_ROM_QSTR(MP_QSTR_splits), MP_ROM_PTR(&eng_splits_obj) },
+    { MP_ROM_QSTR(MP_QSTR_split_held), MP_ROM_PTR(&eng_split_held_obj) },
     { MP_ROM_QSTR(MP_QSTR_absent), MP_ROM_PTR(&eng_absent_obj) },
     { MP_ROM_QSTR(MP_QSTR_pane_ask), MP_ROM_PTR(&eng_pane_ask_obj) },
     { MP_ROM_QSTR(MP_QSTR_rect), MP_ROM_PTR(&eng_rect_obj) },

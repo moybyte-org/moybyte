@@ -78,6 +78,42 @@ class Engine(uitree_editor.Engine, uitree_ref.Engine):
     stacked down the page, rows, panes and their dividers, the text editor,
     popovers hung from a node's part."""
 
+    def __init__(self, *a, **k):
+        uitree_editor.Engine.__init__(self, *a, **k)
+        self.under = True          # the hosted phase draws the page's ground round them
+        self.placing = False       # the hosted phase's walk: regions placed, nothing drawn
+        self.legacies = {}         # key -> (node, rect), as this frame's pass drew it
+
+    def hosted(self, dt, cv, th, content, desk):
+        self._bind()
+        self._start(dt)
+        self._started = True
+        self._hosted_no = self.frame_no
+        self.cv, self.th = cv, th
+        self.content = content
+        self.desk = desk
+        self.fs = max(1, getattr(cv, "font_scale", 1))
+        self._ready()
+        self.placed = []
+        if self._hosts(self.root):
+            self._place_hosted(dt, cv, th, content)
+
+    def draw_hosted(self, cv, th, dt):
+        was = _NOW.app, _NOW.frame
+        try:
+            for n, row, r in self.placed:
+                focused = self.focused is not None and self.focused[0] is n
+                _NOW.app, _NOW.frame = self, False
+                self.hosting = n
+                n.l["draw"](cv, th, r[0], r[1], r[2], r[3], focused, dt)
+                cv.clip()
+                if "gen" in n.l:
+                    _NOW.app = self
+                    self.legacy_gens[n.key] = n.l["gen"]()
+        finally:
+            _NOW.app, _NOW.frame = was
+            self.hosting = None
+
     def _place_hosted(self, dt, cv, th, content):
         """`hosted`'s pass where the page hosts a surface: the regions
         placed, the page's ground rounded under them, their bodies drawn."""
@@ -92,7 +128,7 @@ class Engine(uitree_editor.Engine, uitree_ref.Engine):
                 rect = (rect[0], rect[1], rect[2], rect[3] - self._h_row())
             self._place_walk(rect)
             if self.under and placed:
-                self._ground_round(cv, th, placed)
+                self.ground_round(cv, th, content)
             self.draw_hosted(cv, th, dt)
         finally:
             _NOW.app, _NOW.frame = was

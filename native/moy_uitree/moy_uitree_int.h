@@ -358,6 +358,8 @@ struct uit {
     // the placed layout: each node's rect as the last pass placed it (w -1: not placed)
     uint8_t placed, placing;
     int16_t ground[4];
+    char legacy_hints[128];     // a focused legacy stop's band hints, NUL-separated (its host's)
+    uint8_t nlegacy_hints;
     int16_t *rects;
     int crects;
     uit_mc_t mcells[UIT_MCELLS];   // a pass's model row cells (`put_cell`)

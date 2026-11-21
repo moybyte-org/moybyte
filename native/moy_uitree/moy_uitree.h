@@ -158,6 +158,9 @@ void uit_set_placed(uit_t *e, int on);
 // The box the page's ground covers past its content (w 0: none): the
 // toolkit's page opens there and the page lays out in the content.
 void uit_set_ground(uit_t *e, int x, int y, int w, int h);
+// The band's hints while a legacy stop holds focus (its host's `hints()`),
+// NUL-separated, the last NUL in `n`; cut at 128 bytes.
+void uit_set_legacy_hints(uit_t *e, const char *s, size_t n);
 // The layout alone, nothing drawn, over `x, y, w, h` (a host's placement
 // before its frame): each placed region's rect, as uit_rect reads them.
 int uit_place(uit_t *e, int x, int y, int w, int h, int flags, int fs);
@@ -235,6 +238,9 @@ int uit_panes(const uit_t *e, int32_t *out, int max);
 enum { UIT_SP_SPLIT, UIT_SP_DIV, UIT_SP_AT, UIT_SP_STOP, UIT_SP_LIVE, UIT_SP_FLASH, UIT_SP_MIN, UIT_SP_WRITES,
        UIT_SP_OWE, UIT_SP_N };
 int uit_splits(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int flags, int32_t out[UIT_SP_N]);
+// What the last frame's own dividers answered (a page whose frame draws
+// them inline): `uit_splits`'s words but for the writes and the owe.
+void uit_split_held(const uit_t *e, int32_t out[UIT_SP_N]);
 // What a host asks of panes or pane `node` now, as the layout reads it:
 // whether it is shown (a pane with no tab on offer, a split with no child
 // shown, is not), its least size along axis `arg` (0 across, 1 down; pixels,

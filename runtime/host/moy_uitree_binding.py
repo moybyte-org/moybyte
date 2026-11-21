@@ -55,6 +55,7 @@ _SIGS = (
     ("uit_want_focus", [_P, _S], None),
     ("uit_set_placed", [_P, _I], None),
     ("uit_set_ground", [_P, _I, _I, _I, _I], None),
+    ("uit_set_legacy_hints", [_P, _S, _Z], None),
     ("uit_place", [_P, _I, _I, _I, _I, _I, _I], _I),
     ("uit_rect", [_P, _S, _I32], _I),
     ("uit_cond_of", [_P, _I, _S], _I),
@@ -68,6 +69,7 @@ _SIGS = (
     ("uit_set_unit", [_P, _I], None),
     ("uit_panes", [_P, _I32, _I], _I),
     ("uit_splits", [_P, _P, _P, _I, _I32], _I),
+    ("uit_split_held", [_P, _I32], None),
     ("uit_absent", [_P, _I], _I),
     ("uit_pane_ask", [_P, _I, _I, _I], _I),
     ("uit_next", [_P, _I32, c.c_char_p, _Z], _I),
@@ -331,6 +333,11 @@ class Engine:
         del buf
         return list(out)
 
+    def split_held(self):
+        out = (c.c_int32 * 9)()
+        self._L.uit_split_held(self._e, out)
+        return list(out)
+
     def pane_ask(self, node, what, arg):
         return self._L.uit_pane_ask(self._e, node, what, arg)
 
@@ -403,6 +410,10 @@ class Engine:
 
     def ground(self, x, y, w, h):
         self._L.uit_set_ground(self._e, x, y, w, h)
+
+    def legacy_hints(self, text):
+        b = text.encode()
+        self._L.uit_set_legacy_hints(self._e, b, len(b))
 
     def place(self, x, y, w, h, flags, fs):
         return self._L.uit_place(self._e, x, y, w, h, flags, fs)

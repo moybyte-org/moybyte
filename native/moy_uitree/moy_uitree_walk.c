@@ -1726,16 +1726,10 @@ static void fill_token(const moy_ui_sink_t *s, int32_t x, int32_t y, int32_t w, 
 }
 
 // An enum's tab strip across the page's top (`_r_tabs`): a band cut from its room.
-static void draw_tabs(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k)
+// An enum's tabs in `band`: a tap or left and right while focused write the value.
+static void tabs_in(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, const int32_t band[4])
 {
     const uit_node_t *N = NODE(k);
-    int desk = (e->flags & UIT_F_DESK) != 0, mn;
-    int bh = moy_ui_metrics(MOY_UI_K_VALUE_ROW, &mn)[desk ? 17 : 16] * e->fs, pad = desk ? 8 : 0;
-    int32_t band[4], rest[4];
-    moy_ui_cut(e->rect, MOY_UI_CUT_TOP, bh + 2 * pad, band, rest);
-    memcpy(e->rect, rest, sizeof rest);
-    if (pad)
-        moy_ui_inset32(band, 2 * pad, pad, band);
     moy_ui_api_at(c, band[0], band[1], band[2], band[3]);
     int count, at;
     uint32_t len, items = seg_items(e, N, &len, &count, &at);
@@ -1743,11 +1737,24 @@ static void draw_tabs(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k)
     char id[UIT_ID_MAX + 1];
     over_for(e, k, -1, -1, c, &o, id);
     int got = moy_ui_api_choice(c, s, 9, span_of("", 0), (const uint8_t *)e->scratch.p + items, len, at, &o);
-    moy_ui_api_at(c, e->rect[0], e->rect[1], e->rect[2], e->rect[3]);
     if (got >= 0 && got < count && got != at) {
         const char *v = seg_key(e, N, got);
         wrote_text(e, k, v, strlen(v), "from", N->on);
     }
+}
+
+// A flow page's tabs: a band cut from the page's top.
+static void draw_tabs(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k)
+{
+    int desk = (e->flags & UIT_F_DESK) != 0, mn;
+    int bh = moy_ui_metrics(MOY_UI_K_VALUE_ROW, &mn)[desk ? 17 : 16] * e->fs, pad = desk ? 8 : 0;
+    int32_t band[4], rest[4];
+    moy_ui_cut(e->rect, MOY_UI_CUT_TOP, bh + 2 * pad, band, rest);
+    memcpy(e->rect, rest, sizeof rest);
+    if (pad)
+        moy_ui_inset32(band, 2 * pad, pad, band);
+    tabs_in(e, c, s, k, band);
+    moy_ui_api_at(c, e->rect[0], e->rect[1], e->rect[2], e->rect[3]);
 }
 
 // A table (`_r_table`): its columns' headers and its rows' cells, one stop
@@ -2530,6 +2537,14 @@ void uit_set_ground(uit_t *e, int x, int y, int w, int h)
     e->ground[0] = (int16_t)x, e->ground[1] = (int16_t)y, e->ground[2] = (int16_t)w, e->ground[3] = (int16_t)h;
 }
 
+void uit_set_legacy_hints(uit_t *e, const char *s, size_t n)
+{
+    if (n > sizeof e->legacy_hints)
+        n = 0;
+    memcpy(e->legacy_hints, s, n);
+    e->nlegacy_hints = (uint8_t)n;
+}
+
 static int32_t fdiv(int32_t a, int32_t b)
 {
     int32_t q = a / b;
@@ -2813,6 +2828,8 @@ static int32_t row_gap(const uit_t *e)
 
 // A row's shown cells in order, each with the list row it draws on (`km`, `kr`): a `rows` among
 // them a cell per row of its model, its kids shown on that row (a row from a model).
+static int lender(uit_t *e, int k, const char *site);
+
 static int row_kids(uit_t *e, int k, int model, int row, int16_t *kids, int16_t *km, int16_t *kr, int *st,
                     int *st_shown)
 {
@@ -2828,6 +2845,14 @@ static int row_kids(uit_t *e, int k, int model, int row, int16_t *kids, int16_t 
                 KIDS(g, b)
                 if (n < PLACE_KIDS && placed_shown(e, b, m, r))
                     kids[n] = (int16_t)b, km[n] = (int16_t)m, kr[n++] = (int16_t)r;
+            continue;
+        }
+        if (kind == UIT_LENT) {         // a lent site: the shown lender's cells, in its place
+            int t = lender(e, 0, uit_str(e, NODE(g)->key));
+            if (t >= 0)
+                KIDS(t, b)
+                if (n < PLACE_KIDS && placed_shown(e, b, model, row))
+                    kids[n] = (int16_t)b, km[n] = (int16_t)model, kr[n++] = (int16_t)row;
             continue;
         }
         *st_shown |= kind == UIT_STATUS;
@@ -3198,6 +3223,9 @@ static void place_at(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, i
     case UIT_CANVAS:
         moy_ui_api_at(c, r[0], r[1], r[2], r[3]);
         draw_canvas_at(e, c, s, k, model, row);
+        return;
+    case UIT_TABS:
+        tabs_in(e, c, s, k, r);
         return;
     case UIT_TEXT_EDITOR: {
         // its document is the front end's: it draws the editor's rows in the rect, under the
@@ -3879,6 +3907,13 @@ int uit_splits(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int flags, int
     return e->nevs - e->evat;
 }
 
+void uit_split_held(const uit_t *e, int32_t out[UIT_SP_N])
+{
+    for (int i = 0; i < UIT_SP_N; i++)
+        out[i] = e->arr ? e->arr->held[i] : -1;
+    out[UIT_SP_WRITES] = out[UIT_SP_OWE] = 0;
+}
+
 int uit_place(uit_t *e, int x, int y, int w, int h, int flags, int fs)
 {
     if (!e->nnodes)
@@ -3974,7 +4009,8 @@ void uit_anchor(uit_t *e, const char *name, int x, int y, int w, int h)
 }
 
 // The rect a popover hangs from (`_part_anchor`): a part the front end placed this frame
-// ("code.caret"), or a text editor's or a slot's whole rect; 0 none.
+// ("code.caret"), a pane's header ("PANE.head"), or a node's whole rect as this frame placed
+// it (a text editor, a slot, a row); 0 none.
 static int anchor_rect(uit_t *e, const char *name, size_t n, int32_t out[4])
 {
     for (int i = 0; i < e->nanc; i++)
@@ -3983,15 +4019,30 @@ static int anchor_rect(uit_t *e, const char *name, size_t n, int32_t out[4])
                 out[j] = e->anc[i][j];
             return 1;
         }
+    if (n > 5 && !memcmp(name + n - 5, ".head", 5) && e->arr) {
+        const uit_arr_t *A = e->arr;
+        for (int i = 0; i < A->norder; i++) {
+            const uit_node_t *P = NODE(A->order[i].node);
+            const char *key = uit_str(e, P->key);
+            if (strlen(key) == n - 5 && !memcmp(key, name, n - 5)) {
+                if (P->lit & PN_HEADLESS)
+                    return 0;
+                for (int j = 0; j < 3; j++)
+                    out[j] = A->order[i].r[j];
+                out[3] = PN_HEADER * e->du;
+                return 1;
+            }
+        }
+    }
     if (memchr(name, '.', n) || !e->rects)
         return 0;
     for (int k = 0; k < e->nnodes; k++) {
         const uit_node_t *N = NODE(k);
         const char *key = uit_str(e, N->key);
-        if ((N->kind == UIT_TEXT_EDITOR || N->kind == UIT_SLOT) && strlen(key) == n && !memcmp(key, name, n)) {
+        if (N->kind != UIT_POPOVER && strlen(key) == n && !memcmp(key, name, n)) {
             const int16_t *r = e->rects + 4 * k;
             if (r[2] < 0)
-                return 0;
+                continue;           // not placed this frame (hidden): a shown node of the key may be
             for (int j = 0; j < 4; j++)
                 out[j] = r[j];
             return 1;
@@ -4118,7 +4169,10 @@ static void placed_hints(uit_t *e, uit_buf_t *b, int pages)
         return;
     int closer = pop >= 0 ? pop : closer_of(e, 0);
     if (closer < 0) {
-        if (e->has_focused && e->focused.kind != UIT_TEXT_EDITOR)
+        if (e->has_focused && e->focused.kind == UIT_LEGACY) {
+            if (e->nlegacy_hints)
+                uit_buf_put(b, e->legacy_hints, e->nlegacy_hints - 1u);
+        } else if (e->has_focused && e->focused.kind != UIT_TEXT_EDITOR)
             hints(e, b, pages);
         return;
     }

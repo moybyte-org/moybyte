@@ -409,7 +409,7 @@ class App(AppLayer):
         self._surf, self._theme, self._damage = ctx.surface, ctx.theme, ctx.damage
         build = self.BUILD[0]
         eng = self.ENGINE[0] if self.ENGINE else _engine_class(False)
-        if eng.__module__ == "uitree_editor":       # the Editor's kinds, on the engine in use
+        if eng.__module__.rpartition(".")[2] == "uitree_editor":     # the Editor's kinds (runtime.uitree_editor on the host)
             eng = _engine_class(False, True)
         self.engine = eng(S.decl_of(S.module_of(build)), build, ctx.ui, ctx.surface, ctx.damage,
                           getattr(ctx, "files", None), env=ctx)

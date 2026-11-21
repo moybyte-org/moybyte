@@ -1,6 +1,6 @@
 # Map (grep -n a name to jump there):
 #   Engine                 the Editor's kinds over uitree_app.Engine: what the C engine and the reference share
-#   Engine.hosted          the bridge's first phase: regions placed, the hosted surfaces drawn
+#   Engine.draw_hosted     the bridge: each hosted surface drawn where the page laid it out
 #   Engine.nudge           a divider moved by keys
 #   Engine._r_text_editor  the text editor's options and its document's view
 #   lent_place             a lent row's cells placed
@@ -23,6 +23,7 @@ import ui_draw as _ud
 import uitree as S
 from uitree import _NOW
 import uitree_app
+from ui_host import _outside
 
 _SYN = {"python": "python", "lua": "lua", "json": "json", "markdown": "markdown", "plain": "plain"}
 _REGIONS = ("case", "switch", "panel")          # a row's cells that stack their own children
@@ -105,11 +106,8 @@ class Engine(uitree_app.Engine):
         self.ground = None         # a box the page's ground covers past its content: the
                                    # canvas round the host's rect (a handheld's bar band)
         # the bridge (`legacy`): the hosted phase places and draws them
-        self.under = True          # the hosted phase draws the page's ground round them
-        self.placing = False       # the hosted phase's walk: regions placed, nothing drawn
         self.placed = []           # (node, row, rect) of each legacy node the phase placed
-        self._hosted_no = -1       # the frame whose hosted phase ran
-        self.legacies = {}         # key -> (node, rect), as this frame's pass drew it
+        self._hosted_no = -1       # the frame whose hosted phase drew a body
         self.legacy_gens = {}      # key -> its gen() when its body was drawn
         self.held_legacy = None    # (node, rect) a press holds until its release
         self.hosting = None        # the legacy node whose body `draw_hosted` is drawing
@@ -142,8 +140,8 @@ class Engine(uitree_app.Engine):
         """Whether a hosted surface's gen() moved since its body was drawn."""
         was, _NOW.app = _NOW.app, self
         try:
-            for key, (n, _r) in self.legacies.items():
-                if "gen" in n.l and n.l["gen"]() != self.legacy_gens.get(key):
+            for n, _row, _r in self.placed:
+                if "gen" in n.l and n.l["gen"]() != self.legacy_gens.get(n.key):
                     return True
             return False
         finally:
@@ -158,27 +156,26 @@ class Engine(uitree_app.Engine):
     #
     # A page that hosts a surface still drawn with today's verbs draws in
     # two phases: `hosted`, which its host runs BEFORE it begins the frame,
-    # places the page's regions by arithmetic (nothing drawn), draws the
-    # page's ground round them and then each hosted surface in its own
-    # verbs pass; the frame's pass (`paint`) then draws everything else,
-    # each legacy node a focus stop that draws nothing, its overlays last.
-    # No verbs pass ever runs inside another: the desk Editor's own order
-    # (its pane bodies, then its one verbs pass of headers, dividers and
-    # menus), and what a C engine does as layout, then its paint in layers.
+    # draws the page's ground round the hosted bodies and then each body in
+    # its own verbs pass; the frame's pass (`paint`) then draws everything
+    # else, bare, each legacy node a focus stop that draws nothing, its
+    # overlays last. No verbs pass ever runs inside another: the desk
+    # Editor's own order (its pane bodies, then its one verbs pass of
+    # headers, dividers and menus).
 
-    def hosted(self, dt, cv, th, content, desk):
-        self._bind()
-        self._start(dt)
-        self._started = True
-        self._hosted_no = self.frame_no
-        self.cv, self.th = cv, th
-        self.content = content
-        self.desk = desk
-        self.fs = max(1, getattr(cv, "font_scale", 1))
-        self._ready()
-        self.placed = []
-        if self._hosts(self.root):
-            self._place_hosted(dt, cv, th, content)
+    def ground_round(self, cv, th, content):
+        """The page's ground where the hosted bodies leave it showing: the
+        Editor's `panel`, never filled under a body (it draws its own)."""
+        left = [tuple(self.ground if self.ground is not None else content)]
+        for _n, _row, r in self.placed:
+            out = []
+            for piece in left:
+                out += _outside(piece, r)
+            left = out
+        col = th["panel"]
+        for x, y, w, h in left:
+            if w > 0 and h > 0:
+                cv.rect(x, y, w, h, col)
 
     def draw_hosted(self, cv, th, dt):
         """Each legacy body where the last placement put it, in reading
@@ -186,9 +183,10 @@ class Engine(uitree_app.Engine):
         this page's frame (it may be a page of its own, which writes its
         state as its host syncs it)."""
         was = _NOW.app, _NOW.frame
+        fk = self.focus_key
         try:
             for n, row, r in self.placed:
-                focused = self.focused is not None and self.focused[0] is n
+                focused = fk == n.key
                 _NOW.app, _NOW.frame = self, False
                 self.hosting = n
                 n.l["draw"](cv, th, r[0], r[1], r[2], r[3], focused, dt)

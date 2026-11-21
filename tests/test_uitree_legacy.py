@@ -1,5 +1,5 @@
 """The bridge (`ui.legacy`, spec §7.7) and the panes on the desk Editor's
-rules (runtime/uitree/uitree_ref_editor.py), over the fixture
+rules (the C engine's placed kinds, `uitree_c.CEditorEngine`), over the fixture
 tests/uitree_fixtures/uitree_legacy_app.py on every size the shell goldens
 draw: a hosted surface drawn in its own verbs pass BEFORE the page's, its
 pixels kept under the page's pass and under a popover's, its pointer, keys,
@@ -125,7 +125,7 @@ def test_a_hosted_surface_draws_first_and_the_pass_keeps_its_pixels(config, run)
     stop's well is drawn over it: its 4-row mark stands on the glass."""
     r = run(config)
     eng, surf = r.eng, r.surf
-    rect = eng.legacies["list"][1]
+    rect = eng.rect_of("list")
     assert surf.rects[-1] == rect and surf.draws >= 2
     assert all(p[0].key == "list" and p[2] == rect for p in eng.placed)
     x, y, w, _h = rect
@@ -143,7 +143,7 @@ def test_a_hosted_surface_draws_first_and_the_pass_keeps_its_pixels(config, run)
 @pytest.mark.parametrize("config", SIZES)
 def test_a_popover_lies_over_the_hosted_body(config, run):
     r = run(config)
-    x, y, w, h = r.eng.legacies["list"][1]
+    x, y, w, h = r.eng.rect_of("list")
     r.key("C-u")
     assert r.E.s.menu and r.eng.popover_shown()
     before, after = r.frames[-2], r.frames[-1]
@@ -163,20 +163,20 @@ def test_a_press_focuses_the_hosted_stop_and_its_keys_and_hints_are_its_own(conf
     on as from any stop."""
     r = run(config)
     eng, surf, E = r.eng, r.surf, r.E
-    x, y, w, h = eng.legacies["list"][1]
+    x, y, w, h = eng.rect_of("list")
     r.tap(x + 10, y + 20)
     assert surf.presses[0] == (10, 20, True), surf.presses
-    assert eng.focused is not None and eng.focused[0].key == "list"
+    assert eng.focus_key == "list"
     assert surf.focused[-1] is True
     said = E.s.said
     r.type("q")
     assert surf.typed == ["q"] and E.s.said == said
-    assert eng._hints() == ("confirm", "Pick")
+    assert eng.hints() == ("confirm", "Pick")
     if G.CONFIGS[config]["windowed"]:
         assert E.s.on == "list_pane"
     if not G.CONFIGS[config]["windowed"]:
         r.step(r.driver.press, "up")            # the head row's Say, above it
-        assert eng.focused is not None and eng.focused[0].key == "say"
+        assert eng.focus_key == "say"
 
 
 @pytest.mark.parametrize("config", SIZES[:1] + DESK[:1])
@@ -236,16 +236,16 @@ def test_pane_focus_steps_and_a_pane_grows(config, run):
     eng, E = r.eng, r.E
     assert E.s.on == "list_pane"
     r.key("F6")
-    assert E.s.on == "tools" and eng.focused[0].key == "say", eng.trace_text()
+    assert E.s.on == "tools" and eng.focus_key == "say", eng.trace_text()
     r.key("F6")
     assert E.s.on == "notes"
     r.key("S-F6")
     r.key("S-F6")
-    assert E.s.on == "list_pane" and eng.focused[0].key == "list"
+    assert E.s.on == "list_pane" and eng.focus_key == "list"
     r.key("C-S-Enter")
     assert E.s.big == "list_pane"
     assert [p.key for p, _r in eng.pane_order] == ["list_pane"]
-    assert eng.legacies["list"][1][2] > r.surf.rects[0][2]       # the body over the whole area
+    assert eng.rect_of("list")[2] > r.surf.rects[0][2]       # the body over the whole area
     r.step(r.driver.escape)
     assert E.s.big is None and len(eng.pane_order) == 3
 
@@ -293,22 +293,3 @@ def test_the_bridge_and_the_panes_refuse_their_mistakes(case, tmp_path):
     res = uitree_check.check(str(path))
     got = [(e.code, e.where[1] if e.where else None) for e in res.errors]
     assert (code, line) in got, (got, [str(e) for e in res.errors])
-
-
-def test_a_legacy_node_needs_the_editor_replay_and_a_hosted_phase(tmp_path):
-    """The toolkit-laid replay refuses one (N03: it places nothing before
-    its pass); the Editor's refuses one whose host ran no hosted phase."""
-    import types
-    import uitree as S
-    import uitree_ref
-    import uitree_ref_editor
-    import uitree_legacy_app as E
-    base = uitree_ref.Engine(S.decl_of(S.module_of(E.build)), E.build, None, None, None)
-    with pytest.raises(S.UIError) as e:
-        base._r_legacy(types.SimpleNamespace(key="list", where=None), None, (0, 0, 1, 1))
-    assert e.value.code == "N03"
-    ed = uitree_ref_editor.Engine(S.decl_of(S.module_of(E.build)), E.build, None, None, None)
-    ed.frame_no = 3
-    with pytest.raises(S.UIError) as e:
-        ed._r_legacy(types.SimpleNamespace(key="list", where=None), None, (0, 0, 1, 1))
-    assert e.value.code == "N03" and "hosted" in str(e.value)
