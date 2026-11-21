@@ -1475,7 +1475,7 @@ local PROPS = {
   slider = { label = 1, lo = 1, hi = 1, on = 1, focus = 1, when = 1, off = 1, icon = 1, look = 1 },
   field = { label = 1, max = 1, secret = 1, hint = 1, grow = 1, commit = 1, on = 1, changed = 1, input = 1,
             focus = 1, when = 1, off = 1 },
-  rows = { cur = 1, current = 1, check = 1, empty = 1, by = 1, changed = 1 },
+  rows = { cur = 1, current = 1, check = 1, empty = 1, by = 1, changed = 1, filter = 1, group = 1, dir = 1 },
   dialog = { buttons = 1, default = 1 }, popover = { anchor = 1, w = 1, close = 1, wash = 1 },
   switch = {}, case = {},
   -- the C engine's kinds (uitree_engine.lua); the reference back end draws none of them
@@ -1486,18 +1486,22 @@ local PROPS = {
   table = { cols = 1, cur = 1, on = 1, changed = 1, empty = 1, focus = 1, hint = 1 }, col = {},
   split = { dir = 1, sizes = 1, gap = 1, pad = 1, align = 1 }, grid = { cols = 1, rows = 1, gap = 1, pad = 1 },
   panel = {}, canvas = { draw = 1, h = 1, w = 1, focus = 1, ground = 1 },
+  tabs = { labels = 1, icons = 1, on = 1, focus = 1, offered = 1 },
+  cards = { cur = 1, current = 1, w = 1, h = 1, cols = 1, new = 1, changed = 1, group = 1 },
+  card = { label = 1, sub = 1, badge = 1, icon = 1, tone = 1 },
 }
 -- the kinds only the C engine draws
 local C_KINDS = { progress = 1, seg = 1, text_view = 1, menu = 1, item = 1, table = 1, col = 1, split = 1, grid = 1,
-                  panel = 1, canvas = 1 }
+                  panel = 1, canvas = 1, tabs = 1, cards = 1, card = 1 }
 -- the props only the C engine draws, by kind
 local C_PROPS = { group = { close = 1 }, row = { close = 1, gap = 1, pad = 1, mid = 1 },
-                  button = { marked = 1, tone = 1, w = 1 }, slider = { look = 1 }, rows = { changed = 1 } }
+                  button = { marked = 1, tone = 1, w = 1 }, slider = { look = 1 },
+                  rows = { changed = 1, filter = 1, group = 1, dir = 1 } }
 local COND_PROPS = { shown = 1, focus = 1, when = 1, marked = 1 }
 local NAME_PROPS = { key = 1, on = 1, cut = 1, changed = 1, commit = 1, current = 1, cur = 1, by = 1, new = 1,
                      buttons = 1, default = 1, close = 1, off = 1, kind = 1, face = 1, size = 1, wrap = 1,
                      align = 1, input = 1, wash = 1, anchor = 1, arg = 1, look = 1, labels = 1, syntax = 1,
-                     mkind = 1, dir = 1, ground = 1 }
+                     mkind = 1, dir = 1, ground = 1, filter = 1, icons = 1 }
 local NUM_PROPS = { max = 1, lines = 1, lo = 1, hi = 1, span = 1, w = 1, gap = 1, pad = 1, rows = 1, h = 1 }
 -- a function the engine calls inside its frame
 local FN_PROPS = { draw = 1 }
@@ -1512,9 +1516,13 @@ local WORDS = { kind = { normal = 1, primary = 1, danger = 1, tonal = 1 }, off =
                 syntax = { plain = 1, sgr = 1, python = 1, lua = 1, json = 1, markdown = 1 },
                 ground = { surface = 1, surface_alt = 1, surface_light = 1, panel = 1, lcd = 1, desktop = 1 } }
 -- a prop that is another type, or takes other words, on one kind
-local KIND_TYPE = { progress = { max = "int" }, table = { cols = "list" }, grid = { cols = "num" } }
+-- ("row": a template over the list's rows, compiled once the rows' context is in)
+local KIND_TYPE = { progress = { max = "int" }, table = { cols = "list" }, grid = { cols = "num" },
+                    rows = { group = "row" }, cards = { group = "row", w = "int", h = "int", cols = "int" },
+                    tabs = { offered = "conds" } }
 local KIND_WORDS = { look = { seg = { seg = 1, cycle = 1 }, progress = { count = 1 }, slider = { bar = 1, steps = 1 } },
-                     wrap = { text_view = { cut = 1, word = 1 } }, face = { text_view = { ui = 1, mono = 1 } } }
+                     wrap = { text_view = { cut = 1, word = 1 } }, face = { text_view = { ui = 1, mono = 1 } },
+                     dir = { rows = { row = 1 } } }
 local RETIRED_PROPS = { ink = "tone = \"...\"", disabled = "when = \"...\" with off = \"grey\" on the action",
                         does = "hint = \"...\" on the action", below = "new = \"NAME\"", current_tool = 1 }
 local STOPS = { button = 1, link = 1, toggle = 1, slider = 1, field = 1, bubble = 1, rows = 1 }
@@ -1551,6 +1559,16 @@ local function check_opts(kind, o, at)
       end
     elseif kw then
       if not kw[v] then fail("N01", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "one of " .. table.concat(sorted_keys(kw), ", "), describe(v)) end
+    elseif kt == "row" then
+      if type(v) ~= "string" then fail("N01", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "a template (a text)", describe(v)) end
+    elseif kt == "conds" then
+      if type(v) ~= "table" or getmetatable(v) ~= nil or v[1] ~= nil then
+        fail("N01", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "a table of value = condition", describe(v))
+      end
+      for _, c in pairs(v) do
+        if type(c) ~= "string" then fail("N01", at, "ui." .. kind .. "'s " .. k .. " holds " .. describe(c), "a condition (a text)", describe(c)) end
+        compile_cond(c, nil, at)
+      end
     elseif kt == "tpl" then
       if type(v) ~= "string" then fail("N01", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "a template (a text)", describe(v)) end
       compile_tpl(v, nil, at)
@@ -1838,6 +1856,27 @@ function T.slider(name, o)
 end
 function T.field(name, o) return two_way("field", name, { "text" }, o, where()) end
 
+-- a list's filter (a text state the rows' text key is matched against) and its
+-- group (a caption over the rows: a template of the row, drawn where it changes)
+local function list_opts(kind, n, m, ctx, at)
+  if n.o.filter ~= nil then
+    local ty = DECL[n.o.filter]
+    if not ty then undeclared(n.o.filter, at) end
+    if ty.t ~= "text" then fail("T03", at, "ui." .. kind .. "'s filter " .. q(n.o.filter) .. " is " .. tname(ty), "a text state", tname(ty)) end
+    if m.fields[m.key].t ~= "text" then
+      fail("T03", at, "ui." .. kind .. "'s filter: the rows' key " .. q(m.key) .. " is " .. tname(m.fields[m.key]), "a text key",
+           tname(m.fields[m.key]), "filter matches the model's key field, a text")
+    end
+  end
+  if n.o.group ~= nil then
+    local sr = ROWCTX
+    ROWCTX = ctx
+    local ok, err = pcall(compile_tpl, n.o.group, nil, at)
+    ROWCTX = sr
+    if not ok then error(err, 0) end
+  end
+end
+
 local function model_arg(kind, name, at)
   local ty = type(name) == "string" and DECL[name]
   if not ty then undeclared(tostring(name), at) end
@@ -1872,6 +1911,7 @@ function T.rows(name, o, body)
   if n.o.changed ~= nil then use_action(n.o.changed, "row", at, "ui.rows' changed", false) end
   local ctx = { fields = m.fields, order = m.order, name = name }
   n.ctx = ctx
+  list_opts("rows", n, m, ctx, at)
   local sr = ROWCTX
   if n.o.by == nil then
     if type(body) ~= "function" then
@@ -2140,6 +2180,90 @@ function T.col(text, extra)
   if extra ~= nil then fail("N01", at, "ui.col takes its text alone", "ui.col(\"{.FIELD}\")", describe(extra)) end
   n.a[1] = head_text("col", text, at, "text")
   n.o = {}
+  return n
+end
+
+-- a tab strip bound two-way to an enum: a tab a value, worded by the label table
+-- labels= (and drawn with icons=), offered= a condition per value it shows
+function T.tabs(name, o, extra)
+  local at = where()
+  local n = node("tabs", at)
+  if extra ~= nil then fail("N01", at, "ui.tabs takes its state and its props", "ui.tabs(NAME, { labels = \"TABLE\" })", describe(extra)) end
+  local ty = head_state("tabs", name, { "enum" }, at)
+  n.a[2] = name
+  n.o = check_opts("tabs", o, at)
+  for _, p in ipairs({ "labels", "icons" }) do
+    local tn = n.o[p]
+    if tn == nil and p == "labels" then
+      fail("N01", at, "ui.tabs(" .. q(name) .. ") has no labels", "labels = the name of a ui.labels table", "none")
+    end
+    if tn ~= nil and not LABELS[tn] then
+      fail("T02", at, "ui.tabs(" .. q(name) .. ") has no label table " .. q(tn), p .. " = the name of a ui.labels table", q(tn),
+           "ui.labels(\"" .. tn .. "\", { value = \"Word\", ... })")
+    end
+  end
+  for v in pairs(n.o.offered or {}) do
+    if not ty.set[v] then
+      fail("N01", at, "ui.tabs(" .. q(name) .. ")'s offered names " .. describe(v) .. ", not a value", "one of " .. table.concat(ty.values, ", "), describe(v))
+    end
+  end
+  local miss = {}
+  for _, v in ipairs(ty.values) do if LABELS[n.o.labels][v] == nil then miss[#miss + 1] = v end end
+  if #miss > 0 then
+    fail("T04", at, "ui.tabs(" .. q(name) .. "): the labels " .. q(n.o.labels) .. " have no word for " .. table.concat(miss, ", "),
+         "a word for each value", "none for " .. miss[1])
+  end
+  if n.o.on ~= nil then use_action(n.o.on, "none", at, "ui.tabs' on", false) end
+  return n
+end
+
+-- rows as cards: one ui.card a row, a stop that fires its action with the row
+function T.cards(name, o, body)
+  local at = where()
+  if body == nil and type(o) == "function" then o, body = nil, o end
+  local n = node("cards", at)
+  if ROWCTX then fail("N03", at, "ui.cards inside a row", "cards at a page's level", "cards in rows") end
+  local m = model_arg("cards", name, at)
+  n.a[1] = name
+  n.o = check_opts("cards", o, at)
+  if n.o.cur ~= nil then
+    local ty = DECL[n.o.cur]
+    if not ty or ty.t ~= "rowof" or ty.model ~= name then
+      fail("T03", at, "ui.cards' cur " .. describe(n.o.cur), "a ui.row_of(\"" .. name .. "\") state", ty and tname(ty) or "undeclared")
+    end
+  end
+  if n.o.current ~= nil then
+    local ty = DECL[n.o.current]
+    local kt = m.fields[m.key]
+    if not ty then undeclared(n.o.current, at) end
+    if not (ty.t == kt.t or (ty.t == "enum" and kt.t == "text")) then
+      fail("T03", at, "ui.cards' current " .. q(n.o.current) .. " is " .. tname(ty), "a state of the key's type (" .. tname(kt) .. ")", tname(ty))
+    end
+  end
+  if n.o.new ~= nil then use_action(n.o.new, "none", at, "ui.cards' new", true) end
+  if n.o.changed ~= nil then use_action(n.o.changed, "row", at, "ui.cards' changed", false) end
+  local ctx = { fields = m.fields, order = m.order, name = name }
+  n.ctx = ctx
+  list_opts("cards", n, m, ctx, at)
+  local c = setmetatable({ kind = "case", a = {}, o = {}, kids = {}, at = at }, NodeMT)
+  local sr = ROWCTX
+  ROWCTX = ctx
+  local ok, err = pcall(run_body, c, body)
+  ROWCTX = sr
+  if not ok then error(err, 0) end
+  if #c.kids ~= 1 or c.kids[1].kind ~= "card" then
+    fail("N03", at, "ui.cards(" .. q(name) .. ")'s body is not one ui.card", "one ui.card, drawn a row", #c.kids == 1 and "ui." .. c.kids[1].kind or #c.kids .. " nodes")
+  end
+  n.body = c
+  return n
+end
+function T.card(name, o)
+  local at = where()
+  local n = node("card", at)
+  if n.up.kind ~= "case" or not ROWCTX then fail("N03", at, "ui.card outside a ui.cards", "a card in a ui.cards' body", "ui." .. n.up.kind) end
+  n.o = check_opts("card", o, at)
+  use_action(name, row_hands(), at, "ui.card(" .. q(name) .. ")", true)
+  n.action = name
   return n
 end
 
