@@ -249,6 +249,12 @@ int uit_absent(const uit_t *e, int slot);
 // redraw of the whole page.
 int uit_frame(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int x, int y, int w, int h,
               int flags, int fs, int input);
+// One frame of the page on a run (a Lua or compiled app's, moy_uitree_run.c):
+// uit_frame over the RUN face's context and sink into `target` (the run's
+// canvas), in the run's content rect, at its font scale and input, the desk
+// bit the run's face word's (`flags`' own UIT_F_DESK is ignored). Answers as
+// uit_frame, or below 0 where no run is open.
+int uit_run_frame(uit_t *e, void *target, int flags);
 // Whether the frame drawn last is what a frame now would draw, so a host
 // may leave its pixels and skip uit_frame: the same build, no state's
 // version and no draft moved, the same focus, no event, trace line or

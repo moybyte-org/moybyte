@@ -10,7 +10,7 @@ kind or prop the table has not, a new gap) and when a listed one is gone, so
 the list only shrinks, by hand, with the fix that closes it.
 
 Python: runtime/uitree/ (SCHEMA, TAKES, ROLES, the verbs' signatures).
-Lua: runtime/run/uitree.lua (ui._contract(), read through a host Lua).
+Lua: runtime/run/uitree.lua (ui._contract(), read through a host Lua) and its back ends.
 """
 import inspect
 import json
@@ -34,7 +34,8 @@ with open(os.path.join(CONTRACT, "contract.json"), encoding="utf-8") as _f:
 PY_FILES = [str(runtime_file(f)) for f in
             ("uitree.py", "uitree_app.py", "uitree_c.py", "uitree_editor.py", "uitree_doc.py", "uitree_pics.py")] + \
            [os.path.join(ROOT, "tools", "uitree_check.py")]
-LUA_FILES = [str(runtime_file("lua_ext.py").parent / f) for f in ("uitree.lua", "uitree_check.lua")] + \
+LUA_FILES = [str(runtime_file("lua_ext.py").parent / f)
+             for f in ("uitree.lua", "uitree_replay.lua", "uitree_engine.lua", "uitree_check.lua")] + \
             [os.path.join(ROOT, "tools", "uitree_lua_check.py")]
 CODE = re.compile(r'"([A-Z][0-9]{2})"')
 

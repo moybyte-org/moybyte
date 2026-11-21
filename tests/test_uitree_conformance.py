@@ -32,8 +32,11 @@ SMALL, DESK = C.CONFIGS
 CHROME = {SMALL: ((0, 28), (220, 240))}
 
 # (check, fixture, layer or config): why it does not hold, and who the spec sides with
-LUA_SCALE = ("a Lua app in a desk window draws at text scale 1 where the Python app draws at the "
-             "desk's scale 2; the spec's sizes scale with the text scale (§15): the spec sides with Python")
+LUA_SCALE = ("the Lua half is an app cart, and an app cart's desk window (every tier's, tests/test_app_layout.py) "
+             "is the player's window, its canvas at font scale 1 (ui_face reads the canvas's) and its content "
+             "rect 22 px narrower, where the Python half is a system app's window at the desk's scale 2; the "
+             "spec's sizes scale with the text scale (§15): the spec sides with Python; the console's app "
+             "window, not the engine (open)")
 BAR_AND_BAND = ("the bar's title (the Python app's is empty, the Lua cart's is its manifest title) and "
                 "the hints band (Python draws the engine's control hints, Lua none for a toggle or a "
                 "link): F-38 leaves the control hints open; the bar's title is the app declaration's (§19.1)")
@@ -204,6 +207,20 @@ def test_the_reference_matches_its_records(name, config):
 def test_lua_trace_is_the_references(name, config):
     lua, _ = _run("lua", name, SMALL)
     assert trace_open(lua) == trace_open(_expected(name, "trace.txt"))
+
+
+@pytest.mark.parametrize("name,config", _params("trace"))
+def test_lua_on_the_c_engine_writes_the_references_trace(name, config):
+    """On the C engine the Lua layer's trace is the engine's and the
+    reference's, line for line: only the layer's own build and open lines and
+    its opened hook's action line (host py+lua, which Python writes none of)
+    are left out."""
+    import uitree_app
+    if uitree_app.engine_in_use() != "c":
+        pytest.skip("the Lua layer runs on the reference here")
+    own = re.compile(r"^(build|open) |^action opened from ")
+    lua, _ = _run("lua", name, SMALL)
+    assert [l for l in lua if not own.match(l)] == [l for l in _expected(name, "trace.txt") if not own.match(l)]
 
 
 @pytest.mark.parametrize("name,config", _params("dump"))
