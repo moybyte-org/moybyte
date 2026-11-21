@@ -3064,7 +3064,7 @@ def snapshot(app):
         if n.kind == "dialog":
             bits.append("buttons=%s" % ",".join(a.name for a in n.l["buttons"]))
         out.append("  ".join(bits))
-        if n.kind in ("rows", "cards"):
+        if n.kind in ("rows", "cards", "table"):
             m = app.s._v[n.l["model"]]
             out.append("%s  [%d rows of %s]" % ("  " * depth, len(m), n.l["model"]))
             for r in m:

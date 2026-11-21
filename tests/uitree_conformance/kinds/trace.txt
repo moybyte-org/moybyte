@@ -1,0 +1,15 @@
+state items [2 rows] +2 -0 ~0 moved 0 (in opened)
+build build page (builds 1)
+state sel '' -> 'a' (table)
+state mode 'a' -> 'b' (from seg 'mode')
+action pick from table 'a/items' on 'Kinds'
+state picked '' -> 'Picked Apples' (in pick)
+drew label '{picked}' -> 'Picked Apples'
+state sel 'a' -> 'b' (table)
+action pick from table 'b/items' on 'Kinds'
+state picked 'Picked Apples' -> 'Picked Bread' (in pick)
+drew label '{picked}' -> 'Picked Bread'
+action pick from table 'b/items' on 'Kinds'
+action pick from table 'b/items' on 'Kinds'
+state sel 'b' -> 'a' (table)
+state mode 'b' -> 'a' (from seg 'mode')

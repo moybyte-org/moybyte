@@ -1477,18 +1477,37 @@ local PROPS = {
   rows = { cur = 1, current = 1, check = 1, empty = 1, by = 1 },
   dialog = { buttons = 1, default = 1 }, popover = { anchor = 1, w = 1, close = 1, wash = 1 },
   switch = {}, case = {},
+  -- the C engine's kinds (uitree_engine.lua); the reference back end draws none of them
+  progress = { max = 1, label = 1, look = 1 },
+  seg = { label = 1, labels = 1, on = 1, focus = 1, look = 1, text = 1 },
+  text_view = { wrap = 1, follow = 1, syntax = 1, face = 1 },
+  menu = {}, item = { icon = 1, label = 1, mkind = 1 },
+  table = { cols = 1, cur = 1, on = 1, changed = 1, empty = 1, focus = 1, hint = 1 }, col = {},
+  split = { dir = 1, sizes = 1, gap = 1, pad = 1, align = 1 }, grid = { cols = 1, rows = 1, gap = 1, pad = 1 },
+  panel = {},
 }
+-- the kinds only the C engine draws
+local C_KINDS = { progress = 1, seg = 1, text_view = 1, menu = 1, item = 1, table = 1, col = 1, split = 1, grid = 1,
+                  panel = 1 }
 local COND_PROPS = { shown = 1, focus = 1, when = 1 }
 local NAME_PROPS = { key = 1, on = 1, cut = 1, changed = 1, commit = 1, current = 1, cur = 1, by = 1, new = 1,
                      buttons = 1, default = 1, close = 1, off = 1, kind = 1, face = 1, size = 1, wrap = 1,
-                     align = 1, input = 1, wash = 1, anchor = 1, arg = 1, look = 1 }
-local NUM_PROPS = { max = 1, lines = 1, lo = 1, hi = 1, span = 1, w = 1 }
+                     align = 1, input = 1, wash = 1, anchor = 1, arg = 1, look = 1, labels = 1, syntax = 1,
+                     mkind = 1, dir = 1 }
+local NUM_PROPS = { max = 1, lines = 1, lo = 1, hi = 1, span = 1, w = 1, gap = 1, pad = 1, rows = 1 }
+-- a list of texts or ints, one prop a value
+local LIST_PROPS = { sizes = 1 }
 local BOOL_PROPS = { follow = 1, check = 1, grow = 1, secret = 1, alone = 1 }
 local WORDS = { kind = { normal = 1, primary = 1, danger = 1, tonal = 1 }, off = { hide = 1, grey = 1 },
                 face = { ui = 1, title = 1, mono = 1, caption = 1, result = 1 }, size = { fit = 1 },
                 wrap = { cut = 1, word = 1 }, align = { start = 1, center = 1, ["end"] = 1 },
                 input = { text = 1, number = 1, password = 1 }, wash = { page = 1, view = 1, none = 1 },
-                look = { ["end"] = 1, share = 1 } }
+                look = { ["end"] = 1, share = 1 }, mkind = { danger = 1 }, dir = { row = 1, col = 1 },
+                syntax = { plain = 1, sgr = 1, python = 1, lua = 1, json = 1, markdown = 1 } }
+-- a prop that is another type, or takes other words, on one kind
+local KIND_TYPE = { progress = { max = "int" }, table = { cols = "list" }, grid = { cols = "num" } }
+local KIND_WORDS = { look = { seg = { seg = 1, cycle = 1 }, progress = { count = 1 } },
+                     wrap = { text_view = { cut = 1, word = 1 } }, face = { text_view = { ui = 1, mono = 1 } } }
 local RETIRED_PROPS = { ink = "tone = \"...\"", disabled = "when = \"...\" with off = \"grey\" on the action",
                         does = "hint = \"...\" on the action", below = "new = \"NAME\"", current_tool = 1 }
 local STOPS = { button = 1, link = 1, toggle = 1, slider = 1, field = 1, bubble = 1, rows = 1 }
@@ -1517,7 +1536,28 @@ local function check_opts(kind, o, at)
       fail("N01", at, "ui." .. kind .. " has no prop " .. q(k), "one of " .. table.concat(ks, ", "), q(k),
            n and "did you mean " .. q(n) .. "?" or nil)
     end
-    if COND_PROPS[k] then compile_cond(v, nil, at)
+    local kt = KIND_TYPE[kind] and KIND_TYPE[kind][k]
+    local kw = KIND_WORDS[k] and KIND_WORDS[k][kind]
+    if kw then
+      if not kw[v] then fail("N01", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "one of " .. table.concat(sorted_keys(kw), ", "), describe(v)) end
+    elseif kt == "tpl" then
+      if type(v) ~= "string" then fail("N01", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "a template (a text)", describe(v)) end
+      compile_tpl(v, nil, at)
+    elseif kt == "int" then
+      if type(v) == "string" and v:find("{", 1, true) then compile_tpl(v, nil, at)
+      elseif math.type(v) ~= "integer" then
+        fail("T03", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "an int, or \"{NAME}\" of an int", describe(v))
+      end
+    elseif kt == "num" then
+      if math.type(v) ~= "integer" or v < 1 then fail("N01", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "an int, at least 1", describe(v)) end
+    elseif kt == "list" or LIST_PROPS[k] then
+      if type(v) ~= "table" or #v == 0 then fail("N01", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "a list: { ... }", describe(v)) end
+      for _, x in ipairs(v) do
+        local ok = type(x) == "string" or (k == "sizes" and math.type(x) == "integer")
+        if not ok then fail("N01", at, "ui." .. kind .. "'s " .. k .. " holds " .. describe(x), k == "sizes" and "ints or weights (\"2*\")" or "texts", describe(x)) end
+        if kt == "list" then compile_tpl(x, false, at) end
+      end
+    elseif COND_PROPS[k] then compile_cond(v, nil, at)
     elseif (k == "lines" and kind ~= "bubble" and kind ~= "label") or k == "buttons" then
     elseif k == "signal" then
       -- an int: a literal, or the whole reference to an int ({bars}, {.bars})
@@ -1949,6 +1989,174 @@ function T.dialog(title, o, body)
   return n
 end
 
+-- -- the C engine's kinds ------------------------------------------------------------
+
+-- a state named by a node's head, of one of the types `want` names
+local function head_state(kind, name, want, at)
+  if type(name) ~= "string" then fail("N01", at, "ui." .. kind .. "'s head is " .. describe(name), "a state's name", describe(name)) end
+  local ty = DECL[name]
+  if not ty then undeclared(name, at) end
+  for _, t in ipairs(want) do if ty.t == t and not ty.opt then return ty end end
+  fail("T03", at, "ui." .. kind .. " shows " .. q(name) .. ", which is " .. tname(ty), table.concat(want, " or "), tname(ty))
+end
+
+-- a bar of how much of max= is done: its head an int state, or a template of an int
+function T.progress(value, o)
+  local at = where()
+  local n = node("progress", at)
+  if type(value) == "string" and not value:find("{", 1, true) then head_state("progress", value, { "int" }, at); value = "{" .. value .. "}" end
+  n.a[1] = head_text("progress", value, at, "value")
+  n.o = check_opts("progress", o, at)
+  if n.o.max == nil then fail("N01", at, "ui.progress(" .. q(value) .. ") has no max", "max = \"{NAME}\" (an int), or 0 for work of no known size", "none") end
+  return n
+end
+
+-- one of several values: an enum's, each worded by a label table, or a row_of's rows, each worded by text=
+function T.seg(name, o)
+  local at = where()
+  local n = node("seg", at)
+  local ty = head_state("seg", name, { "enum", "rowof" }, at)
+  n.a[2] = name
+  if ty.t == "rowof" then
+    local m = DECL[ty.model]
+    local ctx = { fields = m.fields, order = m.order, name = ty.model }
+    local sr = ROWCTX
+    ROWCTX = ctx
+    local ok, err = pcall(check_opts, "seg", o, at)
+    ROWCTX = sr
+    if not ok then error(err, 0) end
+    n.o = err
+    if n.o.text == nil or n.o.labels ~= nil then
+      fail("N01", at, "ui.seg(" .. q(name) .. ") over a row_of words each row with text", "text = \"{.FIELD}\"", n.o.labels and "labels" or "none")
+    end
+  else
+    n.o = check_opts("seg", o, at)
+    if n.o.text ~= nil then fail("N01", at, "ui.seg(" .. q(name) .. "): text words a row_of's rows", "labels = \"TABLE\" for an enum", "text") end
+    local tab = n.o.labels and LABELS[n.o.labels]
+    if not tab then
+      fail("T02", at, "ui.seg(" .. q(name) .. ") has no label table " .. describe(n.o.labels), "labels = the name of a ui.labels table",
+           describe(n.o.labels), "ui.labels(\"NAME\", { value = \"Word\", ... })")
+    end
+    local miss = {}
+    for _, v in ipairs(ty.values) do if tab[v] == nil then miss[#miss + 1] = v end end
+    if #miss > 0 then
+      fail("T04", at, "ui.seg(" .. q(name) .. "): the labels " .. q(n.o.labels) .. " have no word for " .. table.concat(miss, ", "),
+           "a word for each value", "none for " .. miss[1])
+    end
+  end
+  n.a[1] = n.o.label or ""
+  if n.o.on ~= nil then use_action(n.o.on, "none", at, "ui.seg's on", false) end
+  return n
+end
+
+-- a text state's lines, or a model's rows' first text field, read only
+function T.text_view(name, o)
+  local at = where()
+  local n = node("text_view", at)
+  local ty = head_state("text_view", name, { "text", "model" }, at)
+  n.a[2] = name
+  n.o = check_opts("text_view", o, at)
+  if n.o.face == "ui" and n.o.syntax ~= nil then fail("N01", at, "ui.text_view with face = \"ui\" and syntax", "prose takes no syntax", "syntax") end
+  if ty.t == "model" then
+    for _, f in ipairs(ty.order) do
+      if f ~= ty.key and ty.fields[f].t == "text" and not ty.fields[f].opt then n.field = f; break end
+    end
+    if not n.field then fail("T03", at, "ui.text_view(" .. q(name) .. "): its model has no text field", "a text field beside the key", "none") end
+  end
+  return n
+end
+
+function T.menu(caption, body)
+  local at = where()
+  local n = node("menu", at)
+  if type(caption) == "function" then caption, body = "", caption end
+  n.a[1] = head_text("menu", caption or "", at, "caption")
+  n.o = {}
+  run_body(n, body)
+  return n
+end
+
+-- an item of a menu: its action's label and icon unless it gives its own
+function T.item(name, o)
+  local at = where()
+  local n = node("item", at)
+  if n.up.kind ~= "menu" then fail("N03", at, "ui.item outside a ui.menu", "items in a menu's body", "ui." .. n.up.kind) end
+  n.o = check_opts("item", o, at)
+  use_action(name, row_hands(), at, "ui.item(" .. q(name) .. ")", true)
+  n.action = name
+  return n
+end
+
+-- rows as a table: a header of cols, one ui.col a column, each a template over the row
+function T.table(name, o, body)
+  local at = where()
+  if body == nil and type(o) == "function" then o, body = nil, o end
+  local n = node("table", at)
+  if ROWCTX then fail("N03", at, "ui.table inside a row", "a table at a page's level", "a table in rows") end
+  local m = model_arg("table", name, at)
+  n.a[1] = name
+  n.o = check_opts("table", o, at)
+  if n.o.cur ~= nil then
+    local ty = DECL[n.o.cur]
+    if not ty or ty.t ~= "rowof" or ty.model ~= name then
+      fail("T03", at, "ui.table's cur " .. describe(n.o.cur), "a ui.row_of(\"" .. name .. "\") state", ty and tname(ty) or "undeclared")
+    end
+  end
+  for _, p in ipairs({ "on", "changed" }) do
+    if n.o[p] ~= nil then use_action(n.o[p], "row", at, "ui.table's " .. p, false) end
+  end
+  local c = setmetatable({ kind = "case", a = {}, o = {}, kids = {}, at = at }, NodeMT)
+  local sr = ROWCTX
+  ROWCTX = { fields = m.fields, order = m.order, name = name }
+  local ok, err = pcall(run_body, c, body)
+  ROWCTX = sr
+  if not ok then error(err, 0) end
+  for _, k in ipairs(c.kids) do
+    if k.kind ~= "col" then fail("N03", k.at, "ui." .. k.kind .. " in a ui.table", "ui.col, one a column", "ui." .. k.kind) end
+  end
+  if n.o.cols and #n.o.cols ~= #c.kids then
+    fail("N01", at, "ui.table(" .. q(name) .. ") has " .. #n.o.cols .. " headers and " .. #c.kids .. " columns", "one header a column", tostring(#c.kids))
+  end
+  n.body = c
+  return n
+end
+function T.col(text, extra)
+  local at = where()
+  local n = node("col", at)
+  if extra ~= nil then fail("N01", at, "ui.col takes its text alone", "ui.col(\"{.FIELD}\")", describe(extra)) end
+  n.a[1] = head_text("col", text, at, "text")
+  n.o = {}
+  return n
+end
+
+-- the room parted along dir= by sizes=, a child a part; a grid of cols x rows cells, a child a cell (or span of them)
+function T.split(o, body)
+  local at = where()
+  local n = node("split", at)
+  n.o = check_opts("split", o, at)
+  if n.o.dir == nil or n.o.sizes == nil then fail("N01", at, "ui.split takes dir and sizes", "ui.split({ dir = \"row\", sizes = { 1, 2 } }, body)", "none") end
+  run_body(n, body)
+  return n
+end
+function T.grid(o, body)
+  local at = where()
+  local n = node("grid", at)
+  n.o = check_opts("grid", o, at)
+  if n.o.cols == nil or n.o.rows == nil then fail("N01", at, "ui.grid takes cols and rows", "ui.grid({ cols = 2, rows = 3 }, body)", "none") end
+  run_body(n, body)
+  return n
+end
+function T.panel(key, body)
+  local at = where()
+  local n = node("panel", at)
+  if type(key) ~= "string" or not key:match("^[%a_][%w_]*$") then
+    fail("N01", at, "ui.panel's key is " .. describe(key), "a word: ui.panel(\"side\", function() ... end)", describe(key))
+  end
+  n.o = { key = key }
+  run_body(n, body)
+  return n
+end
+
 -- names an app no longer has, each with its replacement
 local function retired(what, instead)
   return function() fail("N04", nil, what .. " is retired", instead, what, instead) end
@@ -1970,13 +2178,15 @@ end
 T.pages = not_here("ui.pages", "ui.page(NAME, BUILD, { title = ... }) per page; the first registered opens")
 T.run = not_here("ui.run", "the first page ui.page registers opens")
 T.list = not_here("ui.list", "ui.rows(MODEL, { current = ..., check = true }, function() ui.link(...) end)")
-T.split = not_here("ui.split", "ui.row and ui.foot")
 T.on = not_here("ui.on", "the handler is the third argument of ui.action or the second of ui.hook")
 
 -- identity: a node's key is its head where that is a name, else its kind and a
 -- number; two siblings with one key are N02
 local function ident(k)
   if k.o.key then return k.o.key end
+  if k.kind == "item" then return k.action end
+  if k.kind == "seg" or k.kind == "text_view" then return k.a[2] end
+  if k.kind == "table" then return k.a[1] end
   if k.kind == "button" or k.kind == "link" then return k.action end
   if k.kind == "toggle" or k.kind == "slider" or k.kind == "field" then return k.a[2] end
   if k.kind == "rows" then return k.a[1] end
@@ -2354,7 +2564,7 @@ end
 -- clears it before a cart's own scripts run
 T._in = {
   E = E, T = T, V = V, VER = VER, DECL = DECL, ACTIONS = ACTIONS, ACTION_ORDER = ACTION_ORDER, LABELS = LABELS,
-  KEYMAP = KEYMAP, SYS = SYS, STOPS = STOPS, DERIVED = DERIVED, ENGINE_OWNED = ENGINE_OWNED, stack = stack, R = R,
+  KEYMAP = KEYMAP, SYS = SYS, STOPS = STOPS, C_KINDS = C_KINDS, DERIVED = DERIVED, ENGINE_OWNED = ENGINE_OWNED, stack = stack, R = R,
   BACK = BACK, ModelMT = ModelMT,
   fail = fail, q = q, show = show, trace = trace, lookup = lookup, render = render, cond = cond, truthy = truthy,
   frozen = frozen, setv = setv, fire = fire, fire_placed = fire_placed, fire_fn = fire_fn, build_page = build_page, page_title = page_title,
