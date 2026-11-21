@@ -341,10 +341,19 @@ class CEngine(Engine):
             t = t.base
         if isinstance(t, S.Model):
             cells = []
+            add = cells.append
             for r in v:
-                for f in t.order:
-                    c, ft = r._f[f], t.fields[f]
-                    cells.append(("1" if c else "0") if ft is S.BOOL else repr(c) if ft is S.NUM else str(c))
+                d = r._f
+                for f, k in t.wire:
+                    c = d[f]
+                    if k == 0:
+                        add(c)
+                    elif k == 2:
+                        add("1" if c else "0")
+                    elif k == 3:
+                        add(repr(c))
+                    else:
+                        add(str(c))
             raw = ("\0".join(cells) + "\0").encode("utf-8") if cells else b""
             self._ck(x.set_model(slot, len(v), raw), "model " + name)
             self._drain()
