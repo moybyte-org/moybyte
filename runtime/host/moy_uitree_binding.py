@@ -61,6 +61,11 @@ _SIGS = (
     ("uit_lent", [_P, _S, _I32, _I, c.c_char_p, _Z], _I),
     ("uit_lent_place", [_I32, _I, _I, _I, _I, _I, _I, _I32, c.POINTER(_I), _I32], _I),
     ("uit_frame", [_P, _P, _P, _I, _I, _I, _I, _I, _I, _I], _I),
+    ("uit_panes_set", [_P, _I, _S, _I, c.c_uint32], None),
+    ("uit_panes", [_P, _I32, _I], _I),
+    ("uit_splits", [_P, _P, _P, _I, _I32], _I),
+    ("uit_absent", [_P, _I], _I),
+    ("uit_pane_ask", [_P, _I, _I, _I], _I),
     ("uit_next", [_P, _I32, c.c_char_p, _Z], _I),
     ("uit_trace_next", [_P, c.c_char_p, _Z], _I),
     ("uit_can", [_P, _I, _I], _I),
@@ -127,6 +132,7 @@ class Engine:
         self._ev = (c.c_int32 * 3)()
         self._buf = c.create_string_buffer(512)
         self._lent = None
+        self._pn = None
         self._draw = self._cb = self._raised = None
 
     def __del__(self):
@@ -248,6 +254,40 @@ class Engine:
             x, self._raised = self._raised, None
             raise x
         return r
+
+    def panes_set(self, du, pane_cur, mouse, clock):
+        self._L.uit_panes_set(self._e, du, b(pane_cur or ""), 1 if mouse else 0, clock & 0xffffffff)
+
+    _PANES = 2048       # the words of the panes' answers read at most
+
+    def panes(self):
+        """The last pass's panes (uit_panes), as a list of ints."""
+        if self._pn is None:
+            self._pn = (c.c_int32 * self._PANES)()
+        n = self._L.uit_panes(self._e, self._pn, self._PANES)
+        return self._pn[:n]
+
+    def splits(self, ctx, cv, look, flags):
+        """The last pass's dividers drawn into the pass open on `ctx`
+        (uit_splits): its UIT_SP_* words."""
+        L = self._L
+        buf = (c.c_char * len(ctx)).from_buffer(ctx)
+        p = L.moy_ui_api_ctx(c.addressof(buf), len(ctx))
+        hd, queue = cv._ui
+        if queue[0] > 4:
+            cv.flush_batch()
+        sink = self._Sink()
+        L.moy_ui_sink_row(c.byref(sink), int(hd), 0 if look is None else int(look))
+        out = (c.c_int32 * 9)()
+        L.uit_splits(self._e, p, c.byref(sink), flags, out)
+        del buf
+        return list(out)
+
+    def pane_ask(self, node, what, arg):
+        return self._L.uit_pane_ask(self._e, node, what, arg)
+
+    def absent(self, slot):
+        return bool(self._L.uit_absent(self._e, slot))
 
     def still(self, ctx, x, y, w, h, flags, fs, inp):
         L = self._L

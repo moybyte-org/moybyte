@@ -198,6 +198,42 @@ int uit_lent(uit_t *e, const char *site, int32_t *cells, int max, char *text, si
 int uit_lent_place(int32_t *cells, int n, int32_t x0, int32_t w, int32_t h, int fs, int32_t pad,
                    int32_t *hair, int *nhair, int32_t *need);
 
+// -- the panes (`ui.panes`, `ui.pane`, `ui.legacy`) --------------------------------
+// What a place, a frame or uit_splits lays the panes out by: the desk unit
+// `du` (pixels), the pane the keys reach (its key, "" none), whether the
+// pointer hovers and the host's clock in ms (a divider's double tap).
+void uit_panes_set(uit_t *e, int du, const char *pane_cur, int mouse, uint32_t clock);
+// The last pass's panes as ints into `out` (`max` at most): UIT_PN_HEAD
+// words (the outermost panes' node or -1, the pane the placement stood
+// alone or -1, the least size's w and h, then the counts of the four lists
+// and of the splits), then the last placement's panes arranged (node, x, y,
+// w, h, depth, path[4]), its dividers (x, y, w, h, depth, path[4], index,
+// axis), the bodies it placed and the panes this pass drew (as the panes),
+// then each split of this pass (node, n, axis, gap, x, y, w, h, depth,
+// path[4], then node, size, minimum, held a child: -1 it grows). Answers
+// the words written.
+#define UIT_PN_HEAD 9
+int uit_panes(const uit_t *e, int32_t *out, int max);
+// The last pass's splits' dividers drawn into a pass the host has open
+// (its own context and sink): a press holds one, a drag's let-go writes
+// the held sizes beside it (traced under UIT_F_TRACE, queued as writes), a
+// double tap puts them back. Into `out`: the split and divider held (-1
+// none), where its drag takes it, the side it stopped at, whether it moved,
+// the pane it holds at its minimum and that minimum (-1 none), the held
+// sizes written and whether the page owes a frame. Answers the events queued.
+enum { UIT_SP_SPLIT, UIT_SP_DIV, UIT_SP_AT, UIT_SP_STOP, UIT_SP_LIVE, UIT_SP_FLASH, UIT_SP_MIN, UIT_SP_WRITES,
+       UIT_SP_OWE, UIT_SP_N };
+int uit_splits(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int flags, int32_t out[UIT_SP_N]);
+// What a host asks of panes or pane `node` now, as the layout reads it:
+// whether it is shown (a pane with no tab on offer, a split with no child
+// shown, is not), its least size along axis `arg` (0 across, 1 down; pixels,
+// gutters in), its held size (pixels, -1 it grows), whether its tab value
+// `arg` (an index of its tabs= enum) is on offer. UIT_E_ARG for another node.
+enum { UIT_PQ_SHOWN, UIT_PQ_MIN, UIT_PQ_HELD, UIT_PQ_OFFERS };
+int uit_pane_ask(uit_t *e, int node, int what, int arg);
+// Whether optional state `slot` is absent.
+int uit_absent(const uit_t *e, int slot);
+
 // -- the frame ----------------------------------------------------------------
 // One frame of the page into `content` of a frame the host began: answers
 // the events queued (UIT_F_* flags; `input` an UIT_IN_*). Bit 16 set in the

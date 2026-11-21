@@ -162,6 +162,53 @@ typedef struct {
     int16_t mark;               // a button's marked= cond: drawn current while it holds
 } uit_node_t;
 
+// The panes (`ui.panes`, `ui.pane`): a split's children are the layout rule's cells along its
+// axis, each held at its size or the one fill. Their props in the node's words:
+//   both: `lit` PN_*; `current` the size= state (opt int); `changed` a start= state, else
+//         start= in `btn` (desk units, PN_START)
+//   panes: `nbtn` its gap (desk units); `slot` the focused= state, `cur` the grown= state
+//   pane: `slot` its tabs= enum, `cur` its labels= table; its min= triples in e->btns from
+//         `mark`, `nbtn` of them (the value's pool offset, PN_MIN_ANY "_" or PN_MIN_ONE a plain
+//         pair; then w, h in desk units)
+enum { PN_GROW = 1, PN_HEADLESS = 2, PN_COL = 4, PN_START = 8 };
+enum { PN_MIN_ANY = -1, PN_MIN_ONE = -2 };
+#define PN_KIDS 8               // a split's children at most
+#define PN_DEPTH 4              // panes in panes at most
+#define PN_MAX 16               // the panes, dividers and hosted bodies a pass records at most
+#define PN_SPLITS 8
+typedef struct {
+    int16_t node, r[4];
+    uint8_t depth, path[PN_DEPTH];
+} uit_pa_t;                     // a pane arranged, a body placed, a pane drawn
+typedef struct {
+    int16_t r[4];
+    uint8_t depth, path[PN_DEPTH], i, axis;
+} uit_pd_t;                     // a divider arranged
+typedef struct {
+    int16_t node, r[4], gap;
+    uint8_t nk, axis, depth, path[PN_DEPTH];
+    int16_t kids[PN_KIDS];
+    int32_t sizes[PN_KIDS], mins[PN_KIDS], held[PN_KIDS];      // held -1: it grows
+} uit_ps_t;                     // a split as its pass laid it out
+// What the panes of a page answer a host (made at the first pass over a page that has them).
+typedef struct {
+    uit_pa_t panes[PN_MAX];     // the last placement's arrangement, even under a pane alone
+    uit_pd_t divs[PN_MAX];
+    uit_pa_t placed[PN_MAX];    // each hosted body where the last placement put it
+    uit_pa_t order[PN_MAX];     // the panes this pass drew
+    uit_ps_t splits[PN_SPLITS]; // this pass's splits
+    uint8_t npanes, ndivs, nplaced, norder, nsplits;
+    uint8_t depth, ghost, arranging;
+    uint8_t path[PN_DEPTH];
+    int16_t root, alone;        // the outermost panes this pass; the pane the placement stood alone
+    int16_t least[2];           // the outermost panes' least size, gutters in
+    uint32_t tap_key, tap_at;   // the last tap on a divider (its split's id hashed, its index) and when
+    int32_t writes;             // held sizes written or put back since the host last asked
+    int32_t held[UIT_SP_N];     // the divider this pass's splits hold (UIT_SP_*)
+    uint32_t clock;             // the host's clock, ms (a double tap)
+    uint8_t mouse, owe;         // the pointer hovers; a let-go wrote held sizes this pass
+} uit_arr_t;
+
 // A label table: its name, keys and words NUL-separated in the pool.
 typedef struct {
     uint16_t name, keys, words, n;
@@ -301,6 +348,10 @@ struct uit {
     int16_t ground[4];
     int16_t *rects;
     int crects;
+    uit_arr_t *arr;             // the panes' answers (a page with panes or a hosted body)
+    uint8_t has_panes;
+    int16_t du;                 // the desk unit the host hands (`uit_panes_set`)
+    int16_t pane_cur;           // the pane the keys reach, -1 none
     int16_t late[8];            // the popovers and dialogs a stack draws last, over it
     int nlate;
     // a part's rect a front end placed this frame, that a popover hangs from ("code.caret")

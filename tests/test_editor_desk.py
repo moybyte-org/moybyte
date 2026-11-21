@@ -22,14 +22,23 @@ FULL_800 = (6, 46, 788, 428)
 DT = 1 / 30
 
 
-@pytest.fixture(scope="module")
-def placer(tmp_path_factory):
-    """A desk whose workspace pages place at any area, for any cart shape."""
+@pytest.fixture(scope="module", params=("reference", "c"))
+def placer(request, tmp_path_factory):
+    """A desk whose workspace pages place at any area, for any cart shape,
+    its pages on the reference engine or on the C engine's layout rule."""
+    from runtime import editor_ui, uitree_app
     ws = host_app.build_workstation(str(tmp_path_factory.mktemp("placer")), sys_size=(1024, 600),
                                     panel_diagonal_in=7.0, font_scale=1, windowed=True)
     ws.home.open_desk()
     ws.open_in_editor(install_shape(ws, "sky_run"))
-    return ws.editor_desk
+    d = ws.editor_desk
+    uitree_app.use_engine(request.param)
+    try:
+        for key in editor_ui.SPACES:
+            d._page(key)
+    finally:
+        uitree_app.use_engine("reference")
+    return d
 
 
 def _page(d, key, area, blocks=False, game=True, **held):
@@ -44,7 +53,7 @@ def _page(d, key, area, blocks=False, game=True, **held):
     if held:
         page._bind()
         for nm, v in held.items():
-            editor_ui.s._v[nm] = v
+            d._put(editor_ui.s, nm, v)          # a write the C engine is handed: its version moves
         d._place(key, area, 1)
     return page, {pane: r for pane, r, _p in d._place(key, area, 1)[0]}
 

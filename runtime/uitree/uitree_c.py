@@ -54,7 +54,9 @@ _KINDS = {"page": 1, "group": 2, "label": 3, "info": 4, "link": 5, "button": 6, 
 # the placed kinds: a page the engine's layout places holds them (`CEditorPage`)
 _PLACED_KINDS = ("tools", "row", "status", "text_editor", "panes", "pane", "legacy", "slot", "panel", "lent")
 # what a placed page's frame does not draw yet
-_PLACED_GAPS = ("panes", "pane", "legacy", "slot", "lent", "tabs")
+_PLACED_GAPS = ("slot", "lent", "tabs")
+_PANE_KINDS = ("panes", "pane")
+_LEGACY_FNS = ("draw", "pointer", "keys", "hints", "gen")
 _HEAD = {"rows": ("model",), "table": ("model",), "cards": ("model",), "dialog": ("buttons",)}
 _KIND_NAMES = dict((v, k) for k, v in _KINDS.items())
 _KIND_NAMES[len(_KINDS) + 1] = "cycle"          # UIT_KINDS: a seg of the cycle look
@@ -104,6 +106,24 @@ class _TextEditor:
         def holds(row):
             return eng._x.cond_of(node, k) == 1
         return holds
+
+
+class _PaneNode(S.Node):
+    """A lowered panes, pane or legacy node: `aux` its node in the store."""
+    __slots__ = ()
+
+
+def _pane_node(n, parent):
+    """A panes, pane or legacy node's stand-in once its page is lowered: its
+    key, props and the panes it holds, for what the Editor's front end asks
+    of a pane (its tabs on offer, its name, its held size's state); the
+    layout is the engine's."""
+    m = _PaneNode(n.kind, n.key, n.where)
+    m.p, m.l, m.src = n.p, n.l, n.src
+    if parent is not None:
+        m.parent = parent
+        parent.kids.append(m)
+    return m
 
 
 class CEngine(Engine):
@@ -354,7 +374,11 @@ class CEngine(Engine):
         name, t = self._names[slot], self._types[slot]
         if type(t) is S.Opt:
             t = t.base
-        if t is S.BOOL:
+            if x.absent(slot):
+                t = None
+        if t is None:
+            v = None
+        elif t is S.BOOL:
             v = bool(x.get_int(slot))
         elif t is S.INT:
             v = x.get_int(slot)
@@ -456,6 +480,8 @@ class CEngine(Engine):
         pointers = self._pointers = []
         pop_lists = self._pop_lists = {}
         pop_fields = self._pop_fields = {}
+        stand = self._pn = {}           # node -> a panes or pane's stand-in (`_pane_node`)
+        legacies = self._legacy = {}    # node -> a legacy node's stand-in: its functions
         srcs = []
 
         def node(n, parent, lent=False):
@@ -483,6 +509,10 @@ class CEngine(Engine):
                     r = cprop(me, "field", l["field"], None)       # a model's lines: this text field
                 if r < 0:
                     fail(r, "%s %s" % (nk, n.key), n.where)
+            if nk in _PANE_KINDS or nk == "legacy":
+                m = _pane_node(n, stand.get(parent))
+                (legacies if nk == "legacy" else stand)[me] = m
+                m.aux = me
             if nk == "popover":
                 pop_fields[n.key] = any(k.kind == "field" for k in n.kids)
                 for k in n.kids:
@@ -507,6 +537,18 @@ class CEngine(Engine):
             for k, src in n.src.items():
                 if k in head:
                     continue
+                if nk == "legacy" and k in _LEGACY_FNS:     # the front end's functions
+                    r = cprop(me, k, getattr(src, "__name__", k), None)
+                    if r < 0:
+                        fail(r, "legacy %s %s=" % (n.key, k), n.where)
+                    continue
+                if k == "min" and nk == "pane":             # one prop a pair: "w h", its tab the repr
+                    pairs = src.items() if type(src) is dict else (("", src),)
+                    for v, wh in pairs:
+                        r = cprop(me, k, "%d %d" % (wh[0], wh[1]), v)
+                        if r < 0:
+                            fail(r, "ui.pane min=%r" % (src,), n.where)
+                    continue
                 if k == "draw" and nk == "canvas":         # the front end's function: called inside the frame
                     draws[me] = src
                     r = cprop(me, "draw", getattr(src, "__name__", "draw"), None)
@@ -523,7 +565,7 @@ class CEngine(Engine):
                 if type(src) is str:
                     if "." in src:
                         srcs.append(src)
-                elif k == "offered" and nk == "tabs":
+                elif k == "offered" and (nk == "tabs" or nk == "pane"):
                     for v, when in src.items():     # one prop a value: its condition, the value its repr
                         r = cprop(me, k, when, v) if type(when) is str else E_GAP
                         if r < 0:
@@ -993,16 +1035,135 @@ class CEditorEngine(CEngine, _ed.Engine):
     def _hosts(self, n):
         return False            # a legacy node is a gap of this engine's (`lower`)
 
+    # -- the panes: laid out by the engine's rule, read back for the host
+
+    # what the reference's pane helpers ask of a lowered pane, the engine answers
+
+    def _shown(self, k, row):
+        if type(k) is _PaneNode and k.kind != "legacy":
+            return self._x.pane_ask(k.aux, 0, 0) == 1
+        return _ed.Engine._shown(self, k, row)
+
+    def _min_of(self, k, axis):
+        if type(k) is _PaneNode and k.kind != "legacy":
+            return self._x.pane_ask(k.aux, 1, axis)
+        return _ed.Engine._min_of(self, k, axis)
+
+    def _offered(self, pane):
+        tabs = pane.l.get("tabs")
+        if tabs is None:
+            return None
+        vals = self.s._t[tabs].values
+        if type(pane) is not _PaneNode:
+            return _ed.Engine._offered(self, pane)
+        ask = self._x.pane_ask
+        return tuple(v for i, v in enumerate(vals) if ask(pane.aux, 3, i) == 1)
+
+    def _axis(self, n):
+        return 0 if n.src.get("dir", "row") == "row" else 1
+
+    def _pane_name(self, pane):
+        t = pane.src.get("title")
+        if t is not None and "{" not in t:
+            return t
+        return _ed.Engine._pane_name(self, pane)
+
+    def _pane_sync(self):
+        """The desk unit, the pane the keys reach, the pointer and the clock,
+        handed to the engine before it lays the panes out or draws a divider."""
+        self.du = self.unit or max(1, _ed._lb.chrome_size(getattr(self, "fs", 1)) // _ed._lb.render_scale())
+        self._x.panes_set(self.du, self.pane_cur, self._mouse(), self.clock)
+
+    def _pane_read(self):
+        """The engine's panes (`uit_panes`) as `uitree_editor.Engine` keeps
+        them: `arranged`, `least`, `alone_pane`, `placed`, `pane_order`,
+        `splits` and `panes_root`, each pane its stand-in."""
+        w = self._x.panes()
+        if not w:
+            return
+        pn, lg = self._pn, self._legacy
+        self.panes_root = pn.get(w[0])
+        self.alone_pane = pn.get(w[1])
+        self.least = (w[2], w[3])
+        at = 9
+
+        def path(i):
+            return tuple(w[i + 1:i + 1 + w[i]])
+
+        panes = []
+        for _ in range(w[4]):
+            panes.append((pn[w[at]], tuple(w[at + 1:at + 5]), path(at + 5)))
+            at += 10
+        divs = []
+        for _ in range(w[5]):
+            divs.append((path(at + 4), w[at + 9], "v" if w[at + 10] else "h", tuple(w[at:at + 4])))
+            at += 11
+        self.arranged = (panes, divs)
+        self.placed = []
+        for _ in range(w[6]):
+            self.placed.append((lg[w[at]], None, tuple(w[at + 1:at + 5])))
+            at += 10
+        self.pane_order = []
+        for _ in range(w[7]):
+            self.pane_order.append((pn[w[at]], tuple(w[at + 1:at + 5])))
+            at += 10
+        self.splits = {}
+        self._sids = []
+        for _ in range(w[8]):
+            n, nk, axis, gap = pn[w[at]], w[at + 1], w[at + 2], w[at + 3]
+            rect, base = tuple(w[at + 4:at + 8]), path(at + 8)
+            at += 13
+            kids, sizes, mins, held = [], [], [], []
+            for _j in range(nk):
+                kids.append(pn[w[at]])
+                sizes.append(w[at + 1])
+                mins.append(w[at + 2])
+                held.append(None if w[at + 3] < 0 else w[at + 3])
+                at += 4
+            sid = "split:" + "/".join(k.key for k in kids)
+            self._sids.append(sid)
+            self.splits[sid] = (n, kids, sizes, mins, held, rect, axis, gap, base)
+
     def place(self, area, desk=True):
         """The page's regions laid out over `area`, nothing drawn: each
-        one's rect for `rect_of`."""
+        one's rect for `rect_of`, its panes' arrangement and hosted bodies
+        (`uitree_editor.Engine.place`)."""
         self._bind()
         self.content = area
         self.desk = desk
         self._ready()
+        self.committed()
         self.placed = []
+        self._pane_sync()
         self._x.place(area[0], area[1], area[2], area[3], self._flags(desk), max(1, getattr(self, "fs", 1)))
+        self._pane_read()
         self._hosted_no = self.frame_no
+
+    def draw_splits(self):
+        """The last placement's dividers drawn into the verbs pass the host
+        has open (`uitree_editor.Engine.draw_splits`), in C (`uit_splits`)."""
+        self.div_held = None
+        self.flash = None
+        if not self.splits:
+            return
+        self._bind()
+        x = self._made()
+        self.committed()
+        self._pane_sync()
+        t = _D.UI_TARGET
+        out = x.splits(t[0], t[1], t[2], self._flags(self.desk))
+        if out[7]:
+            self.size_gen += out[7]
+            self._drain()
+        if out[8]:
+            self._damage.all()
+        if out[0] >= 0:
+            self.div_held = (self._sids[out[0]], out[1], out[2], out[3], bool(out[4]))
+            if out[5] >= 0:
+                pane = self._pn[out[5]]
+                axis = self.splits[self._sids[out[0]]][6]
+                self.flash = (pane, "%s stops at its minimum, %d %s" % (
+                    self._pane_name(pane), out[6], "wide" if axis == 0 else "tall"))
 
     def rect_of(self, key):
         """Where node `key` was placed by the last frame or placement, else None."""

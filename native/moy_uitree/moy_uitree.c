@@ -239,6 +239,7 @@ uit_t *uit_new(void)
     memset(e, 0, sizeof *e);
     pool_put(e, "", 0);         // offset 0 is the empty text
     e->ccur = -1;
+    e->pane_cur = -1;
     return e;
 }
 
@@ -293,6 +294,8 @@ void uit_close(uit_t *e)
     UIT_FREE(e->rects);
     e->rects = NULL;
     e->crects = 0;
+    UIT_FREE(e->arr);
+    e->arr = NULL;
     free_drew(e);
     for (int i = 0; i < e->nslots; i++) {
         uit_slot_t *S = &e->slots[i];
@@ -374,7 +377,7 @@ void uit_free(uit_t *e)
     UIT_FREE(e->conds); UIT_FREE(e->terms); UIT_FREE(e->nodes); UIT_FREE(e->props);
     UIT_FREE(e->btns); UIT_FREE(e->ids); UIT_FREE(e->prev); UIT_FREE(e->evs);
     UIT_FREE(e->drew); UIT_FREE(e->orders); UIT_FREE(e->want); UIT_FREE(e->drafts);
-    UIT_FREE(e->labels); UIT_FREE(e->tvl); UIT_FREE(e->rects);
+    UIT_FREE(e->labels); UIT_FREE(e->tvl); UIT_FREE(e->rects); UIT_FREE(e->arr);
     uit_buf_free(&e->pool); uit_buf_free(&e->scratch); uit_buf_free(&e->evtext); uit_buf_free(&e->cells);
     uit_buf_free(&e->trace);
     UIT_FREE(e);
@@ -604,6 +607,11 @@ int uit_set_text(uit_t *e, int slot, const char *s, size_t n)
     return r;
 }
 
+int uit_absent(const uit_t *e, int slot)
+{
+    return slot >= 0 && slot < e->nslots && e->slots[slot].absent;
+}
+
 int uit_set_absent(uit_t *e, int slot)
 {
     if (!slot_ok(e, slot))
@@ -745,6 +753,8 @@ int uit_node(uit_t *e, int kind, const char *key, int parent)
         N.btn = 32;
     if (kind == UIT_SPLIT)
         N.btn = N.nbtn = GAP_M, N.lit = 1;          // pad="m", gap="m", align="center"
+    if (kind == UIT_PANES)
+        N.nbtn = 6;                                 // the gutter, desk units
     if (kind == UIT_SWITCH) {
         // keyed "switch:NAME": the enum or bool it switches on
         const char *name = strncmp(key, "switch:", 7) ? "" : key + 7;
@@ -833,6 +843,86 @@ int uit_cond_of(uit_t *e, int node, const char *name)
             return uit_cond_eval(e, P->idx, -1, -1);
     }
     return -1;
+}
+
+// A state of `type` named `src` (an opt of it too), else -1.
+static int state_of(uit_t *e, const char *src, int type)
+{
+    int s = uit_slot_find(e, src, strlen(src));
+    return s >= 0 && e->slots[s].type == type ? s : -1;
+}
+
+// A prop of a panes or a pane (moy_uitree_int.h's PN_* words): 0, a refusal, or 1 where `name`
+// is none of theirs.
+static int pane_prop(uit_t *e, int node, const char *name, const char *src, const char *repr)
+{
+    uit_node_t *N = &e->nodes[node];
+    int pane = N->kind == UIT_PANE, s = -2;
+    if (!strcmp(name, "size")) {
+        N->current = (int16_t)(s = state_of(e, src, UIT_INT));
+    } else if (!strcmp(name, "start")) {
+        if ((src[0] >= '0' && src[0] <= '9') || src[0] == '-')
+            N->btn = (uint16_t)strtol(src, NULL, 10), N->lit |= PN_START;
+        else
+            N->changed = (int16_t)(s = state_of(e, src, UIT_INT));
+    } else if (!strcmp(name, "grow") || !strcmp(name, "head")) {
+        if (!strcmp(src, name[0] == 'g' ? "True" : "False"))
+            N->lit |= name[0] == 'g' ? PN_GROW : PN_HEADLESS;
+    } else if (!strcmp(name, "dir") && !pane) {
+        if (strcmp(src, "row") && strcmp(src, "col"))
+            return uit_check_fail(e, "T03", UIT_MSG("ui.panes dir=%s: one of row, col", "ui.panes dir=%s"), src);
+        if (src[0] == 'c')
+            N->lit |= PN_COL;
+    } else if (!strcmp(name, "gap") && !pane) {
+        N->nbtn = (uint16_t)strtol(src, NULL, 10);
+    } else if ((!strcmp(name, "focused") || !strcmp(name, "grown")) && !pane) {
+        s = state_of(e, src, UIT_TEXT);
+        if (name[0] == 'f')
+            N->slot = (int16_t)s;
+        else
+            N->cur = (int16_t)s;
+    } else if (!strcmp(name, "tabs") && pane) {
+        N->slot = (int16_t)(s = state_of(e, src, UIT_ENUM));
+    } else if (!strcmp(name, "labels") && pane) {
+        for (int i = 0; i < e->nlabels; i++)
+            if (!strcmp(uit_str(e, e->labels[i].name), src))
+                N->cur = (int16_t)i;
+        if (N->cur < 0)
+            return uit_fail(e, UIT_E_NAME, UIT_MSG("pane labels=%s: no label table of that name", "labels=%s"), src);
+    } else if (!strcmp(name, "min") && pane) {
+        // one prop a pair: "w h", its tab's value the repr ("_" any other, "" the one pair)
+        if (e->nbtns + 3 > e->cbtns) {
+            int c = e->cbtns ? 2 * e->cbtns : 16;
+            int16_t *p = UIT_REALLOC(e->btns, (size_t)c * sizeof *p);
+            if (!p)
+                return UIT_E_NOMEM;
+            e->btns = p, e->cbtns = c;
+        }
+        int v = PN_MIN_ONE;
+        if (repr && repr[0])
+            v = strcmp(repr, "_") ? pool_puts(e, repr) : PN_MIN_ANY;
+        if (v == -1 && strcmp(repr, "_"))
+            return UIT_E_NOMEM;
+        char *end;
+        long w = strtol(src, &end, 10), h = strtol(end, NULL, 10);
+        if (!N->nbtn)
+            N->mark = (int16_t)e->nbtns;
+        e->btns[e->nbtns++] = (int16_t)v;
+        e->btns[e->nbtns++] = (int16_t)w;
+        e->btns[e->nbtns++] = (int16_t)h;
+        N->nbtn++;
+    } else if (!strcmp(name, "offered") && pane) {
+        int c = uit_cond_compile(e, src, -1);
+        if (c < 0)
+            return c;
+        return add_prop(e, node, name, src, repr ? repr : "", PK_COND, c);
+    } else {
+        return 1;
+    }
+    if (s == -1)
+        return uit_fail(e, UIT_E_NAME, UIT_MSG("%s %s=%s: no state of its type", "%s %s=%s"),
+                        uit_kind_names[N->kind], name, src);
+    return add_prop(e, node, name, src, repr, PK_LIT, -1);
 }
 
 int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *repr)
@@ -927,6 +1017,14 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         *tslot = (int16_t)t;
         return add_prop(e, node, name, src, repr, PK_TMPL, t);
     }
+    if (kind == UIT_PANES || kind == UIT_PANE) {
+        int r = pane_prop(e, node, name, src, repr);
+        if (r != 1)
+            return r;
+    }
+    if (kind == UIT_LEGACY && (!strcmp(name, "draw") || !strcmp(name, "pointer") || !strcmp(name, "keys") ||
+                               !strcmp(name, "hints") || !strcmp(name, "gen")))
+        return add_prop(e, node, name, src, repr, PK_LIT, 0);     // the front end's functions
     if (!strcmp(name, "tone") && kind == UIT_LABEL) {
         int i = lit_index(src, TONES, 4);
         if (i <= 0)
@@ -1319,7 +1417,7 @@ static void gen_of_build(uit_t *e)
     for (int c = e->m_conds; c < e->nconds; c++)
         e->gen_vals |= (uint8_t)names_engine_value(uit_str(e, e->conds[c].src));
     for (int k = 0; k < e->nnodes; k++)
-        if (e->nodes[k].kind == UIT_CANVAS)
+        if (e->nodes[k].kind == UIT_CANVAS || e->nodes[k].kind == UIT_LEGACY)
             e->gen_safe = 0;
     for (int i = 0; i < e->nslots; i++)
         e->slots[i].in_gen = 1;
@@ -1342,7 +1440,10 @@ static void gen_of_build(uit_t *e)
 
 int uit_build_end(uit_t *e)
 {
+    e->has_panes = 0;
     for (int k = 0; k < e->nnodes; k++) {
+        if (e->nodes[k].kind == UIT_PANES || e->nodes[k].kind == UIT_LEGACY)
+            e->has_panes = 1;
         const uit_node_t *N = &e->nodes[k];
         if (N->kind == UIT_FOOT && !N->lit)
             for (int g = N->kid; g != (int)UIT_NONE; g = e->nodes[g].next)

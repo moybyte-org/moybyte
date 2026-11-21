@@ -2542,6 +2542,8 @@ static int32_t text_px(uint32_t f, const char *p, size_t n, int scale)
 
 static void place_at(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row,
                      const int32_t r[4]);
+static void pn_draw(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row,
+                    const int32_t r[4]);
 
 // `n` bytes onto a line of text (its NUL kept past its length).
 static void line_put(uit_buf_t *b, const char *p, size_t n)
@@ -2557,9 +2559,11 @@ static void stack(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int 
     int16_t kids[PLACE_KIDS];
     int32_t hs[PLACE_KIDS], fixed = 0;
     int n = 0, fills = 0;
+    int body = NODE(k)->kind == UIT_PANE;      // a pane's body: its tools are its header's
     KIDS(k, g) {
         int kind = NODE(g)->kind;
-        if (n == PLACE_KIDS || kind == UIT_POPOVER || kind == UIT_DIALOG || !placed_shown(e, g, model, row))
+        if (n == PLACE_KIDS || kind == UIT_POPOVER || kind == UIT_DIALOG || (body && kind == UIT_TOOLS) ||
+            !placed_shown(e, g, model, row))
             continue;
         kids[n] = (int16_t)g;
         hs[n] = fixed_h(e, g);
@@ -2801,6 +2805,11 @@ static void place_at(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, i
     const uit_node_t *N = NODE(k);
     put_rect(e, k, r);
     switch (N->kind) {
+    case UIT_PANES:
+    case UIT_PANE:
+    case UIT_LEGACY:
+        pn_draw(e, c, s, k, model, row, r);
+        return;
     case UIT_CASE:
         stack(e, c, s, k, model, row, r);
         return;
@@ -2855,6 +2864,667 @@ static void place_at(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, i
     draw(e, c, s, k, model, row);
 }
 
+// -- the panes ------------------------------------------------------------------------
+//
+// A split (`ui.panes`) is the rule's container along its axis: each child held at its size
+// (its size= state, else its start=, never under its minimum) and the one that grows the fill;
+// where the fill falls under its minimum the held children give it room, last first, down to
+// their own (the desk Editor's rule, `uitree_editor.fit`). Under the outermost panes' least size,
+// or with a pane grown, one pane stands over the whole area. A placement records the
+// arrangement and each hosted body's rect for the host; the dividers are `moy_ui_api_split`'s,
+// drawn inline in the page's pass or into a host's own (`uit_splits`).
+
+enum { PN_GUTTER = 6, PN_HEADER = 32, PN_FLOOR_W = 64, PN_FLOOR_H = PN_HEADER + 16, PN_DOUBLE_MS = 400 };
+
+static int pn_shown(uit_t *e, int k);
+static int offered(uit_t *e, int k, const char *v);
+
+// Pane `k` offers tab value `v` (its offered= condition holds, or it names none for `v`).
+static int pn_offers(uit_t *e, int k, const char *v)
+{
+    return offered(e, k, v);
+}
+
+// A pane's tab values on offer, counted; the first into *first (NULL none).
+static int pn_tabs(uit_t *e, int k, const char **first)
+{
+    const uit_node_t *N = NODE(k);
+    if (first)
+        *first = NULL;
+    if (N->slot < 0)
+        return -1;
+    const uit_slot_t *S = &e->slots[N->slot];
+    const char *v = uit_str(e, S->vals);
+    int n = 0;
+    for (int i = 0; i < S->nvals; i++, v += strlen(v) + 1)
+        if (pn_offers(e, k, v)) {
+            if (first && !n)
+                *first = v;
+            n++;
+        }
+    return n;
+}
+
+static int pn_shown(uit_t *e, int k)
+{
+    const uit_node_t *N = NODE(k);
+    if (!placed_shown(e, k, -1, -1))
+        return 0;
+    if (N->kind == UIT_PANE)
+        return N->slot < 0 || pn_tabs(e, k, NULL) > 0;     // a pane left with no tab goes
+    if (N->kind == UIT_PANES) {
+        KIDS(k, g) if (pn_shown(e, g)) return 1;           // ...and a split left empty
+        return 0;
+    }
+    return 1;
+}
+
+// A child's least size along `axis`, in pixels, its gutters in.
+static int32_t pn_min(uit_t *e, int k, int axis)
+{
+    const uit_node_t *N = NODE(k);
+    int32_t du = e->du;
+    if (N->kind == UIT_PANE) {
+        int32_t floor = axis ? PN_FLOOR_H : PN_FLOOR_W, d = floor, most = 0;
+        const int16_t *m = e->btns + (N->nbtn ? N->mark : 0);
+        if (!N->nbtn)
+            return floor * du;
+        if (m[0] == PN_MIN_ONE)
+            return m[1 + axis] * du;
+        for (int i = 0; i < N->nbtn; i++)
+            if (m[3 * i] == PN_MIN_ANY)
+                d = m[3 * i + 1 + axis];
+        const uit_slot_t *S = &e->slots[N->slot];
+        const char *v = uit_str(e, S->vals);
+        for (int j = 0; j < S->nvals; j++, v += strlen(v) + 1) {      // by tab: the largest offered
+            if (!pn_offers(e, k, v))
+                continue;
+            int32_t got = d;
+            for (int i = 0; i < N->nbtn; i++)
+                if (m[3 * i] != PN_MIN_ANY && !strcmp(uit_str(e, (uint16_t)m[3 * i]), v))
+                    got = m[3 * i + 1 + axis];
+            if (got > most)
+                most = got;
+        }
+        return most * du;
+    }
+    if (N->kind != UIT_PANES)
+        return 0;
+    int32_t sum = 0, most = 0;
+    int n = 0;
+    KIDS(k, g) {
+        if (!pn_shown(e, g))
+            continue;
+        int32_t m = pn_min(e, g, axis);
+        sum += m, n++;
+        if (m > most)
+            most = m;
+    }
+    if (!!(N->lit & PN_COL) == axis)
+        return sum + (int32_t)N->nbtn * du * (n > 1 ? n - 1 : 0);
+    return most;
+}
+
+// A child's held size now, in pixels: its state, else its start (desk units); -1 it grows.
+static int32_t pn_held(uit_t *e, int k)
+{
+    const uit_node_t *N = NODE(k);
+    if ((N->lit & PN_GROW) || N->current < 0)
+        return -1;
+    const uit_slot_t *S = &e->slots[N->current];
+    if (!S->absent)
+        return S->i;
+    int32_t st = (N->lit & PN_START) ? (int16_t)N->btn
+                 : N->changed >= 0 && !e->slots[N->changed].absent ? e->slots[N->changed].i : 0;
+    return st * e->du;
+}
+
+// The children's sizes along a span `total` long (`uitree_editor.fit`).
+static void pn_fit(const int32_t *held, const int32_t *mins, int n, int32_t total, int32_t *sizes)
+{
+    int flex = n - 1;
+    for (int i = n - 1; i >= 0; i--)
+        if (held[i] < 0)
+            flex = i;
+    int32_t rest = total;
+    for (int i = 0; i < n; i++) {
+        sizes[i] = held[i] < 0 ? 0 : held[i] > mins[i] ? held[i] : mins[i];
+        if (i != flex)
+            rest -= sizes[i];
+    }
+    int32_t need = mins[flex] - rest;
+    for (int i = n - 1; i >= 0 && need > 0; i--) {
+        if (i == flex)
+            continue;
+        int32_t give = sizes[i] - mins[i] < need ? sizes[i] - mins[i] : need;
+        if (give > 0)
+            sizes[i] -= give, rest += give, need -= give;
+    }
+    sizes[flex] = rest > 0 ? rest : 0;
+}
+
+// The first shown pane under `k` in reading order whose node is `want` (-1: any), else -1.
+static int pn_pane_in(uit_t *e, int k, int want)
+{
+    KIDS(k, g) {
+        if (!pn_shown(e, g))
+            continue;
+        if (NODE(g)->kind == UIT_PANE && (want < 0 || g == want))
+            return g;
+        if (NODE(g)->kind == UIT_PANES) {
+            int got = pn_pane_in(e, g, want);
+            if (got >= 0)
+                return got;
+        }
+    }
+    return -1;
+}
+
+// The shown pane under `k` keyed `key` (n bytes), else -1.
+static int pn_pane_keyed(uit_t *e, int k, const char *key, size_t n)
+{
+    KIDS(k, g) {
+        if (!pn_shown(e, g))
+            continue;
+        if (NODE(g)->kind == UIT_PANE) {
+            const char *gk = uit_str(e, NODE(g)->key);
+            if (strlen(gk) == n && !memcmp(gk, key, n))
+                return g;
+        } else if (NODE(g)->kind == UIT_PANES) {
+            int got = pn_pane_keyed(e, g, key, n);
+            if (got >= 0)
+                return got;
+        }
+    }
+    return -1;
+}
+
+// The pane shown over the whole panes area, else -1: the grown one, else the focused one
+// where the area is under the outermost panes' least size.
+static int pn_alone(uit_t *e, int k, const int32_t r[4])
+{
+    const uit_node_t *N = NODE(k);
+    if (N->cur >= 0 && !e->slots[N->cur].absent) {
+        const uit_slot_t *S = &e->slots[N->cur];
+        int p = pn_pane_keyed(e, k, S->s ? S->s : "", S->sn);
+        if (p >= 0)
+            return p;
+    }
+    if (r[2] < pn_min(e, k, 0) || r[3] < pn_min(e, k, 1)) {
+        int p = e->pane_cur >= 0 ? pn_pane_in(e, k, e->pane_cur) : -1;
+        return p >= 0 ? p : pn_pane_in(e, k, -1);
+    }
+    return -1;
+}
+
+static void pn_rec(uit_pa_t *a, int k, const int32_t r[4], const uit_arr_t *A)
+{
+    a->node = (int16_t)k;
+    for (int i = 0; i < 4; i++)
+        a->r[i] = (int16_t)r[i];
+    a->depth = A->depth;
+    memcpy(a->path, A->path, PN_DEPTH);
+}
+
+// The split's id as the toolkit keeps its dividers: "split:" and its children's keys.
+static size_t pn_sid(uit_t *e, const uit_ps_t *P, char *out, size_t cap)
+{
+    size_t n = (size_t)snprintf(out, cap, "split:");
+    for (int j = 0; j < P->nk && n < cap; j++)
+        n += (size_t)snprintf(out + n, cap - n, "%s%s", j ? "/" : "", uit_str(e, NODE(P->kids[j])->key));
+    return n < cap ? n : cap - 1;
+}
+
+// Held size `k`'s state written (`v` -1: put back, absent), traced `why` and queued.
+static void pn_write(uit_t *e, int k, int32_t v, const char *why, int i, const char *sid)
+{
+    int sl = NODE(k)->current;
+    uit_slot_t *S = &e->slots[sl];
+    int32_t was = S->absent ? -1 : S->i;
+    if (v < 0)
+        uit_set_absent(e, sl);
+    else
+        uit_set_int(e, sl, v);
+    if (e->flags & UIT_F_TRACE) {
+        char a[16], b[16];
+        snprintf(a, sizeof a, was < 0 ? "None" : "%d", (int)was);
+        snprintf(b, sizeof b, v < 0 ? "None" : "%d", (int)v);
+        uit_buf_t t = {0};
+        uit_buf_printf(&t, "%s -> %s   (divider %d of ", a, b, i);
+        uit_buf_repr(&t, sid, strlen(sid));
+        uit_buf_printf(&t, " %s)", why);
+        uit_trace(e, "state", uit_str(e, S->name), "%s", t.p ? t.p : "");
+        uit_buf_free(&t);
+    }
+    uit_event(e, UIT_EV_WRITE, sl, -1, -1, NULL, 0);
+    e->arr->writes++;
+}
+
+static int pn_holds(uit_t *e, int k)
+{
+    return NODE(k)->current >= 0 && !(NODE(k)->lit & PN_GROW);
+}
+
+// The pane of a split's child the keys reach, its index, else -1.
+static int pn_keys_child(uit_t *e, const uit_ps_t *P)
+{
+    if (e->pane_cur < 0 || e->arr->root < 0 || pn_pane_in(e, e->arr->root, e->pane_cur) < 0)
+        return -1;
+    for (int j = 0; j < P->nk; j++)
+        if (P->kids[j] == e->pane_cur)
+            return j;
+    return -1;
+}
+
+// Split `si`'s dividers drawn on `c`: a press on one held, its drag's let-go writing the held
+// sizes beside it, a double tap putting them back. `out` (UIT_SP_*) where one is held.
+static int pn_split(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int si, int32_t *out)
+{
+    uit_arr_t *A = e->arr;
+    uit_ps_t *P = &A->splits[si];
+    int32_t u = e->du, n = P->nk;
+    int32_t opt[MOY_UI_SPO_N] = {0}, got[PN_KIDS], w[4 * PN_KIDS + 4];
+    opt[MOY_UI_SPO_FLAGS] = (P->axis ? MOY_UI_SPLIT_Y : 0) | MOY_UI_SPLIT_DRAG | MOY_UI_SPLIT_FOCUS;
+    opt[MOY_UI_SPO_GAP] = P->gap;
+    opt[MOY_UI_SPO_CUR] = pn_keys_child(e, P);
+    opt[MOY_UI_SPO_SLOP] = A->mouse ? 0 : 8 * u;
+    if (!A->mouse)
+        opt[MOY_UI_SPO_HIT_W] = 16 * u, opt[MOY_UI_SPO_HIT_L] = 48 * u;
+    opt[MOY_UI_SPO_HANDLE_W] = 6 * u, opt[MOY_UI_SPO_HANDLE_L] = 36 * u;
+    opt[MOY_UI_SPO_LINE] = 2 * u;
+    memcpy(got, P->sizes, (size_t)n * sizeof *got);
+    char sid[96];
+    size_t sn = pn_sid(e, P, sid, sizeof sid);
+    moy_ui_api_at(c, P->r[0], P->r[1], P->r[2], P->r[3]);
+    moy_ui_api_split(c, s, span_of(sid, sn), got, n, P->mins, opt, w);
+    int32_t i = w[4 * n], at = w[4 * n + 1], stop = w[4 * n + 2], bits = w[4 * n + 3];
+    if (i < 0 || i >= n - 1)
+        return 0;
+    if (bits & MOY_UI_SPD_LET_GO) {
+        if (bits & MOY_UI_SPD_LIVE) {
+            for (int j = i; j <= i + 1; j++) {
+                int k = P->kids[j];
+                if (pn_holds(e, k) && (pn_held(e, k) != got[j] || e->slots[NODE(k)->current].absent))
+                    pn_write(e, k, got[j], "let go", i, sid);
+            }
+        } else {
+            uint32_t key = 2166136261u;
+            for (size_t b = 0; b < sn; b++)
+                key = (key ^ (uint8_t)sid[b]) * 16777619u;
+            key = key * 31u + (uint32_t)i + 1u;
+            if (A->tap_key != key || (uint32_t)(A->clock - A->tap_at) >= PN_DOUBLE_MS) {
+                A->tap_key = key, A->tap_at = A->clock;
+                return 0;
+            }
+            A->tap_key = 0;
+            for (int j = i; j <= i + 1; j++) {
+                int k = P->kids[j];
+                if (pn_holds(e, k) && !e->slots[NODE(k)->current].absent)
+                    pn_write(e, k, -1, "tapped twice", i, sid);
+            }
+        }
+        return 1;
+    }
+    out[UIT_SP_SPLIT] = si, out[UIT_SP_DIV] = i, out[UIT_SP_AT] = at, out[UIT_SP_STOP] = stop;
+    out[UIT_SP_LIVE] = (bits & MOY_UI_SPD_LIVE) != 0;
+    if ((bits & MOY_UI_SPD_LIVE) && stop >= 0) {
+        int p = P->kids[i + stop];
+        if (NODE(p)->kind == UIT_PANES)
+            p = pn_pane_in(e, p, -1);
+        out[UIT_SP_FLASH] = p;
+        out[UIT_SP_MIN] = p >= 0 ? pn_min(e, p, P->axis) : 0;
+    }
+    return 0;
+}
+
+static void pn_lay(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row,
+                   const int32_t r[4])
+{
+    uit_arr_t *A = e->arr;
+    const uit_node_t *N = NODE(k);
+    int16_t kids[PN_KIDS];
+    int n = 0;
+    KIDS(k, g) if (n < PN_KIDS && pn_shown(e, g)) kids[n++] = (int16_t)g;
+    if (n == 1) {
+        pn_draw(e, c, s, kids[0], model, row, r);
+        return;
+    }
+    if (!n)
+        return;
+    int axis = (N->lit & PN_COL) != 0;
+    int32_t gap = (int32_t)N->nbtn * e->du, span = r[2 + axis] - gap * (n - 1);
+    uit_ps_t P;
+    memset(&P, 0, sizeof P);
+    P.node = (int16_t)k, P.nk = (uint8_t)n, P.axis = (uint8_t)axis, P.gap = (int16_t)gap;
+    for (int i = 0; i < 4; i++)
+        P.r[i] = (int16_t)r[i];
+    P.depth = A->depth;
+    memcpy(P.path, A->path, PN_DEPTH);
+    for (int j = 0; j < n; j++) {
+        P.kids[j] = kids[j];
+        P.held[j] = pn_held(e, kids[j]);
+        P.mins[j] = pn_min(e, kids[j], axis);
+    }
+    pn_fit(P.held, P.mins, n, span, P.sizes);
+    int si = -1;
+    if (!A->ghost && A->nsplits < PN_SPLITS) {
+        si = A->nsplits++;
+        A->splits[si] = P;
+    }
+    if (!e->placing && si >= 0 && pn_split(e, c, s, si, A->held))
+        A->owe = 1;          // the page is drawn again with the sizes written
+    int record = A->arranging && e->placing;
+    int32_t x = r[0], y = r[1], w = r[2], h = r[3];
+    uint8_t base = A->depth;
+    for (int j = 0; j < n; j++) {
+        int32_t sz = j < n - 1 ? P.sizes[j] : (axis ? h : w);
+        int32_t cell[4] = {x, y, axis ? w : sz, axis ? sz : h}, div[4] = {0, 0, 0, 0};
+        if (j < n - 1) {
+            if (!axis) {
+                div[0] = x + sz, div[1] = y, div[2] = gap, div[3] = h;
+                x += sz + gap, w -= sz + gap;
+            } else {
+                div[0] = x, div[1] = y + sz, div[2] = w, div[3] = gap;
+                y += sz + gap, h -= sz + gap;
+            }
+        }
+        if (base < PN_DEPTH)
+            A->path[base] = (uint8_t)j;
+        A->depth = (uint8_t)(base + 1);
+        pn_draw(e, c, s, kids[j], model, row, cell);
+        A->depth = base;
+        if (record && j < n - 1 && A->ndivs < PN_MAX) {
+            uit_pd_t *D = &A->divs[A->ndivs++];
+            for (int i = 0; i < 4; i++)
+                D->r[i] = (int16_t)div[i];
+            D->depth = base, D->i = (uint8_t)j, D->axis = (uint8_t)axis;
+            memcpy(D->path, A->path, PN_DEPTH);
+        }
+    }
+}
+
+static void pane_head(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row,
+                      const int32_t r[4], int32_t hh)
+{
+    const uit_node_t *N = NODE(k);
+    int32_t x = r[0], y = r[1], w = r[2];
+    fill_token(s, x, y, w, hh - 1, MOY_UI_T_PANEL);
+    fill_token(s, x, y + hh - 1, w, 1, MOY_UI_T_BORDER);
+    int32_t tw = 0;
+    KIDS(k, t) {
+        if (NODE(t)->kind != UIT_TOOLS || !placed_shown(e, t, model, row))
+            continue;
+        int nk = 0;
+        KIDS(t, g) {
+            if (!placed_shown(e, g, model, row))
+                continue;
+            int32_t v = natural(e, g, model, row, hh - 4);
+            tw += (v > 0 ? v : 0) + 4, nk++;
+        }
+        int32_t cell[4] = {x + w - tw - 4, y + 2, tw, hh - 4};
+        put_rect(e, t, cell);
+        row_cells(e, c, s, t, model, row, cell);
+        break;
+    }
+    if (N->slot >= 0) {
+        // its tabs, every value of its enum (`_r_tabs`)
+        moy_ui_api_at(c, x + 6, y + 2, w - tw - 16, hh - 4);
+        int count, at;
+        uint32_t len, items = seg_items(e, N, &len, &count, &at);
+        const char *name = uit_str(e, e->slots[N->slot].name);
+        int got = moy_ui_api_choice(c, s, 9, span_of(name, strlen(name)), (const uint8_t *)e->scratch.p + items,
+                                    len, at, NULL);
+        id_put(e, k, model, row, name);
+        if (got >= 0 && got < count && got != at) {
+            const char *v = seg_key(e, N, got);
+            const uit_slot_t *S = &e->slots[N->slot];
+            uit_buf_t b = {0};
+            uit_buf_repr(&b, S->s ? S->s : "", S->sn);
+            uit_buf_printf(&b, " -> ");
+            uit_buf_repr(&b, v, strlen(v));
+            uit_buf_printf(&b, "   (from tabs ");
+            uit_buf_repr(&b, name, strlen(name));
+            uit_buf_printf(&b, ")");
+            uit_set_text(e, N->slot, v, strlen(v));
+            if (e->flags & UIT_F_TRACE)
+                uit_trace(e, "state", name, "%s", b.p);
+            uit_buf_free(&b);
+            uit_event(e, UIT_EV_WRITE, N->slot, -1, -1, NULL, 0);
+        }
+        return;
+    }
+    moy_ui_api_at(c, x + 10, y + 2, w - tw - 20, hh - 4);
+    uint32_t n, at;
+    if (N->t_icon >= 0) {
+        at = uit_tmpl_render(e, N->t_icon, model, row, &n);
+        moy_ui_api_icon(c, sspan(e, at, n));
+    }
+    at = text(e, k, 0, model, row, &n);
+    moy_ui_api_label(c, s, sspan(e, at, n), NULL);
+}
+
+static void pane_at(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row,
+                    const int32_t r[4])
+{
+    uit_arr_t *A = e->arr;
+    if (A->arranging && e->placing && A->npanes < PN_MAX)
+        pn_rec(&A->panes[A->npanes++], k, r, A);
+    if (A->ghost)
+        return;
+    int32_t hh = (NODE(k)->lit & PN_HEADLESS) ? 0 : PN_HEADER * e->du;
+    if (A->norder < PN_MAX)
+        pn_rec(&A->order[A->norder++], k, r, A);
+    if (!e->placing && hh)
+        pane_head(e, c, s, k, model, row, r, hh);
+    int32_t body[4] = {r[0], r[1] + hh, r[2], r[3] - hh > 0 ? r[3] - hh : 0};
+    stack(e, c, s, k, model, row, body);
+}
+
+// A hosted body: placed, its rect the host's; in the pass, one stop over it that draws nothing.
+static void legacy_at(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row,
+                      const int32_t r[4])
+{
+    uit_arr_t *A = e->arr;
+    if (e->placing) {
+        if (A->nplaced < PN_MAX)
+            pn_rec(&A->placed[A->nplaced++], k, r, A);
+        return;
+    }
+    const char *key = uit_str(e, NODE(k)->key);
+    moy_ui_over_t o;
+    int32_t one = 1, got[5];
+    moy_ui_over_none(&o);
+    moy_ui_over_text(&o, MOY_UI_OV_ID, span_of(key, strlen(key)));
+    moy_ui_over_put(&o, MOY_UI_OV_BARE, &one);
+    moy_ui_api_at(c, r[0], r[1], r[2], r[3]);
+    moy_ui_api_part(c, s, span_of(key, strlen(key)), 0, 0, &o, got);
+    id_put(e, k, model, row, key);
+}
+
+static void panes_at(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row,
+                     const int32_t r[4])
+{
+    uit_arr_t *A = e->arr;
+    int p = NODE(k)->parent;
+    if (p == (int)UIT_NONE || (NODE(p)->kind != UIT_PANE && NODE(p)->kind != UIT_PANES)) {
+        A->root = (int16_t)k;
+        A->depth = 0;
+        if (A->arranging && e->placing) {
+            A->npanes = A->ndivs = 0;
+            A->least[0] = (int16_t)pn_min(e, k, 0), A->least[1] = (int16_t)pn_min(e, k, 1);
+        }
+        int alone = pn_alone(e, k, r);
+        if (A->arranging && e->placing)
+            A->alone = (int16_t)alone;
+        if (alone >= 0) {
+            if (e->placing) {
+                // the arrangement under the pane alone, as a host's placement answers it
+                A->ghost = 1;
+                pn_lay(e, c, s, k, model, row, r);
+                A->ghost = 0;
+            }
+            A->arranging = 0;
+            pn_draw(e, c, s, alone, model, row, r);
+            A->arranging = 1;
+            return;
+        }
+    }
+    pn_lay(e, c, s, k, model, row, r);
+}
+
+static void pn_draw(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row,
+                    const int32_t r[4])
+{
+    if (!e->arr)
+        return;
+    switch (NODE(k)->kind) {
+    case UIT_PANES:
+        panes_at(e, c, s, k, model, row, r);
+        return;
+    case UIT_PANE:
+        pane_at(e, c, s, k, model, row, r);
+        return;
+    case UIT_LEGACY:
+        legacy_at(e, c, s, k, model, row, r);
+        return;
+    }
+    place_at(e, c, s, k, model, row, r);
+}
+
+// A pass begins: its splits and the panes it draws let go (a placement's bodies too).
+static int pn_pass(uit_t *e)
+{
+    if (!e->has_panes)
+        return 1;
+    if (!e->arr) {
+        e->arr = UIT_MALLOC(sizeof *e->arr);
+        if (!e->arr)
+            return 0;
+        memset(e->arr, 0, sizeof *e->arr);
+        e->arr->alone = -1;
+    }
+    uit_arr_t *A = e->arr;
+    A->nsplits = A->norder = 0;
+    A->root = -1;
+    A->depth = A->ghost = 0;
+    A->arranging = 1;
+    if (e->placing)
+        A->nplaced = 0;
+    for (int i = 0; i < UIT_SP_N; i++)
+        A->held[i] = -1;
+    return 1;
+}
+
+void uit_panes_set(uit_t *e, int du, const char *pane_cur, int mouse, uint32_t clock)
+{
+    e->du = (int16_t)(du > 0 ? du : 1);
+    e->pane_cur = -1;
+    for (int k = 0; pane_cur && pane_cur[0] && k < e->nnodes; k++)
+        if (NODE(k)->kind == UIT_PANE && !strcmp(uit_str(e, NODE(k)->key), pane_cur))
+            e->pane_cur = (int16_t)k;
+    if (e->arr)
+        e->arr->mouse = (uint8_t)(mouse != 0), e->arr->clock = clock;
+}
+
+static int pn_put(int32_t *out, int at, int max, const uit_pa_t *a)
+{
+    if (at + 10 > max)
+        return at;
+    out[at] = a->node;
+    for (int i = 0; i < 4; i++)
+        out[at + 1 + i] = a->r[i];
+    out[at + 5] = a->depth;
+    for (int i = 0; i < PN_DEPTH; i++)
+        out[at + 6 + i] = a->path[i];
+    return at + 10;
+}
+
+int uit_panes(const uit_t *e, int32_t *out, int max)
+{
+    const uit_arr_t *A = e->arr;
+    if (!A || max < UIT_PN_HEAD)
+        return 0;
+    out[0] = A->root, out[1] = A->alone, out[2] = A->least[0], out[3] = A->least[1];
+    out[4] = A->npanes, out[5] = A->ndivs, out[6] = A->nplaced, out[7] = A->norder, out[8] = A->nsplits;
+    int at = UIT_PN_HEAD;
+    for (int i = 0; i < A->npanes; i++)
+        at = pn_put(out, at, max, &A->panes[i]);
+    for (int i = 0; i < A->ndivs; i++) {
+        const uit_pd_t *D = &A->divs[i];
+        if (at + 11 > max)
+            break;
+        for (int j = 0; j < 4; j++)
+            out[at + j] = D->r[j];
+        out[at + 4] = D->depth;
+        for (int j = 0; j < PN_DEPTH; j++)
+            out[at + 5 + j] = D->path[j];
+        out[at + 9] = D->i, out[at + 10] = D->axis;
+        at += 11;
+    }
+    for (int i = 0; i < A->nplaced; i++)
+        at = pn_put(out, at, max, &A->placed[i]);
+    for (int i = 0; i < A->norder; i++)
+        at = pn_put(out, at, max, &A->order[i]);
+    for (int i = 0; i < A->nsplits; i++) {
+        const uit_ps_t *P = &A->splits[i];
+        if (at + 12 + 4 * P->nk > max)
+            break;
+        out[at] = P->node, out[at + 1] = P->nk, out[at + 2] = P->axis, out[at + 3] = P->gap;
+        for (int j = 0; j < 4; j++)
+            out[at + 4 + j] = P->r[j];
+        out[at + 8] = P->depth;
+        for (int j = 0; j < PN_DEPTH; j++)
+            out[at + 9 + j] = P->path[j];
+        at += 9 + PN_DEPTH;
+        for (int j = 0; j < P->nk; j++) {
+            out[at] = P->kids[j], out[at + 1] = P->sizes[j], out[at + 2] = P->mins[j], out[at + 3] = P->held[j];
+            at += 4;
+        }
+    }
+    return at;
+}
+
+int uit_pane_ask(uit_t *e, int node, int what, int arg)
+{
+    if (node < 0 || node >= e->nnodes || (NODE(node)->kind != UIT_PANE && NODE(node)->kind != UIT_PANES))
+        return UIT_E_ARG;
+    switch (what) {
+    case UIT_PQ_SHOWN:
+        return pn_shown(e, node);
+    case UIT_PQ_MIN:
+        return pn_min(e, node, arg != 0);
+    case UIT_PQ_HELD:
+        return pn_held(e, node);
+    case UIT_PQ_OFFERS: {
+        const uit_node_t *N = NODE(node);
+        if (N->kind != UIT_PANE || N->slot < 0 || arg < 0 || arg >= e->slots[N->slot].nvals)
+            return UIT_E_ARG;
+        const char *v = uit_str(e, e->slots[N->slot].vals);
+        for (int i = 0; i < arg; i++)
+            v += strlen(v) + 1;
+        return pn_offers(e, node, v);
+    }
+    }
+    return UIT_E_ARG;
+}
+
+int uit_splits(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int flags, int32_t out[UIT_SP_N])
+{
+    for (int i = 0; i < UIT_SP_N; i++)
+        out[i] = -1;
+    out[UIT_SP_WRITES] = out[UIT_SP_OWE] = 0;
+    uit_arr_t *A = e->arr;
+    if (!A)
+        return 0;
+    e->flags = (e->flags & ~UIT_F_TRACE) | (flags & UIT_F_TRACE);
+    A->writes = 0;
+    for (int i = 0; i < A->nsplits; i++)
+        if (pn_split(e, c, s, i, out))
+            out[UIT_SP_OWE] = 1;
+    out[UIT_SP_WRITES] = A->writes;
+    return e->nevs - e->evat;
+}
+
 int uit_place(uit_t *e, int x, int y, int w, int h, int flags, int fs)
 {
     if (!e->nnodes)
@@ -2865,6 +3535,10 @@ int uit_place(uit_t *e, int x, int y, int w, int h, int flags, int fs)
     e->fs = fs;
     e->placing = 1;
     int32_t r[4] = {x, y, w, h};
+    if (!pn_pass(e)) {
+        e->placing = 0;
+        return UIT_E_NOMEM;
+    }
     stack(e, NULL, NULL, 0, -1, -1, r);
     e->placing = 0;
     return 0;
@@ -3134,7 +3808,7 @@ static void placed_band(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, uit_b
 // A placed page's pass: its children stacked down its room, its popovers and dialogs last.
 static void placed_walk(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s)
 {
-    if (!rects_ready(e))
+    if (!rects_ready(e) || !pn_pass(e))
         return;
     e->nlate = 0;
     stack(e, c, s, 0, -1, -1, e->rect);
@@ -3350,6 +4024,8 @@ ids:;
     uit_id_t was = e->focused;
     focus_after(e, c, moved, ahead, had_last ? &last : NULL);
     int owe = 0;
+    if (e->arr && e->arr->owe)
+        owe = 1, e->arr->owe = 0;       // a divider's let-go wrote held sizes
     if (had != e->has_focused || (had && (was.node != e->focused.node || was.gen != e->focused.gen))) {
         uit_buf_t hb2 = {0};
         if (e->placed)

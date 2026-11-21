@@ -399,6 +399,61 @@ static mp_obj_t eng_frame(size_t n, const mp_obj_t *a)
     return mp_obj_new_int(r);
 }
 
+// panes_set(du, pane_cur, mouse, clock)
+static mp_obj_t eng_panes_set(size_t n, const mp_obj_t *a)
+{
+    (void)n;
+    uit_panes_set(eng(a[0]), mp_obj_get_int(a[1]), a[2] == mp_const_none ? "" : CSTR(a[2]), mp_obj_is_true(a[3]),
+                  (uint32_t)mp_obj_get_int_truncated(a[4]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(eng_panes_set_obj, 5, 5, eng_panes_set);
+
+#define PANES_MAX 2048
+
+// panes() -> [ints]: the last pass's panes (uit_panes)
+static mp_obj_t eng_panes(mp_obj_t self)
+{
+    int32_t *out = m_new(int32_t, PANES_MAX);
+    int n = uit_panes(eng(self), out, PANES_MAX);
+    mp_obj_t l = mp_obj_new_list((size_t)n, NULL);
+    for (int i = 0; i < n; i++)
+        mp_obj_list_store(l, MP_OBJ_NEW_SMALL_INT(i), MP_OBJ_NEW_SMALL_INT(out[i]));
+    m_del(int32_t, out, PANES_MAX);
+    return l;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(eng_panes_obj, eng_panes);
+
+// splits(ctx, cv, look, flags) -> [UIT_SP_* words]: the dividers drawn into the open pass
+static mp_obj_t eng_splits(size_t n, const mp_obj_t *a)
+{
+    (void)n;
+    moy_ui_sink_t s;
+    moy_ui_mp_sink(&s, a[2], a[3]);
+    int32_t out[UIT_SP_N];
+    uit_splits(eng(a[0]), moy_ui_mp_ctx(a[1]), &s, mp_obj_get_int(a[4]), out);
+    mp_obj_t l = mp_obj_new_list(UIT_SP_N, NULL);
+    for (int i = 0; i < UIT_SP_N; i++)
+        mp_obj_list_store(l, MP_OBJ_NEW_SMALL_INT(i), MP_OBJ_NEW_SMALL_INT(out[i]));
+    return l;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(eng_splits_obj, 5, 5, eng_splits);
+
+// pane_ask(node, what, arg) (uit_pane_ask)
+static mp_obj_t eng_pane_ask(size_t n, const mp_obj_t *a)
+{
+    (void)n;
+    return MP_OBJ_NEW_SMALL_INT(uit_pane_ask(eng(a[0]), mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
+                                             mp_obj_get_int(a[3])));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(eng_pane_ask_obj, 4, 4, eng_pane_ask);
+
+static mp_obj_t eng_absent(mp_obj_t self, mp_obj_t slot)
+{
+    return mp_obj_new_bool(uit_absent(eng(self), mp_obj_get_int(slot)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(eng_absent_obj, eng_absent);
+
 // A canvas's draw, called inside the frame: what it raises is kept and raised once the frame
 // is out of the engine's C.
 static void draw_tramp(void *ud, int node, int x, int y, int w, int h)
@@ -612,6 +667,11 @@ static const mp_rom_map_elem_t eng_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_placed), MP_ROM_PTR(&eng_set_placed_obj) },
     { MP_ROM_QSTR(MP_QSTR_ground), MP_ROM_PTR(&eng_ground_obj) },
     { MP_ROM_QSTR(MP_QSTR_place), MP_ROM_PTR(&eng_place_obj) },
+    { MP_ROM_QSTR(MP_QSTR_panes_set), MP_ROM_PTR(&eng_panes_set_obj) },
+    { MP_ROM_QSTR(MP_QSTR_panes), MP_ROM_PTR(&eng_panes_obj) },
+    { MP_ROM_QSTR(MP_QSTR_splits), MP_ROM_PTR(&eng_splits_obj) },
+    { MP_ROM_QSTR(MP_QSTR_absent), MP_ROM_PTR(&eng_absent_obj) },
+    { MP_ROM_QSTR(MP_QSTR_pane_ask), MP_ROM_PTR(&eng_pane_ask_obj) },
     { MP_ROM_QSTR(MP_QSTR_rect), MP_ROM_PTR(&eng_rect_obj) },
     { MP_ROM_QSTR(MP_QSTR_lent), MP_ROM_PTR(&eng_lent_obj) },
     { MP_ROM_QSTR(MP_QSTR_cond_of), MP_ROM_PTR(&eng_cond_of_obj) },
