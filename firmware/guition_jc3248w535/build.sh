@@ -145,10 +145,11 @@ moybyte_patch_sdcard_runs
 # ---------------------------------------------------------------------------
 # 3) Stage: shared native modules (board.toml [native.shared]) with the web
 #    blob generated into the staged copy, then the shared Python modules
-#    (board.toml [modules.*]), then the generated modules (`keep` names both).
+#    (board.toml [modules.*]), then the generated modules (`keep` names them).
 # ---------------------------------------------------------------------------
 moybyte_stage_native
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" stage "${SCRIPT_DIR}"
+moybyte_stage_uitree_pages
 
 #    carts_data.py is built from system_carts/ so the seed + embedded-fallback
 #    carts can never drift from the host source of truth. PACKED (2026-08-30):

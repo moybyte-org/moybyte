@@ -60,7 +60,12 @@ front end then builds the page as it would with no blob.
 Slots are bound by name: a board's dicts keep another order than the host's,
 so the store's slot order is the blob's and the front end's `_names` follow
 it. The image's frozen `uitree_pages` module holds each blob with its front
-part already read (`uitree_aot.entry`), its names a frozen tuple.
+part already read (`uitree_aot.entry`), its names a frozen tuple. A board
+build that takes this module writes it into its staged modules
+(`moybyte_stage_uitree_pages` in `tools/esp32_build_lib.sh`, which runs
+`tools/uitree_compile.py --staged` over the console's pages, `SYSTEM`); where
+the host cannot compile, the image carries none and every page builds on the
+device. The host and the browser carry none either: their pages build.
 
 **What stays in RAM.** A load copies the blob into the store (the compiler prints
 each blob's size). After `uit_build_end` the nodes, props, templates, ops, conditions,

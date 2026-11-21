@@ -805,6 +805,35 @@ moybyte_stage_native() {
   moybyte_phase stage
 }
 
+# The console's pages compiled ahead of time for the C engine
+# (tools/uitree_compile.py --staged, runtime/uitree/uitree_aot.py) into
+# MODULES_DIR/uitree_pages.py, which freezes beside the pages it holds. Called
+# after `board_config.py stage` has staged and pruned the modules. A board
+# that does not take moy_uitree carries none. Where the compiler cannot run
+# (no C compiler for the host library) the image carries none, the build says
+# so in one line, and every page builds on the device; CI and
+# MOYBYTE_REQUIRE_UITREE_PAGES=1 fail the build there instead.
+# Reads BUILD_PYTHON REPO_ROOT SCRIPT_DIR MODULES_DIR.
+moybyte_stage_uitree_pages() {
+  local out="${MODULES_DIR}/uitree_pages.py" dest args=(--staged "${MODULES_DIR}") err rc=0
+  dest="$("${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" native-dest "${SCRIPT_DIR}")"
+  if [ ! -d "${SCRIPT_DIR}/${dest}/moy_uitree" ]; then
+    rm -f "${out}"
+    return 0
+  fi
+  if [ -n "${CI:-}" ] || [ "${MOYBYTE_REQUIRE_UITREE_PAGES:-0}" = "1" ]; then
+    args+=(--require)
+  fi
+  err="$(mktemp)"
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/uitree_compile.py" "${args[@]}" 2>"${err}" || rc=$?
+  if [ "${rc}" -ne 0 ] && { [ "${rc}" -ne 3 ] || [ "${#args[@]}" -gt 2 ]; }; then
+    cat "${err}" >&2
+    rm -f "${err}"
+    exit 1
+  fi
+  rm -f "${err}"
+}
+
 # The OTA build identity (#53): $1 is the board id inside the signed manifest
 # ("tdeck"/"p4"), $2 the path to the moy_ota.py this image freezes (the SHARED
 # device/moy_ota.py -- both boards freeze a staged copy of the same file, so

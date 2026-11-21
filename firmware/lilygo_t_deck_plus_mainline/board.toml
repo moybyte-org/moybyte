@@ -69,6 +69,7 @@ keep  = [
   "carts_data.py",   # tools/gen_device_carts.py, from system_carts/
   "fonts_data.py",   # tools/make_font.py, the tier's font set
   "_ota_build.py",   # the OTA channel/version/label/board stamp (#53)
+  "uitree_pages.py", # the C engine's pages compiled ahead of time (tools/uitree_compile.py --staged)
 ]
 
 [modules.shared]

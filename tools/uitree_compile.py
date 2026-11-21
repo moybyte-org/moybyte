@@ -4,6 +4,7 @@
 "A compiled page").
 
     tools/uitree_compile.py MODULE... [--out FILE]
+    tools/uitree_compile.py --staged MODULES_DIR [--require]
 
 Each module is checked as tools/uitree_check.py checks it (every reference
 check); each of its page functions is then built on the C engine through the
@@ -12,6 +13,14 @@ host's library, lowered, and saved. A page the C engine does not draw yet
 (`uitree_pages`, frozen into an image beside the modules it compiles) whose
 PAGES maps "module.function" to the blob; it is written only when its bytes
 change, and the same sources always give the same bytes.
+
+`--staged` is the board build's step (tools/esp32_build_lib.sh,
+`moybyte_stage_uitree_pages`): it compiles the console's pages (`SYSTEM`)
+that the image stages into MODULES_DIR/uitree_pages.py, then checks the
+blobs against the staged copies (`stale`). Where the host library cannot be
+made (no C compiler), it removes that file, says so in one line and exits
+CANNOT_RUN: the image then carries no compiled page and every page builds on
+the device. `--require` makes that a failure.
 """
 
 import argparse
@@ -23,11 +32,24 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 sys.path.insert(0, os.path.join(ROOT, "runtime", "host"))
 
-import uitree_check  # noqa: E402  (puts runtime/ on the path)
+try:
+    import uitree_check  # noqa: E402  (puts runtime/ on the path)
 
-import uitree as S  # noqa: E402
-import uitree_aot  # noqa: E402
-import uitree_c  # noqa: E402
+    import uitree as S  # noqa: E402
+    import uitree_aot  # noqa: E402
+    import uitree_c  # noqa: E402
+    UNABLE = None if uitree_c._New is not None else "the host has no moy_uitree"
+except ImportError as e:            # the host library is made by a C compiler
+    if __name__ != "__main__":
+        raise
+    UNABLE = str(e)
+
+# The console's pages the C engine draws: the modules an image's pages are
+# compiled from, where the image stages them.
+SYSTEM = ("settings_rows", "settings_ui", "wifi_ui", "update_ui", "log_ui", "perms_ui", "about_ui",
+          "web_console_ui", "tasks_ui", "achievements_ui")
+
+CANNOT_RUN = 3
 
 # What a blob is built from beyond its page's module: the engine on both sides.
 ENGINE_SOURCES = (
@@ -124,11 +146,59 @@ def compile_modules(targets):
         uitree_aot.BLOBS = was
 
 
+def write(path, text):
+    """Write `text` to `path` only when its bytes change (a frozen module's
+    build is keyed on its file's time)."""
+    old = None
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            old = f.read()
+    if old != text:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+
+
+def stage(modules_dir, require=False):
+    """Compile SYSTEM's modules staged in `modules_dir` into its
+    uitree_pages.py; the build's step."""
+    out = os.path.join(modules_dir, "uitree_pages.py")
+    if UNABLE:
+        if os.path.exists(out):
+            os.remove(out)
+        print("uitree pages: %s the compiler cannot run here (%s): this image carries no compiled "
+              "page, and every page builds on the device" % ("!!" if require else "--", UNABLE))
+        return CANNOT_RUN
+    staged = dict((m, os.path.join(modules_dir, m + ".py")) for m in SYSTEM)
+    staged = dict((m, p) for m, p in staged.items() if os.path.exists(p))
+    c = compile_modules(sorted(staged))
+    late = stale(c.pages, staged)
+    if late:
+        raise SystemExit("uitree pages: staged modules differ from the sources compiled: %s"
+                         % ", ".join(late))
+    write(out, module_text(c))
+    print("uitree pages: %d compiled from %d staged modules, %d B of blobs, into %s%s" % (
+        len(c.pages), len(staged), sum(len(b) for b in c.pages.values()), out,
+        "".join("; skipped %s (%s)" % s for s in c.skipped)))
+    return 0
+
+
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("modules", nargs="+")
+    ap.add_argument("modules", nargs="*")
     ap.add_argument("--out", help="the uitree_pages module to write (default: print a summary only)")
+    ap.add_argument("--staged", metavar="MODULES_DIR",
+                    help="compile SYSTEM's modules staged here into its uitree_pages.py")
+    ap.add_argument("--require", action="store_true",
+                    help="with --staged: a host that cannot compile fails")
     a = ap.parse_args(argv)
+    if a.staged:
+        if a.modules or a.out:
+            ap.error("--staged takes no MODULE and no --out")
+        return stage(a.staged, a.require)
+    if not a.modules:
+        ap.error("name a MODULE, or --staged")
+    if UNABLE:
+        raise SystemExit("uitree_compile: cannot run here (%s)" % UNABLE)
     c = compile_modules(a.modules)
     for page, why in c.skipped:
         print("skipped %s: %s" % (page, why))
@@ -137,14 +207,7 @@ def main(argv):
     for k in sorted(c.pages):
         print("  %-40s %6d" % (k, len(c.pages[k])))
     if a.out:
-        text = module_text(c)
-        old = None
-        if os.path.exists(a.out):
-            with open(a.out, encoding="utf-8") as f:
-                old = f.read()
-        if old != text:
-            with open(a.out, "w", encoding="utf-8") as f:
-                f.write(text)
+        write(a.out, module_text(c))
     return 0
 
 

@@ -129,6 +129,61 @@ def test_the_build_python_prefers_the_venv_but_needs_no_venv(tmp_path):
     assert r.stdout.strip() == "/usr/bin/python3.11"
 
 
+# -- the compiled pages ---------------------------------------------------------
+
+
+@pytest.fixture
+def pages_build(tmp_path):
+    """A board dir, its modules and a BUILD_PYTHON that answers board_config's
+    native-dest with `native` and runs the compiler as `$RC` says."""
+    board = tmp_path / "board"
+    (board / "native" / "moy_uitree").mkdir(parents=True)
+    mods = board / "modules"
+    mods.mkdir()
+    py = tmp_path / "py"
+    py.write_text('#!/bin/bash\ncase "$1" in\n  *board_config.py) echo native ;;\n'
+                  '  *uitree_compile.py) echo "args $*"; echo "why" >&2; exit "${RC}" ;;\nesac\n',
+                  encoding="utf-8")
+    py.chmod(0o755)
+
+    def run(rc, **env):
+        return sh("moybyte_stage_uitree_pages; echo done",
+                  REPO_ROOT=str(ROOT), SCRIPT_DIR=str(board), MODULES_DIR=str(mods),
+                  BUILD_PYTHON=str(py), RC=rc, **env)
+    return board, mods, run
+
+
+def test_the_pages_compile_into_the_staged_modules(pages_build):
+    board, mods, run = pages_build
+    r = run(0)
+    assert r.returncode == 0 and "done" in r.stdout
+    assert "--staged %s" % mods in r.stdout and "--require" not in r.stdout
+    assert "why" not in r.stderr
+
+
+def test_a_host_that_cannot_compile_builds_without_pages_unless_required(pages_build):
+    board, mods, run = pages_build
+    assert run(3).returncode == 0
+    for env in ({"CI": "1"}, {"MOYBYTE_REQUIRE_UITREE_PAGES": "1"}):
+        r = run(3, **env)
+        assert r.returncode != 0 and "--require" in r.stdout and "why" in r.stderr
+
+
+def test_a_compiler_error_fails_the_build_with_its_message(pages_build):
+    board, mods, run = pages_build
+    r = run(1)
+    assert r.returncode != 0 and "done" not in r.stdout and "why" in r.stderr
+
+
+def test_a_board_without_moy_uitree_carries_no_pages(pages_build):
+    board, mods, run = pages_build
+    (board / "native" / "moy_uitree").rmdir()
+    (mods / "uitree_pages.py").write_text("PAGES = {}\n", encoding="utf-8")
+    r = run(1)
+    assert r.returncode == 0 and "args" not in r.stdout
+    assert not (mods / "uitree_pages.py").exists()
+
+
 # -- the IDF component list -----------------------------------------------------
 
 

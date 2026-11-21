@@ -27,9 +27,8 @@ import uitree_compile as UC  # noqa: E402
 import uitree_aot  # noqa: E402
 import uitree_c  # noqa: E402
 
-# The modules whose pages the C runs open (PORTS.C_RUNS).
-MODULES = ("settings_rows", "settings_ui", "wifi_ui", "update_ui", "log_ui", "perms_ui", "about_ui",
-           "web_console_ui", "tasks_ui", "achievements_ui")
+# The console's pages an image compiles: the modules whose pages the C runs open (PORTS.C_RUNS).
+MODULES = UC.SYSTEM
 
 
 @pytest.fixture(scope="module")
@@ -180,6 +179,42 @@ def test_a_blob_made_before_its_module_changed_is_stale(compiled, tmp_path):
     copy = tmp_path / "log_ui.py"
     copy.write_text(src + "\n# a change\n")
     assert UC.stale({"log_ui.log_page": blob}, paths={"log_ui": str(copy)}) == ["log_ui.log_page"]
+
+
+def _staged(tmp_path):
+    import importlib
+    mods = tmp_path / "modules"
+    mods.mkdir()
+    for m in MODULES:
+        (mods / (m + ".py")).write_text(Path(importlib.import_module(m).__file__).read_text())
+    return mods
+
+
+def test_staging_compiles_the_staged_pages_and_names_a_stale_one(tmp_path, capsys):
+    mods = _staged(tmp_path)
+    assert UC.stage(str(mods)) == 0
+    assert "uitree pages: 14 compiled from 10 staged modules" in capsys.readouterr().out
+    ns = {}
+    exec((mods / "uitree_pages.py").read_text(), ns)
+    blobs = dict((k, v[0]) for k, v in ns["PAGES"].items())
+    assert set(blobs) == set(UC.compile_modules(MODULES).pages)
+    paths = dict((m, str(mods / (m + ".py"))) for m in MODULES)
+    assert UC.stale(blobs, paths) == []
+    with open(mods / "tasks_ui.py", "a") as f:
+        f.write("\n# a change\n")
+    assert UC.stale(blobs, paths) == ["tasks_ui.tasks_page"]
+    with pytest.raises(SystemExit, match="tasks_ui"):
+        UC.stage(str(mods))
+
+
+def test_a_host_that_cannot_compile_stages_no_pages_and_says_so_in_one_line(tmp_path):
+    mods = _staged(tmp_path)
+    (mods / "uitree_pages.py").write_text("PAGES = {}\n")
+    r = subprocess.run([sys.executable, str(ROOT / "tools/uitree_compile.py"), "--staged", str(mods)],
+                       env=dict(os.environ, CC="/nonexistent/cc"), cwd=ROOT, capture_output=True, text=True)
+    assert r.returncode == UC.CANNOT_RUN, r.stderr
+    assert r.stdout.count("\n") == 1 and "every page builds on the device" in r.stdout
+    assert not (mods / "uitree_pages.py").exists()
 
 
 def test_on_the_boards_python_a_loaded_page_neither_builds_nor_lowers_and_keeps_the_built_bytes(compiled, tmp_path):

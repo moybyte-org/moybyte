@@ -155,6 +155,7 @@ moybyte_patch_lfs_sizes
 # ---------------------------------------------------------------------------
 moybyte_stage_native
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" stage "${SCRIPT_DIR}"
+moybyte_stage_uitree_pages
 
 #    carts_data.py is built from system_carts/ so the seed + embedded-fallback
 #    carts can never drift from the host source of truth. PACKED: one
