@@ -4,7 +4,7 @@
 "A compiled page").
 
     tools/uitree_compile.py MODULE... [--out FILE]
-    tools/uitree_compile.py --staged MODULES_DIR [--require]
+    tools/uitree_compile.py --staged MODULES_DIR [--board BOARD_DIR] [--require]
 
 Each module is checked as tools/uitree_check.py checks it (every reference
 check); each of its page functions is then built on the C engine through the
@@ -17,7 +17,9 @@ change, and the same sources always give the same bytes.
 `--staged` is the board build's step (tools/esp32_build_lib.sh,
 `moybyte_stage_uitree_pages`): it compiles the console's pages (`SYSTEM`)
 that the image stages into MODULES_DIR/uitree_pages.py, then checks the
-blobs against the staged copies (`stale`). Where the host library cannot be
+blobs against the staged copies (`stale`); `--board` names the board, and
+one with no desk (`has_desk`) carries no page only a desk opens
+(`desk_pages`). Where the host library cannot be
 made (no C compiler), it removes that file, says so in one line and exits
 CANNOT_RUN: the image then carries no compiled page and every page builds on
 the device. `--require` makes that a failure.
@@ -161,9 +163,26 @@ def write(path, text):
             f.write(text)
 
 
-def stage(modules_dir, require=False):
+def has_desk(board_dir):
+    """Whether the board in `board_dir` has a desk: the metric class the
+    shell gives its glass (`layout_base.class_of` of board.toml's [panel]
+    diagonal_in, which the board's runtime hands the console)."""
+    import board_config
+    import layout_base
+    d = board_config.load(board_dir).get("panel", {}).get("diagonal_in")
+    return layout_base.class_of(d) == layout_base.DESK
+
+
+def desk_pages():
+    """The pages only a desk opens: the Editor's workspaces (`editor_ui.SPACES`)."""
+    import editor_ui
+    return set(uitree_aot.key(f) for f in editor_ui.SPACES.values())
+
+
+def stage(modules_dir, require=False, desk=True):
     """Compile SYSTEM's modules staged in `modules_dir` into its
-    uitree_pages.py; the build's step."""
+    uitree_pages.py; the build's step. With no `desk`, the pages only a
+    desk opens (`desk_pages`) are left out."""
     out = os.path.join(modules_dir, "uitree_pages.py")
     if UNABLE:
         if os.path.exists(out):
@@ -174,13 +193,17 @@ def stage(modules_dir, require=False):
     staged = dict((m, os.path.join(modules_dir, m + ".py")) for m in SYSTEM)
     staged = dict((m, p) for m, p in staged.items() if os.path.exists(p))
     c = compile_modules(sorted(staged))
+    if not desk:
+        for k in desk_pages():
+            c.pages.pop(k, None)
     late = stale(c.pages, staged)
     if late:
         raise SystemExit("uitree pages: staged modules differ from the sources compiled: %s"
                          % ", ".join(late))
     write(out, module_text(c))
-    print("uitree pages: %d compiled from %d staged modules, %d B of blobs, into %s%s" % (
-        len(c.pages), len(staged), sum(len(b) for b in c.pages.values()), out,
+    print("uitree pages: %d compiled from %d staged modules%s, %d B of blobs, into %s%s" % (
+        len(c.pages), len(staged), "" if desk else " (no desk: no desk page)",
+        sum(len(b) for b in c.pages.values()), out,
         "".join("; skipped %s (%s)" % s for s in c.skipped)))
     return 0
 
@@ -191,13 +214,16 @@ def main(argv):
     ap.add_argument("--out", help="the uitree_pages module to write (default: print a summary only)")
     ap.add_argument("--staged", metavar="MODULES_DIR",
                     help="compile SYSTEM's modules staged here into its uitree_pages.py")
+    ap.add_argument("--board", metavar="BOARD_DIR",
+                    help="with --staged: the board the image is for; one with no desk "
+                         "(has_desk) carries no desk page")
     ap.add_argument("--require", action="store_true",
                     help="with --staged: a host that cannot compile fails")
     a = ap.parse_args(argv)
     if a.staged:
         if a.modules or a.out:
             ap.error("--staged takes no MODULE and no --out")
-        return stage(a.staged, a.require)
+        return stage(a.staged, a.require, has_desk(a.board) if a.board else True)
     if not a.modules:
         ap.error("name a MODULE, or --staged")
     if UNABLE:

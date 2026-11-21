@@ -221,6 +221,24 @@ def test_staging_compiles_the_staged_pages_and_names_a_stale_one(compiled, tmp_p
         UC.stage(str(mods))
 
 
+def test_a_board_with_no_desk_stages_no_desk_page(compiled, tmp_path, capsys):
+    """A handheld's image carries no page only a desk opens (the Editor's
+    workspaces); which boards have a desk is the shell's metric class of each
+    board's glass."""
+    desk = dict((d.name, UC.has_desk(d)) for d in (ROOT / "firmware").iterdir()
+                if (d / "board.toml").exists())
+    assert desk["lilygo_t_deck_plus_mainline"] is False and desk["guition_jc3248w535"] is False
+    assert desk["esp32_p4_wifi6_touch_lcd_7b"] is True and desk["guition_jc8012p4a1c"] is True
+    gone = UC.desk_pages()
+    assert len(gone) == 6 and gone <= set(compiled.pages)
+    mods = _staged(tmp_path)
+    assert UC.stage(str(mods), desk=False) == 0
+    assert "(no desk: no desk page)" in capsys.readouterr().out
+    ns = {}
+    exec((mods / "uitree_pages.py").read_text(), ns)
+    assert set(ns["PAGES"]) == set(compiled.pages) - gone
+
+
 def test_a_host_that_cannot_compile_stages_no_pages_and_says_so_in_one_line(tmp_path):
     mods = _staged(tmp_path)
     (mods / "uitree_pages.py").write_text("PAGES = {}\n")
