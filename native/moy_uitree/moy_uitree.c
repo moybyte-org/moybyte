@@ -1051,10 +1051,13 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
             N->btn = (uint16_t)i, N->nbtn |= LT_LINES;
         return add_prop(e, node, name, src, repr, PK_LIT, i);
     }
-    if (kind == UIT_CANVAS && (!strcmp(name, "draw") || !strcmp(name, "h"))) {
-        // draw= names the front end's function (uit_on_draw); h= its height where it is a row
+    if (kind == UIT_CANVAS && (!strcmp(name, "draw") || !strcmp(name, "h") || !strcmp(name, "w"))) {
+        // draw= names the front end's function (uit_on_draw); h= its height in a stack, w= its
+        // width in a row
         if (name[0] == 'h')
             N->btn = (uint16_t)strtol(src, NULL, 10);
+        else if (name[0] == 'w')
+            N->nbtn = (uint16_t)strtol(src, NULL, 10);
         return add_prop(e, node, name, src, repr, PK_LIT, 0);
     }
     if (kind == UIT_SPLIT && (!strcmp(name, "pad") || !strcmp(name, "gap") || !strcmp(name, "align"))) {

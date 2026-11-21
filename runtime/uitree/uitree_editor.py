@@ -42,6 +42,8 @@ _SYN = {"python": "python", "lua": "lua", "json": "json", "markdown": "markdown"
 _FILL = ("switch", "panes", "pane", "text_editor", "slot", "panel", "case", "canvas", "legacy")
 # what the hosted phase walks to place the legacy nodes: the regions
 _PLACED = ("case", "switch", "panes", "pane", "panel", "legacy")
+_REGIONS = ("case", "switch", "panel")          # a row's cells that stack their own children
+_WHOLE = _REGIONS + ("status", "canvas")        # a row's cells the row's whole height
 _BARE = {"bare": True}      # a page whose bodies its host drew opens over them
 # The panes' sizes in desk units (runtime/editors/editor_panes.py's, the
 # desk Editor's): the gutter, a pane's header, a divider's handle drawn and
@@ -403,6 +405,8 @@ class Engine(uitree_app.Engine):
             # a wrapped label: its lines of the ui face, a pad above and below
             line = _ud.font("ui")[2]
             return (k.l.get("lines", 2) * (line + 2) + 6) * self.fs
+        if k.kind == "row" and any(c.kind in _REGIONS for c in k.kids):
+            return None         # a row of regions: the rule turned, a fill of its stack
         if k.kind == "row" and any(c.kind == "status" for c in k.kids) and \
                 not any(c.kind == "field" for c in k.kids):
             return self._height(next(c for c in k.kids if c.kind == "status"))   # a status line's
@@ -506,6 +510,8 @@ class Engine(uitree_app.Engine):
                 return _ud.print_width(self._t(k, "text", row), self.fs) + 2 * pad + 2
             finally:
                 _ud.print_font(was)
+        if k.kind == "canvas" and k.l.get("w"):
+            return k.l["w"] * (1 if self.desk else self.fs)     # a fixed cell along x, as h= down
         if k.kind == "tabs":
             st = self.s._t[k.key]
             tab = self.decl.labels[k.l["labels"]]
@@ -536,7 +542,7 @@ class Engine(uitree_app.Engine):
         rest = w - sum(v for v in nat if v) - gap * max(0, len(kids) - 1)
         for i, k in enumerate(kids):
             kw = nat[i] if nat[i] is not None else max(0, rest // max(1, len(grow)))
-            r = (x, y, kw, h) if k.kind == "status" else (x, y + 2, kw, h - 4)   # a band: the row's height
+            r = (x, y, kw, h) if k.kind in _WHOLE else (x, y + 2, kw, h - 4)   # a band, a region: the row's height
             self._put_rect(k.key, r)
             if k.kind == "button":
                 self._r_button(k, row, rect, at=r)

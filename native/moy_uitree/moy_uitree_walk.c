@@ -2513,8 +2513,11 @@ static int32_t fixed_h(uit_t *e, int k)
     case UIT_ROW: {
         int st = 0, field = 0;
         KIDS(k, g) {
-            st |= NODE(g)->kind == UIT_STATUS;
-            field |= NODE(g)->kind == UIT_FIELD;
+            int gk = NODE(g)->kind;
+            if (gk == UIT_CASE || gk == UIT_SWITCH || gk == UIT_PANEL)
+                return -1;              // a row of regions: the rule turned, a fill of its stack
+            st |= gk == UIT_STATUS;
+            field |= gk == UIT_FIELD;
         }
         if (st && !field)
             return status_h(e);         // a status line's
@@ -2669,6 +2672,8 @@ static int32_t natural(uit_t *e, int k, int model, int row, int32_t h)
         int mn, pad = moy_ui_metrics(MOY_UI_K_STATUS, &mn)[1] * e->fs;
         return text_px(role_font(MOY_UI_FONT_UI, &fi), p, n, e->fs) + 2 * pad + 2;
     }
+    if (N->kind == UIT_CANVAS && N->nbtn)
+        return N->nbtn * ((e->flags & UIT_F_DESK) ? 1 : e->fs);    // a fixed cell along x, as h= down
     return -1;
 }
 
@@ -2706,8 +2711,9 @@ static void row_cells(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, 
         if (kw < 0)
             kw = 0;
         int32_t cell[4] = {x, r[1] + 2, kw, r[3] - 4};
-        if (NODE(g)->kind == UIT_STATUS)
-            cell[1] = r[1], cell[3] = r[3];     // a band: the row's height
+        int gk = NODE(g)->kind;
+        if (gk == UIT_STATUS || gk == UIT_CASE || gk == UIT_SWITCH || gk == UIT_PANEL || gk == UIT_CANVAS)
+            cell[1] = r[1], cell[3] = r[3];     // a band, a region: the row's height
         if (NODE(g)->kind == UIT_BUTTON) {
             put_rect(e, g, cell);
             moy_ui_api_at(c, cell[0], cell[1], cell[2], cell[3]);

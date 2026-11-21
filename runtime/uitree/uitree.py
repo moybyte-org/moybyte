@@ -1882,7 +1882,7 @@ SCHEMA = {
     "split": dict(_C, dir="choice", sizes="ints", pad="lit", gap="lit", align="lit"),
     "grid": dict(_C, cols="lit", rows="lit", gap="lit", pad="lit"),
     "panel": dict(_C),
-    "canvas": dict(_C, draw="fn", h="lit", pointer="action1", focus="cond", ground="lit"),
+    "canvas": dict(_C, draw="fn", h="lit", w="lit", pointer="action1", focus="cond", ground="lit"),
     "foot": dict(_C, look="lit"),
     "scroll": dict(_C),
     "switch": dict(_C),

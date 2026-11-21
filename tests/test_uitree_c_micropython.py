@@ -170,7 +170,8 @@ def conf(loop):
     pairs = (uitree_app.Engine, uitree_c.CEngine)
     for name, src, script, pair in [f + (pairs,) for f in FIXTURES] + [
             ("placed", PLACED_SRC, PLACED_SCRIPT, (uitree_editor.Engine, uitree_c.CEditorEngine)),
-            ("text_editor", TE_SRC, TE_SCRIPT, (uitree_editor.Engine, uitree_c.CEditorEngine))]:
+            ("text_editor", TE_SRC, TE_SCRIPT, (uitree_editor.Engine, uitree_c.CEditorEngine)),
+            ("across", ACROSS_SRC, ACROSS_SCRIPT, (uitree_editor.Engine, uitree_c.CEditorEngine))]:
         runs = {}
         for tag, cls in zip(("py", "c"), pair):
             mod = _load("conf_%s_%s" % (name, tag), src)
@@ -395,6 +396,8 @@ PLACED_SCRIPT = ["k:right", "k:a", "k:right", "k:a", "k:down", "k:a", "k:down", 
 # the text editor (tests/uitree_fixtures/uitree_text_editor.py): the caret walked, the gutter
 # turned off and on by its focused button
 TE_SCRIPT = ["k:down", "k:down", "k:right", "k:a", "k:down", "k:a", "k:up"]
+# the rule along x (tests/uitree_fixtures/uitree_across.py): the bar walked, the switch flipped
+ACROSS_SCRIPT = ["k:right", "k:a", "k:right", "k:a", "k:down", "k:a", "k:up"]
 
 
 @pytest.fixture(scope="module")
@@ -402,9 +405,11 @@ def result(tmp_path_factory):
     placed = (Path(__file__).resolve().parent / "uitree_fixtures" / "uitree_placed.py").read_text()
     bar_row = (Path(__file__).resolve().parent / "uitree_fixtures" / "uitree_bar_row.py").read_text()
     te = (Path(__file__).resolve().parent / "uitree_fixtures" / "uitree_text_editor.py").read_text()
+    across = (Path(__file__).resolve().parent / "uitree_fixtures" / "uitree_across.py").read_text()
     more = (DRIVER.replace("@FIXTURES@", repr(_fixtures())) + "\nLONG_SRC = %r\n" % LONG
             + "PLACED_SRC = %r\nPLACED_SCRIPT = %r\nBAR_SRC = %r\n" % (placed, PLACED_SCRIPT, bar_row)
             + "TE_SRC = %r\nTE_SCRIPT = %r\n" % (te, TE_SCRIPT)
+            + "ACROSS_SRC = %r\nACROSS_SCRIPT = %r\n" % (across, ACROSS_SCRIPT)
             + "SETTINGS_KEYS = %r\nSETTINGS_RUNS = %r\n" % (SETTINGS_KEYS, SETTINGS_RUNS))
     info, text = FA._run(tmp_path_factory.mktemp("uitree_c"), entry="conf", more=more,
                          why="the C engine runs on the boards' MicroPython: this is its check there")
