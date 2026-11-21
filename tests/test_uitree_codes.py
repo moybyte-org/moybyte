@@ -1,8 +1,8 @@
 """The layer's own refusals, raised at the offending call outside the
 checker: a build that reads, writes or misplaces (B01-B03), a declaration
 with no type (S13), a model field named `key` (S07), an enum's `init=`
-(E01-E03), a retired `takes="change"` (N04) and a command outside a
-handler (A10)."""
+(E01-E03), a retired `takes="change"` (N04), a command outside a
+handler (A10), a cancelled timer and a pop on the first page (P05)."""
 
 import sys
 from pathlib import Path
@@ -213,3 +213,27 @@ def test_the_app_declaration_names_its_title_and_fields_once():
     assert _code(lambda: uitree_app.app_layer("t", None, page)) == "A01"
     ui._d().app = None
     assert _code(lambda: uitree_app.app_layer("t", None, page)) == "D04"
+
+
+def test_a_cancelled_timer_runs_nothing_and_a_pop_on_the_first_page_is_p05():
+    ui.state(on=False)
+    ui.action("tick", "Tick", nothing)
+    ui.action("tock", "Tock", nothing)
+
+    def page():
+        with ui.page("P"):
+            ui.label("x")
+    app = _App(ui.decl_of(__name__), page)
+    app._build()
+    app.close_root = None
+    ui._NOW.app = app                   # as a handler runs: its app in force
+    try:
+        ui.after(100, "tick")
+        ui.after(200, "tick")
+        ui.after(300, "tock")
+        ui.cancel("tick")
+        assert [t[1].name for t in app.timers] == ["tock"]
+        assert _code(lambda: ui.cancel("nope")) == "A01"
+        assert _code(ui.pop) == "P05"
+    finally:
+        ui._NOW.app = None

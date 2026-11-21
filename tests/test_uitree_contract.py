@@ -32,7 +32,7 @@ with open(os.path.join(CONTRACT, "contract.json"), encoding="utf-8") as _f:
     TABLE = json.load(_f)
 
 PY_FILES = [str(runtime_file(f)) for f in
-            ("uitree.py", "uitree_app.py", "uitree_editor.py", "uitree_doc.py", "uitree_pics.py")] + \
+            ("uitree.py", "uitree_app.py", "uitree_c.py", "uitree_editor.py", "uitree_doc.py", "uitree_pics.py")] + \
            [os.path.join(ROOT, "tools", "uitree_check.py")]
 LUA_FILES = [str(runtime_file("lua_ext.py").parent / f) for f in ("uitree.lua", "uitree_check.lua")] + \
             [os.path.join(ROOT, "tools", "uitree_lua_check.py")]
@@ -179,7 +179,7 @@ def _held(lang, facts):
 
 def test_the_table_is_whole():
     codes = TABLE["codes"]
-    assert len(codes) == 86
+    assert len(codes) == 89
     for c, d in codes.items():
         assert re.fullmatch(r"[A-Z][0-9]{2}", c)
         assert d["meaning"] and d["stage"] and d["fix"]["python"] and d["fix"]["lua"], c

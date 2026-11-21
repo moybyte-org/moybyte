@@ -1855,6 +1855,13 @@ def after(ms, name):
     a.timers.append([a.clock + ms, act])
 
 
+def cancel(name):
+    """A handler cancels the timers armed for the action NAME: they run nothing."""
+    a = _command("cancel")
+    act = _action(name, "none", "ui.cancel", _caller(), seen=False)
+    a.timers[:] = [t for t in a.timers if t[1] is not act]
+
+
 def focus(key=None):
     """A handler moves focus: ui.focus(key). Nothing reads it back."""
     if key is None:

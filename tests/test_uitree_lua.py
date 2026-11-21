@@ -209,6 +209,7 @@ CASES = {
     "S04": (APP + REC + 'ui.action("go", "Go", function()\n  local v = s.r.nope\nend)' + PAGE, 4, 'ui._fire("go")\n'),
     "S05": (APP + REC + 'ui.action("go", "Go", function()\n  s.r = 5\nend)' + PAGE, 4, 'ui._fire("go")\n'),
     "S06": (APP + 'local s = ui.state { n = 0 }\ns.n = 1' + PAGE, 3, None),
+    "P05": (APP + 'ui.action("go", "Go", function()\n  ui.pop()\nend)' + PAGE, 3, 'ui._fire("go")\n'),
     "S07": (APP + 'local s = ui.state { m = ui.model { name = "" } }' + PAGE, 2, None),
     "S09": (APP + 'local s = ui.state { n = 0 }\nui.derive("big", "bool", "n>3")\n'
             'ui.action("go", "Go", function()\n  s.big = true\nend)' + PAGE, 5, 'ui._fire("go")\n'),

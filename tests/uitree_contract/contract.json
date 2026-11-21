@@ -249,6 +249,19 @@
    },
    "as_run": ""
   },
+  "E00": {
+   "stage": [
+    "build",
+    "tree"
+   ],
+   "meaning": "a kind, a prop or a form the C engine does not draw yet, by name (`uitree_c.EngineGap`), never drawn wrong",
+   "fix": {
+    "python": "run the app on the reference (`uitree`), or build it from what the C engine draws",
+    "lua": "—",
+    "c": "—"
+   },
+   "as_run": ""
+  },
   "E01": {
    "stage": [
     "build"
@@ -640,6 +653,18 @@
    },
    "as_run": ""
   },
+  "P05": {
+   "stage": [
+    "run"
+   ],
+   "meaning": "`ui.pop()` on the app's first page (a page its host shows is closed by its host instead)",
+   "fix": {
+    "python": "Back leaves the app; `ui.pop()` closes a page `ui.push()` opened",
+    "lua": "as Python",
+    "c": "as Python"
+   },
+   "as_run": ""
+  },
   "Q01": {
    "stage": [
     "read"
@@ -1009,6 +1034,18 @@
    },
    "as_run": ""
   },
+  "X01": {
+   "stage": [
+    "run"
+   ],
+   "meaning": "an internal assertion: the layer missed a check at build",
+   "fix": {
+    "python": "—",
+    "lua": "report it: the layer missed a check",
+    "c": "—"
+   },
+   "as_run": ""
+  },
   "Y01": {
    "stage": [
     "build"
@@ -1120,6 +1157,7 @@
   "pop": 1,
   "focus": 1,
   "after": 1,
+  "cancel": 1,
   "post": 1,
   "damage": 1,
   "doc": 2,

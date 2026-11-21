@@ -62,7 +62,8 @@ local FIXES = {
   N04 = "the verb or prop the error names", N08 = "a node's key on the page shown",
   O01 = "off = \"hide\" or off = \"grey\"", O02 = "drop off, or give the action a when",
   O04 = "when and off on the action", P01 = "ui.page(NAME, BUILD) for it", P02 = "drop takes; the page's arg is its row",
-  P03 = "a push action has no handler", P04 = "arg names a ui.row_of state", S01 = "declare it in ui.state",
+  P03 = "a push action has no handler", P04 = "arg names a ui.row_of state",
+  P05 = "Back leaves the app; ui.pop() closes a page ui.push() opened", S01 = "declare it in ui.state",
   S02 = "a value of the field's type", S03 = "replace the whole value", S04 = "a declared field",
   S05 = "a table of the declared fields", S06 = "write state in a handler", S07 = "ui.model { key = \"id\", id = \"\", ... }",
   S09 = "write the names the derive reads", S10 = "read it; the engine writes it", S11 = "ui.row_of(\"MODEL\")",
@@ -2047,6 +2048,8 @@ function T.pop()
     stack[#stack] = nil
     stack[#stack].fresh = 1
     GEN = GEN + 1
+  else
+    fail("P05", where(), "ui.pop() on the app's first page", "a page ui.push opened", "the first page")
   end
 end
 
