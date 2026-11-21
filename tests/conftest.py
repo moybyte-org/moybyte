@@ -291,6 +291,31 @@ def pytest_runtest_setup(item):
     pixel_goldens.clear(item.nodeid)
 
 
+# The canvas rows a worker may hold live, garbage collected, after a test file:
+# the last console's few stay reachable from the module globals that name it
+# (`devices.console`, `ui_draw.UI_TARGET`); the glass has MOY_GLASS_ROWS (256).
+CANVAS_ROWS_AFTER_A_FILE = 64
+
+
+def pytest_runtest_teardown(item, nextitem):
+    """A test file that leaves canvas rows reachable fails at its last test,
+    before the rows it kept fill the glass's table under a later file on the
+    same worker (`MemoryError: the glass's canvas table is full`)."""
+    if nextitem is not None and nextitem.path == item.path:
+        return
+    gb = sys.modules.get("runtime.host.glass_binding")
+    lib = gb._LIB[0] if gb is not None and gb._LIB else None
+    if not lib:
+        return
+    import gc
+    gc.collect()
+    n = lib.moy_canvas_count()
+    assert n <= CANVAS_ROWS_AFTER_A_FILE, (
+        "%s leaves %d canvas rows live (at most %d): a module global, a "
+        "fixture or a closed app still holds a console's canvases"
+        % (item.path.name, n, CANVAS_ROWS_AFTER_A_FILE))
+
+
 # Whether the running test is marked `first_run` (`_carts_are_made_here`).
 _FIRST_RUN = [False]
 

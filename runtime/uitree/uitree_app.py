@@ -221,26 +221,27 @@ class Engine(S.Builder):
         self._edits = 0                 # a commit field's draft edits, which move the gen too
         self._buttons = 0               # the frame's buttons, as keys() handed them to the host
         st = decl.state                 # this engine's own values: two consoles in one process each hold theirs
-        self._vals = dict((k, st._init.get(k)) for k in st._t)
-        self._vers = dict.fromkeys(st._t, 0)
+        self._own = [dict((k, st._init.get(k)) for k in st._t), dict.fromkeys(st._t, 0)]
 
     def _bind(self):
         """The module's state holds this engine's values: at every way in (a
         frame, a handler, input, an opening, a way out) an engine that is not
         the last one in puts the other's values by and takes its own. The
         first engine in takes the module's as they are. The dicts stay the
-        objects templates and derives read."""
+        objects templates and derives read. The state names its holder by
+        the engine's [values, versions] pair, never the engine: a module
+        outlives its consoles."""
         st = self.s
-        was = st._owner
-        if was is self:
+        was, own = st._owner, self._own
+        if was is own:
             return
         if was is not None:
-            was._vals, was._vers = dict(st._v), dict(st._ver)
+            was[0], was[1] = dict(st._v), dict(st._ver)
             st._v.clear()
-            st._v.update(self._vals)
+            st._v.update(own[0])
             st._ver.clear()
-            st._ver.update(self._vers)
-        object.__setattr__(st, "_owner", self)
+            st._ver.update(own[1])
+        object.__setattr__(st, "_owner", own)
 
     # -- the engine's counted runs (G12) ------------------------------------
 

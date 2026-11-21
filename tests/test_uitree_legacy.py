@@ -42,6 +42,7 @@ class Run:
         return P._settle(self.ws, G, self.driver)
 
     def close(self):
+        self.E._SURF.pop(id(self.eng.env), None)
         self.ws.home.go_home()
         from runtime import scheduler
         scheduler.SCHED.reset()
