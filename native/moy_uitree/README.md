@@ -75,7 +75,9 @@ order, and `O` refuses a blob whose numbering this Python would read
 otherwise. `tests/test_uitree_aot.py` loads every page on the boards'
 MicroPython and holds its frame to the built one, and on the host walks
 every declaration dict the other way. The image's frozen `uitree_pages` module holds each blob with its front
-part already read (`uitree_aot.entry`), its names a frozen tuple. A board
+part already read (`uitree_aot.entry`), its names a frozen tuple, and the
+blob itself bare of that part (`uitree_aot.bare`: its length and checksum
+made again), so the front is in the image once. A board
 build that takes this module writes it into its staged modules
 (`moybyte_stage_uitree_pages` in `tools/esp32_build_lib.sh`, which runs
 `tools/uitree_compile.py --staged` over the console's pages, `SYSTEM`); where

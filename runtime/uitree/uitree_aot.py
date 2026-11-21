@@ -65,7 +65,26 @@ def entry(blob):
     (`orders`), then `tables`' four), every part made on the host, the
     dicts once when the image imports it."""
     f = front_of(blob)
-    return (blob, tuple(f["S"]), f["T"], tuple(f["A"]), f["D"], f["G"], f["X"], f["O"]) + tables(f)
+    return (bare(blob), tuple(f["S"]), f["T"], tuple(f["A"]), f["D"], f["G"], f["X"], f["O"]) + tables(f)
+
+
+def _put32(b, at, v):
+    b[at:at + 4] = bytes(((v >> s) & 255) for s in (0, 8, 16, 24))
+
+
+def bare(blob):
+    """`blob` with no front end's part: what the store reads alone, its
+    length and checksum made again (the C loader stops at the front's
+    offset). A frozen entry holds this, its front already read beside it."""
+    at = _u32(blob, 24)
+    out = bytearray(blob[:at])
+    _put32(out, 20, at)
+    _put32(out, 28, 0)
+    h = 2166136261
+    for c in out[32:]:
+        h = ((h ^ c) * 16777619) & 0xffffffff
+    _put32(out, 16, h)
+    return bytes(out)
 
 
 def tables(f):
