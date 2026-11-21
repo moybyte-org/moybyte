@@ -281,6 +281,7 @@ class TasksLayer(Layer):
         self._rect = (0, 0, 0, 0)
         self.held = False            # it paused the front game when it opened
         self._pg = None
+        self.page()                  # at boot: its first open makes no engine, which holds no C store until then
 
     def page(self):
         if self._pg is None:

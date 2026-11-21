@@ -204,6 +204,8 @@ class AchievementsPage:
         self._host = host
         self.page = None
         self._groups = None           # the badges the model was made from
+        self._today = None            # the day its popover lines were made on
+        self._page()                  # at boot: its first open makes no engine, which holds no C store until then
 
     def _page(self):
         if self.page is None:
@@ -212,8 +214,13 @@ class AchievementsPage:
         return self.page
 
     def open(self):
-        self._groups = self._ctx.notify.groups()
-        self._page().open()
+        """A visit: the model made again only when the badges or the day
+        moved since it was made (its `opened` hook, `fill`)."""
+        notify = self._ctx.notify
+        groups, today = notify.groups(), notify.today()
+        made = groups is self._groups and today == self._today and self.page is not None
+        self._groups, self._today = groups, today
+        self._page().open(hook=None if made else "opened")
 
     def close(self):
         if self.page is not None:
@@ -271,7 +278,7 @@ class AchievementsPage:
         pg = self._page()
         groups = self._ctx.notify.groups()
         if groups is not self._groups:
-            self._groups = groups
+            self._groups, self._today = groups, self._ctx.notify.today()
             pg.run(fill, action="fill")
             ui.commit(pg)
         cv, th = self._ctx.surface.canvas(), self._ctx.theme.colors()
