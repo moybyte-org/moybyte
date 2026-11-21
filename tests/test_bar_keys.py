@@ -243,7 +243,17 @@ def test_the_homes_strip_names_the_bars_keys_while_on_it(tmp_path):
     assert home_hints.modal_keys(ws) is None
 
 
+def _foot(ws, rows=16):
+    """The canvas's last `rows` rows, where a page's hint strip draws."""
+    cv = ws.sys_canvas
+    return bytes(cv._buf[(cv.h - rows) * cv.w * 2:])
+
+
 def test_a_pages_strip_names_the_bars_keys_while_on_it(tmp_path, monkeypatch):
+    """Settings' strip shows the bar's keys while the keys are on the bar
+    and its own again after, on either engine: the reference's strip read
+    where it names its items (`ui._C.api_hints`), the C engine's (drawn in
+    native/moy_uitree with its own BAR row) by its pixels."""
     from runtime import ui
     seen = []
     real = ui._C.api_hints
@@ -253,15 +263,20 @@ def test_a_pages_strip_names_the_bars_keys_while_on_it(tmp_path, monkeypatch):
     ws.open_settings()
     for _ in range(3):
         drv.frame(1 / 30)
-    page = seen[-1]
+    page, foot = seen[-1:], _foot(ws)
     for _ in range(4):
         _press(drv, "up")
         if ws.bar_layer.focus is not None:
             break
     drv.frame(1 / 30)
-    assert seen[-1] == ui._opts(ui_draw.BAR_KEYS) != page
+    assert ui_draw.on_bar() and _foot(ws) != foot
+    if page:
+        assert seen[-1] == ui._opts(ui_draw.BAR_KEYS) != page[0]
     _press(drv, "down")
-    assert seen[-1] == page and not ui_draw.on_bar()
+    drv.frame(1 / 30)
+    assert not ui_draw.on_bar() and _foot(ws) == foot
+    if page:
+        assert seen[-1] == page[0]
 
 
 def test_the_bars_keys_are_keys_every_input_has(tmp_path):
