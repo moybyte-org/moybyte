@@ -35,7 +35,7 @@ def _run(engine, name, config):
     import uitree_parity as P
     app_py, cart = C.fixture(name)
     mod = C._module(app_py)
-    eng = uitree_c.CEngine if engine == "c" else None
+    eng = uitree_c.CEngine if engine == "c" else uitree_app.Engine
     cls = uitree_app.app_layer("conf_" + name, C._title(cart), mod.build, engine=eng)
     seen = {}
 
@@ -85,7 +85,9 @@ def test_the_c_store_dumps_the_references_tree(name):
     assert got == _expected(name, "dump.txt")
 
 
-def test_a_kind_the_engine_lacks_is_refused_by_name():
+def test_a_form_the_engine_lacks_is_refused_by_name():
+    """Every kind of the schema is the C engine's; a placed kind outside a
+    placed page is a form it does not draw, refused by name."""
     import uitree as S
     import uitree_c
     app_py, _ = C.fixture("counter")
@@ -93,10 +95,10 @@ def test_a_kind_the_engine_lacks_is_refused_by_name():
 
     def build():
         with S.page("P"):
-            with S.grid(1, 1):
+            with S.row("r"):
                 pass
     eng = uitree_c.CEngine(S.decl_of(S.module_of(mod.build)), build, _Host(), None, None)
-    with pytest.raises(uitree_c.EngineGap, match="grid"):
+    with pytest.raises(uitree_c.EngineGap, match="row node outside a placed page"):
         eng._ready()
 
 
@@ -146,7 +148,7 @@ def test_a_pushed_page_opens_on_its_own_focus_node(engine, tmp_path):
     app_py.write_text(PUSHED)
     mod = C._module(str(app_py))
     cls = uitree_app.app_layer("pushed_" + engine, "Pushed", mod.build,
-                               engine=uitree_c.CEngine if engine == "c" else None)
+                               engine=uitree_c.CEngine if engine == "c" else uitree_app.Engine)
     seen = {}
 
     def opened(ws):
@@ -236,7 +238,7 @@ def _long(tmp_path, engine, n, script, config=None):
     app_py.write_text(LONG.replace("@N@", str(n)))
     mod = C._module(str(app_py))
     cls = uitree_app.app_layer("long_%s_%d" % (engine, n), "Long", mod.build,
-                               engine=uitree_c.CEngine if engine == "c" else None)
+                               engine=uitree_c.CEngine if engine == "c" else uitree_app.Engine)
     seen = {}
 
     def opened(ws):

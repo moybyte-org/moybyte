@@ -1583,6 +1583,40 @@ static void draw_split(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k,
     }
 }
 
+// A grid (`_r_grid`): the page's room in by its pad, cut into rows then cols with its gap
+// between; each child takes the next cell (a button's span= cells along its row), drawn placed
+// there where it is shown: a hidden one leaves its cells empty, so no key moves.
+static void draw_grid(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row)
+{
+    const uit_node_t *N = NODE(k);
+    int cols = N->lit & 15, rows = N->lit >> 4;
+    int pad = gap_px(e, N->btn), gap = gap_px(e, N->nbtn);
+    int32_t r[4], down[16][4], across[16][4];
+    moy_ui_inset32(e->rect, pad, pad, r);
+    if (r[2] < 0)
+        r[2] = 0;
+    if (r[3] < 0)
+        r[3] = 0;
+    moy_ui_split(r, rows, gap, 0, down, 16);
+    int i = 0;
+    KIDS(k, g) {
+        const uit_node_t *G = NODE(g);
+        int span = G->kind == UIT_BUTTON && G->nbtn ? G->nbtn : 1;
+        int r0 = i / cols, c0 = i % cols;
+        i += span;
+        if (r0 >= rows)
+            break;
+        if (!uit_shown(e, g, model, row) ||
+            (G->act >= 0 && !uit_act_can(e, G->act, model, row) && e->acts[G->act].off != 2))
+            continue;
+        moy_ui_split(down[r0], cols, gap, 1, across, 16);
+        int c1 = c0 + span - 1 < cols ? c0 + span - 1 : cols - 1;
+        moy_ui_api_at(c, across[c0][0], across[c0][1], across[c1][0] + across[c1][2] - across[c0][0],
+                      across[c0][3]);
+        draw(e, c, s, g, model, row);
+    }
+}
+
 // A menu: its items in order, a `rows` among them an item per row of its model, each shown and
 // its action on; an item's id is its text (its letter after a tab where the band shows keys).
 typedef struct {
@@ -2134,6 +2168,9 @@ static void draw(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int m
         break;
     case UIT_SPLIT:
         draw_split(e, c, s, k, model, row);
+        break;
+    case UIT_GRID:
+        draw_grid(e, c, s, k, model, row);
         break;
     case UIT_CANVAS: {
         // a row of the page that only draws: no stop, no ring
@@ -4222,7 +4259,7 @@ int uit_frame(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int x, int y, i
         size_t hn = (flags & UIT_F_ON_BAR) ? sizeof BAR - 1 : hb.n - 1;
         int placed = e->foot >= 0;
         KIDS(0, k)
-        if (NODE(k)->kind == UIT_SPLIT && uit_shown(e, k, -1, -1))
+        if ((NODE(k)->kind == UIT_SPLIT || NODE(k)->kind == UIT_GRID) && uit_shown(e, k, -1, -1))
             placed = 1;
         if (!placed) {
             moy_ui_api_hints(c, s, hp, hn, NULL);

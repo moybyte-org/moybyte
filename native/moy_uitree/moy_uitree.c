@@ -745,6 +745,8 @@ int uit_node(uit_t *e, int kind, const char *key, int parent)
         N.btn = 32;
     if (kind == UIT_SPLIT)
         N.btn = N.nbtn = GAP_M, N.lit = 1;          // pad="m", gap="m", align="center"
+    if (kind == UIT_GRID)
+        N.btn = GAP_0, N.nbtn = GAP_S, N.lit = 0x11;  // no pad, gap="s", 1 x 1
     if (kind == UIT_PANES)
         N.nbtn = 6;                                 // the gutter, desk units
     if (kind == UIT_SWITCH) {
@@ -791,7 +793,7 @@ const char *const uit_kind_names[UIT_KINDS] = {"", "page", "group", "label", "in
                                                "table", "col", "foot", "cards", "card", "picture",
                                                "popover", "tools", "row", "status", "text_editor",
                                                "panes", "pane", "legacy", "slot", "panel", "lent",
-                                               "rule", "note"};
+                                               "rule", "note", "grid"};
 
 static const char *const TONES[] = {"ink", "dim", "value", "danger"};
 static const char *const BKINDS[] = {"normal", "primary", "tonal", "danger", "toggle", "bar"};   // moy_ui's, then its bar item
@@ -1086,6 +1088,32 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         else
             N->lit = (uint8_t)i;
         return add_prop(e, node, name, src, repr, PK_LIT, i);
+    }
+    if (kind == UIT_GRID && (!strcmp(name, "pad") || !strcmp(name, "gap"))) {
+        static const char *const GAPS[] = {"s", "m", "l", "0"};
+        int i = lit_index(src, GAPS, 4);
+        if (i < 0)
+            return uit_fail(e, UIT_E_KIND, UIT_MSG("grid %s=%s", "%s %s"), name, src);
+        if (name[0] == 'p')
+            N->btn = (uint16_t)i;
+        else
+            N->nbtn = (uint16_t)i;
+        return add_prop(e, node, name, src, repr, PK_LIT, i);
+    }
+    if (kind == UIT_GRID && (!strcmp(name, "cols") || !strcmp(name, "rows"))) {
+        // cols in the lit's low nibble, rows in its high one
+        long v = strtol(src, NULL, 10);
+        if (v < 1 || v > 15)
+            return uit_fail(e, UIT_E_KIND, UIT_MSG("grid %s=%s: 1 to 15", "%s %s"), name, src);
+        N->lit = name[0] == 'c' ? (uint8_t)((N->lit & 0xf0) | v) : (uint8_t)((N->lit & 0x0f) | (v << 4));
+        return add_prop(e, node, name, src, repr, PK_LIT, (int)v);
+    }
+    if (kind == UIT_BUTTON && !strcmp(name, "span")) {
+        long v = strtol(src, NULL, 10);
+        if (v < 1 || v > 15)
+            return uit_fail(e, UIT_E_KIND, UIT_MSG("button span=%s: 1 to 15", "span=%s"), src);
+        N->nbtn = (uint16_t)v;
+        return add_prop(e, node, name, src, repr, PK_LIT, (int)v);
     }
     if (!strcmp(name, "mkind") && kind == UIT_ITEM) {
         N->lit = (uint8_t)!strcmp(src, "danger");

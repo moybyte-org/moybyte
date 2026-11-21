@@ -166,16 +166,14 @@ _UI_ENGINE = os.environ.get("MOYBYTE_UI_ENGINE")
 
 @pytest.fixture(autouse=True)
 def _ui_engine():
-    """`MOYBYTE_UI_ENGINE=c` runs every test with the C engine in use
-    (`uitree_app.use_engine`), the way the suite runs once the default
-    flips; unset, each test starts on the tier's default, the reference.
-    A test that names its engine (`engine=`, a parity pair) keeps its own."""
-    if not _UI_ENGINE:
-        yield
-        return
+    """Each test starts on the host's default engine, C (`uitree_app.DEFAULT`);
+    `MOYBYTE_UI_ENGINE=reference` runs every test on the reference instead,
+    the host checker and the parity record. The engine in use is given back
+    after the test, so one test's `use_engine` never leaks into the next. A
+    test that names its engine (`engine=`, a parity pair) keeps its own."""
     import uitree_app
     was = uitree_app.engine_in_use()
-    uitree_app.use_engine(_UI_ENGINE)
+    uitree_app.use_engine(_UI_ENGINE or uitree_app.DEFAULT)
     yield
     uitree_app.use_engine(was)
 

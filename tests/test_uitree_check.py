@@ -43,6 +43,7 @@ PORTED = (
     "uitree_two_pages",
     "uitree_placed",
     "uitree_text_editor",
+    "uitree_grid",
 )
 
 

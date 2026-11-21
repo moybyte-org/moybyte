@@ -161,7 +161,8 @@ typedef struct {
     uint16_t props;
     uint16_t btn, nbtn;         // a dialog's buttons in e->btns; a field's max= in btn; a label's
                                 // lines= in btn and its text options in nbtn (LT_*); a button's
-                                // alone= in btn (BT_ALONE)
+                                // alone= in btn (BT_ALONE) and span= in nbtn; a grid's pad and
+                                // gap (GAP_*) in btn and nbtn, its cols and rows in lit's nibbles
     int16_t mark;               // a button's marked= cond: drawn current while it holds
 } uit_node_t;
 

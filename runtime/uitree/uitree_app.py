@@ -28,6 +28,8 @@ frame, as one commit.
 whose screen is a build (`app_layer` makes the class a manifest names);
 `Page` is a build hosted by a surface still drawn with today's verbs."""
 
+import sys
+
 import ui as _v
 from layers import AppLayer
 from layout_base import bar_rows, content_of, metric_class, DESK
@@ -2014,12 +2016,16 @@ class Engine(S.Builder):
             rect = (rect[0] + p, rect[1] + p, max(0, rect[2] - 2 * p), max(0, rect[3] - 2 * p))
         cells = [_v.hsplit(r, cols, gap=gap) for r in _v.vsplit(rect, rows_, gap=gap)]
         i = 0
-        for k in n.kids:
+        for k in n.kids:            # a hidden key leaves its cells empty: no key moves
             span = k.l.get("span", 1)
             r0, c0 = divmod(i, cols)
-            a, b = cells[r0][c0], cells[r0][c0 + span - 1]
-            self._r_button(k, row, rect, at=(a[0], a[1], b[0] + b[2] - a[0], a[3]))
             i += span
+            if r0 >= rows_:
+                break
+            if not _shown(k, row) or not (k.act is None or k.act.can(row) or k.act.off == "grey"):
+                continue
+            a, b = cells[r0][c0], cells[r0][min(c0 + span, cols) - 1]
+            self._r_button(k, row, rect, at=(a[0], a[1], b[0] + b[2] - a[0], a[3]))
 
     def _r_panel(self, n, row, rect):
         cv, th = self.cv, self.th
@@ -2506,14 +2512,17 @@ class Page(Engine):
 # -- which engine ------------------------------------------------------------------
 
 ENGINES = ("reference", "c")
-_IN_USE = ["reference"]
+# The host's default is the C engine; a board's stays the reference until its pass moves it.
+DEFAULT = "reference" if sys.implementation.name == "micropython" else "c"
+_IN_USE = [DEFAULT]
 
 
 def use_engine(name):
     """The engine the apps and hosted pages made from now on run on:
     "reference" (this module's replay, which the host checker and the
-    CPython tests keep) or "c" (native/moy_uitree, through uitree_c). Every
-    tier starts on the reference; an app made with `engine=` keeps its own."""
+    CPython tests keep) or "c" (native/moy_uitree, through uitree_c). The
+    host starts on "c", a board on the reference (`DEFAULT`); an app made
+    with `engine=` keeps its own."""
     if name not in ENGINES:
         raise S.UIError("N01", "uitree_app.use_engine(%r)" % (name,), expected=", ".join(ENGINES),
                         fix='use_engine("reference") or use_engine("c")')

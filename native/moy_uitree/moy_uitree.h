@@ -44,6 +44,7 @@ enum {
     UIT_TOOLS, UIT_ROW, UIT_STATUS, UIT_TEXT_EDITOR, UIT_PANES, UIT_PANE, UIT_LEGACY, UIT_SLOT,
     UIT_PANEL, UIT_LENT,
     UIT_RULE, UIT_NOTE,     // level 1: a divider, a note (no stop either)
+    UIT_GRID,               // the page's room in cols x rows cells, a button a cell (or `span` of them)
     UIT_KINDS
 };
 
