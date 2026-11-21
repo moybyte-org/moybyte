@@ -6,8 +6,9 @@
 -- with a code, the app's file and line, the fix, and what was expected and
 -- found. A back end draws the pages: uitree_engine.lua lowers each built page
 -- into the C engine (native/moy_uitree), which lays it out, draws it, moves
--- focus and hands back what the user did; uitree_replay.lua, the reference,
--- replays the tree into today's `ui` verbs every frame.
+-- focus and hands back what the user did; uitree_replay.lua replays the tree
+-- into today's `ui` verbs every frame instead, for the kinds the C engine does
+-- not draw yet (bubble, rows by=: Moy Mesh's ports, their parity check alone).
 --
 -- The Player loads this chunk, then one back end, ahead of a cart that
 -- declares the extension "moybyte.uitree" (runtime/run/lua_ext.py); it takes

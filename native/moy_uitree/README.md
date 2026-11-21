@@ -28,7 +28,7 @@ A build reads no state and asks the engine nothing (B01-B03), so the store as
 a build's lowering leaves it is a function of the page's module alone: every
 size class, input kind, desk or handheld and font scale is a template or a
 condition the walk evaluates. `tools/uitree_compile.py` checks a module with
-every reference check, builds and lowers each page function on the host's
+every check `uitree.Builder` makes, builds and lowers each page function on the host's
 engine, and saves the store as a blob; a board loads it into a new store
 (`uit_load`) with no build, no check and no lowering. The variant key is
 empty: no build depends on a layout value.

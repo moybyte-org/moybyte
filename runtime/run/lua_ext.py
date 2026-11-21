@@ -63,13 +63,15 @@ def cart_chunks(ns, src):
 
 # The UI tree API for Lua apps (runtime/run/uitree.lua): a cart that declares
 # the extension "moybyte.uitree" gets the layer and one back end as its first
-# scripts, so its own scripts find the tree's `ui` over the engine's. The back
-# end is the engine the console's apps run on (uitree_app.engine_in_use):
-# uitree_engine.lua lowers each page into the C engine, uitree_replay.lua (the
-# reference) replays it into today's verbs.
+# scripts, so its own scripts find the tree's `ui` over the engine's: the back
+# end, uitree_engine.lua, lowers each page into the C engine. uitree_replay.lua
+# replays a page into today's verbs instead: what draws the kinds the C engine
+# does not draw yet (bubble, rows by=), which Moy Mesh's ports use; only their
+# parity check (tests/uitree_lua_parity.py) swaps it in.
 UITREE_EXT = "moybyte.uitree"
 UITREE_FILE = "uitree.lua"
-UITREE_BACK = {"c": "uitree_engine.lua", "reference": "uitree_replay.lua"}
+UITREE_BACK = "uitree_engine.lua"
+UITREE_REPLAY = "uitree_replay.lua"
 _uitree_src = {}
 
 
@@ -83,23 +85,13 @@ def uitree_source(name=UITREE_FILE):
     return src
 
 
-def uitree_engine():
-    """The engine a Lua app's pages run on: the console's (`uitree_app`), the
-    reference where the console has no such module."""
-    try:
-        import uitree_app
-    except ImportError:
-        return "reference"
-    return uitree_app.engine_in_use()
-
-
-def uitree_chunks(cart, pre, engine=None):
+def uitree_chunks(cart, pre):
     """`pre` (the cart's scripts before main, as (name, text)) with the layer
-    and the back end of `engine` (default `uitree_engine()`) first when the
-    cart declares UITREE_EXT; `pre` itself otherwise."""
+    and its back end (UITREE_BACK) first when the cart declares UITREE_EXT;
+    `pre` itself otherwise."""
     if UITREE_EXT not in (cart.get("extensions") or ()):
         return pre
-    back = UITREE_BACK[engine or uitree_engine()]
+    back = UITREE_BACK
     return [(UITREE_FILE, uitree_source()), (back, uitree_source(back))] + list(pre or ())
 
 

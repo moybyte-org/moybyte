@@ -647,8 +647,8 @@ def test_a_ported_surface_draws_its_old_frames(run, tmp_path):
     P.check_recorded(name, SURFACES[surface], tmp_path / "carts", run[4] if len(run) > 4 else None)
 
 
-# The runs whose surfaces run on the C engine (native/moy_uitree) as they
-# run on the reference: each is held to the same record on both. A page the
+# The runs whose surfaces run on the C engine (native/moy_uitree), each held
+# to its record. A page the
 # C engine does not draw yet raises its EngineGap, which a window's draw would
 # swallow: any one made fails the run.
 C_RUNS = ("settings_rows-tdeck", "settings_rows-desk", "settings_rows_layout-tdeck",
@@ -672,7 +672,6 @@ C_RUNS = ("settings_rows-tdeck", "settings_rows-desk", "settings_rows_layout-tde
 
 @pytest.mark.parametrize("name", C_RUNS)
 def test_a_ported_surface_draws_its_old_frames_on_the_c_engine(name, tmp_path, monkeypatch):
-    import uitree_app
     import uitree_c
     run = [r for r in RUNS if r[0] == name][0]
     gaps = []
@@ -689,10 +688,6 @@ def test_a_ported_surface_draws_its_old_frames_on_the_c_engine(name, tmp_path, m
         lowered.append(root.kind)
         return lower(self, root)
     monkeypatch.setattr(uitree_c.CEngine, "lower", counted)
-    uitree_app.use_engine("c")
-    try:
-        P.check_recorded(name, SURFACES[run[1]], tmp_path / "carts", run[4] if len(run) > 4 else None)
-    finally:
-        uitree_app.use_engine("reference")
+    P.check_recorded(name, SURFACES[run[1]], tmp_path / "carts", run[4] if len(run) > 4 else None)
     assert not gaps, gaps
     assert lowered, "no page of the run was built on the C engine"

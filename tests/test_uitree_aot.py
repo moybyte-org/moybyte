@@ -73,7 +73,6 @@ def _board_order(monkeypatch, request):
 @pytest.mark.parametrize("order", ("host", "board"))
 @pytest.mark.parametrize("name", PORTS.C_RUNS)
 def test_a_c_run_draws_its_record_with_its_pages_loaded(name, order, compiled, tmp_path, monkeypatch, request):
-    import uitree_app
     if order == "board":
         _board_order(monkeypatch, request)
     run = [r for r in PORTS.RUNS if r[0] == name][0]
@@ -84,11 +83,7 @@ def test_a_c_run_draws_its_record_with_its_pages_loaded(name, order, compiled, t
         # to a playtest's first frame (a game's frames follow the clock, and the desk's
         # after it): the first that plays or shows another surface on top
         monkeypatch.setattr(uitree_aot, "BLOBS", {})
-        uitree_app.use_engine("c")
-        try:
-            built = P.check_recorded(name, PORTS.SURFACES[run[1]], tmp_path / "built", moved)
-        finally:
-            uitree_app.use_engine("reference")
+        built = P.check_recorded(name, PORTS.SURFACES[run[1]], tmp_path / "built", moved)
         top = built[0].state.split(" top=")[-1]
         built_frames = []
         for f in built:
@@ -113,11 +108,7 @@ def test_a_c_run_draws_its_record_with_its_pages_loaded(name, order, compiled, t
     refused = []
     monkeypatch.setattr(uitree_aot, "Refused", type("Refused", (Exception,), {
         "__init__": lambda self, m: (refused.append(m), Exception.__init__(self, m))[1]}))
-    uitree_app.use_engine("c")
-    try:
-        fs = P.check_recorded(name, PORTS.SURFACES[run[1]], tmp_path / "carts", moved)
-    finally:
-        uitree_app.use_engine("reference")
+    fs = P.check_recorded(name, PORTS.SURFACES[run[1]], tmp_path / "carts", moved)
     if built_frames is not None:
         moved_at = [i for i, (f, b) in enumerate(zip(fs, built_frames)) if f.digest() != b]
         assert not moved_at, "the loaded pages draw other frames than the built ones at steps %s" % moved_at
@@ -337,18 +328,14 @@ def test_a_board_with_no_desk_stages_no_desk_page(compiled, tmp_path, capsys):
 def test_a_host_with_no_inflater_stages_every_page_on_the_c_engine_alone(compiled, tmp_path):
     """The step a CI build takes: its host library has no inflater's part
     (no desktop MicroPython tree, runtime/host/host_native.py), and every
-    console page still compiles on it, with neither of the reference
-    engine's modules imported on the way."""
+    console page still compiles on it."""
     mods = _staged(tmp_path)
     code = ("import sys; sys.path.insert(0, 'tools'); import uitree_compile as UC; "
-            "rc = UC.main(['--staged', sys.argv[1], '--require']); "
-            "print('REF', sorted(m for m in ('uitree_ref', 'uitree_ref_editor') if m in sys.modules)); "
-            "sys.exit(rc)")
+            "sys.exit(UC.main(['--staged', sys.argv[1], '--require']))")
     r = subprocess.run([sys.executable, "-c", code, str(mods)], cwd=ROOT, capture_output=True, text=True,
                        env=dict(os.environ, MOYHOST_NO_INFLATER="1"))
     assert r.returncode == 0, r.stderr[-2000:]
     assert "uitree pages: %d compiled" % len(compiled.pages) in r.stdout
-    assert "REF []" in r.stdout, r.stdout
 
 
 def test_a_host_that_cannot_compile_stages_no_pages_and_says_so_in_one_line(tmp_path):
@@ -368,9 +355,11 @@ def test_on_the_boards_python_a_loaded_page_neither_builds_nor_lowers_and_keeps_
     import test_frame_alloc as FA
     import test_uitree_c_memory as M
     entries = dict((k, uitree_aot.entry(v)) for k, v in compiled.pages.items())
-    drv = M.DRIVER.replace('''    uitree_app.use_engine("c")''', '''    uitree_app.use_engine("c")
+    drv = M.DRIVER.replace('''    import uitree_c, uitree as S
+''', '''    import uitree_c, uitree as S
     import uitree_aot
-    uitree_aot.BLOBS = BLOBS''')
+    uitree_aot.BLOBS = BLOBS
+''')
     out = {}
     for arm, blobs in (("built", {}), ("loaded", entries)):
         (tmp_path / arm).mkdir()

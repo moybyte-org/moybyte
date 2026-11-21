@@ -433,7 +433,6 @@ def measure(loop):
     periodic(loop, info)
     notes(loop, info)
     code(loop, info)
-    code(loop, info, "code_c", "c")
     apps(loop, info)
     achievements(loop, info)
     home(loop, info)
@@ -710,7 +709,7 @@ def notes_swiped(loop, info):
     info["notes_swipe"] = out
 
 
-def code(loop, info, tag="code", engine=None):
+def code(loop, info, tag="code_c"):
     """The Editor's Code tab, a `ui.text_view`: typed into (a key every
     fourth frame, the edit the editor's, outside the frame measured), then
     its view sent down the file and back by the wheel, which glides it. What each frame allocates, and what the tab's draw does: its
@@ -731,21 +730,16 @@ def code(loop, info, tag="code", engine=None):
             break
         ws.spine.exit()
     info[tag + "_cart"] = cart.get("title")
-    # the Code tab's page made again on the arm's engine (C, else the reference), opened at its
-    # next draw
-    import uitree_app
+    # the Code tab's page made again, opened at its next draw
     import uitree_editor
     import code_ui
     import code_layer
-    was = uitree_app.engine_in_use()
-    uitree_app.use_engine("c" if engine == "c" else "reference")
     cl = ws.code_layer
     old = cl.page
     cl.page = uitree_editor.page(getattr(code_ui, cl.PAGE), cl._host, code_layer._Damage(ws))
     cl.page.host_arrows = True
     cl.page.pointer_down = old.pointer_down
     cl._opened = False
-    uitree_app.use_engine(was)
     ed.set_text("\n".join("value_%d = probe(%d) + 1  # a line of the cart" % (i, i)
                           for i in range(120)))
     ed.row = 5
@@ -759,9 +753,8 @@ def code(loop, info, tag="code", engine=None):
     acc = [0, 0, 0, 0, 0]               # rows bytes, rows calls, draw bytes, status bytes, draws
     rows = page._r_text_editor
     draw = page.paint
-    # the status line: drawn by the reference; on the C engine drawn in C from the document's
-    # fields, which a moved caret pushes again
-    status_name = "_push_doc" if engine == "c" else "_r_status"
+    # the status line: drawn in C from the document's fields, which a moved caret pushes again
+    status_name = "_push_doc"
     status = getattr(page, status_name)
 
     def _rows(n, row, rect):
@@ -869,9 +862,8 @@ def code(loop, info, tag="code", engine=None):
     del page._r_text_editor
     del page.paint
     delattr(page, status_name)
-    if engine == "c":
-        cl.page = old                   # the console's own page again, for the passes after
-        cl._opened = False
+    cl.page = old                       # the console's own page again, for the passes after
+    cl._opened = False
     ws.spine.exit()
     for _ in range(30):
         loop.step()
@@ -1892,15 +1884,6 @@ def test_the_code_tabs_text_view_allocates_nothing_typed_or_gliding_on_the_c_eng
     bar's strip, which every tab draws.)"""
     info, text = result
     bad = _code_tab_bill(info, "code_c", "CEditorPage")
-    assert not bad, bad
-
-
-@pytest.mark.xfail(strict=True, reason="the reference engine (uitree_ref_editor.Engine) is the host's checker, "
-                   "not a board's frame path (K7): its text editor's pass and its walk allocate a frame, "
-                   "and only cheap fixes go into it; the C engine's arm holds the bill")
-def test_the_code_tabs_text_view_allocates_nothing_typed_or_gliding_on_the_reference(result):
-    info, text = result
-    bad = _code_tab_bill(info, "code", "Page")
     assert not bad, bad
 
 

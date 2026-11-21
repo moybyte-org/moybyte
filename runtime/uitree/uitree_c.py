@@ -1,5 +1,5 @@
 # Map (grep -n a name to jump there):
-#   CEngine            the reference's Engine with its frame, focus and hints in C
+#   CEngine            uitree_app.Engine with its frame, focus and hints in C
 #   CEngine.lower      the checked tree into the C store, one build call a node and a prop
 #   CEngine.committed  the commit's writes pushed to C's slots
 #   CEngine.paint      one frame: one call into C, then the events it queued
@@ -8,12 +8,12 @@
 #   CEditorEngine      the Editor's kinds (uitree_editor.Engine), placed by the engine's layout
 #   CEditorPage        a hosted page on them (uitree_editor.Page)
 """The UI tree on the C engine (native/moy_uitree): the app's build function
-runs through the reference's Builder (every check the reference makes), the
+runs through `uitree.Builder` (every check the API makes in Python), the
 checked tree is lowered into the engine's store, and each frame is one call
 into C that walks it through the toolkit's verbs. Python runs for handlers
 only: the commit's writes are pushed to C's slots at its end, and the
 engine's own writes (a toggle, a list's cursor) are pulled back before any
-handler runs. Same app file, same trace, same pixels as the reference (`uitree_ref.Engine`)."""
+handler runs."""
 
 import sys
 
@@ -37,7 +37,7 @@ class EngineGap(S.UIError):
 
     def __init__(self, what):
         S.UIError.__init__(self, "E00", "the C engine does not draw %s yet" % what,
-                           fix="run this app on the reference engine (uitree_ref.Engine)")
+                           fix="leave it out of the page: the C engine refuses it by name")
 
 
 # the engine's numbers (native/moy_uitree/moy_uitree.h)
@@ -65,7 +65,7 @@ _KIND_NAMES = dict((v, k) for k, v in _KINDS.items())
 _KIND_NAMES[len(_KINDS) + 1] = "cycle"          # UIT_KINDS: a seg of the cycle look
 _BOUND = ("toggle", "seg", "slider", "field", "text_view", "tabs")       # a two-way control: bound to the state of its key
 _LIT_ONLY = {"seg": ("values", "words", "model", "labels"), "text_view": ("name",),
-             "switch": ("name",), "case": ("v",), "tabs": ("labels", "values")}    # a switch's and a case's: in their keys   # what the reference keeps beside a node's props
+             "switch": ("name",), "case": ("v",), "tabs": ("labels", "values")}    # a switch's and a case's: in their keys   # what the Builder keeps beside a node's props
 _TYPED = "typed in field "
 _DOC = "#doc"               # a document's model: its state's name and this
 LOWERED = "lowered"         # an engine's root once its page is in the store: the Python tree is gone
@@ -74,7 +74,7 @@ E_GAP = -3                  # UIT_E_KIND: what this engine does not draw yet
 # The build mode of the engines made after it is set. "direct": the build's
 # calls keep each template's and condition's source and C compiles it at
 # lowering, raising the spec's codes (T01-T05, C01-C02) from its compiler.
-# "checked": the reference's Builder compiles and checks them first, as the
+# "checked": `uitree.Builder` compiles and checks them first, as the
 # host's checker does.
 BUILD = "direct"
 # each code C's compiler raises, with the fix the contract gives it
@@ -132,7 +132,7 @@ def _pane_node(n, parent):
 
 class CEngine(Engine):
     """`uitree_app.Engine` with the frame in C: the build, the checks and the
-    handlers stay the reference's."""
+    handlers stay Python's (`uitree.Builder`, `uitree_app.Engine`)."""
 
     PLACED = False          # the page is stacked by the engine's layout (uit_set_placed)
     unit = 0                # a placed page's unit, the host's (0: the engine's own)
@@ -431,7 +431,7 @@ class CEngine(Engine):
 
     def _pull_cell(self, slot, ri, fi):
         """A row's field the engine wrote (a toggle bound to `.field`): the
-        row made again with it, as the reference's `_row_write` makes it."""
+        row made again with it, as `_row_write` makes it."""
         st = self.s
         name, t = self._names[slot], self._types[slot]
         f = t.order[fi]
@@ -492,7 +492,7 @@ class CEngine(Engine):
     # -- the build ----------------------------------------------------------------
 
     def _ready(self):
-        """The page built and checked by the reference's Builder, lowered into
+        """The page built and checked by `uitree.Builder`, lowered into
         the store, and the Python tree let go: `root` is then `LOWERED`."""
         if self.root is None:
             self._made()
@@ -905,7 +905,7 @@ class CEngine(Engine):
         return True
 
     def dump(self):
-        """The tree as the engine holds it (the reference's snapshot)."""
+        """The tree as the engine holds it (the dump's grammar, uitree.py's)."""
         return self._made().dump()
 
     snapshot = dump
@@ -1406,7 +1406,7 @@ class CEditorEngine(CEngine, _ed.Engine):
 
     # -- the panes: laid out by the engine's rule, read back for the host
 
-    # what the reference's pane helpers ask of a lowered pane, the engine answers
+    # what uitree_editor's pane helpers ask of a lowered pane, the engine answers
 
     def _shown(self, k, row):
         if type(k) is _PaneNode and k.kind != "legacy":
@@ -1544,7 +1544,7 @@ class CEditorEngine(CEngine, _ed.Engine):
 
     def lent(self, site):
         """The shown row lent to `site`, read from the store (`uit_lent`):
-        the reference's cells, [kind, key, value, label, icon, flags,
+        the cells, [kind, key, value, label, icon, flags,
         action], None where none is lent."""
         self._made()
         if self._shut:

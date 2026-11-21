@@ -8,8 +8,7 @@
 -- the layer's state, and the actions to run, queued for the layer's handlers.
 -- A handler's writes are pushed to the engine's slots before the next frame.
 -- What the engine does not draw is an error (E00), never drawn wrong. The
--- Player loads this after the layer when the app runs on the C engine
--- (runtime/run/lua_ext.py); uitree_replay.lua is the reference.
+-- Player loads this after the layer (runtime/run/lua_ext.py).
 
 local I = ui._in
 ui._in = nil
@@ -37,7 +36,7 @@ local FIELD = { bool = BOOL, int = INT, number = NUM, text = TEXT, enum = TEXT }
 local LIT = { kind = 1, wrap = 1, face = 1, size = 1, align = 1, alone = 1, span = 1, arg = 1, grow = 1, max = 1,
               secret = 1, commit = 1, look = 1, cur = 1, current = 1, check = 1, follow = 1, filter = 1, dir = 1,
               icons = 1 }
-local FIX = "run this app on the reference engine: uitree_app.use_engine(\"reference\")"
+local FIX = "leave it out of the page: the C engine refuses it by name"
 
 local X = nil                   -- the store, made at the first frame
 local SLOT, NAMES, TYPES = {}, {}, {}   -- a state's slot by name; the name and declaration by slot
@@ -492,5 +491,5 @@ I.BACK.frame = function(p)
   end
 end
 
--- the store's tree as text (the reference's snapshot): the page the last frame drew
+-- the store's tree as text (the dump's grammar, uitree.py's): the page the last frame drew
 function T._dump() return X and X:dump() or "" end

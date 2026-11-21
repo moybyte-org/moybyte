@@ -1,21 +1,20 @@
 # Map (grep -n a name to jump there):
-#   Engine                 the Editor's kinds over uitree_app.Engine: what the C engine and the reference share
+#   Engine                 the Editor's kinds over uitree_app.Engine: their Python half
 #   Engine.draw_hosted     the bridge: each hosted surface drawn where the page laid it out
 #   Engine.nudge           a divider moved by keys
 #   Engine._r_text_editor  the text editor's options and its document's view
 #   lent_place             a lent row's cells placed
 #   Page                   a page on the Editor's kinds hosted by a surface on today's verbs
-#   page                   that page on the engine in use
+#   page                   that page on the C engine
 #   BarZone                the page's row lent to the shell's bar (lend="bar")
 #   BarZone.draw_zone      the lent row drawn into the bar's zone
 #   BarZone.zone_tap       a tap on the lent row
 #   BarZone.activate       a lent cell's action run
-"""The Editor's kinds (uitree.py EXT-4) as both engines share them: the
-panes' sizes and their rules (`fit`, `nudge`, `reset_sizes`), the hosted
-surfaces a page's regions place, the text editor's view over its document,
-and the row a page lends the shell's bar (`BarZone`, `lent_place`). The C
-engine draws them (`uitree_c.CEditorEngine`); the reference replays them
-through today's `ui` verbs (`uitree_ref_editor.Engine`)."""
+"""The Editor's kinds (uitree.py EXT-4), their Python half: the panes'
+sizes and their rules (`fit`, `nudge`, `reset_sizes`), the hosted surfaces
+a page's regions place, the text editor's view over its document, and the
+row a page lends the shell's bar (`BarZone`, `lent_place`). The C engine
+draws them (`uitree_c.CEditorEngine`)."""
 from array import array
 
 import ui as _v
@@ -204,35 +203,6 @@ class Engine(uitree_app.Engine):
         return self.least
 
     # -- a row ----------------------------------------------------------------
-
-    @staticmethod
-    def _fit_cells(kids, rws, nat, row, room, gap, h):
-        """A row of fixed cells wider than `room`: its model's cells (on a
-        row other than the row's own) cut to one width, the widest first,
-        never under the row's height `h`; those that still do not fit
-        dropped from the end."""
-        mine = [r is not row for r in rws]
-        most = max([v for v, m in zip(nat, mine) if m] or [0])
-        sep = gap * max(0, len(nat) - 1)
-        if sum(nat) + sep <= room or not most:
-            return
-        lo, hi = min(h, most), most
-        while lo < hi:
-            cap = lo + (hi - lo + 1) // 2
-            if sum(cap if m and v > cap else v for v, m in zip(nat, mine)) + sep <= room:
-                lo = cap
-            else:
-                hi = cap - 1
-        for i, m in enumerate(mine):
-            if m and nat[i] > lo:
-                nat[i] = lo
-        total = sum(nat) + sep
-        for i in range(len(nat) - 1, -1, -1):
-            if total <= room:
-                break
-            if mine[i]:
-                total -= nat[i] + (gap if len(nat) > 1 else 0)
-                del kids[i], rws[i], nat[i], mine[i]
 
     @staticmethod
     def _share(nat, base, ws, i0, i1, room):
@@ -473,11 +443,6 @@ class Engine(uitree_app.Engine):
 
     # -- popovers hang from a node's part -------------------------------------
 
-    @staticmethod
-    def _a_note(p):
-        """A popover of words alone (See why): nothing in it takes the keys."""
-        return not any(k.kind in ("field", "rows", "link", "button", "menu") for k in p.kids)
-
     def pointer_down(self):
         """Whether the pointer is held: the surface's; a hosted page's host
         replaces it with its own."""
@@ -610,9 +575,7 @@ class Page(Engine):
 
 
 def page(build, host, damage, files=None, close=None):
-    """A page on the Editor's kinds on the engine in use
-    (`uitree_app.use_engine`): the C engine's `CEditorPage`, or the
-    reference's `uitree_ref_editor.Page`."""
+    """A page on the Editor's kinds: the C engine's `CEditorPage`."""
     return uitree_app._engine_class(True, True)(build, host, damage, files, close)
 
 

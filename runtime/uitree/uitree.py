@@ -40,8 +40,7 @@ It imports no engine: `tools/uitree_check.py` runs an app's page functions
 with this module and the engine's prop check alone (`moy_uitree.check_prop`,
 the contract's one table of kinds and props, which every front checks a
 node's props against). The engines share `uitree_app.py` (the Editor's
-kinds: `uitree_editor.py`); the C engine is `uitree_c.py`, the reference's
-replay into the toolkit's verbs `uitree_ref.py` (`uitree_ref_editor.py`).
+kinds: `uitree_editor.py`); the C engine is `uitree_c.py`.
 
 Every mistake is a `UIError`: a code, the app's file and line, what was
 expected, what was found and the fix. There are no warnings.
@@ -129,8 +128,7 @@ def dotted(s, lead=False):
     return "".join(out)
 
 # the layer's own files: an error's file:line is the first frame outside them
-_SKIP = ("uitree.py", "uitree_app.py", "uitree_editor.py", "uitree_ref.py", "uitree_ref_editor.py",
-         "uitree_doc.py", "uitree_pics.py")
+_SKIP = ("uitree.py", "uitree_app.py", "uitree_editor.py", "uitree_doc.py", "uitree_pics.py")
 
 
 def _base(path):
@@ -1639,10 +1637,6 @@ class Action:
         self.hook = False
         self.hint_g = None      # a hint that is a template over the state
 
-    def hint_now(self):
-        """The hints band's verb now: `hint=` evaluated when it is a template."""
-        return self.hint if self.hint_g is None else _text(self.hint_g(None))
-
     def cur_row(self):
         st = _st()
         m = st._t[st._t[self.row].model]
@@ -1661,37 +1655,6 @@ class Action:
 
 # the units a node bound to is shown this frame (None before the first frame)
 LIVE = None
-
-
-def live_units(root, lenders=None):
-    """Walk what is shown: a node not shown hides its subtree, a switch shows
-    its one case; every bound node met is a live unit. `lenders`, when given,
-    collects the shown `tools ... lend=NAME` by NAME."""
-    out = set()
-
-    def walk(n):
-        if n.p.get("shown") is not None and not n.p["shown"](None):
-            return
-        if n.unit:
-            out.add(n.unit)
-        if lenders is not None and n.kind == "tools" and n.l.get("lend"):
-            if n.l["lend"] in lenders:
-                raise UIError("L03", "two shown units lend to %s" % n.l["lend"], where=n.where, fix='show one lending unit at a time')
-            lenders[n.l["lend"]] = n
-        if n.kind == "switch":
-            v = _NOW.app.s._v[n.l["name"]]
-            case = next((c for c in n.kids if c.l["v"] == v), None) or next(
-                (c for c in n.kids if c.l["v"] == "_"), None)
-            if case is not None:
-                walk(case)
-            return
-        if n.kind in ("rows", "cards", "table"):
-            return
-        for k in n.kids:
-            walk(k)
-    if root is not None:
-        walk(root)
-    return out
 
 
 def _params(fn):
@@ -1958,7 +1921,7 @@ class Node:
             b.ctx = Ctx()
 
 
-# how the reference keeps each prop of a kind: text, int, cond, choice, lit, fn, action0/1/p (none,
+# how the Builder keeps each prop of a kind: text, int, cond, choice, lit, fn, action0/1/p (none,
 # the row, a pointer event). Which props a kind takes, and the words a word prop takes, are the
 # contract's (`_check_prop`); this table only routes what that check let through.
 _C = {"shown": "cond"}
@@ -3003,19 +2966,6 @@ class Builder:
         self.run(act.fn, *args, action=act.name)
         commit(self)
 
-    def fire_named(self, name, *args):
-        """Tests by name: fire an action as its key would; an action of a
-        unit not shown is off, as its key is."""
-        a = _d().actions[name]
-        if not a.live():
-            was, _NOW.app = _NOW.app, self
-            try:
-                _trace("off", name, "unit %s is not shown" % a.unit)
-            finally:
-                _NOW.app = was
-            return
-        self.run_action(a, args or self.args_for(a), "test")
-
     def args_for(self, act, row=None, arg=None):
         if row is not None:
             return (row,)
@@ -3128,7 +3078,6 @@ class LoadView:
 
     def __repr__(self):
         return repr(self._s._v[self._n])
-
 
 
 def post(name, arg=None, ticket=None):

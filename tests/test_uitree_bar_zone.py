@@ -6,8 +6,6 @@ the engine and moves its generation only when what the row reads moved."""
 import sys
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parent / "uitree_fixtures"))
 
 import uitree_reference as R  # noqa: E402

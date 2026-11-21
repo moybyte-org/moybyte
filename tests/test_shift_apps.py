@@ -646,15 +646,12 @@ def _badges():
     return tuple(out)
 
 
-@pytest.mark.parametrize("engine", ("c", "reference"))
-def test_a_cards_drag_draws_none_of_the_cards_it_moved(tmp_path, engine):
+def test_a_cards_drag_draws_none_of_the_cards_it_moved(tmp_path):
     """Achievements' cards dragged: a shift frame moves the cards it keeps
     and draws only what the move uncovered. A row of marked pixels across
     the middle of the page moves with them, unpainted; a card that drew its
     picture again every frame (no picture gen: the engine's tile) paints
     over its part of the row."""
-    import uitree_app
-    uitree_app.use_engine(engine)
     ws = _console(tmp_path, "settings", True)
     groups = _badges()
     ws.ach.groups = lambda: groups

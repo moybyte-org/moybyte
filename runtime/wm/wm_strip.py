@@ -61,7 +61,7 @@ def _states(title, icon, tone, back, unit, inset, full=False):
         _DIRTY[0] = False
         pushed = getattr(page, "committed", None)
         if pushed is not None:
-            pushed()            # the C engine's store takes the writes (the reference reads them)
+            pushed()            # the C engine's store takes the writes
     return page
 
 

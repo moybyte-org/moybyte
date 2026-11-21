@@ -32,10 +32,9 @@ ALL = []
 
 
 def _pre():
-    """Before the console boots: every page on the C engine, each engine
-    made kept in ALL (they live as long as the console anyway)."""
-    import uitree_app, uitree_c, uitree as S
-    uitree_app.use_engine("c")
+    """Before the console boots: each engine made kept in ALL (they live as
+    long as the console anyway)."""
+    import uitree_c, uitree as S
     made = uitree_c.CEngine._c_init
     def keep(self):
         ALL.append(self)

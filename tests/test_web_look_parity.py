@@ -177,14 +177,13 @@ def test_the_browser_console_awards_achievements_as_a_board_does():
 def test_the_browser_console_draws_its_pages_on_the_c_engine_from_compiled_pages():
     """The wasm carries native/moy_uitree and the console's compiled pages
     (firmware/web_runner/build.sh), so its pages run on the C engine as on a
-    board, the reference engine's modules never imported."""
+    board, loaded from the compiled pages."""
     from web_e2e import require
     require()
     if not (WEB / "dist" / "micropython.mjs").exists():
         pytest.skip("no built firmware/web_runner/dist")
-    report = ("import json, sys, uitree_app, uitree_aot\n"
-              "print('UIT ' + json.dumps({'engine': uitree_app.engine_in_use(), 'pages': len(uitree_aot.BLOBS),"
-              " 'ref': sorted(m for m in ('uitree_ref', 'uitree_ref_editor') if m in sys.modules)}))\n")
+    report = ("import json, sys, uitree_aot\n"
+              "print('UIT ' + json.dumps({'c': 'uitree_c' in sys.modules, 'pages': len(uitree_aot.BLOBS)}))\n")
     steps = [{"frames": 30}, {"py": "_ws.open_settings()\n"}, {"frames": 10}, {"py": report}]
     with tempfile.TemporaryDirectory() as tmp:
         scenario = Path(tmp) / "uit.json"
@@ -195,7 +194,7 @@ def test_the_browser_console_draws_its_pages_on_the_c_engine_from_compiled_pages
     line = [ln for ln in r.stdout.splitlines() if "UIT " in ln]
     assert line, r.stdout[-3000:]
     got = json.loads(line[0].split("UIT ", 1)[1])
-    assert got["engine"] == "c" and got["pages"] > 0 and got["ref"] == [], got
+    assert got["c"] and got["pages"] > 0, got
 
 
 # -- the frames themselves -----------------------------------------------------

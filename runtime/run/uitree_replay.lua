@@ -1,8 +1,9 @@
--- The UI tree layer's reference back end (runtime/run/uitree.lua is the
--- layer): each frame it replays the built page into today's `ui` verbs,
--- laying it out, drawing it and moving focus in Lua. The Player loads it after
--- the layer when the app runs on the reference engine (runtime/run/lua_ext.py);
--- uitree_engine.lua is the C engine's back end.
+-- The UI tree layer's replay back end (runtime/run/uitree.lua is the layer):
+-- each frame it replays the built page into today's `ui` verbs, laying it out,
+-- drawing it and moving focus in Lua. It draws what the C engine's back end
+-- (uitree_engine.lua) does not yet: bubble and rows by=, which Moy Mesh's
+-- ports use; only their parity check (tests/uitree_lua_parity.py) loads it
+-- (lua_ext.UITREE_REPLAY).
 
 local I = ui._in
 ui._in = nil
@@ -613,13 +614,13 @@ local C_PROPS = { group = { close = 1 }, row = { close = 1, gap = 1, pad = 1, mi
                   rows = { changed = 1, filter = 1, group = 1, dir = 1 } }
 local function refuse(n)
   if C_KINDS[n.kind] then
-    fail("E00", n.at, "the reference back end does not draw ui." .. n.kind, "the C engine", "the reference",
-         "run this app on the C engine: uitree_app.use_engine(\"c\")")
+    fail("E00", n.at, "the replay back end does not draw ui." .. n.kind, "the C engine", "the replay",
+         "run this app on the C engine's back end (lua_ext.UITREE_BACK)")
   end
   for k in pairs(C_PROPS[n.kind] or {}) do
     if n.o[k] ~= nil then
-      fail("E00", n.at, "the reference back end does not draw ui." .. n.kind .. "'s " .. k, "the C engine", "the reference",
-           "run this app on the C engine: uitree_app.use_engine(\"c\")")
+      fail("E00", n.at, "the replay back end does not draw ui." .. n.kind .. "'s " .. k, "the C engine", "the replay",
+           "run this app on the C engine's back end (lua_ext.UITREE_BACK)")
     end
   end
   for _, k in ipairs(n.kids) do refuse(k) end

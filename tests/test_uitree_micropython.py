@@ -4,8 +4,8 @@ The host suite runs `uitree` on CPython, which has what a board's MicroPython
 lacks (frames, signatures, `re.fullmatch`, function attributes, a writable
 instance `__dict__`, `collections.Counter`); uitree.py meets each in one guarded
 place at its top. This boots the T-Deck's console as tests/test_frame_alloc.py
-stages it, frozen, on the boards' model and on the engine a board defaults to
-(`uitree_app.DEFAULT`: C, as the image carries moy_uitree), opens every page ported to the layer,
+stages it, frozen, on the boards' model and on the C engine (the image carries
+moy_uitree), opens every page ported to the layer,
 drags the scrolling ones, and checks that each built and painted and that no
 frame raised. The kernel's loop runs on past a frame that raises, so a raise
 is caught here, around the frame, or it reads as a frame that drew nothing. A
@@ -78,7 +78,7 @@ def pages(loop):
             painted[k] = painted.get(k, 0) + 1
             return r
         return counted
-    # the engine the board defaults to: its app class and its hosted page's
+    # the C engine's app class and its hosted page's
     classes = (uitree_app._engine_class(False), uitree_app._engine_class(True))
     for cls, paint in [(cls, cls.paint) for cls in classes]:
         cls.paint = counter(paint)
@@ -234,14 +234,12 @@ def pages(loop):
     _steps(loop)
     ws.spine.exit()
     _steps(loop, 4)
-    # every page above ran on the C engine, which imports none of the reference's modules
-    shown["reference"] = sorted(m for m in ("uitree_ref", "uitree_ref_editor") if m in sys.modules)
     # the bridge (ui.legacy): a page on the Editor's kinds hosting a surface
     # on today's verbs, its hosted phase before the host begins the frame
     with open(ROOT + "/fakes/uitree_legacy_app.py", "w") as f:
         f.write(@LEGACY@)
     import uitree_legacy_app as LA
-    import uitree_ref_editor
+    import uitree_c
     import ui_draw
     import ui
 
@@ -249,7 +247,7 @@ def pages(loop):
         def all(self):
             pass
     lh = ui_draw.AppHost()
-    lp = uitree_ref_editor.Page(LA.build, lh, Damage())
+    lp = uitree_c.CEditorPage(LA.build, lh, Damage())
     lp.open()
     cv, th = ws.sys_canvas, ws.theme_colors
     box = (0, 0, cv.w, cv.h)
@@ -259,7 +257,7 @@ def pages(loop):
         lp.paint(0.033, cv, th, box, False)
         ui.end()
     hs = LA._SURF[id(None)]
-    shown["legacy"] = [hs.draws, list(hs.rects[-1]), list(lp.legacies["list"][1])]
+    shown["legacy"] = [hs.draws, list(hs.rects[-1]), list(lp.rect_of("list"))]
     # the desk's workspaces (editor_ui.SPACES): each page placed over a
     # 1024 desk's panes area at its starting state, its bodies drawn by a
     # stand-in desk
@@ -276,7 +274,7 @@ def pages(loop):
     editor_ui._desk[0] = pd
     spaces = {}
     for key in ("settings", "code", "art", "world", "sound", "theme"):
-        sp = uitree_ref_editor.Page(editor_ui.SPACES[key], lh, Damage())
+        sp = uitree_c.CEditorPage(editor_ui.SPACES[key], lh, Damage())
         sp.unit = 1
         pd.page = sp
         sp.place((6, 46, 1012, 548))
@@ -286,7 +284,6 @@ def pages(loop):
                        [[list(pa), i, a, list(r)] for pa, i, a, r in sp.arranged[1]],
                        list(pd.drawn), list(sp.minimum())]
     shown["spaces"] = spaces
-    shown["engine"] = uitree_app.engine_in_use()
     print("RESULT " + json.dumps({"painted": painted, "shown": shown, "errors": errors}))
 '''
 
@@ -316,8 +313,6 @@ def test_every_ported_page_builds_and_draws_on_the_boards_micropython(tmp_path):
                              "that the layer and its pages run on a board's MicroPython")
     shown, painted = info["shown"], info["painted"]
     assert not info["errors"], (info["errors"][:3], text[-3000:])
-    assert shown["engine"] == "c", "a board whose image carries moy_uitree runs the C engine"
-    assert shown["reference"] == [], "the C engine's console imported the reference: %r" % shown["reference"]
     assert shown["rows"] == "settings", shown
     assert shown["wifi"] == "wifi" and shown["wifi_popover"] == "wifi", shown
     assert [shown[p] for p in ("tz", "paired", "log", "permissions", "licences", "achievements")] == \
@@ -337,7 +332,7 @@ def test_every_ported_page_builds_and_draws_on_the_boards_micropython(tmp_path):
     assert shown["desk_head"][:3] == ["ws:settings", "ws:code", "ws:art"], shown
     assert shown["desk_ws"] == "art", shown
     draws, drew_at, laid_at = shown["legacy"]
-    assert draws == 3 and drew_at == laid_at, shown["legacy"]
+    assert draws == 2 and drew_at == laid_at, shown["legacy"]     # from the second frame: where the first laid it out
     # the desk's workspaces place on the board as on the host
     spaces = shown["spaces"]
     assert spaces["code"][0] == [["code", [6, 46, 666, 548], [0]],

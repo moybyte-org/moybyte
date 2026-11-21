@@ -3,8 +3,9 @@
 - An app written in it opens, paints, takes input and closes beside today's.
 - Old against port: Moy Mesh's hand-written thread and Radio pages and their
   ports draw the same pixels through one input script, on the handheld and
-  in a desk window (tests/uitree_lua_parity.py), on the reference back end.
-- Every other test runs on the engine in use (the C engine on the host).
+  in a desk window (tests/uitree_lua_parity.py), on the Lua replay back end
+  (runtime/run/uitree_replay.lua): the ports use bubbles and rows by kind.
+- Every other test runs on the C engine.
 - The checker (tools/uitree_lua_check.py): one failing case per error code a
   Lua app can raise, each reported at its file and line.
 """
@@ -83,12 +84,9 @@ def test_an_app_opens_paints_takes_input_and_closes(tmp_path):
 @pytest.mark.parametrize("size", sorted(parity.SIZES))
 @pytest.mark.parametrize("pair", sorted(parity.PAIRS))
 def test_old_and_port_draw_the_same_pixels(pair, size):
-    """The reference back end (runtime/run/uitree_replay.lua) against the
-    hand-written pages it replays into today's verbs: the C engine lays out
-    by its own rules, and the ports hold a record and bubbles it does not
-    draw yet (E00)."""
-    import uitree_app
-    uitree_app.use_engine("reference")
+    """The Lua replay back end (runtime/run/uitree_replay.lua) against the
+    hand-written pages it replays into today's verbs: the ports hold
+    bubbles and rows by kind, which the C engine does not draw yet (E00)."""
     wh, old, port, errors, _logs = parity.compare(pair, size)
     assert errors == []
     assert list(old) == list(port)
@@ -159,11 +157,8 @@ def test_a_foot_that_shares_its_width_and_a_slider_icon_draw(tmp_path):
 
 def test_a_split_a_grid_and_a_panel_draw_on_the_c_engine(tmp_path):
     """The placing kinds only the C engine draws: a split's parts, a grid's
-    cells and a panel each move the pixels, and the reference back end
-    refuses them by name (E00)."""
-    import uitree_app
+    cells and a panel each move the pixels."""
     from runtime import host_app
-    uitree_app.use_engine("c")
     carts = str(tmp_path / "carts")
     host_app.moy_carts.ensure_dirs(carts)
     body = ('ui.app("%s", { icon = "calc" })\n'
@@ -187,22 +182,13 @@ def test_a_split_a_grid_and_a_panel_draw_on_the_c_engine(tmp_path):
         shots[name] = bytes(drv.rgb888())
         ws.spine.exit_to_caller()
     assert shots["Split"] != shots["Plain"] and shots["Grid"] != shots["Plain"]
-    uitree_app.use_engine("reference")
-    open_cart(ws, "Grid")
-    for _ in range(4):
-        frame()
-    err = ws.run.player.cart_error
-    assert err and "error[E00] main.lua:5:" in err and "ui.grid" in err, err
 
 
 def test_the_props_only_the_c_engine_draws_lower_and_draw(tmp_path):
     """A button's marked, tone and w, a group's and a row's close, a row's
     gap, pad and mid, a slider's look and a rows' changed: each
-    page opens on the C engine and draws, and the reference refuses one by
-    name (E00)."""
-    import uitree_app
+    page opens on the C engine and draws."""
     from runtime import host_app
-    uitree_app.use_engine("c")
     carts = str(tmp_path / "carts")
     host_app.moy_carts.ensure_dirs(carts)
     head = ('ui.app("%s", { icon = "calc" })\n'
@@ -227,21 +213,13 @@ def test_the_props_only_the_c_engine_draws_lower_and_draw(tmp_path):
             frame()
         assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
         ws.spine.exit_to_caller()
-    uitree_app.use_engine("reference")
-    open_cart(ws, "Steps")
-    for _ in range(4):
-        frame()
-    err = ws.run.player.cart_error
-    assert err and "error[E00] main.lua:8:" in err and "ui.slider's look" in err, err
 
 
 def test_tabs_cards_and_a_rows_group_draw_and_a_filter_is_refused_on_the_c_engine(tmp_path):
     """Tabs over an enum, cards with their card, and a rows' group open on
     the C engine and draw; a rows' filter, which the engine does not draw
     (nor for a Python app), stops the run at its line with E00."""
-    import uitree_app
     from runtime import host_app
-    uitree_app.use_engine("c")
     carts = str(tmp_path / "carts")
     host_app.moy_carts.ensure_dirs(carts)
     head = ('ui.app("%s", { icon = "calc" })\n'
@@ -276,11 +254,8 @@ def test_tabs_cards_and_a_rows_group_draw_and_a_filter_is_refused_on_the_c_engin
 def test_a_canvas_draws_with_the_carts_verbs_inside_the_frame(tmp_path):
     """A canvas's draw runs inside the C engine's frame at the canvas's rect
     and draws with the cart's own verbs; a draw that writes state stops the
-    run at its line (S06), as a mistake in a draw does. The reference back
-    end refuses a canvas by name (E00)."""
-    import uitree_app
+    run at its line (S06), as a mistake in a draw does."""
     from runtime import host_app
-    uitree_app.use_engine("c")
     carts = str(tmp_path / "carts")
     host_app.moy_carts.ensure_dirs(carts)
     head = ('ui.app("%s", { icon = "calc" })\n'
@@ -309,22 +284,14 @@ def test_a_canvas_draws_with_the_carts_verbs_inside_the_frame(tmp_path):
     err = ws.run.player.cart_error
     assert err and "error[S06] main.lua:5:" in err, err
     ws.spine.exit_to_caller()
-    uitree_app.use_engine("reference")
-    open_cart(ws, "Pad")
-    for _ in range(4):
-        frame()
-    err = ws.run.player.cart_error
-    assert err and "error[E00] main.lua:5:" in err and "ui.canvas" in err, err
 
 
 def test_a_canvas_pointer_hands_down_drag_and_up_in_its_own_coordinates(tmp_path):
     """A canvas with pointer= on the C engine: a press on it hands its action
     a read-only event (kind, x, y, source) at the canvas's own coordinates,
     the drag that follows and the release, each traced as Python's are."""
-    import uitree_app
     from runtime import host_app
     from runtime.host import moy_log
-    uitree_app.use_engine("c")
     carts = str(tmp_path / "carts")
     host_app.moy_carts.ensure_dirs(carts)
     _cart(carts, "Pointer", 'ui.app("Pointer", { icon = "calc" })\n'
@@ -360,10 +327,8 @@ def test_a_letter_key_and_the_confirm_role_fire_on_the_c_engine(tmp_path):
     """An action's letter key fires it, traced `key 's'`, and the confirm
     role's key fires its action where nothing on the page is focused, as
     uitree_c.py's keys() fires them for a Python app."""
-    import uitree_app
     from runtime import host_app
     from runtime.host import moy_log
-    uitree_app.use_engine("c")
     carts = str(tmp_path / "carts")
     host_app.moy_carts.ensure_dirs(carts)
     _cart(carts, "Keys", 'ui.app("Keys", { icon = "calc" })\n'

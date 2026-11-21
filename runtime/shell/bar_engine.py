@@ -303,7 +303,7 @@ def draw(cv, th, rect, names, cs, fs, clock_w, sys_len, n_items, wicon, time, gl
         _DIRTY[0] = False
         pushed = getattr(page, "committed", None)
         if pushed is not None:
-            pushed()            # the C engine's store takes the writes (the reference reads them)
+            pushed()            # the C engine's store takes the writes
     if page._damage is None:
         page._damage = _NoDamage()
     D = _ui_draw()

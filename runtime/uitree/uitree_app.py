@@ -8,18 +8,13 @@
 #   env                   what the host handed the engine running this handler
 #   app_layer             the class a manifest names, made from a build
 #   Page                  a build hosted by a surface still drawn with today's verbs
-#   use_engine            which engine runs the apps and hosted pages made from now on
-#   hosted_page           a hosted page on the engine in use
-"""The UI tree's engines' common ground and the app protocol over them:
-`Engine` is what the C engine (`uitree_c.CEngine`) and the reference
-(`uitree_ref.Engine`, the replay through the toolkit's `ui` verbs) share --
-the state, a handler's run and commit, the page's open and close, the roles
-and the edges. `App` is a registered app whose screen is a build
-(`app_layer` makes the class a manifest names); `Page` is a build hosted by
-a surface still drawn with today's verbs; `use_engine` picks the engine both
-are made on."""
-
-import sys
+#   hosted_page           a hosted page on the C engine
+"""The UI tree engine's Python half and the app protocol over it: `Engine`
+is what the C engine (`uitree_c.CEngine`) runs in Python -- the state, a
+handler's run and commit, the page's open and close, the roles and the
+edges. `App` is a registered app whose screen is a build (`app_layer` makes
+the class a manifest names); `Page` is a build hosted by a surface still
+drawn with today's verbs. Both are made on the C engine."""
 
 import ui as _v
 from layers import AppLayer
@@ -58,28 +53,15 @@ class Engine(S.Builder):
         self._list_at = {}              # a cards list's key -> [the pass that last drew it, the one before]
         self._vr = {}                   # a long rows list's key -> [its key, unit, row heights] (_vrows)
         self._all_names = None          # every state name, and whether one is a document (no versions)
-        self._has_doc = False
-        self._live, self._live_at, self._live_cls, self._live_in = None, -2, None, None
-        self._rf = {}                   # a node kind -> its replay function
-        self._foot_btns = []            # the foot's shown buttons, refilled each frame
-        self._order_of = {}             # a list's key -> the model its row order was taken from
-        self._no_stops = -2             # the states' versions at which the page drew no stop
         self._hint = None               # the band's hints, and what they were made at (_hints)
-        self._hk = None
-        self._hk_v = self._hk_n = self._hk_a = -2
-        self._hk_c = self._hk_tv = self._hk_d = self._hk_f = self._hk_at = None
         self.dups = set()
         self._sync = {}
         self._orders = {}               # a list's key -> the order of its rows (_after_removal)
         self._pid = (None, 0, "")       # (build, level, the id _page_id made for them)
-        self.curs = []
-        self.tv_stop = False
         self.fresh = False
-        self._new_build = False         # no pass has drawn since the page was built (_land_focus)
         self.focused = None
         self.drawn = {}
         self.actions = decl.actions
-        self._in_pop = False            # a popover's children replaying
         self._roles = None              # role -> its action, made again when an action is declared
         self._roles_n = -1
         self.files = files
@@ -88,15 +70,10 @@ class Engine(S.Builder):
         self.frame_calls = []
         self.work_run = {}              # work name -> [first frame, frames, steps, ms, over, wrote]
         self.frame_no = 0
-        self.pic_wh = {}
         self.drafts = {}                # a commit field's key -> its text until it is written
         self._page_o = {"gen": 0}       # the page's gen: moves when what its rows show may have
-        self._gen_ok = False
         self._page_names = ()           # the states the page's gen counts: all but its cells' own
-        self._gen_vals = 0              # the engine values its text names (`_engine_values`)
-        self._gv = 0                    # what they are this frame, hashed
         self._cells = {}                # a split's region (its group) -> [its override block, the states it reads]
-        self._split_w = {}              # a split -> [its versions, its span, its widths]; False: no link in it
         self._edits = 0                 # a commit field's draft edits, which move the gen too
         self._buttons = 0               # the frame's buttons, as keys() handed them to the host
         st = decl.state                 # this engine's own values: two consoles in one process each hold theirs
@@ -135,8 +112,8 @@ class Engine(S.Builder):
         return (self.pics is not None and self.pics.idle_owed) or self.legacy_moved()
 
     def legacy_moved(self):
-        """Whether a hosted surface's gen moved since it drew: this replay
-        hosts none."""
+        """Whether a hosted surface's gen moved since it drew: a page with no
+        Editor's kinds hosts none."""
         return False
 
     def idle_step(self):
@@ -266,8 +243,8 @@ class Engine(S.Builder):
     def hosted(self, dt, cv, th, content, desk):
         """The frame's first phase, which a host runs BEFORE it begins the
         frame (`host.begin`): the surfaces the page hosts (`legacy`) drawn
-        each in its own verbs pass. This replay's layout is the toolkit's,
-        which places nothing before the pass: it hosts none (`_r_legacy`)."""
+        each in its own verbs pass. A page with no Editor's kinds hosts none
+        (`uitree_c.CEditorEngine.hosted` draws them)."""
 
     GEN_UNSAFE = ("canvas", "picture", "cards", "text_editor", "legacy")
 
@@ -403,7 +380,7 @@ class App(AppLayer):
     domain = "system"
     BUILD = None            # (build,): the app module's root page
     IS_APP = None           # (is_app,): claims the app's identity cart
-    ENGINE = None           # (Engine subclass,): uitree_editor.Engine for the Editor's kinds on the engine in use
+    ENGINE = None           # (Engine subclass,): uitree_editor.Engine for the Editor's kinds
 
     def __init__(self, ctx, names=None):
         self._surf, self._theme, self._damage = ctx.surface, ctx.theme, ctx.damage
@@ -508,69 +485,19 @@ class Page(Engine):
         self.close_root = close
 
 
-# -- which engine ------------------------------------------------------------------
-
-ENGINES = ("reference", "c")
-# The file whose word ("reference" or "c") picks a board's engine at boot, for diagnosis.
-ENGINE_FILE = "/uitree_engine"
-
-
-def _default():
-    """The C engine on the host and on every board whose image carries
-    native/moy_uitree; the reference on a board without it, or where
-    `ENGINE_FILE` names it."""
-    if sys.implementation.name != "micropython":
-        return "c"
-    try:
-        with open(ENGINE_FILE) as f:
-            name = f.read().strip()
-        if name in ENGINES:
-            return name
-    except OSError:
-        pass
-    try:
-        import moy_uitree  # noqa: F401
-    except ImportError:
-        return "reference"
-    return "c"
-
-
-DEFAULT = _default()
-_IN_USE = [DEFAULT]
-
-
-def use_engine(name):
-    """The engine the apps and hosted pages made from now on run on:
-    "reference" (`uitree_ref`'s replay) or "c" (native/moy_uitree, through
-    uitree_c). It
-    starts on `DEFAULT`; an app made with `engine=` keeps its own."""
-    if name not in ENGINES:
-        raise S.UIError("N01", "uitree_app.use_engine(%r)" % (name,), expected=", ".join(ENGINES),
-                        fix='use_engine("reference") or use_engine("c")')
-    _IN_USE[0] = name
-
-
-def engine_in_use():
-    return _IN_USE[0]
-
+# -- the engine class ------------------------------------------------------------
 
 def _engine_class(page, editor=False):
-    """The class a page (or an app's engine) is made of on the engine in
-    use; `editor` for the Editor's kinds."""
-    if _IN_USE[0] == "c":
-        import uitree_c
-        if editor:
-            return uitree_c.CEditorPage if page else uitree_c.CEditorEngine
-        return uitree_c.CPage if page else uitree_c.CEngine
+    """The C engine's class for a page (or an app's engine); `editor` for
+    the Editor's kinds."""
+    import uitree_c
     if editor:
-        import uitree_ref_editor
-        return uitree_ref_editor.Page if page else uitree_ref_editor.Engine
-    import uitree_ref
-    return uitree_ref.Page if page else uitree_ref.Engine
+        return uitree_c.CEditorPage if page else uitree_c.CEditorEngine
+    return uitree_c.CPage if page else uitree_c.CEngine
 
 
 def hosted_page(build, host, damage, files=None, close=None, gen=False, env=None):
     """A `uitree` page hosted by a surface still drawn with today's verbs
-    (`Page`), on the engine in use."""
+    (`Page`), on the C engine."""
     return _engine_class(True)(build, host, damage, files=files, close=close, gen=gen, env=env)
 

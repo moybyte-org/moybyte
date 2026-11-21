@@ -26,11 +26,6 @@ import pytest
 import uitree_conf as C
 
 NAMES = ("counter", "list", "pages", "gates", "kinds", "lists")
-# the fixtures whose Lua half only the C engine draws (level 2's kinds): on the
-# reference engine the Lua layer refuses them (E00), so the checks that run it skip
-C_ONLY = ("kinds", "lists")
-ON_REFERENCE = os.environ.get("MOYBYTE_UI_ENGINE") == "reference"
-LUA_CHECKS = ("events", "content", "glass", "trace")
 SMALL, DESK = C.CONFIGS
 
 # the rows of the glass outside the page's content: the bar, the hints band
@@ -93,8 +88,6 @@ def _params(check, names=NAMES, configs=(None,)):
         for c in configs:
             why = KNOWN.get((check, n, c))
             marks = [pytest.mark.xfail(strict=True, reason=why)] if why else []
-            if ON_REFERENCE and n in C_ONLY and check in LUA_CHECKS:
-                marks = [pytest.mark.skip(reason="the reference back end draws no level-2 kind (E00)")]
             out.append(pytest.param(n, c, marks=marks, id="%s-%s" % (n, c) if c else n))
     return out
 
@@ -223,9 +216,6 @@ def test_lua_on_the_c_engine_writes_the_references_trace(name, config):
     reference's, line for line: only the layer's own build and open lines and
     its opened hook's action line (host py+lua, which Python writes none of)
     are left out."""
-    import uitree_app
-    if uitree_app.engine_in_use() != "c":
-        pytest.skip("the Lua layer runs on the reference here")
     own = re.compile(r"^(build|open) |^action opened from ")
     lua, _ = _run("lua", name, SMALL)
     assert [l for l in lua if not own.match(l)] == [l for l in _expected(name, "trace.txt") if not own.match(l)]
@@ -260,9 +250,6 @@ def test_a_compiled_app_draws_the_lua_apps_glass(name, config):
     """Both are app carts on the run's canvas, so every frame of the script is
     the Lua half's on the C engine, pixel for pixel, bar and band included."""
     _wasm_or_skip()
-    import uitree_app
-    if uitree_app.engine_in_use() != "c":
-        pytest.skip("the Lua layer runs on the reference here")
     got = C.run_wasm(name, config, _script(name))[1]
     lua = _run("lua", name, config)[1]
     assert len(got) == len(lua)

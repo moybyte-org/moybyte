@@ -161,23 +161,6 @@ _DEVICE_ONLY.update({
 } - runtime.FlatFinder.names - set(_RENAMED) - _BUILD_STAMPED)
 
 
-_UI_ENGINE = os.environ.get("MOYBYTE_UI_ENGINE")
-
-
-@pytest.fixture(autouse=True)
-def _ui_engine():
-    """Each test starts on the host's default engine, C (`uitree_app.DEFAULT`);
-    `MOYBYTE_UI_ENGINE=reference` runs every test on the reference instead,
-    the host checker and the parity record. The engine in use is given back
-    after the test, so one test's `use_engine` never leaks into the next. A
-    test that names its engine (`engine=`, a parity pair) keeps its own."""
-    import uitree_app
-    was = uitree_app.engine_in_use()
-    uitree_app.use_engine(_UI_ENGINE or uitree_app.DEFAULT)
-    yield
-    uitree_app.use_engine(was)
-
-
 def pytest_addoption(parser):
     """`--update-goldens` -- the explicit re-baseline switch for the shell
     pixel goldens (tests/test_shell_goldens.py, UI refactor Phase 0).
