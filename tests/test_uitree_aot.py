@@ -219,6 +219,34 @@ def test_a_blob_whose_fields_or_values_this_python_orders_otherwise_is_refused(p
             uitree_aot.load(eng, None, b)
 
 
+def _pool(blob):
+    at = 32
+    at += 1 + blob[at]                  # the page id
+    at += 1 + blob[at]                  # the variant
+    at += 1                             # placed
+    n = int.from_bytes(blob[at:at + 4], "little")
+    return blob[at + 4:at + 4 + n]
+
+
+def test_a_pages_pool_keeps_each_text_once(compiled):
+    """A page's texts repeat (its props' names, their sources, its labels'
+    words): the store keeps each once (`uit_pool_put`), but for the lists
+    (an enum's values, a label table's keys and words), which are kept as
+    they come."""
+    import uitree as S
+    for page, blob in compiled.pages.items():
+        decl = S.decl_of(__import__(page.partition(".")[0]))
+        pool = _pool(blob)
+        lists = ["\0".join(t.values) for t in decl.state._t.values() if type(t) is S.Enum]
+        for tab in decl.labels.values():
+            lists += ["\0".join(str(k) for k in tab), "\0".join(str(tab[k]) for k in tab)]
+        for text in lists:
+            pool = pool.replace(text.encode("utf-8") + b"\0", b"", 1)
+        texts = pool.split(b"\0")[:-1]
+        twice = sorted(set(t for t in texts if texts.count(t) > 1))
+        assert not twice, (page, twice[:8])
+
+
 def test_a_blob_carries_every_field_of_every_record():
     """Each struct a blob stores names every member in moy_uitree_aot.c's
     field tables; a slot's members the visit owns are listed there by name."""

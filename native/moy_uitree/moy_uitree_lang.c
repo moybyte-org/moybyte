@@ -358,7 +358,7 @@ static int term_parse(uit_t *e, const char *s, size_t n, int model, uit_term_t *
     t->lf = strtod(tmp, r.type == UIT_NUM ? &stop : NULL);
     if ((r.type == UIT_INT || r.type == UIT_NUM) && (!m || m != ln || *stop))
         return uit_check_fail(e, "T03", UIT_MSG("%.*s: %.*s is not a number", "%.*s %.*s"), (int)n, s, (int)ln, lit);
-    int at = uit_buf_put(&e->pool, lit, ln);
+    int at = uit_pool_put(e, lit, ln);
     if (at < 0 || at >= (int)UIT_NONE)
         return UIT_E_NOMEM;
     t->ls = (uint16_t)at;
@@ -392,7 +392,7 @@ int uit_cond_compile(uit_t *e, const char *src, int model)
         return uit_check_fail(e, "C02", UIT_MSG("condition %s mixes && and ||", "%s"), src);
     if (uit_grow((void **)&e->conds, &e->cconds, e->nconds + 1, sizeof *e->conds))
         return UIT_E_NOMEM;
-    int sat = uit_buf_put(&e->pool, src, n);
+    int sat = uit_pool_put(e, src, n);
     if (sat < 0 || sat >= (int)UIT_NONE)
         return UIT_E_NOMEM;
     uit_cond_t C = {(uint16_t)sat, (uint16_t)e->nterms, 0, (uint8_t)any};
@@ -474,7 +474,7 @@ static int op_add(uit_t *e, uit_op_t o)
 
 static int lit_add(uit_t *e, const char *s, size_t n)
 {
-    int at = uit_buf_put(&e->pool, s, n);
+    int at = uit_pool_put(e, s, n);
     if (at < 0 || at >= (int)UIT_NONE)
         return UIT_E_NOMEM;
     uit_op_t o = {OP_LIT, 0, 0, 0, (uint16_t)at, (uint16_t)n};
@@ -736,7 +736,7 @@ static int piece(uit_t *e, const char *b, size_t n, int model, uit_tmpl_t *T, ui
             return f;
         if (counted && conv == 's')
             return uit_fail(e, UIT_E_LANG, UIT_MSG("count then fmt %%s", "%s"));
-        int spec = uit_buf_put(&e->pool, a, an);
+        int spec = uit_pool_put(e, a, an);
         if (spec < 0 || spec >= (int)UIT_NONE)
             return UIT_E_NOMEM;
         uit_op_t o = {OP_FMT, r.rk, r.ref, r.f, (uint16_t)spec, (uint16_t)conv};
@@ -763,8 +763,8 @@ static int piece(uit_t *e, const char *b, size_t n, int model, uit_tmpl_t *T, ui
         const char *comma = memchr(a, ',', an);
         if (!comma || comma == a || comma + 1 == a + an)
             return uit_check_fail(e, "T01", UIT_MSG("plural needs both forms", ""));
-        int one = uit_buf_put(&e->pool, a, (size_t)(comma - a));
-        int many = uit_buf_put(&e->pool, comma + 1, an - (size_t)(comma + 1 - a));
+        int one = uit_pool_put(e, a, (size_t)(comma - a));
+        int many = uit_pool_put(e, comma + 1, an - (size_t)(comma + 1 - a));
         if (one < 0 || many < 0 || many >= (int)UIT_NONE)
             return UIT_E_NOMEM;
         uit_op_t o = {OP_PLURAL, r.rk, r.ref, r.f, (uint16_t)one, (uint16_t)many};
@@ -866,7 +866,7 @@ int uit_tmpl_compile(uit_t *e, const char *src, int model)
     memset(&T, 0, sizeof T);
     T.lit = 1;
     T.type = UIT_TEXT;
-    int sat = uit_buf_put(&e->pool, src, strlen(src));
+    int sat = uit_pool_put(e, src, strlen(src));
     if (sat < 0 || sat >= (int)UIT_NONE)
         return UIT_E_NOMEM;
     T.src = (uint16_t)sat;
