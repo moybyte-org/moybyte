@@ -6,6 +6,8 @@ compiled halves).
   * the numbers sdk/include/moybyte/uitree.h gives an app are the engine's;
   * a refusal is latched for the run, and its line names its code, its row
     and where on the page;
+  * a prop is held to the contract's table at the row that names it, with
+    the contract's code, though the module carries no check of its own;
   * a read answers the whole length, whatever the buffer held;
   * a model's write is traced as the Python and Lua layers trace a set.
 """
@@ -35,8 +37,8 @@ _SIGS = (
     ("moy_uitree_wasm_error", [_P, _P, _U], _I),
 )
 TEXT, MODEL = 4, 7
-PAGE, GROUP = 1, 2
-E_KIND, E_ARG = -3, -5
+PAGE, GROUP, LABEL = 1, 2, 3
+E_KIND, E_ARG, E_CHECK = -3, -5, -6
 
 
 class Rows:
@@ -125,6 +127,27 @@ def test_a_refusal_is_latched_and_names_its_row_and_place():
         assert r.read("error")[0] == 0
     finally:
         r.close()
+
+
+def test_a_prop_is_held_to_the_contract_with_its_code_page_path_and_name():
+    for name, src, line in (
+            ("nope", "1", "N01 uitree_prop(page/group#0/label#0 nope=): ui.label has no prop 'nope'; fix: drop it"),
+            ("tones", "x", "N01 uitree_prop(page/group#0/label#0 tones=): ui.label has no prop 'tones'; "
+                           "fix: did you mean 'tone' or 'lines'?"),
+            ("ink", "x", "N04 uitree_prop(page/group#0/label#0 ink=): ui.label ink= is retired; fix: tone="),
+            ("wrap", "x", "N01 uitree_prop(page/group#0/label#0 wrap=): ui.label wrap='x'; fix: wrap='cut' "
+                          "(expected cut, word, char)")):
+        r = Rows()
+        try:
+            r.build("1 page")
+            page = r.node(PAGE, "page", -1)
+            group = r.node(GROUP, "group#0", page)
+            label = r.node(LABEL, "label#0", group)
+            assert r.prop(label, "text", "hi") >= 0
+            assert r.prop(label, name, src) == E_CHECK
+            assert r.read("error", cap=400)[1].startswith(line), (name, r.read("error", cap=400)[1])
+        finally:
+            r.close()
 
 
 def test_a_frame_is_refused_before_a_page_and_with_a_flag():

@@ -967,11 +967,40 @@ static int pane_prop(uit_t *e, int node, const char *name, const char *src, cons
     return add_prop(e, node, name, src, repr, PK_LIT, -1);
 }
 
+// The API's check at lowering, so a front that carries no check (a compiled app's) is held to the
+// contract's table as the others are: a prop name no kind takes, a retired one, a word not the prop's.
+// What a kind does not take by name in the API is the store's own: a node's binding (`bind`, `field`)
+// and its head, which the API gives by position and the store by name. A prop the spec designs passes
+// here, so the engine draws it or refuses it as one it does not draw yet.
+static int api_check(uit_t *e, int kind, const char *name, const char *src)
+{
+    static const char *const OWN[] = {"bind", "field", "title", "caption", "text", "label", "value", "image"};
+    const char *kn = uit_kind_names[kind];
+    if (!uit_prop_type(kn, name))
+        for (size_t i = 0; i < sizeof OWN / sizeof OWN[0]; i++)
+            if (!strcmp(name, OWN[i]))
+                return 0;
+    char out[600];
+    const char *code = uit_check_prop(kn, name, UIT_VC_BUILDS, src, out, sizeof out);
+    if (!code || !strncmp(out, "no kind", 7))
+        return 0;           // a kind of the store's own (switch, case, row, panel) checks nothing here
+    char *what = out, *expected = strchr(what, '\x1f');
+    *expected++ = 0;
+    char *fix = strchr(expected, '\x1f');
+    *fix++ = 0;
+    fix[strcspn(fix, "\x1f")] = 0;
+    return uit_check_fail(e, code, UIT_MSG("%s; fix: %s%s%s%s", "%s%.0s%.0s%.0s%.0s"), what, fix,
+                          expected[0] ? " (expected " : "", expected, expected[0] ? ")" : "");
+}
+
 int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *repr)
 {
     if (node < 0 || node >= e->nnodes)
         return UIT_E_ARG;
     uit_node_t *N = &e->nodes[node];
+    int checked = api_check(e, N->kind, name, src);
+    if (checked < 0)
+        return checked;
     int model = uit_model_of(e, node);
     if (UIT_IS_LIST(N->kind))
         model = -1;             // a list's own props read the page, not its rows
