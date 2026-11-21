@@ -197,6 +197,7 @@ class WindowChrome:
             _strip.fire(name)
         finally:
             self._strip_at = None
+            _strip_ui.TAP[0] = None
 
     def _strip_tapped(self, name):
         at = self._strip_at
