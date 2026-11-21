@@ -286,15 +286,35 @@ def pytest_configure(config):
 
 
 def pytest_runtest_setup(item):
-    """A pixel test's moved frames (`pixel_goldens`) are its last run's."""
+    """A pixel test's moved frames (`pixel_goldens`) are its last run's; a
+    test file's first test notes the canvas rows live as it begins."""
     import pixel_goldens
     pixel_goldens.clear(item.nodeid)
+    if _ROWS[0] != item.path:
+        _ROWS[0], _ROWS[1] = item.path, _canvas_rows()
 
 
-# The canvas rows a worker may hold live, garbage collected, after a test file:
-# the last console's few stay reachable from the module globals that name it
-# (`devices.console`, `ui_draw.UI_TARGET`); the glass has MOY_GLASS_ROWS (256).
-CANVAS_ROWS_AFTER_A_FILE = 64
+# The canvas rows a test file may leave live, garbage collected, past those
+# live as it began: its last console's few stay reachable from the module
+# globals that name it (`devices.console`, `ui_draw.UI_TARGET`, an editor
+# module's `_host`); the glass has MOY_GLASS_ROWS (256). The rows an earlier
+# file's console still holds, through a global this file never rebinds, are
+# that file's, so the count a file begins with is where it is measured from.
+CANVAS_ROWS_A_FILE_LEAVES = 64
+_ROWS = [None, None]      # the file whose first test began last, the rows live then
+
+
+def _canvas_rows():
+    """The glass's live canvas rows after a collect, None before its library
+    loads (`glass_binding`, under whichever package name imported it)."""
+    for m in list(sys.modules.values()):
+        lib = getattr(m, "_LIB", None)
+        if (type(lib) is list and lib and lib[0]
+                and (getattr(m, "__file__", None) or "").endswith("glass_binding.py")):
+            import gc
+            gc.collect()
+            return lib[0].moy_canvas_count()
+    return None
 
 
 def pytest_runtest_teardown(item, nextitem):
@@ -303,17 +323,14 @@ def pytest_runtest_teardown(item, nextitem):
     same worker (`MemoryError: the glass's canvas table is full`)."""
     if nextitem is not None and nextitem.path == item.path:
         return
-    gb = sys.modules.get("runtime.host.glass_binding")
-    lib = gb._LIB[0] if gb is not None and gb._LIB else None
-    if not lib:
+    n = _canvas_rows()
+    if n is None:
         return
-    import gc
-    gc.collect()
-    n = lib.moy_canvas_count()
-    assert n <= CANVAS_ROWS_AFTER_A_FILE, (
-        "%s leaves %d canvas rows live (at most %d): a module global, a "
-        "fixture or a closed app still holds a console's canvases"
-        % (item.path.name, n, CANVAS_ROWS_AFTER_A_FILE))
+    was = _ROWS[1] if _ROWS[0] == item.path and _ROWS[1] is not None else 0
+    assert n - was <= CANVAS_ROWS_A_FILE_LEAVES, (
+        "%s leaves %d canvas rows live past the %d it began with (at most %d): "
+        "a module global, a fixture or a closed app still holds a console's canvases"
+        % (item.path.name, n - was, was, CANVAS_ROWS_A_FILE_LEAVES))
 
 
 # Whether the running test is marked `first_run` (`_carts_are_made_here`).
