@@ -1125,16 +1125,23 @@ class CEditorEngine(CEngine, _ed.Engine):
         the action, ahead of the document; a bare letter is the document's."""
         if not ch:
             return False
+        hit = key = None
         for a in self._acts:
             for k in a.keys:
                 if S._chord_byte(k) == ch and a.live():
-                    if a.can():
-                        self.q.append((a, self.args_for(a), "key %r (unit %s)" % (k, a.unit)))
-                    else:
-                        S._trace("off", a.name, "key %r: %s" % (k, a.when_src))
-                    self._damage.all()
-                    return True
-        return False
+                    if hit is not None:     # the checker proves this cannot happen; the engine says so if it does
+                        raise S.UIError("U08", "%s and %s answer one key while both are shown" % (hit.name, a.name),
+                                        fix="never show two units that answer one key together")
+                    hit, key = a, k
+                    break
+        if hit is None:
+            return False
+        if hit.can():
+            self.q.append((hit, self.args_for(hit), "key %r (unit %s)" % (key, hit.unit)))
+        else:
+            S._trace("off", hit.name, "key %r: %s" % (key, hit.when_src))
+        self._damage.all()
+        return True
 
     def _doc_keys(self, i, ch):
         """The arrows and the typed bytes into the shown text editor's
