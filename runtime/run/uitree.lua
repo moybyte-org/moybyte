@@ -1440,7 +1440,7 @@ end
 local NodeMT = {}
 local COMMON = { shown = 1 }
 local PROPS = {
-  group = {}, row = {}, scroll = { follow = 1, new = 1 }, foot = {},
+  group = {}, row = {}, scroll = { follow = 1, new = 1 }, foot = { look = 1 },
   label = { tone = 1, icon = 1, face = 1, size = 1, wrap = 1, lines = 1, align = 1 }, rule = {},
   info = { value = 1, icon = 1, signal = 1, tag = 1, tone = 1 },
   note = { icon = 1, lines = 1 }, empty = { icon = 1, lines = 1 },
@@ -1448,23 +1448,24 @@ local PROPS = {
   button = { kind = 1, label = 1, icon = 1, arg = 1, alone = 1, span = 1, focus = 1 },
   link = { label = 1, value = 1, icon = 1, signal = 1, tag = 1, tone = 1, focus = 1 },
   toggle = { label = 1, hint = 1, on = 1, focus = 1, when = 1, off = 1 },
-  slider = { label = 1, lo = 1, hi = 1, on = 1, focus = 1, when = 1, off = 1 },
+  slider = { label = 1, lo = 1, hi = 1, on = 1, focus = 1, when = 1, off = 1, icon = 1 },
   field = { label = 1, max = 1, secret = 1, hint = 1, grow = 1, commit = 1, on = 1, changed = 1, input = 1,
             focus = 1, when = 1, off = 1 },
   rows = { cur = 1, current = 1, check = 1, empty = 1, by = 1 },
   dialog = { buttons = 1, default = 1 }, popover = { anchor = 1, w = 1, close = 1, wash = 1 },
-  switch = {},
+  switch = {}, case = {},
 }
 local COND_PROPS = { shown = 1, focus = 1, when = 1 }
 local NAME_PROPS = { key = 1, on = 1, cut = 1, changed = 1, commit = 1, current = 1, cur = 1, by = 1, new = 1,
                      buttons = 1, default = 1, close = 1, off = 1, kind = 1, face = 1, size = 1, wrap = 1,
-                     align = 1, input = 1, wash = 1, anchor = 1, arg = 1 }
+                     align = 1, input = 1, wash = 1, anchor = 1, arg = 1, look = 1 }
 local NUM_PROPS = { max = 1, lines = 1, lo = 1, hi = 1, span = 1, w = 1 }
 local BOOL_PROPS = { follow = 1, check = 1, grow = 1, secret = 1, alone = 1 }
 local WORDS = { kind = { normal = 1, primary = 1, danger = 1, tonal = 1 }, off = { hide = 1, grey = 1 },
                 face = { ui = 1, title = 1, mono = 1, caption = 1, result = 1 }, size = { fit = 1 },
                 wrap = { cut = 1, word = 1 }, align = { start = 1, center = 1, ["end"] = 1 },
-                input = { text = 1, number = 1, password = 1 }, wash = { page = 1, view = 1, none = 1 } }
+                input = { text = 1, number = 1, password = 1 }, wash = { page = 1, view = 1, none = 1 },
+                look = { ["end"] = 1, share = 1 } }
 local RETIRED_PROPS = { ink = "tone = \"...\"", disabled = "when = \"...\" with off = \"grey\" on the action",
                         does = "hint = \"...\" on the action", below = "new = \"NAME\"", current_tool = 1 }
 local STOPS = { button = 1, link = 1, toggle = 1, slider = 1, field = 1, bubble = 1, rows = 1 }
@@ -2394,10 +2395,12 @@ local function foot(n, x, y, w)
           if c.o.grow then grow = c else fixed = fixed + cw_of(c) + 4 * fs end
         end
       end
-      local cx = grow and x + L.g or x + w - L.g - fixed + 4 * fs
+      -- look = "share": the row's controls share its width
+      local share = n.o.look == "share" and #shown > 0 and (w - 2 * L.g - 4 * fs * (#shown - 1)) // #shown
+      local cx = (grow or share) and x + L.g or x + w - L.g - fixed + 4 * fs
       local by = k.kind == "row" and y + L.zgap or y + L.zgap
       for _, c in ipairs(shown) do
-        local cw = c.o.grow and (w - 2 * L.g - fixed) or cw_of(c)
+        local cw = share or (c.o.grow and (w - 2 * L.g - fixed) or cw_of(c))
         if c.kind == "field" then E.at(cx - L.inset, by - 2 * fs, cw + 2 * L.inset, L.field + 4 * fs)
         else E.at(cx, by, cw, L.field) end
         draw(c)

@@ -18,7 +18,8 @@
   "takes": "a takes= value",
   "text": "a literal text",
   "word:A,B": "one of the words",
-  "list:T": "a list of T"
+  "list:T": "a list of T",
+  "conds": "a condition a value (a dict in Python, a table in Lua)"
  },
  "common_props": {
   "shown": {
@@ -1202,11 +1203,19 @@
   "push": {
    "type": "name",
    "level": 1
+  },
+  "unit": {
+   "type": "name",
+   "level": 1
   }
  },
  "hook_props": {
   "takes": {
    "type": "takes",
+   "level": 1
+  },
+  "unit": {
+   "type": "name",
    "level": 1
   }
  },
@@ -1299,13 +1308,25 @@
    "head": null,
    "level": 1,
    "section": "7.1",
-   "props": {}
+   "props": {
+    "look": {
+     "type": "word:end,share",
+     "level": 1
+    }
+   }
   },
   "switch": {
    "head": "state",
    "level": 1,
    "section": "7.1",
    "props": {}
+  },
+  "case": {
+   "head": "lit",
+   "level": 1,
+   "section": "7.1",
+   "props": {},
+   "made_by": "switch: a case per value, made by ui.switch (and rows by=), never called"
   },
   "tools": {
    "head": "key",
@@ -1548,6 +1569,10 @@
      "type": "name",
      "level": 2,
      "designed": true
+    },
+    "face": {
+     "type": "word:ui,title,mono,caption,result",
+     "level": 2
     }
    },
    "designed": true
@@ -1759,6 +1784,10 @@
      "type": "word:steps",
      "level": 2,
      "designed": true
+    },
+    "icon": {
+     "type": "tpl",
+     "level": 1
     }
    }
   },
@@ -1843,6 +1872,10 @@
      "type": "word:cycle",
      "level": 2,
      "designed": true
+    },
+    "text": {
+     "type": "tpl",
+     "level": 2
     }
    }
   },
@@ -1865,6 +1898,10 @@
     },
     "focus": {
      "type": "cond",
+     "level": 2
+    },
+    "offered": {
+     "type": "conds",
      "level": 2
     }
    }
@@ -1985,6 +2022,10 @@
      "type": "int",
      "level": 2,
      "designed": true
+    },
+    "group": {
+     "type": "tpl",
+     "level": 2
     }
    }
   },
@@ -2046,6 +2087,10 @@
     },
     "focus": {
      "type": "cond",
+     "level": 2
+    },
+    "hint": {
+     "type": "tpl",
      "level": 2
     }
    }
@@ -2119,6 +2164,14 @@
     "icon": {
      "type": "tpl",
      "level": 2
+    },
+    "label": {
+     "type": "tpl",
+     "level": 2
+    },
+    "mkind": {
+     "type": "word:danger",
+     "level": 2
     }
    }
   },
@@ -2141,6 +2194,10 @@
     },
     "pad": {
      "type": "int",
+     "level": 1
+    },
+    "align": {
+     "type": "word:start,center,end",
      "level": 1
     }
    }
@@ -2197,6 +2254,14 @@
     "gap": {
      "type": "int",
      "level": 2
+    },
+    "focused": {
+     "type": "name",
+     "level": 2
+    },
+    "grown": {
+     "type": "name",
+     "level": 2
     }
    }
   },
@@ -2239,6 +2304,14 @@
     },
     "unit": {
      "type": "name",
+     "level": 2
+    },
+    "head": {
+     "type": "bool",
+     "level": 2
+    },
+    "offered": {
+     "type": "conds",
      "level": 2
     }
    }
@@ -2349,6 +2422,10 @@
      "type": "name",
      "level": 2,
      "designed": true
+    },
+    "w": {
+     "type": "int",
+     "level": 2
     }
    }
   },
@@ -2361,6 +2438,22 @@
      "type": "fn",
      "level": 1,
      "designed": true
+    },
+    "pointer": {
+     "type": "fn",
+     "level": 1
+    },
+    "keys": {
+     "type": "fn",
+     "level": 1
+    },
+    "hints": {
+     "type": "fn",
+     "level": 1
+    },
+    "gen": {
+     "type": "fn",
+     "level": 1
     }
    },
    "designed": true

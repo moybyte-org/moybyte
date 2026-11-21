@@ -153,7 +153,7 @@ def differences(f, lang):
         out.append("role not in the table: %s" % r)
     for r in sorted(app_roles - f["roles"]):
         out.append("role missing: L%s %s" % (roles[r]["level"], r))
-    verbs = dict(TABLE["verbs"], **{k: d["level"] for k, d in kinds.items()})
+    verbs = dict(TABLE["verbs"], **{k: d["level"] for k, d in kinds.items() if "made_by" not in d})
     for v in sorted(set(verbs) - f["verbs"]):
         out.append("verb missing: L%s %s" % (verbs[v], v))
     for v in sorted(f["retired_live"]):

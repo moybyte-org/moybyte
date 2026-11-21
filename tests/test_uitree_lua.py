@@ -123,6 +123,33 @@ def test_an_anchor_on_no_node_stops_the_run_at_the_popover(tmp_path):
     assert err and "error[N06] main.lua:5:" in err, err
 
 
+def test_a_foot_that_shares_its_width_and_a_slider_icon_draw(tmp_path):
+    """foot look="share" spreads its row's buttons over its width; a
+    slider's icon= stands before its label: each moves the pixels."""
+    from runtime import host_app
+    carts = str(tmp_path / "carts")
+    host_app.moy_carts.ensure_dirs(carts)
+    body = ('ui.app("%s", { icon = "calc" })\n'
+            'local s = ui.state { v = 3 }\n'
+            'ui.action("a", "Add", function() end)\nui.action("b", "Back", function() end)\n'
+            'ui.page("p", function()\n'
+            '  ui.scroll(function() ui.slider("v", { label = "Level", lo = 0, hi = 9%s }) end)\n'
+            '  ui.foot({%s}, function() ui.row(function() ui.button("a") ui.button("b") end) end)\n'
+            'end)\n')
+    shots = {}
+    for name, icon, look in (("Plain", "", ""), ("Shared", "", ' look = "share" '), ("Iconed", ', icon = "calc"', "")):
+        _cart(carts, name, body % (name, icon, look))
+    ws, drv, frame, open_cart = _console(carts)
+    for name in ("Plain", "Shared", "Iconed"):
+        open_cart(ws, name)
+        for _ in range(4):
+            frame()
+        assert ws.run.player.cart_error is None, ws.run.player.cart_error
+        shots[name] = bytes(drv.rgb888())
+        ws.spine.exit_to_caller()
+    assert shots["Shared"] != shots["Plain"] and shots["Iconed"] != shots["Plain"]
+
+
 def test_a_cancelled_timer_runs_nothing(tmp_path):
     from runtime import host_app
     from runtime.host import moy_log

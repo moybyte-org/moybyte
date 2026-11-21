@@ -31,7 +31,6 @@
   "code never raised: Y04",
   "code never raised: Y05",
   "code never raised: Y06",
-  "kind not in the table: case",
   "kind missing: L1 bubble",
   "kind missing: L2 cells",
   "kind missing: L2 month",
@@ -57,11 +56,6 @@
   "prop missing: L1 info.tag",
   "prop missing: L1 info.tone",
   "prop not in the table: button.w",
-  "prop not in the table: canvas.w",
-  "prop not in the table: cards.group",
-  "prop not in the table: foot.look",
-  "prop not in the table: item.label",
-  "prop not in the table: item.mkind",
   "prop not in the table: row.gap",
   "prop not in the table: row.mid",
   "prop missing: L1 link.tag",
@@ -81,14 +75,8 @@
   "prop missing: L2 scroll.snap",
   "prop missing: L1 slider.off",
   "prop missing: L1 slider.when",
-  "prop not in the table: split.align",
-  "prop not in the table: table.hint",
-  "prop not in the table: tabs.offered",
-  "prop not in the table: text_view.face",
   "prop missing: L1 toggle.off",
   "prop missing: L1 toggle.when",
-  "action prop not in the table: unit",
-  "hook prop not in the table: unit",
   "takes missing: L2 key",
   "takes missing: L2 pointer",
   "takes missing: L2 row+arg",
@@ -102,17 +90,7 @@
   "verb missing: L2 pictures",
   "verb missing: L2 toast",
   "verb missing: L2 tool",
-  "verb missing: L1 unit",
-  "prop not in the table: seg.text",
-  "prop not in the table: slider.icon",
-  "prop not in the table: legacy.gen",
-  "prop not in the table: legacy.hints",
-  "prop not in the table: legacy.keys",
-  "prop not in the table: legacy.pointer",
-  "prop not in the table: panes.focused",
-  "prop not in the table: panes.grown",
-  "prop not in the table: pane.head",
-  "prop not in the table: pane.offered"
+  "verb missing: L1 unit"
  ],
  "lua": [
   "code never raised: A07",
@@ -212,6 +190,8 @@
   "verb missing: L2 tool",
   "verb missing: L2 tools",
   "verb missing: L1 unit",
-  "verb missing: L2 work"
+  "verb missing: L2 work",
+  "action prop missing: unit",
+  "hook prop missing: unit"
  ]
 }
