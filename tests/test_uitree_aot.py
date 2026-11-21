@@ -150,8 +150,9 @@ def test_a_blob_naming_what_the_module_lacks_is_refused_by_name(compiled):
     last = f["A"][-1].encode()
     text = blob[at:at + n].replace(b"," + last + b"\n", b",gone_" + last + b"\n")
     assert text != blob[at:at + n]
+    head = blob[:28] + len(text).to_bytes(4, "little") + blob[32:at]
     with pytest.raises(uitree_aot.Refused, match="no action 'gone_%s'" % last.decode()):
-        uitree_aot.load(eng, None, blob[:at] + text)
+        uitree_aot.load(eng, None, head + text)
 
 
 def test_a_blob_carries_every_field_of_every_record():
@@ -203,10 +204,10 @@ def _staged(tmp_path):
     return mods
 
 
-def test_staging_compiles_the_staged_pages_and_names_a_stale_one(tmp_path, capsys):
+def test_staging_compiles_the_staged_pages_and_names_a_stale_one(compiled, tmp_path, capsys):
     mods = _staged(tmp_path)
     assert UC.stage(str(mods)) == 0
-    assert "uitree pages: 14 compiled from 10 staged modules" in capsys.readouterr().out
+    assert "uitree pages: %d compiled from %d staged modules" % (len(compiled.pages), len(MODULES)) in capsys.readouterr().out
     ns = {}
     exec((mods / "uitree_pages.py").read_text(), ns)
     blobs = dict((k, v[0]) for k, v in ns["PAGES"].items())

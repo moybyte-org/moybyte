@@ -109,7 +109,13 @@ def layout():
     return lib().uit_layout_hash()
 
 
-FORMAT = 1                      # UIT_FORMAT
+def _format():
+    import re
+    with open(os.path.join(_DIR, "moy_uitree.h")) as f:
+        return int(re.search(r"#define UIT_FORMAT (\d+)", f.read()).group(1))
+
+
+FORMAT = _format()              # UIT_FORMAT, read from the header the library is built from
 
 
 def mem():

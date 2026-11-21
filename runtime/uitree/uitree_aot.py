@@ -55,21 +55,34 @@ def _u32(b, at):
     return b[at] | b[at + 1] << 8 | b[at + 2] << 16 | b[at + 3] << 24
 
 
+DOC = "#doc"        # a document's hidden model: its state's name and this (uitree_c's `_DOC`)
+
+
 def entry(blob):
     """A page's entry as the frozen module holds it: (blob, state names,
-    their type codes, action names, {node: draw}, {node: ground})."""
+    their type codes, action names, {node: draw}, {node: ground}, the rest
+    of the front end's literals, `CEngine.front`)."""
     f = front_of(blob)
-    return (blob, tuple(f["S"]), f["T"], tuple(f["A"]), f["D"], f["G"])
+    return (blob, tuple(f["S"]), f["T"], tuple(f["A"]), f["D"], f["G"], f["X"])
+
+
+def _literal(text):
+    try:
+        import ast
+    except ImportError:             # a board: only ever a blob with no frozen entry
+        return eval(text, {}, {})
+    return ast.literal_eval(text)
 
 
 def front_of(blob):
     """The front end's part of a blob (the header's front offset and
     length): {"S": state names, "T": their type codes, "A": action names,
-    "D": {node: draw function name}, "G": {node: ground role}}."""
+    "D": {node: draw function name}, "G": {node: ground role}, "X": the
+    rest of the front end's literals}."""
     if len(blob) < 32 or blob[:4] != b"MUIT":
         raise Refused("not a compiled page")
     at, n = _u32(blob, 24), _u32(blob, 28)
-    out = {"S": [], "T": b"", "A": [], "D": {}, "G": {}}
+    out = {"S": [], "T": b"", "A": [], "D": {}, "G": {}, "X": None}
     for line in bytes(blob[at:at + n]).decode("utf-8").split("\n"):
         if not line:
             continue
@@ -78,6 +91,8 @@ def front_of(blob):
             out[tag] = rest.split(",") if rest else []
         elif tag == "T":
             out["T"] = bytes(int(c) for c in rest)
+        elif tag == "X":
+            out["X"] = _literal(rest)
         else:
             for item in rest.split(",") if rest else ():
                 k, _, v = item.partition(":")
@@ -96,15 +111,22 @@ def front(eng):
         if mod is None or getattr(mod, name, None) is not fn:
             raise Refused("canvas %d draw=%r is not a function of its module" % (node, fn))
         draws.append("%d:%s" % (node, name))
-    lines = ("S " + ",".join(eng._names), "T " + "".join(str(ctype(eng.s._t[n])) for n in eng._names),
+    lines = ("S " + ",".join(eng._names), "T " + "".join(str(ctype(t)) for t in eng._types),
              "A " + ",".join(a.name for a in eng._acts), "D " + ",".join(draws),
-             "G " + ",".join("%d:%s" % kv for kv in eng._grounds.items()))
+             "G " + ",".join("%d:%s" % kv for kv in eng._grounds.items()), "X " + repr(eng.front()))
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
 def ctype(t):
     """A state's type as the store declares it (`CEngine._declare`'s, the
-    header's UIT_BOOL .. UIT_MODEL)."""
+    header's UIT_BOOL .. UIT_MODEL): an optional state its base's, a
+    document a row_of its hidden model (`DOC`), which is a model."""
+    if type(t) is S.Opt:
+        t = t.base
+    if t == DOC:
+        return 7
+    if type(t) is S.Doc:
+        return 6
     return (1 if t is S.BOOL else 2 if t is S.INT else 3 if t is S.NUM else 4 if t is S.TEXT else
             7 if isinstance(t, S.Model) else 6 if isinstance(t, S.RowOf) else 5 if type(t) is S.Enum else 0)
 
@@ -116,7 +138,7 @@ def load(eng, x, blob):
     state pushed. Refused (nothing loaded) where the blob is not this page's,
     this engine's or this module's."""
     if type(blob) is tuple:
-        f = {"S": blob[1], "T": blob[2], "A": blob[3], "D": blob[4], "G": blob[5]}
+        f = {"S": blob[1], "T": blob[2], "A": blob[3], "D": blob[4], "G": blob[5], "X": blob[6]}
         blob = blob[0]
     else:
         f = front_of(blob)
@@ -126,13 +148,17 @@ def load(eng, x, blob):
 def _load(eng, x, blob, f):
     st, acts = eng.s, eng.actions
     names = f["S"]                  # the store's slots in the blob's order (a board's dicts keep another)
+    types = []
     for n in names:
-        if n not in st._t:
+        doc = n.endswith(DOC) and n[:-len(DOC)]
+        t = DOC if doc and type(st._t.get(doc)) is S.Doc else st._t.get(n)
+        if t is None:
             raise Refused("no state %r: the blob names one the module does not declare" % n)
-    if len(names) != len(st._t):
+        types.append(t)
+    if len(names) - len([t for t in types if t == DOC]) != len(st._t):
         raise Refused("state %s: the module declares one the blob lacks" % [n for n in st._t if n not in names][0])
-    for n, t in zip(names, f["T"]):
-        if ctype(st._t[n]) != t:
+    for n, ty, t in zip(names, types, f["T"]):
+        if ctype(ty) != t:
             raise Refused("state %s: the module's type is not the blob's" % n)
     for a in f["A"]:
         if a not in acts:
@@ -147,12 +173,14 @@ def _load(eng, x, blob, f):
     r = x.load(blob, eng._page_id(), VARIANT)
     if r < 0:
         raise Refused(x.error())
-    eng._slot = dict((n, i) for i, n in enumerate(names))
+    eng._slot = dict((n, i) for i, n in enumerate(names) if types[i] != DOC)
     eng._names = list(names)
-    eng._types = [st._t[n] for n in names]
+    eng._types = types
+    eng._docs = dict((n, [-1] * 8) for n, t in zip(names, types) if type(t) is S.Doc)
     eng._acts = [acts[a] for a in f["A"]]
     eng._aidx = dict((a, i) for i, a in enumerate(f["A"]))
     eng._draws, eng._grounds = draws, f["G"]
+    eng.unfront(f["X"])
     x.on_draw(eng._draw)
     eng._drawing = True
     for name in names:

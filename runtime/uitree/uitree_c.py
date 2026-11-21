@@ -15,6 +15,8 @@ only: the commit's writes are pushed to C's slots at its end, and the
 engine's own writes (a toggle, a list's cursor) are pulled back before any
 handler runs. Same app file, same trace, same pixels as `uitree_app.Engine`."""
 
+import sys
+
 import ui as _v
 import ui_draw as _D
 
@@ -92,15 +94,15 @@ class _TextEditor:
     (`uitree_editor.Engine._r_text_editor`): its key, its literal props and
     its conditions, which the store evaluates (`cond_of`)."""
 
-    def __init__(self, eng, node, n):
-        self.key = n.key
+    def __init__(self, eng, node, key, l, conds):
+        self.key = key
         self.kind = "text_editor"
-        self.parts = (n.key + ".caret", n.key + ".word")
-        self.l = dict((k, n.l[k]) for k in ("find", "marks") if k in n.l)
+        self.parts = (key + ".caret", key + ".word")
+        self.l = dict((k, l[k]) for k in ("find", "marks") if k in l)
+        self.conds = conds      # of "gutter", "find_on": the ones its page names
         self.p = {}
-        for k in ("gutter", "find_on"):
-            if k in n.src:
-                self.p[k] = self._cond(eng, node, k)
+        for k in conds:
+            self.p[k] = self._cond(eng, node, k)
 
     @staticmethod
     def _cond(eng, node, k):
@@ -175,7 +177,7 @@ class CEngine(Engine):
         """The first page's compiled blob (uitree_aot), where the image has
         one: the store filled with no declaration, build or lowering call. A
         blob this front end does not take is said once and the page built."""
-        blob = None if self.PLACED else _aot.blob_for(self.pages[0])
+        blob = _aot.blob_for(self.pages[0])
         if blob is None:
             return False
         try:
@@ -478,11 +480,14 @@ class CEngine(Engine):
     def _ready(self):
         """The page built and checked by the reference's Builder, lowered into
         the store, and the Python tree let go: `root` is then `LOWERED`."""
+        if self.root is None:
+            self._made()
+            if self._lowered is not None and self._lowered is self.pages[0] and len(self.pages) == 1:
+                self.root = LOWERED         # the store holds the page from a compiled blob
         if self._loaded:            # the build a compiled page stands for, counted and traced as one
             self._loaded = False
             self._built_as_loaded()
         if self.root is None:
-            self._made()
             self._build()
             self.lower(self.root)
             self.root = LOWERED
@@ -552,7 +557,7 @@ class CEngine(Engine):
             if nk == "canvas" and l and l.get("ground"):
                 grounds[me] = l["ground"]
             elif nk == "text_editor":
-                editors[me] = _TextEditor(self, me, n)
+                editors[me] = _TextEditor(self, me, n.key, n.l, tuple(k for k in ("gutter", "find_on") if k in n.src))
             if nk == "seg" and "labels" in l:
                 r = cprop(me, "labels", l["labels"], None)
                 if r < 0:
@@ -643,6 +648,64 @@ class CEngine(Engine):
         for name in self._docs:
             got = [f for f in S.DOC_FIELDS if any((name + "." + f) in t for t in srcs)]
             reads[name] = tuple(got)
+
+    def front(self):
+        """What the front end keeps beside the store once a page is lowered,
+        as literals a compiled page carries (`uitree_aot.front`): each
+        canvas's pointer action, each popover's list and whether a field of
+        its own takes keys, the document fields the page reads, each text
+        editor, each pane, panes and legacy stand-in. A prop's value is kept
+        as itself (0), a dict as its items (1), a function as its name in
+        the page's module (2); a dict of conditions is the store's alone."""
+        mod = sys.modules[_aot._module(self.pages[0])]
+
+        def lits(d):
+            out = []
+            for k, v in d.items():
+                if type(v) is dict:
+                    if not any(callable(x) for x in v.values()):
+                        out.append((k, tuple(v.items()), 1))
+                elif type(v) is S.Action:
+                    continue
+                elif callable(v):
+                    name = getattr(v, "__name__", "")
+                    if getattr(mod, name, None) is not v:
+                        raise _aot.Refused("%s=%r is not a function of its module" % (k, v))
+                    out.append((k, name, 2))
+                else:
+                    out.append((k, v, 0))
+            return tuple(out)
+        stand = list(self._pn.items()) + list(self._legacy.items())
+        stand.sort(key=lambda kv: kv[0])
+        return (tuple((k, a.name) for k, a in self._pointers),
+                tuple((k, m, c) for k, (m, c) in self._pop_lists.items()),
+                tuple(self._pop_fields.items()),
+                tuple(self._doc_reads.items()),
+                tuple((node, te.key, tuple(te.l.items()), te.conds) for node, te in self._editors.items()),
+                tuple((node, m.kind, m.key, m.parent.aux if m.parent is not None else -1, tuple(m.where),
+                       lits(m.src), lits(m.l)) for node, m in stand))
+
+    def unfront(self, f):
+        """`front`'s literals made again into what lowering leaves the front end."""
+        acts, mod = self.actions, sys.modules[_aot._module(self.pages[0])]
+
+        def made(v, d):
+            return v if d == 0 else dict(v) if d == 1 else getattr(mod, v)
+        self._pointers = [(k, acts[a]) for k, a in f[0]]
+        self._pop_lists = dict((k, (m, c)) for k, m, c in f[1])
+        self._pop_fields = dict(f[2])
+        self._doc_reads = dict(f[3])
+        self._editors = dict((node, _TextEditor(self, node, key, dict(l), conds)) for node, key, l, conds in f[4])
+        pn, lg = self._pn, self._legacy = {}, {}
+        for node, kind, key, parent, where, src, l in f[5]:
+            m = _PaneNode(kind, key, where)
+            m.src = dict((k, made(v, d)) for k, v, d in src)
+            m.l = dict((k, made(v, d)) for k, v, d in l)
+            if parent >= 0:
+                m.parent = pn[parent]
+                m.parent.kids.append(m)
+            m.aux = node
+            (lg if kind == "legacy" else pn)[node] = m
 
     def _draw(self, node, x, y, w, h):
         """A canvas's draw, called by the walk inside the frame at its rect."""

@@ -1080,14 +1080,16 @@ class EditorDesk(Layer):
         ws.bar_layer.draw_status_strip("menu")
         self._dock()
 
-    def pane_body(self, key, dt):
-        """The body of the page's pane `key` (its legacy node's draw): its
-        card, then its tab's surface, the Run slot or the Map's parts."""
+    def pane_body(self, dt):
+        """The body of the pane whose legacy node the page is hosting
+        (`editor_ui.pane_body`): its card, then its tab's surface, the Run
+        slot or the Map's parts."""
         ws = self.ws
         cv = ws.sys_canvas
         th = ws.theme_colors
         u = self._unit()
-        n = self._page().desk_keys.index(key)
+        page = self._page()
+        n = page.desk_keys.index(page.hosting.parent.key)
         r = pane = None
         for m, p, rr in self._drawing:
             if m == n:

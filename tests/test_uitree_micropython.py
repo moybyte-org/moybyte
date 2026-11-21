@@ -261,15 +261,17 @@ def pages(loop):
     class PaneDesk:
         def __init__(self):
             self.drawn = []
+            self.page = None
 
-        def pane_body(self, key, dt):
-            self.drawn.append(key)
+        def pane_body(self, dt):
+            self.drawn.append(self.page.hosting.parent.key)
     pd = PaneDesk()
     editor_ui._desk[0] = pd
     spaces = {}
     for key in ("settings", "code", "art", "world", "sound", "theme"):
         sp = uitree_editor.Page(editor_ui.SPACES[key], lh, Damage())
         sp.unit = 1
+        pd.page = sp
         sp.place((6, 46, 1012, 548))
         del pd.drawn[:]
         sp.draw_hosted(cv, th, 0.033)

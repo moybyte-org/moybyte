@@ -22,7 +22,7 @@ typedef struct {
 #define NFLD(t) ((int)(sizeof(t) / sizeof((t)[0])))
 
 // A slot's declaration. The rest of a slot (ver, i, f, s, sn, scap, nrows,
-// cells, at, cells_n, sync, sync_set, in_gen) is the visit's or build_end's;
+// cells, at, cells_n, sync, sync_set, in_gen, absent) is the visit's or build_end's;
 // mf is its own record (`f_fields`), after a byte saying whether it is there.
 static const uit_fld_t f_slot[] = {
     FLD(uit_slot_t, name), FLD(uit_slot_t, type), FLD(uit_slot_t, nf), FLD(uit_slot_t, key),
@@ -179,7 +179,9 @@ static int save(uit_t *e, uit_buf_t *b, const char *variant, uint32_t source, co
     head[5] = (char)(UIT_FORMAT >> 8);
     head[6] = (char)UIT_BLOB_HEAD;
     head[7] = 0;
-    if (raw(b, head, sizeof head) || text8(b, uit_str(e, e->page_id)) || text8(b, variant))
+    uint8_t placed = e->placed;
+    if (raw(b, head, sizeof head) || text8(b, uit_str(e, e->page_id)) || text8(b, variant) ||
+        raw(b, &placed, 1))
         return -1;
     if (u32(b, e->pool.n) || raw(b, e->pool.p, e->pool.n) || u32(b, (uint32_t)e->nslots))
         return -1;
@@ -365,6 +367,11 @@ int uit_load(uit_t *e, const char *blob, size_t n, const char *page_id, const ch
     if (id || var)
         return uit_fail(e, UIT_E_BLOB, UIT_MSG("a compiled page of another page or variant than %s %s",
                                                "blob page %s %s"), page_id ? page_id : "", variant ? variant : "");
+    uint8_t placed;
+    if (take(&r, &placed, 1) || placed != e->placed)
+        return uit_fail(e, UIT_E_BLOB, UIT_MSG("a compiled page %s; this store is %s",
+                                               "blob placed %s %s"), placed ? "placed" : "not placed",
+                        e->placed ? "placed" : "not placed");
     if (load(e, &r) || r.at != r.n) {
         for (int i = 0; i < e->nslots; i++) {
             UIT_FREE(e->slots[i].mf);

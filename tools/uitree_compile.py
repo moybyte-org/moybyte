@@ -47,7 +47,9 @@ except ImportError as e:            # the host library is made by a C compiler
 # The console's pages the C engine draws: the modules an image's pages are
 # compiled from, where the image stages them.
 SYSTEM = ("settings_rows", "settings_ui", "wifi_ui", "update_ui", "log_ui", "perms_ui", "about_ui",
-          "web_console_ui", "tasks_ui", "achievements_ui")
+          "web_console_ui", "tasks_ui", "achievements_ui", "editor_ui", "code_ui")
+# ...of which the Editor's: placed by the engine's layout rule (`uitree_c.CEditorEngine`)
+PLACED = ("editor_ui", "code_ui")
 
 CANNOT_RUN = 3
 
@@ -94,7 +96,8 @@ def compile_module(target, out):
     for name in pages:
         fn = getattr(mod, name)
         page = uitree_aot.key(fn)
-        eng = uitree_c.CEngine(decl, fn, None, None, None)
+        eng = (uitree_c.CEditorEngine if mod.__name__.rpartition(".")[2] in PLACED else uitree_c.CEngine)(
+            decl, fn, None, None, None)
         try:
             eng._made()
             eng._build()

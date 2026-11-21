@@ -121,6 +121,7 @@ class Engine(uitree_app.Engine):
         self.legacies = {}         # key -> (node, rect), as this frame's pass drew it
         self.legacy_gens = {}      # key -> its gen() when its body was drawn
         self.held_legacy = None    # (node, rect) a press holds until its release
+        self.hosting = None        # the legacy node whose body `draw_hosted` is drawing
         # the panes: their splits as drawn, pane focus, the divider's flash
         self.du = 1                # the desk unit, this frame's
         self.unit = 0              # a host's desk unit (0: the engine's, from the font scale)
@@ -279,6 +280,7 @@ class Engine(uitree_app.Engine):
             for n, row, r in self.placed:
                 focused = self.focused is not None and self.focused[0] is n
                 _NOW.app, _NOW.frame = self, False
+                self.hosting = n
                 n.l["draw"](cv, th, r[0], r[1], r[2], r[3], focused, dt)
                 cv.clip()
                 if "gen" in n.l:
@@ -286,6 +288,7 @@ class Engine(uitree_app.Engine):
                     self.legacy_gens[n.key] = n.l["gen"]()
         finally:
             _NOW.app, _NOW.frame = was
+            self.hosting = None
 
     def draw_splits(self):
         """The last placement's dividers drawn into the verbs pass the host

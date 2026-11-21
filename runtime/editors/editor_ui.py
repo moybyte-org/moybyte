@@ -163,10 +163,10 @@ _WHEN = {"cards": "has_cards", "code": "has_code", "blocks": "has_blocks",
          "song": "has_music", "game": "game"}
 
 
-def _body(key):
-    def draw(cv, th, x, y, w, h, focused, dt):
-        _desk[0].pane_body(key, dt)
-    return draw
+def pane_body(cv, th, x, y, w, h, focused, dt):
+    """A pane's body (its legacy node's draw): the desk draws the content
+    of the pane the node being hosted is in."""
+    _desk[0].pane_body(dt)
 
 
 def _one(c, also=None, **p):
@@ -175,7 +175,7 @@ def _one(c, also=None, **p):
     label, icon, _tab, least = CONTENTS[c]
     when = " & ".join(w for w in (_WHEN.get(c), also) if w) or None
     with ui.pane(c, title=label, icon=icon, min=least, shown=when, **p):
-        ui.legacy("body", draw=_body(c))
+        ui.legacy("body", draw=pane_body)
 
 
 def _tabbed(key, tabs, **p):
@@ -184,7 +184,7 @@ def _tabbed(key, tabs, **p):
     off = dict((c, _WHEN[c]) for c in vals if c in _WHEN)
     with ui.pane(key, tabs=tabs, labels="PANES", offered=off or None,
                  min=dict((c, CONTENTS[c][3]) for c in vals), **p):
-        ui.legacy("body", draw=_body(key))
+        ui.legacy("body", draw=pane_body)
 
 
 def settings_space():

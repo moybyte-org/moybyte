@@ -301,7 +301,7 @@ int uit_stats(const uit_t *e, int32_t out[8]);
 // change to what a blob holds; the layout hash is this engine's own, over
 // every record's fields and widths and the numbers they hold, and a blob of
 // another format or layout is refused, never read.
-#define UIT_FORMAT 1
+#define UIT_FORMAT 2
 #define UIT_BLOB_HEAD 32
 uint32_t uit_layout_hash(void);
 // The store after a build's lowering (its declarations and its one page) as
@@ -313,7 +313,8 @@ int uit_save(uit_t *e, char *buf, size_t cap, const char *variant, uint32_t sour
              size_t nfront);
 // A new store filled from a blob of page `page_id`, variant `variant`, as
 // uit_build_end leaves a build: 0, or UIT_E_BLOB naming why it is refused
-// (format, layout, damage, another page, a store not new). The blob is
+// (format, layout, damage, another page, placed where the store is not or
+// the other way, a store not new). The blob is
 // copied; the caller may let it go.
 int uit_load(uit_t *e, const char *blob, size_t n, const char *page_id, const char *variant);
 // Every engine's blocks together: [0] bytes live, [1] the most live since the

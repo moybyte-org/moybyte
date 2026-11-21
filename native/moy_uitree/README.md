@@ -29,7 +29,7 @@ The blob, every number little-endian at its own width:
 | at | bytes | what |
 |---|---|---|
 | 0 | 4 | `MUIT` |
-| 4 | 2 | the format, `UIT_FORMAT` (1) |
+| 4 | 2 | the format, `UIT_FORMAT` (2) |
 | 6 | 2 | the header's length, `UIT_BLOB_HEAD` (32) |
 | 8 | 4 | the layout hash of the engine that wrote it (`uit_layout_hash`) |
 | 12 | 4 | the source hash: FNV-1a over the page's module and the engine's sources (`tools/uitree_compile.py`) |
@@ -37,7 +37,7 @@ The blob, every number little-endian at its own width:
 | 20 | 4 | the blob's length |
 | 24 | 4 | the front end's part: its offset |
 | 28 | 4 | and its length |
-| 32 | 1 + n | the page's id (`"1 rows_page"`), then the variant, each a length byte and its bytes |
+| 32 | 1 + n | the page's id (`"1 rows_page"`), then the variant, each a length byte and its bytes; then one byte, 1 where the store is placed (`uit_set_placed`: the Editor's pages) |
 
 Then the store's sections, each a count (4 bytes) and its records, each record
 its fields in the order `moy_uitree_aot.c`'s field tables list them, at their
@@ -48,11 +48,18 @@ props; the dialogs' buttons (2 bytes each); then the six marks (where the
 declarations end in the pool, templates, ops, conditions and terms, and the
 page id's pool offset). Last, the front end's part, text lines: `S` the
 states in slot order, `T` their type codes, `A` the actions in their order,
-`D` each canvas's draw function (`node:name`), `G` each canvas's ground role.
+`D` each canvas's draw function (`node:name`), `G` each canvas's ground role,
+`X` the rest of what the front end keeps beside the store once a page is
+lowered, as one literal (`uitree_c.CEngine.front`): each canvas's pointer
+action, each popover's list and whether a field of its own takes keys, the
+document fields the page reads, each text editor, and each panes, pane and
+legacy node's stand-in (its props, a function by its name in the page's
+module). A document is its state's slot (a row_of) and its hidden model's
+(`NAME#doc`), both in `S`.
 
 The layout hash folds the format, every field table's widths, every kind's
 name and the last value of each numbering a record holds. A blob whose
-format, layout, length, checksum or page is not this engine's is refused by
+format, layout, length, checksum, page or placing is not this engine's is refused by
 name (`UIT_E_BLOB`), never read; `uitree_aot.load` refuses one naming a state
 or action its module does not declare, or a state of another type, and the
 front end then builds the page as it would with no blob.
