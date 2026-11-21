@@ -81,6 +81,7 @@ typedef struct {
     int writable_ok;            // the cart's "writable" is a list of strings
     moy_cat_int_t version, memory;
     moy_cat_int_t audio_ring;   // moybyte.audio_ring: the render-ahead ring's depth
+    moy_cat_int_t api;          // moybyte.api: the console API level the cart needs
     int graduated;
     int glass;                  // a per-glass wallpaper: moybyte.glass is JSON true
     int animates;               // an app drawn every frame: moybyte.animates is JSON true

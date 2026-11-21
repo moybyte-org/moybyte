@@ -200,7 +200,7 @@ from player_fit import (_nativize, _verdict, _exc_cart_line, RUNTIME_NAMES, _com
                         INTERP_NOTICE_TITLE, INTERP_NOTICE_SUB, INTERP_NOTICE_SUB_DEFAULT,
                         _Refused, newer_notice, fit_notice, _cart_fit, _fits, _cart_unbuilt,
                         _cart_missing, _out_of_memory, _lua_err_text, _lua_cart_where,
-                        _format_newer)
+                        _format_newer, _api_newer)
 from player_diag import PlayerDiag, _heap_stats, _moycore_sram
 from scheduler import allocated as _allocated, ALLOC_WRAP as _ALLOC_WRAP
 
@@ -872,7 +872,7 @@ class Player(PlayerDiag):
         cart = self._begin_run(ws, project, t0)
         self._log_begin(cart)
         self.verdict = _verdict(cart)
-        newer = _format_newer(cart)
+        newer = _format_newer(cart) or _api_newer(cart)
         if newer is not None:
             return self._refuse_notice(newer_notice([newer]),
                                        _ch.say_title(_ch.SAY_NEWER))

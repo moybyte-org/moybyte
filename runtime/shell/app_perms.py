@@ -89,7 +89,7 @@ asks for `full_access` too where its native module runs (`perms_of`,
 `full_access`, consented and on, is the choice (`native_opted`)."""
 
 import moy_app as _moy_app
-from moy_store_base import builtin_name, id_in_folder, vendor
+from moy_store_base import builtin_name, id_in_folder, vendor, api_of, api_above, API_LEVEL
 
 ALL = ("python", "lua", "wasm", "elf")
 
@@ -197,6 +197,9 @@ UNASKED_REFUSAL = "needs your OK - open it to say yes"
 
 # A launch of a cart whose installed version its store withdrew.
 REVOKED_REFUSAL = "was taken back by its store - remove it, or update it in Get Carts"
+
+# A run or an install of a cart that needs a console API level above this one's.
+NEWER_REFUSAL = "needs API level %d - this console has %d: update it in Settings"
 
 # A raw lease's line: full access to one of the board's resources (the
 # overview's section 4).
@@ -451,8 +454,12 @@ def check(cart, rec, have):
     `granted` and `absent` split the manifest's permissions; `refusal` is
     the message naming the first `required` permission that is absent, or
     the first that no tier of the cart's serves (`_served`: a Lua or wasm
-    cart's `network`, whose door is `http`), else None."""
+    cart's `network`, whose door is `http`), else None. A cart whose `api`
+    names a console API level above this one's is refused first."""
     perms = perms_of(cart, rec if rec is not UNASKED else None)
+    newer = api_above(cart.get("api")) if cart else None
+    if newer is not None:
+        return [], list(perms), NEWER_REFUSAL % (newer, API_LEVEL)
     if rec is UNASKED:
         return [], list(perms), UNASKED_REFUSAL
     if rec is not None and rec.get("revoked"):
@@ -526,8 +533,8 @@ def absent_names(absent, rec):
 def manifest_cart(man, folder, root=None):
     """What the checks read of a cart, from its manifest `man` (a dict) and
     its `folder` name in the store `root`: id (`id_in_folder`'s, the
-    shelf's), title, runtime, type, permissions, required, native and
-    entries, as the store's cart dict carries them."""
+    shelf's), title, runtime, type, permissions, required, native, entries
+    and api, as the store's cart dict carries them."""
     ven = vendor(man)
     cid = man.get("id") if isinstance(man, dict) else None
     cid = id_in_folder(cid, (root.rstrip("/") + "/" if root else "") + folder)
@@ -540,7 +547,7 @@ def manifest_cart(man, folder, root=None):
             "permissions": perms if isinstance(perms, list) else [],
             "required": req if isinstance(req, list) else [],
             "native": chips if isinstance(chips, list) else None,
-            "entries": ven.get("entries")}
+            "entries": ven.get("entries"), "api": api_of(man)}
 
 
 def app_id(cart):

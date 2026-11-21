@@ -222,6 +222,7 @@ def _entry(at, e):
          "memory": _int_of(e.memory, None) if e.compiled else None,
          "writable": _json(e.writable, None) if e.writable_ok else None,
          "audio_ring": _int_of(e.audio_ring, None),
+         "api": _int_of(e.api, None),
          "version": _int_of(e.version, 0),
          "format": _json(e.format, "moybyte-cart-v1"),
          "graduated": bool(e.graduated), "glass": bool(e.glass), "wasi": bool(e.wasi),

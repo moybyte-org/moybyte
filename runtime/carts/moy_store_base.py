@@ -244,7 +244,16 @@ VENDOR_KEY = "moybyte"
 VENDOR_FIELDS = ("type", "system", "order", "permissions", "required", "handles", "receives",
                  "achievements", "config", "edit", "targets", "app", "assets",
                  "graduated", "glass", "pictures", "animates", "native", "audio_ring",
-                 "entries", "wasi", "fixture", "seed")
+                 "entries", "wasi", "fixture", "seed", "api")
+
+# The console API level (docs/app_api_v1.md, "The API level"): one integer that
+# goes up whenever any app-facing table grows or changes. A cart names the level
+# it needs as `"moybyte": {"api": N}`; one that names none needs API_LOWEST.
+# tools/api_level.py writes the line below it, the fingerprint of the tables at
+# this level, and tests/test_api_level.py fails a table that moves without it.
+API_LEVEL = 1
+# API fingerprint: level 1 sha256 74bc6d309b19c4457242a672af74a8fe5db15e3fb7a43e3b49bc989397630126
+API_LOWEST = 1
 
 
 def vendor(man):
@@ -252,6 +261,25 @@ def vendor(man):
     an object)."""
     v = man.get(VENDOR_KEY) if isinstance(man, dict) else None
     return v if isinstance(v, dict) else {}
+
+
+def api_of(man):
+    """The API level the manifest `man` names (`"moybyte": {"api": N}`),
+    raw: None when it names none."""
+    return vendor(man).get("api")
+
+
+def api_above(level):
+    """`level`, a cart's API level as its manifest, its catalogue entry or its
+    index entry carries it, when it is above API_LEVEL; else None. One that is
+    absent or no positive integer reads as API_LOWEST."""
+    return level if type(level) is int and level > API_LEVEL else None
+
+
+def api_text(level):
+    """Why a cart that needs API level `level` waits for a newer firmware."""
+    return ("Needs a newer firmware: it uses API level %d, this console has %d. "
+            "Update in Settings." % (level, API_LEVEL))
 
 
 def unseeded(man):

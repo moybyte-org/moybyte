@@ -5,6 +5,7 @@
 #   _compiled             a compiled ("runtime": "wasm") cart
 #   newer_notice          the notice for a cart built for a newer console
 #   _format_newer         a cart whose format level is above this console's
+#   _api_newer            a cart whose console API level is above this console's
 #   fit_notice            the notice for a cart too big to load
 #   _cart_fit             what a cart's load needs against what the console has; _fits its verdict
 #   _out_of_memory        a start that failed for want of memory
@@ -29,6 +30,7 @@ import sys
 import chrome_ops as _ch
 from widgets import _err_text
 import moy_carts as _carts
+from moy_store_base import api_above as _api_above
 import moy_play as _moy_play
 
 
@@ -193,6 +195,14 @@ def _format_newer(cart):
     if not digits or digits[0] == "0" or any(d not in "0123456789" for d in digits):
         return None
     return fmt if int(digits) > FORMAT_LEVEL else None
+
+
+def _api_newer(cart):
+    """"API level N" when the cart's `api` (its manifest's `moybyte.api`)
+    names a console API level above moy_store_base.API_LEVEL, else None: a
+    cart refused the way a newer `format` is."""
+    level = _api_above((cart or {}).get("api"))
+    return None if level is None else "API level %d" % level
 
 
 def newer_notice(missing):

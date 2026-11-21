@@ -51,6 +51,12 @@ cart above it, in any language, is refused before any of its code runs, on the
 that names no level, such as the `"moybyte-cart-v1"` a cart made here carries, is a
 Moybyte cart and runs.
 
+The game verbs are moy-spec's and `format` is their level. What a cart uses of
+Moybyte's own (an app's calls, permissions and manifest fields) has its own level,
+the console API level, which the cart names as `"moybyte": {"api": N}`: none
+named is the lowest, and a console below it refuses the cart on the same notice
+(`docs/app_api_v1.md` §2, "The API level").
+
 Three more manifest fields say what the cart is in a list (SPEC.md §3.7), and
 none of them is ever a reason to refuse it: `description` (plain text, at most
 240 bytes), `genre` (one of twelve words; any other is no genre) and `tags` (at

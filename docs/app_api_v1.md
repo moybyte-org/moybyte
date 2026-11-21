@@ -182,7 +182,33 @@ absent (`runtime/carts/moy_store_base.py`, `VENDOR_KEY`):
 | `assets` | a cart's scenes, in order | `docs/moy_cart_api.md`, Scenes |
 | `glass`, `pictures` | a wallpaper drawn per glass, a picture wallpaper | `docs/theme_and_shell_2026-11.md` §3.9 |
 | `graduated` | written by the Editor when blocks become code; never by hand | `runtime/editors/blocks.py` |
+| `api` | the console API level the cart needs (an integer); none is the lowest | "The API level", below |
 | `system`, `order`, `targets`, `app`, `fixture`, `seed` | the seed carts' (`system_carts/`): a system cart, its place, the targets it ships to, a shipped app's declaration, `true` for a test fixture, which only the host seeds: no console image or browser bundle carries it and no release publishes it as an official cart; and `seed: false` for an official cart no store is seeded with: the release publishes it, Get Carts installs it, and no image, browser bundle or host store carries it | §13 |
+
+### The API level
+
+The console API level is ONE integer, `API_LEVEL` in
+`runtime/carts/moy_store_base.py`, that goes up whenever anything an app can
+reach grows or changes: a row, role, permission or error code of
+`native/os_calls.json` (and with it every tier's names: Python, Lua, `ui`, the
+compiled and WASI imports, the ELF table), a manifest field
+(`moy_store_base.VENDOR_FIELDS`), or the moy-spec format level the console runs
+(`runtime/run/player_fit.py`'s `FORMAT_LEVEL`). `tools/api_level.py` pins a
+fingerprint of those tables on the line below the level, and
+`tests/test_api_level.py` fails a table that changes while the level stands; the
+fix it names is to bump `API_LEVEL` and re-pin with `tools/api_level.py`.
+
+A cart names the level it needs as `"moybyte": {"api": N}`, the lowest level
+that has everything it uses; a cart that names none needs the lowest, 1. A
+console at that level or above runs it. Below it, the launch is refused
+before any of the cart's code runs, on the "Needs a newer console." notice a
+newer `format` gets (the Player), or with the refusal a service, command or
+install reads (`runtime/shell/app_perms.py`).
+
+**The rule, from the first public release (owner, 2026-11-21):** the API is
+add-only. A level adds; it never removes or repurposes anything a lower level
+had, so a cart that ran at level N runs at every level above it. How a breaking
+change is made is decided when there are user apps.
 
 ## 3. Drawing an app
 

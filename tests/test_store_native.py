@@ -139,10 +139,10 @@ _KEYS = ("title", "author", "type", "runtime", "main", "format", "version",
          "memory", "writable", "graduated", "fps", "palette", "extensions",
          "icon", "edit", "permissions", "required", "input", "canvas", "assets", "id",
          "config", "sources", "description", "genre", "tags", "glass", "pictures",
-         "audio_ring", "handles", "animates")
+         "audio_ring", "handles", "animates", "api")
 _VENDOR = ("type", "graduated", "edit", "permissions", "required", "handles", "assets", "config",
            "glass", "animates",
-           "pictures", "audio_ring")
+           "pictures", "audio_ring", "api")
 
 
 _LISTING = json.load(open(os.path.join(ROOT, "tests", "listing_vectors",

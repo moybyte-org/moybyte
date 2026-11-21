@@ -65,6 +65,7 @@ class moy_cat_entry_t(_c.Structure):
         ("version", moy_cat_int_t),
         ("memory", moy_cat_int_t),
         ("audio_ring", moy_cat_int_t),
+        ("api", moy_cat_int_t),
         ("graduated", _c.c_int),
         ("glass", _c.c_int),
         ("animates", _c.c_int),
