@@ -127,6 +127,7 @@ class CEngine(Engine):
         self._draws, self._drawing = {}, False
         self._grounds = {}      # a canvas's ground= role, by its node
         self._docs = {}         # a document's state -> what it was pushed at (`_push_doc`)
+        self._doc_reads = {}    # ...and the fields of it the lowered page reads
         self._editors = {}      # a text editor's node -> its stand-in (`_TextEditor`)
         self._pointers = []     # (key, its pointer= action) of each canvas a pointer is routed to
         self._held = None       # (key, action, rect): the canvas a press holds until its release
@@ -312,8 +313,12 @@ class CEngine(Engine):
         ed = d.ed
         sig[0], sig[1], sig[2], sig[3] = ed.edits, ed.row, ed.col, len(ed.lines)
         sig[4], sig[5], sig[6], sig[7] = d.find_q, d.find_ci, ed.sel, ed.left
+        reads = self._doc_reads.get(name, ())
         cells = ["1"]
         for f, ft in S.DOC_FIELDS.items():
+            if f not in reads:              # a field no template of the page reads: never asked
+                cells.append("0" if ft is not S.TEXT else "")
+                continue
             c = getattr(d, f)
             cells.append(("1" if c else "0") if ft is S.BOOL else str(c))
         m = self._slot[name] - 1
@@ -430,6 +435,8 @@ class CEngine(Engine):
             self.lower(self.root)
             self.root = LOWERED
             self._lowered = self.pages[-1]
+            for name in self._docs:
+                self._push_doc(name, self.s._v[name])     # the fields the lowered page reads
 
     def lower(self, root):
         """The checked tree into the store: one node call a node, one prop call
@@ -449,6 +456,7 @@ class CEngine(Engine):
         pointers = self._pointers = []
         pop_lists = self._pop_lists = {}
         pop_fields = self._pop_fields = {}
+        srcs = []
 
         def node(n, parent, lent=False):
             nk, l = n.kind, n.l
@@ -513,7 +521,8 @@ class CEngine(Engine):
                     if type(v) is action or not callable(v):     # a compiled template keeps no literal
                         rep = repr(v)
                 if type(src) is str:
-                    pass
+                    if "." in src:
+                        srcs.append(src)
                 elif k == "offered" and nk == "tabs":
                     for v, when in src.items():     # one prop a value: its condition, the value its repr
                         r = cprop(me, k, when, v) if type(when) is str else E_GAP
@@ -559,16 +568,21 @@ class CEngine(Engine):
                 node(k, me, lends)
         node(root, -1)
         self._ck(x.build_end(), "the build")
+        # what the page's templates and conditions read of each document: the fields pushed
+        reads = self._doc_reads = {}
+        for name in self._docs:
+            got = [f for f in S.DOC_FIELDS if any((name + "." + f) in t for t in srcs)]
+            reads[name] = tuple(got)
 
     def _draw(self, node, x, y, w, h):
         """A canvas's draw, called by the walk inside the frame at its rect."""
         now = S._NOW
-        was = now.app, now.frame
+        app, frame = now.app, now.frame       # two names, not a tuple: a frame allocates nothing
         now.app, now.frame = self, True
         try:
             self._draws[node](self.cv, x, y, w, h)
         finally:
-            now.app, now.frame = was
+            now.app, now.frame = app, frame
 
     # -- the frame -------------------------------------------------------------------
 
@@ -792,8 +806,11 @@ class CEditorEngine(CEngine, _ed.Engine):
         self._te_rect = [0, 0, 0, 0]
 
     def paint(self, dt, cv, th, content, desk):
-        g = self.ground
-        self._made().ground(*(g if g is not None else (0, 0, 0, 0)))
+        g, x = self.ground, self._made()
+        if g is None:
+            x.ground(0, 0, 0, 0)
+        else:
+            x.ground(g[0], g[1], g[2], g[3])        # no star call: a frame allocates nothing
         if self._docs:
             self._doc_moved()
         CEngine.paint(self, dt, cv, th, content, desk)
@@ -1025,7 +1042,7 @@ class CEditorEngine(CEngine, _ed.Engine):
         te = self._editors.get(node)
         if te is not None:
             now = S._NOW
-            was = now.app, now.frame
+            app, frame = now.app, now.frame
             now.app, now.frame = self, True
             try:
                 r = self._te_rect
@@ -1037,7 +1054,7 @@ class CEditorEngine(CEngine, _ed.Engine):
                         if a is not None:
                             self._x.anchor(part, a[0], a[1], a[2], a[3])
             finally:
-                now.app, now.frame = was
+                now.app, now.frame = app, frame
             return
         cv = self.cv
         cv.clip(x, y, w, h)

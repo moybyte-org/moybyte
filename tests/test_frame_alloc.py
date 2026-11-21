@@ -433,6 +433,7 @@ def measure(loop):
     periodic(loop, info)
     notes(loop, info)
     code(loop, info)
+    code(loop, info, "code_c", "c")
     apps(loop, info)
     achievements(loop, info)
     home(loop, info)
@@ -709,7 +710,7 @@ def notes_swiped(loop, info):
     info["notes_swipe"] = out
 
 
-def code(loop, info):
+def code(loop, info, tag="code", engine=None):
     """The Editor's Code tab, a `ui.text_view`: typed into (a key every
     fourth frame, the edit the editor's, outside the frame measured), then
     its view sent down the file and back by the wheel, which glides it. What each frame allocates, and what the tab's draw does: its
@@ -729,20 +730,38 @@ def code(loop, info):
         if ed is not None:
             break
         ws.spine.exit()
-    info["code_cart"] = cart.get("title")
+    info[tag + "_cart"] = cart.get("title")
+    if engine == "c":
+        # the C arm: the Code tab's page made again on the C engine, opened at its next draw
+        import uitree_app
+        import uitree_editor
+        import code_ui
+        import code_layer
+        uitree_app.use_engine("c")
+        cl = ws.code_layer
+        old = cl.page
+        cl.page = uitree_editor.page(getattr(code_ui, cl.PAGE), cl._host, code_layer._Damage(ws))
+        cl.page.host_arrows = True
+        cl.page.pointer_down = old.pointer_down
+        cl._opened = False
+        uitree_app.use_engine("reference")
     ed.set_text("\n".join("value_%d = probe(%d) + 1  # a line of the cart" % (i, i)
                           for i in range(120)))
     ed.row = 5
     ed.col = 0
     for _ in range(60):
         loop.step()
-    info["code_top"] = ws.wm.top_kind()
+    info[tag + "_top"] = ws.wm.top_kind()
     cl = ws.code_layer
     page = cl.page
+    info[tag + "_engine"] = type(page).__name__
     acc = [0, 0, 0, 0, 0]               # rows bytes, rows calls, draw bytes, status bytes, draws
     rows = page._r_text_editor
     draw = page.paint
-    status = page._r_status
+    # the status line: drawn by the reference; on the C engine drawn in C from the document's
+    # fields, which a moved caret pushes again
+    status_name = "_push_doc" if engine == "c" else "_r_status"
+    status = getattr(page, status_name)
 
     def _rows(n, row, rect):
         m = mem_alloc()
@@ -757,14 +776,15 @@ def code(loop, info):
         acc[4] += 1
         return got
 
-    def _status(n, row, rect):
+    def _status(*a):
         m = mem_alloc()
-        status(n, row, rect)
+        status(*a)
         acc[3] += mem_alloc() - m
 
     page._r_text_editor = _rows
     page.paint = _draw
-    page._r_status = _status
+    setattr(page, status_name, _status)
+    us = []
     keys = b"score = score + 1  "
 
     def typing(ms):
@@ -779,7 +799,9 @@ def code(loop, info):
                 ws.mark_dirty()
             n += 1
             a = mem_alloc()
+            t = time.ticks_us()
             loop.step()
+            us.append(time.ticks_diff(time.ticks_us(), t))
             out.append(mem_alloc() - a)
         return out
 
@@ -793,14 +815,18 @@ def code(loop, info):
     gc.collect()
     gc.disable()
     take()
-    info["code_typing"] = typing(@WINDOW_MS@)
-    info["code_typing_acc"] = take()
+    del us[:]
+    info[tag + "_typing"] = typing(@WINDOW_MS@)
+    info[tag + "_typing_acc"] = take()
+    us.sort()
+    info[tag + "_typing_us"] = us[len(us) // 2] if us else None
     gc.enable()
     for _ in range(30):
         loop.step()
     gc.collect()
     gc.disable()
     take()
+    del us[:]
     out = []
 
     class _Wheel:
@@ -813,14 +839,21 @@ def code(loop, info):
         cl._wheel(wheel)
         for _ in range(40):
             a = mem_alloc()
+            t = time.ticks_us()
             loop.step()
+            us.append(time.ticks_diff(time.ticks_us(), t))
             out.append(mem_alloc() - a)
-    info["code_glide"] = out
-    info["code_glide_acc"] = take()
+    info[tag + "_glide"] = out
+    info[tag + "_glide_acc"] = take()
     gc.enable()
+    us.sort()
+    info[tag + "_glide_us"] = us[len(us) // 2] if us else None
     del page._r_text_editor
     del page.paint
-    del page._r_status
+    delattr(page, status_name)
+    if engine == "c":
+        cl.page = old                   # the console's own page again, for the passes after
+        cl._opened = False
     ws.spine.exit()
     for _ in range(30):
         loop.step()
@@ -1814,19 +1847,29 @@ def test_a_notes_swipe_shifts_and_allocates_only_the_fingers_answers(result):
 def test_the_code_tabs_text_view_allocates_nothing_typed_or_gliding(result):
     """The Code tab draws through `ui.text_view` on every painted frame: its
     page's text editor allocates nothing, typed into or gliding, and the
-    rest of its page nothing but the status line a moved caret makes again.
+    rest of its page nothing but the status line a moved caret makes again,
+    on either engine (on the C engine the status line is C's, and what it
+    costs Python is the document's fields pushed again).
     (A frame of the Editor also pays its bar's strip, which every tab
     draws.)"""
     info, text = result
-    assert info["code_top"] == "menu", info["code_top"]
-    for what in ("typing", "glide"):
-        rows, calls, drew, status, draws = info["code_%s_acc" % what]
-        assert calls > 20 and draws > 20, "Code %s: %d text view passes" % (what, calls)
-        assert rows == 0, "Code %s: its text view's passes allocated %d bytes over %d" % (
-            what, rows, calls)
-        assert drew - status == 0, (
-            "Code %s: its draws allocated %d bytes over %d, the status line aside"
-            % (what, drew - status, draws))
+    bad = []
+    for tag, engine in (("code", "Page"), ("code_c", "CEditorPage")):
+        assert info[tag + "_top"] == "menu", info[tag + "_top"]
+        assert info[tag + "_engine"] == engine, (tag, info[tag + "_engine"])
+        for what in ("typing", "glide"):
+            rows, calls, drew, status, draws = info["%s_%s_acc" % (tag, what)]
+            print("%s %s: rows %d B over %d passes, draws %d B over %d (status %d B), frame %s us"
+                  % (engine, what, rows, calls, drew, draws, status, info["%s_%s_us" % (tag, what)]))
+            if calls <= 20 or draws <= 20:
+                bad.append("%s, Code %s: %d text view passes" % (engine, what, calls))
+            if rows:
+                bad.append("%s, Code %s: its text view's passes allocated %d bytes over %d" % (
+                    engine, what, rows, calls))
+            if drew - status:
+                bad.append("%s, Code %s: its draws allocated %d bytes over %d, the status line aside"
+                           % (engine, what, drew - status, draws))
+    assert not bad, bad
 
 
 # -- the desk Editor's Code pane -----------------------------------------------
