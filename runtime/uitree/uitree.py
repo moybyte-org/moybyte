@@ -696,7 +696,7 @@ class State:
         object.__setattr__(self, "_ver", dict.fromkeys(t, 0))
         object.__setattr__(self, "_derive", {})       # name -> its getter, in evaluation order
         object.__setattr__(self, "_dsrc", {})         # name -> (its expression, the names it reads)
-        object.__setattr__(self, "_owner", None)      # the engine whose values these are (uitree_app)
+        object.__setattr__(self, "_owner", None)      # the owning engine's [values, versions] (uitree_app)
         object.__setattr__(self, "_tickets", {})      # a load's name -> its current ticket
 
     def __getattr__(self, k):
