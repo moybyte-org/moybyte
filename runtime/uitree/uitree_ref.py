@@ -5,7 +5,6 @@
 #   Engine.settle         each list's cursor kept on a row after its model changed
 #   Engine.leave          every way out of the page: a commit field's draft is written
 #   Engine.keys           a key routed through the tree
-#   Engine.back           back: the closer's action, else a shown dialog's or popover's
 #   -- the frame          the paint pass and what it draws
 #   -- placed layout      rows, lists and cells placed by arithmetic
 #   -- input              keys and the pointer

@@ -1,3 +1,13 @@
+# Map (grep -n a name to jump there):
+#   Engine                 the Editor's kinds replayed: uitree_editor.Engine over uitree_ref.Engine
+#   Engine.place           the page's regions placed in its area
+#   Engine.draw_splits     the panes' dividers drawn
+#   Engine.point           the pointer routed through the placed regions
+#   Engine.focus_pane      a pane given the focus
+#   Engine.shown_popovers  the popovers hung from a node's part, open now
+#   Engine.keys            a key routed: popovers, the text editor's document, the rows
+#   Engine.lent            a row lent to the shell's bar, placed
+#   Page                   a page on the replayed Editor kinds hosted by a surface on today's verbs
 """The reference engine's Editor kinds (`use_engine("reference")`): the
 replay of the Editor's kinds (uitree.py EXT-4) through today's `ui` verbs,
 regions stacked down the page, rows, tabs, panes over `ui.split` with its

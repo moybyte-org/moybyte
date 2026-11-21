@@ -1,15 +1,15 @@
 # Map (grep -n a name to jump there):
-#   Engine                the Editor's kinds over uitree_app.Engine: what the C engine and the reference share
-#   Engine.hosted         the bridge's first phase: regions placed, the hosted surfaces drawn
-#   Engine.nudge          a divider moved by keys
-#   Engine._r_text_editor the text editor's options and its document's view
-#   lent_place            a lent row's cells placed
-#   Page                  a page on the Editor's kinds hosted by a surface on today's verbs
-#   page                  that page on the engine in use
-#   BarZone               the page's row lent to the shell's bar (lend="bar")
-#   BarZone.draw_zone     the lent row drawn into the bar's zone
-#   BarZone.zone_tap      a tap on the lent row
-#   BarZone.activate      a lent cell's action run
+#   Engine                 the Editor's kinds over uitree_app.Engine: what the C engine and the reference share
+#   Engine.hosted          the bridge's first phase: regions placed, the hosted surfaces drawn
+#   Engine.nudge           a divider moved by keys
+#   Engine._r_text_editor  the text editor's options and its document's view
+#   lent_place             a lent row's cells placed
+#   Page                   a page on the Editor's kinds hosted by a surface on today's verbs
+#   page                   that page on the engine in use
+#   BarZone                the page's row lent to the shell's bar (lend="bar")
+#   BarZone.draw_zone      the lent row drawn into the bar's zone
+#   BarZone.zone_tap       a tap on the lent row
+#   BarZone.activate       a lent cell's action run
 """The Editor's kinds (uitree.py EXT-4) as both engines share them: the
 panes' sizes and their rules (`fit`, `nudge`, `reset_sizes`), the hosted
 surfaces a page's regions place, the text editor's view over its document,

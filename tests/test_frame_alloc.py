@@ -731,20 +731,21 @@ def code(loop, info, tag="code", engine=None):
             break
         ws.spine.exit()
     info[tag + "_cart"] = cart.get("title")
-    if engine == "c":
-        # the C arm: the Code tab's page made again on the C engine, opened at its next draw
-        import uitree_app
-        import uitree_editor
-        import code_ui
-        import code_layer
-        uitree_app.use_engine("c")
-        cl = ws.code_layer
-        old = cl.page
-        cl.page = uitree_editor.page(getattr(code_ui, cl.PAGE), cl._host, code_layer._Damage(ws))
-        cl.page.host_arrows = True
-        cl.page.pointer_down = old.pointer_down
-        cl._opened = False
-        uitree_app.use_engine("reference")
+    # the Code tab's page made again on the arm's engine (C, else the reference), opened at its
+    # next draw
+    import uitree_app
+    import uitree_editor
+    import code_ui
+    import code_layer
+    was = uitree_app.engine_in_use()
+    uitree_app.use_engine("c" if engine == "c" else "reference")
+    cl = ws.code_layer
+    old = cl.page
+    cl.page = uitree_editor.page(getattr(code_ui, cl.PAGE), cl._host, code_layer._Damage(ws))
+    cl.page.host_arrows = True
+    cl.page.pointer_down = old.pointer_down
+    cl._opened = False
+    uitree_app.use_engine(was)
     ed.set_text("\n".join("value_%d = probe(%d) + 1  # a line of the cart" % (i, i)
                           for i in range(120)))
     ed.row = 5
