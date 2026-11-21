@@ -54,19 +54,27 @@ lowered, as one literal (`uitree_c.CEngine.front`): each canvas's pointer
 action, each popover's list and whether a field of its own takes keys, the
 document fields the page reads, each text editor, and each panes, pane and
 legacy node's stand-in (its props, a function by its name in the page's
-module). A document is its state's slot (a row_of) and its hidden model's
-(`NAME#doc`), both in `S`.
+module), and `O` what each state's slot keeps by index, in the store's
+order (`uitree_aot.orders`): a model's fields (`Model.order`, sorted), a
+document's row's (`doc`, then `DOC_ORDER`, sorted), an enum's values, None
+for the rest. A document is its state's slot (a row_of) and its hidden
+model's (`NAME#doc`), both in `S`.
 
 The layout hash folds the format, every field table's widths, every kind's
 name and the last value of each numbering a record holds. A blob whose
 format, layout, length, checksum, page or placing is not this engine's is refused by
 name (`UIT_E_BLOB`), never read; `uitree_aot.load` refuses one naming a state
-or action its module does not declare, or a state of another type, and the
+or action its module does not declare, a state of another type, or a
+state whose fields or values this Python orders otherwise than `O`, and the
 front end then builds the page as it would with no blob.
 
 Slots are bound by name: a board's dicts keep another order than the host's,
 so the store's slot order is the blob's and the front end's `_names` follow
-it. The image's frozen `uitree_pages` module holds each blob with its front
+it. Nothing the store numbers takes a dict's order: fields go in sorted
+order, and `O` refuses a blob whose numbering this Python would read
+otherwise. `tests/test_uitree_aot.py` loads every page on the boards'
+MicroPython and holds its frame to the built one, and on the host walks
+every declaration dict the other way. The image's frozen `uitree_pages` module holds each blob with its front
 part already read (`uitree_aot.entry`), its names a frozen tuple. A board
 build that takes this module writes it into its staged modules
 (`moybyte_stage_uitree_pages` in `tools/esp32_build_lib.sh`, which runs
