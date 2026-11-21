@@ -294,6 +294,13 @@ static mp_obj_t eng_rect(mp_obj_t self, mp_obj_t key)
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(eng_rect_obj, eng_rect);
 
+// cond_of(node, name) -> 1, 0, or -1 where the node has no such condition
+static mp_obj_t eng_cond_of(mp_obj_t self, mp_obj_t node, mp_obj_t name)
+{
+    return MP_OBJ_NEW_SMALL_INT(uit_cond_of(eng(self), mp_obj_get_int(node), CSTR(name)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(eng_cond_of_obj, eng_cond_of);
+
 #define LENT_MAX 32
 #define LENT_TEXT 4096
 
@@ -580,6 +587,7 @@ static const mp_rom_map_elem_t eng_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_place), MP_ROM_PTR(&eng_place_obj) },
     { MP_ROM_QSTR(MP_QSTR_rect), MP_ROM_PTR(&eng_rect_obj) },
     { MP_ROM_QSTR(MP_QSTR_lent), MP_ROM_PTR(&eng_lent_obj) },
+    { MP_ROM_QSTR(MP_QSTR_cond_of), MP_ROM_PTR(&eng_cond_of_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_absent), MP_ROM_PTR(&eng_set_absent_obj) },
     { MP_ROM_QSTR(MP_QSTR_lent_place), MP_ROM_PTR(&eng_lent_place_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame), MP_ROM_PTR(&eng_frame_obj) },

@@ -384,6 +384,12 @@ int uit_cond_compile(uit_t *e, const char *src, int model)
     if (sat < 0 || sat >= (int)UIT_NONE)
         return UIT_E_NOMEM;
     uit_cond_t C = {(uint16_t)sat, (uint16_t)e->nterms, 0, (uint8_t)any};
+    if (!strcmp(src, "True") || !strcmp(src, "False")) {
+        // a literal (focus=True): no terms, true as an empty "&", false as an empty "|"
+        C.any = src[0] == 'F';
+        e->conds[e->nconds] = C;
+        return e->nconds++;
+    }
     char sep = any ? '|' : '&';
     const char *p = src;
     for (;;) {

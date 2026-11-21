@@ -2825,6 +2825,15 @@ static void place_at(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, i
         moy_ui_api_at(c, r[0], r[1], r[2], r[3]);
         draw_canvas_at(e, c, s, k, model, row);
         return;
+    case UIT_TEXT_EDITOR: {
+        // its document is the front end's: it draws the editor's rows in the rect, under the
+        // node's id (a stop)
+        const char *key = uit_str(e, N->key);
+        id_put(e, k, model, row, key);
+        if (e->draw_fn)
+            e->draw_fn(e->draw_ud, k, r[0], r[1], r[2], r[3]);
+        return;
+    }
     }
     moy_ui_api_at(c, r[0], r[1], r[2], r[3]);
     draw(e, c, s, k, model, row);

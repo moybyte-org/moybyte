@@ -823,6 +823,18 @@ static int add_prop(uit_t *e, int node, const char *name, const char *src, const
     return 0;
 }
 
+int uit_cond_of(uit_t *e, int node, const char *name)
+{
+    if (node < 0 || node >= e->nnodes)
+        return UIT_E_ARG;
+    for (int p = e->nodes[node].props; p != (int)UIT_NONE; p = e->props[p].next) {
+        const uit_prop_t *P = &e->props[p];
+        if (P->kind == PK_COND && !strcmp(uit_str(e, P->name), name))
+            return uit_cond_eval(e, P->idx, -1, -1);
+    }
+    return -1;
+}
+
 int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *repr)
 {
     if (node < 0 || node >= e->nnodes)
@@ -979,6 +991,14 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         if (c < 0)
             return c;
         N->mark = (int16_t)c;
+        return add_prop(e, node, name, src, repr, PK_COND, c);
+    }
+    if (kind == UIT_TEXT_EDITOR && (!strcmp(name, "find") || !strcmp(name, "marks")))
+        return add_prop(e, node, name, src, repr, PK_LIT, 0);       // the front end's: it draws the editor
+    if (kind == UIT_TEXT_EDITOR && (!strcmp(name, "find_on") || !strcmp(name, "gutter"))) {
+        int c = uit_cond_compile(e, src, model);
+        if (c < 0)
+            return c;
         return add_prop(e, node, name, src, repr, PK_COND, c);
     }
     if (!strcmp(name, "ground") && kind == UIT_CANVAS)

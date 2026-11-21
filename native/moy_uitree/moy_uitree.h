@@ -157,6 +157,10 @@ int uit_place(uit_t *e, int x, int y, int w, int h, int flags, int fs);
 // into out, else 0 (not placed: hidden, lent, inside a flow).
 int uit_rect(const uit_t *e, const char *key, int32_t out[4]);
 
+// Node `node`'s condition prop `name` now (a text editor's gutter=, which its
+// front end draws by): 1 or 0, -1 where it has none.
+int uit_cond_of(uit_t *e, int node, const char *name);
+
 // -- a row lent to a site ---------------------------------------------------------
 // The shown `tools lend=SITE` row's cells before layout, its host's to draw
 // (the shell's bar): UIT_LC_INTS ints a cell into `cells` (its kind, node, a

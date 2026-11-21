@@ -54,6 +54,7 @@ _SIGS = (
     ("uit_set_ground", [_P, _I, _I, _I, _I], None),
     ("uit_place", [_P, _I, _I, _I, _I, _I, _I], _I),
     ("uit_rect", [_P, _S, _I32], _I),
+    ("uit_cond_of", [_P, _I, _S], _I),
     ("uit_lent", [_P, _S, _I32, _I, c.c_char_p, _Z], _I),
     ("uit_lent_place", [_I32, _I, _I, _I, _I, _I, _I, _I32, c.POINTER(_I), _I32], _I),
     ("uit_frame", [_P, _P, _P, _I, _I, _I, _I, _I, _I, _I], _I),
@@ -313,6 +314,10 @@ class Engine:
         """Where node `key` was placed last, (x, y, w, h), else None."""
         out = (c.c_int32 * 4)()
         return tuple(out) if self._L.uit_rect(self._e, b(key), out) else None
+
+    def cond_of(self, node, name):
+        """Node `node`'s condition `name` now: 1, 0, or -1 where it has none."""
+        return self._L.uit_cond_of(self._e, node, b(name))
 
     _LENT = 32          # the cells of a lent row read at most
 

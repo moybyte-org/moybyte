@@ -54,7 +54,7 @@ _KINDS = {"page": 1, "group": 2, "label": 3, "info": 4, "link": 5, "button": 6, 
 # the placed kinds: a page the engine's layout places holds them (`CEditorPage`)
 _PLACED_KINDS = ("tools", "row", "status", "text_editor", "panes", "pane", "legacy", "slot", "panel", "lent")
 # what a placed page's frame does not draw yet
-_PLACED_GAPS = ("text_editor", "panes", "pane", "legacy", "slot", "lent", "popover", "tabs")
+_PLACED_GAPS = ("panes", "pane", "legacy", "slot", "lent", "popover", "tabs")
 _HEAD = {"rows": ("model",), "table": ("model",), "cards": ("model",), "dialog": ("buttons",)}
 _KIND_NAMES = dict((v, k) for k, v in _KINDS.items())
 _KIND_NAMES[len(_KINDS) + 1] = "cycle"          # UIT_KINDS: a seg of the cycle look
@@ -62,6 +62,7 @@ _BOUND = ("toggle", "seg", "slider", "field", "text_view", "tabs")       # a two
 _LIT_ONLY = {"seg": ("values", "words", "model", "labels"), "text_view": ("name",),
              "switch": ("name",), "case": ("v",), "tabs": ("labels", "values")}    # a switch's and a case's: in their keys   # what the reference keeps beside a node's props
 _TYPED = "typed in field "
+_DOC = "#doc"               # a document's model: its state's name and this
 LOWERED = "lowered"         # an engine's root once its page is in the store: the Python tree is gone
 E_CHECK = -6                # UIT_E_CHECK: a mistake the spec names, its code `error_code()`
 E_GAP = -3                  # UIT_E_KIND: what this engine does not draw yet
@@ -81,6 +82,27 @@ FIXES = {"T01": "the template's syntax: {name}, {name|fmt %d}, {cond?a:b}; '{{' 
          "C01": 'a bare condition: shown="on", "!busy", "mode=edit", "a & !b"',
          "C02": "a condition needing & and | is a derive, named here",
          "N04": "a size class: @wide, @desk, @tall, @handheld"}
+
+
+class _TextEditor:
+    """A text editor as the front end draws it on the C engine
+    (`uitree_editor.Engine._r_text_editor`): its key, its literal props and
+    its conditions, which the store evaluates (`cond_of`)."""
+
+    def __init__(self, eng, node, n):
+        self.key = n.key
+        self.kind = "text_editor"
+        self.l = dict((k, n.l[k]) for k in ("find", "marks") if k in n.l)
+        self.p = {}
+        for k in ("gutter", "find_on"):
+            if k in n.src:
+                self.p[k] = self._cond(eng, node, k)
+
+    @staticmethod
+    def _cond(eng, node, k):
+        def holds(row):
+            return eng._x.cond_of(node, k) == 1
+        return holds
 
 
 class CEngine(Engine):
@@ -103,6 +125,8 @@ class CEngine(Engine):
         self.direct = BUILD == "direct"
         self._draws, self._drawing = {}, False
         self._grounds = {}      # a canvas's ground= role, by its node
+        self._docs = {}         # a document's state -> what it was pushed at (`_push_doc`)
+        self._editors = {}      # a text editor's node -> its stand-in (`_TextEditor`)
 
     def _made(self):
         """The store, made and declared at the first way in that needs it."""
@@ -112,6 +136,7 @@ class CEngine(Engine):
             if self.PLACED:
                 x.set_placed(1)
             self._slot, self._names, self._types, self._pushed = {}, [], [], {}
+            self._docs = {}
             self._drawing = False
             self._bind()            # the module's state holds this engine's values before any is pushed
             self._declare()
@@ -177,6 +202,14 @@ class CEngine(Engine):
                 ty = ROWOF
             elif type(t) is S.Enum:
                 ty, vals = ENUM, "\0".join(t.values).encode("utf-8")
+            elif type(t) is S.Doc:
+                # a document stays Python's: what templates read of it (DOC_FIELDS) is one row
+                # of a model of its own, the state a row_of of it (`{code.line}`), pushed
+                # where the document moved (`_doc_moved`)
+                self._ck(x.state(name + _DOC, MODEL, None), "state " + name)
+                self._names.append(name + _DOC)
+                self._types.append(_DOC)
+                ty = ROWOF
             else:
                 raise EngineGap("state %s of %r" % (name, t))
             self._slot[name] = self._ck(x.state(name, ty, vals), "state " + name)
@@ -190,6 +223,13 @@ class CEngine(Engine):
                                  fields.index(t.key)), "model " + name)
             elif isinstance(t, S.RowOf):
                 x.row_of(self._slot[name], self._slot[t.model])
+            elif type(t) is S.Doc:
+                fields = ["doc"] + list(S.DOC_FIELDS)
+                types = bytes([TEXT] + [self._ftype(f, name) for f in S.DOC_FIELDS.values()])
+                m = self._slot[name] - 1
+                self._ck(x.model(m, "\0".join(fields).encode("utf-8"), types, 0), "doc " + name)
+                x.row_of(self._slot[name], m)
+                self._docs[name] = [-1] * 8
         for name, tab in self.decl.labels.items():
             keys = "\0".join([str(k) for k in tab]).encode("utf-8")
             words = "\0".join([str(tab[k]) for k in tab]).encode("utf-8")
@@ -215,6 +255,8 @@ class CEngine(Engine):
         for k, v in ((S.BOOL, BOOL), (S.INT, INT), (S.NUM, NUM), (S.TEXT, TEXT)):
             if t is k:
                 return v
+        if type(t) is S.Enum:
+            return TEXT         # a field of an enum: its value's text
         raise EngineGap("a field of %r in model %s" % (t, model))
 
     # -- state across the line --------------------------------------------------
@@ -227,8 +269,15 @@ class CEngine(Engine):
 
     def _push(self, name):
         x, st = self._x, self.s
-        slot = self._slot[name]
+        slot = self._slot.get(name)
+        if slot is None:            # a document's model: pushed with its state
+            self._pushed[name] = 0
+            return
         t, v = self._types[slot], self._value(name)
+        if t is S.Doc or type(t) is S.Doc:
+            self._pushed[name] = st._ver.get(name, 0)
+            self._push_doc(name, v)
+            return
         self._pushed[name] = st._ver.get(name, 0)
         if type(t) is S.Opt:
             if v is None:
@@ -250,6 +299,33 @@ class CEngine(Engine):
             x.set_num(slot, float(v))
         else:
             x.set_text(slot, "" if v is None else str(v))
+
+    def _push_doc(self, name, d):
+        """What templates read of document `name` (DOC_FIELDS), its one row."""
+        x = self._x
+        sig = self._docs[name]
+        ed = d.ed
+        sig[0], sig[1], sig[2], sig[3] = ed.edits, ed.row, ed.col, len(ed.lines)
+        sig[4], sig[5], sig[6], sig[7] = d.find_q, d.find_ci, ed.sel, ed.left
+        cells = ["1"]
+        for f, ft in S.DOC_FIELDS.items():
+            c = getattr(d, f)
+            cells.append(("1" if c else "0") if ft is S.BOOL else str(c))
+        m = self._slot[name] - 1
+        self._ck(x.set_model(m, 1, ("\0".join(cells) + "\0").encode("utf-8")), "doc " + name)
+        x.set_text(self._slot[name], "1")
+
+    def _doc_moved(self):
+        """Each document whose caret, text, find or selection moved since it
+        was pushed, pushed (a handler's verb moves its version; the keys move
+        the caret alone)."""
+        st = self.s
+        for name in self._docs:
+            sig, d = self._docs[name], st._v[name]
+            ed = d.ed
+            if (sig[0] != ed.edits or sig[1] != ed.row or sig[2] != ed.col or sig[3] != len(ed.lines)
+                    or sig[4] != d.find_q or sig[5] != d.find_ci or sig[6] is not ed.sel):
+                self._push_doc(name, d)
 
     def committed(self):
         """The end of a commit: each slot whose version moved, pushed."""
@@ -364,6 +440,7 @@ class CEngine(Engine):
         kinds, bound, heads, lits_only, action = _KINDS, _BOUND, _HEAD, _LIT_ONLY, S.Action
         placed, placed_kinds, placed_gaps = self.PLACED, _PLACED_KINDS, _PLACED_GAPS
         grounds = self._grounds = {}
+        editors = self._editors = {}
 
         def node(n, parent, lent=False):
             nk, l = n.kind, n.l
@@ -392,6 +469,8 @@ class CEngine(Engine):
                     fail(r, "%s %s" % (nk, n.key), n.where)
             if nk == "canvas" and l and l.get("ground"):
                 grounds[me] = l["ground"]
+            elif nk == "text_editor":
+                editors[me] = _TextEditor(self, me, n)
             if nk == "seg" and "labels" in l:
                 r = cprop(me, "labels", l["labels"], None)
                 if r < 0:
@@ -438,7 +517,7 @@ class CEngine(Engine):
                             fail(r, "ui.%s %s=%r" % (nk, k, line), n.where)
                     continue
                 elif type(src) is bool and S.SCHEMA[nk].get(k) == "cond":
-                    raise EngineGap("%s %s=%r: a literal condition" % (nk, k, src))
+                    src, rep = str(src), repr(src)          # a literal condition (focus=True)
                 elif type(src) is tuple and S.SCHEMA[nk].get(k) == "ints":     # sizes: ints and weights
                     src, rep = " ".join([str(v) for v in src]), repr(src)
                 elif type(src) is int or type(src) is bool:        # a literal number or flag
@@ -694,11 +773,95 @@ class CEditorEngine(CEngine, _ed.Engine):
     def __init__(self, *a, **k):
         _ed.Engine.__init__(self, *a, **k)
         self._c_init()
+        self._te_rect = [0, 0, 0, 0]
 
     def paint(self, dt, cv, th, content, desk):
         g = self.ground
         self._made().ground(*(g if g is not None else (0, 0, 0, 0)))
+        if self._docs:
+            self._doc_moved()
         CEngine.paint(self, dt, cv, th, content, desk)
+
+    # -- keys: the Editor's typed bytes and arrows into its document, ahead of the store's
+
+    def popover_shown(self):
+        return self._visiting() and self._x.back_popover() != -2
+
+    def _focused_kind(self):
+        """The kind of the stop focus is on, "" none."""
+        key = self._focus_key()
+        if not key:
+            return ""
+        if key in self.views:
+            return "text_editor"
+        i, x = 0, self._x
+        while True:
+            got = x.stop(i)
+            if got is None:
+                return ""
+            if got[1] == key:
+                return _KIND_NAMES[got[0]]
+            i += 1
+
+    def editor_keys(self):
+        if not self._visiting() or self.popover_shown() or self._focused_kind() in ("field", "link"):
+            return None
+        for k in self.views:
+            if self.views[k] is not None:
+                return k
+        return None
+
+    def keys(self, i, damage=True):
+        if self._x is None:
+            self._made()
+        if self._shut:
+            self._resume()
+        self._bind()
+        ch = getattr(i, "typed", 0) & 0xFF
+        was, S._NOW.app = S._NOW.app, self
+        try:
+            if self._chord(ch) or self._doc_keys(i, ch):
+                return True
+        finally:
+            S._NOW.app = was
+        return CEngine.keys(self, i, damage)
+
+    def _chord(self, ch):
+        """A typed byte an action's chord names (`uitree_editor.Engine._keys`):
+        the action, ahead of the document; a bare letter is the document's."""
+        if not ch:
+            return False
+        for a in self._acts:
+            for k in a.keys:
+                if S._chord_byte(k) == ch and a.live():
+                    if a.can():
+                        self.q.append((a, self.args_for(a), "key %r (unit %s)" % (k, a.unit)))
+                    else:
+                        S._trace("off", a.name, "key %r: %s" % (k, a.when_src))
+                    self._damage.all()
+                    return True
+        return False
+
+    def _doc_keys(self, i, ch):
+        """The arrows and the typed bytes into the shown text editor's
+        document (`uitree_editor.Engine._keys`), where it takes them."""
+        ek = self.editor_keys()
+        if ek is None:
+            return False
+        text = ch and (ch in (8, 9, 13, 127) or 32 <= ch < 127)
+        doc = self.s._v[ek]
+        moved = False
+        if not self.host_arrows:
+            for name, dy, dx in (("up", -1, 0), ("down", 1, 0), ("left", 0, -1), ("right", 0, 1)):
+                if i.pressed(name):
+                    doc.move(dy, dx, True if getattr(i, "mods", 0) & _ed._SHIFT else None)
+                    moved = True
+        if text:
+            self._into_doc(ek, ch, bool(getattr(i, "mods", 0) & _ed._SHIFT))
+            moved = True
+        if moved:
+            self._damage.all()
+        return moved
 
     def _flags(self, desk):
         return CEngine._flags(self, desk) & ~F_BARE        # bare only over hosted bodies
@@ -750,7 +913,20 @@ class CEditorEngine(CEngine, _ed.Engine):
         return self._made().lent_place(cells, x0, w, h, fs, pad)
 
     def _draw(self, node, x, y, w, h):
-        """A canvas's draw in its rect, clipped to it, over its ground."""
+        """A canvas's draw in its rect, clipped to it, over its ground; a
+        text editor's rows, its document's (`_r_text_editor`)."""
+        te = self._editors.get(node)
+        if te is not None:
+            now = S._NOW
+            was = now.app, now.frame
+            now.app, now.frame = self, True
+            try:
+                r = self._te_rect
+                r[0], r[1], r[2], r[3] = x, y, w, h
+                self._r_text_editor(te, None, r)
+            finally:
+                now.app, now.frame = was
+            return
         cv = self.cv
         cv.clip(x, y, w, h)
         try:
@@ -769,3 +945,4 @@ class CEditorPage(CEditorEngine, _ed.Page):
     def __init__(self, build, host, damage, files=None, close=None):
         _ed.Page.__init__(self, build, host, damage, files, close)
         self._c_init()
+        self._te_rect = [0, 0, 0, 0]
