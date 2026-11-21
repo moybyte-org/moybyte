@@ -1442,6 +1442,8 @@ class SettingsLayer(Layer):
                 self._sub.clear()
             if view is not None:
                 self._sub.reset()
+            else:
+                self._host.whole()    # the page drew over the rows' last frame
             self._view = view
         host = self._host if view is None else self._sub
         want = self._want if view is None else None
