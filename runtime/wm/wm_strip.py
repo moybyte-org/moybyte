@@ -54,8 +54,8 @@ def _states(title, icon, tone, back, unit, inset):
     _put("icon", icon)
     _put("tone", tone)
     _put("back_on", back)
-    p = (inset + unit - 1) // unit
-    _put("pad", p if p > _PAD else _PAD)
+    p = _PAD * unit             # a bound pad is pixels (a literal one is units)
+    _put("pad", p if p > inset else inset)
     if _DIRTY[0]:
         _DIRTY[0] = False
         pushed = getattr(page, "committed", None)

@@ -7,6 +7,8 @@ stamped from it, inside the canvas's clip, so a drag frame does no page
 work. Both engines lay the strip out alike."""
 
 import sys
+
+import pytest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -139,3 +141,48 @@ def test_a_stamp_keeps_inside_the_clip_and_its_layers_are_bounded(tmp_path):
         SE.stamp(cv, ws.theme_colors, win.x, win.y, win.w, win.h, win.title_h, "T%d" % i, True,
                  wm._win_btns(win) | 32, wm._fs(), a[1], a[3], a[4], False, -1, 0)
     assert sum(1 for lay in SE._LAYS if lay is not None) == SE.CAP
+
+
+def _desk_configs():
+    import test_shell_goldens as G
+    return [n for n, c in G.CONFIGS.items()
+            if c["windowed"] and not c.get("console") and not c.get("plan")]
+
+
+@pytest.mark.parametrize("config", _desk_configs())
+def test_nothing_in_the_strip_is_cut_by_the_frame(tmp_path, config):
+    """Every desk config's calc strip: the page's first and last items lie
+    inside the strip, clear of the columns the stamp leaves to the frame
+    (the depth's corners, `inset` at each end), and the page inks none of
+    those columns -- what it would ink there the stamp would cut."""
+    import test_shell_goldens as G
+    import ui_draw as D
+    ws = G._build(G.CONFIGS[config], tmp_path)
+    ws.home.open_desk()
+    ws.spine.open_app(ws.app("calc"))
+    for _ in range(3):
+        ws.frame(1 / 30)
+    wm = ws.wm
+    win = wm.windows["calc"]
+    rect, unit, title, icon, tone, back, inset = wm._strip_args(win)
+    sw, sh = rect[2], rect[3]
+    head = SE.head(*wm._strip_args(win))
+    close = [b for b in wm._frame_buttons(win) if b[0] == "close"][0][1]
+    assert head[0] >= rect[0] + inset and close[0] + close[2] <= rect[0] + sw - inset, \
+        (config, head, close, rect, inset)
+    cv = wm.root_canvas
+    th = ws.theme_colors
+    btns = wm._win_btns(win) | D.FRAME_BARE
+    lays = []
+    for page in (False, True):
+        lay = cv.new_layer(sw, sh)
+        D.frame(lay, th, (-1, -1, win.w, win.h), win.title_h, title, True, btns, wm._fs())
+        if page:
+            SE.draw(lay, th, (0, 0, sw, sh), unit, title, icon, tone, back, inset)
+        lays.append(_rows(lay, (0, 0, sw, sh)))
+    ground, inked = lays
+    assert ground != inked
+    edge = 2 * max(inset, 1)
+    for j in range(sh):
+        assert inked[j][:edge] == ground[j][:edge], (config, "left", j)
+        assert inked[j][-edge:] == ground[j][-edge:], (config, "right", j)
