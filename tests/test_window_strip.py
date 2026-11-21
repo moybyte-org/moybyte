@@ -172,7 +172,7 @@ def test_nothing_in_the_strip_is_cut_by_the_frame(tmp_path, config):
         (config, head, close, rect, inset)
     cv = wm.root_canvas
     th = ws.theme_colors
-    btns = wm._win_btns(win) | D.FRAME_BARE
+    btns = wm._win_btns(win)
     lays = []
     for page in (False, True):
         lay = cv.new_layer(sw, sh)

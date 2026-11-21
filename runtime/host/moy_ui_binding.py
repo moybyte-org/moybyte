@@ -31,7 +31,7 @@ from runtime import glass_binding  # noqa: E402
 from moy_ui_face import (  # noqa: E402,F401
     moy_theme_layout_t, moy_ui_box_t as _Box, moy_ui_btn_style_t as _BtnStyle,
     moy_ui_button_t as _Button, moy_ui_cell_t as _Cell, moy_ui_depth_t as _Depth,
-    moy_ui_frame_button_t as _FrameButton, moy_ui_lines_t as _Lines, moy_ui_shape_t, moy_ui_over_t as _Over,
+    moy_ui_lines_t as _Lines, moy_ui_shape_t, moy_ui_over_t as _Over,
     moy_ui_row_t as _Row, moy_ui_sink_t as _Sink, moy_ui_span_t as _Span, moy_ui_surface_t as _Surface)
 from moy_gfx_face import moy_text_line_t as _Line  # noqa: E402,F401
 
@@ -132,7 +132,7 @@ _DRAW_SIGS = (
     ("moy_ui_sink_row", [c.POINTER(_Sink), c.c_uint32, _I], _I),
     ("moy_ui_sink_glyph", [c.POINTER(_Sink), _I, _I, _I, _I, _I, _I, _I], _I),
     ("moy_ui_sink_mask", [c.POINTER(_Sink), c.c_uint32, _I, _I, _I, _I], _I),
-    ("moy_ui_icons_use", [c.c_uint32, c.c_uint32, c.POINTER(c.c_uint8 * 3)], None),
+    ("moy_ui_icons_use", [c.c_uint32, c.c_uint32], None),
     ("moy_ui_moy_use", [c.c_void_p, _I], None),
     ("moy_ui_calls", [], c.c_uint32),
     ("moy_ui_row", [c.POINTER(_Sink), _Box, _I, _I, _I, c.POINTER(_Row), _I], _I),
@@ -166,9 +166,7 @@ _DRAW_SIGS = (
     ("moy_ui_toolbar", [c.POINTER(_Sink), _Box, c.POINTER(_I)], _I),
     ("moy_ui_paint", [c.POINTER(_Sink), _Box, _I, _I, c.POINTER(_I)], _I),
     ("moy_ui_frame", [c.POINTER(_Sink), _Box, _I, _Span, _I, _I, _I], _I),
-    ("moy_ui_frame_buttons", [_Box, _I, _Span, _I, _I, c.POINTER(_FrameButton)], _I),
     ("moy_ui_frame_band", [c.POINTER(_Sink), _Box, _I], _I),
-    ("moy_ui_frame_icon", [_Box, _I, _I, c.POINTER(_Box)], _I),
     ("moy_ui_bar_part", [c.POINTER(_Sink), _I, _Box, _I], _I),
     ("moy_ui_bar_tile", [c.POINTER(_Sink), _Box, c.c_int32], _I),
     ("moy_ui_scrim", [c.POINTER(_Sink), _Box], _I),

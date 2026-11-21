@@ -484,13 +484,6 @@ static int header_paint(const dd_t *d, int active, moy_shape_paint_t *p) {
     }
 }
 
-int moy_ui_depth_title_ink(int active) {
-    if (!active) {
-        return MOY_UI_T_CHROME_INK_DIM;
-    }
-    return s_depth.header == MOY_UI_HEAD_FILL ? MOY_UI_T_VALUE_INK : MOY_UI_T_CHROME_INK;
-}
-
 // The frame's body in `mask`: the header with the top corners (a focused
 // `bar` header's value bar across its top rows), the sides and foot with the
 // bottom ones (the content's rect left alone: in from each side by the foot

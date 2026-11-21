@@ -243,31 +243,6 @@ def test_the_bar_draws_the_themes_set(tmp_path):
     assert not ws.draw_icon("wifi", (0, 0, 16, 16), 7, cv)
 
 
-def test_a_depth_frames_title_buttons_take_the_set(tmp_path):
-    """moy_ui.icons_use hands the C its set: the title buttons of a depth frame
-    draw the set's close/maximize/minimize masks, and its glyphs without one."""
-    ws = _ws(tmp_path)
-    ws.look.set_theme("moy", persist=False, variant="light")
-    cv = ws.sys_canvas
-    rect, th = (0, 0, 300, 120), 44
-
-    def frame():
-        cv.rect(0, 0, 300, 120, 7)
-        _ui.frame(cv, ws.theme_colors, rect, th, "T", True, True, 1)
-        return _pixels(cv, (150, 0, 150, th))
-
-    iconsets.use_parts(None)
-    glyphs = frame()
-    iconsets.use_parts(("smooth", "default", None))
-    masks = frame()
-    assert masks != glyphs
-    assert ws.icon_spec() == ("smooth", "default", None)
-    iconsets.use_parts(("pixel", None, None))
-    assert frame() == glyphs
-    iconsets.reset()
-    use_theme(ws, "night", "dark")     # the depth is global
-
-
 def test_one_icon_one_meaning_for_the_round_4_pairs():
     """The gear means Settings alone and `dup` Duplicate alone (D-22):
     Appearance wears the palette and the sprite tab's Copy the clipboard
@@ -397,34 +372,6 @@ def test_every_set_and_kind_draws_the_slots_past_0x7f(tmp_path, box):
             if spec[0] == "smooth":
                 assert iconsets.ink_span(slot, box, box, spec) is not None, (spec, slot)
     iconsets.reset()
-
-
-def test_the_title_buttons_draw_a_slot_past_0x7f(tmp_path):
-    """moy_ui.icons_use takes a slot's byte past 0x7f for a title button and
-    the C draws its mask by index."""
-    ws = _ws(tmp_path)
-    ws.look.set_theme("moy", persist=False, variant="light")
-    cv = ws.sys_canvas
-    rect, th = (0, 0, 300, 120), 44
-
-    def frame():
-        cv.rect(0, 0, 300, 120, 7)
-        _ui.frame(cv, ws.theme_colors, rect, th, "T", True, True, 1)
-        return _pixels(cv, (150, 0, 150, th))
-
-    iconsets.use_parts(("smooth", "default", None))
-    masks = frame()
-    f16 = iconsets._pick("default", 16, True)[0]
-    f24 = iconsets._pick("default", 24, True)[0]
-    codes = [iconsets.FIRST + iconsets.SLOT[n] for n in ("grid", "resize", "loop")]
-    assert min(codes) > 0x7f
-    _ui._C.icons_use(f16, f24, *codes)
-    past = frame()
-    _ui._C.icons_use(0, 0, 0, 0, 0)
-    glyphs = frame()
-    assert past != masks and past != glyphs
-    iconsets.reset()
-    use_theme(ws, "night", "dark")
 
 
 # The boards' module: the same masks drawn by the desktop MicroPython's moy_ui.
