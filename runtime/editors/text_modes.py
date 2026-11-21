@@ -91,8 +91,18 @@ BY_EXT_LANG = {
 }
 
 # Not a mode: the drawings kind is not text at all, and Paint owns it. Here so
-# that ONE table answers "what is this file" for the Files router too.
-IMAGE_EXT = _store.FILE_KINDS["drawings"][0]
+# that ONE table answers "what is this file" for the Files router too. Read
+# from the store's registry at the first use, so importing this module needs
+# no user-files layer (a page compiler's host has none without the
+# MicroPython tree).
+_IMAGE_EXT = []
+
+
+def image_ext():
+    """The drawings kind's extension."""
+    if not _IMAGE_EXT:
+        _IMAGE_EXT.append(_store.FILE_KINDS["drawings"][0])
+    return _IMAGE_EXT[0]
 
 
 def ext_of(filename):
@@ -216,7 +226,7 @@ def is_image(filename):
     the router sends somewhere other than a text page: to Paint."""
     name = str(filename)
     slash = max(name.rfind("/"), name.rfind("\\"))
-    return (ext_of(name) == IMAGE_EXT
+    return (ext_of(name) == image_ext()
             or name[slash + 1:] == _store.COVER_FILE)
 
 

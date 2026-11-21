@@ -118,9 +118,9 @@ def library():
     if _LIB[0] is not None:
         return _LIB[0]
     from runtime import host_native
-    if not os.path.isdir(UZLIB):
-        raise ImportError("moy_ufiles: no MicroPython tree for its inflater "
-                          "(make unix-micropython)")
+    if not host_native.inflater():
+        raise ImportError("moy_ufiles: no inflater in the host library (make "
+                          "unix-micropython, MOYHOST_NO_INFLATER unset)")
     path = host_native.build()
     if path is None:
         raise ImportError("moy_ufiles: no C compiler for the host build")

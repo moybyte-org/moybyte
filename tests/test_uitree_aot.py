@@ -334,6 +334,23 @@ def test_a_board_with_no_desk_stages_no_desk_page(compiled, tmp_path, capsys):
     assert set(ns["PAGES"]) == set(compiled.pages) - gone
 
 
+def test_a_host_with_no_inflater_stages_every_page_on_the_c_engine_alone(compiled, tmp_path):
+    """The step a CI build takes: its host library has no inflater's part
+    (no desktop MicroPython tree, runtime/host/host_native.py), and every
+    console page still compiles on it, with neither of the reference
+    engine's modules imported on the way."""
+    mods = _staged(tmp_path)
+    code = ("import sys; sys.path.insert(0, 'tools'); import uitree_compile as UC; "
+            "rc = UC.main(['--staged', sys.argv[1], '--require']); "
+            "print('REF', sorted(m for m in ('uitree_ref', 'uitree_ref_editor') if m in sys.modules)); "
+            "sys.exit(rc)")
+    r = subprocess.run([sys.executable, "-c", code, str(mods)], cwd=ROOT, capture_output=True, text=True,
+                       env=dict(os.environ, MOYHOST_NO_INFLATER="1"))
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert "uitree pages: %d compiled" % len(compiled.pages) in r.stdout
+    assert "REF []" in r.stdout, r.stdout
+
+
 def test_a_host_that_cannot_compile_stages_no_pages_and_says_so_in_one_line(tmp_path):
     mods = _staged(tmp_path)
     (mods / "uitree_pages.py").write_text("PAGES = {}\n")
