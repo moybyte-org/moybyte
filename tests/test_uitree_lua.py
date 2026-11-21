@@ -317,6 +317,45 @@ def test_a_canvas_draws_with_the_carts_verbs_inside_the_frame(tmp_path):
     assert err and "error[E00] main.lua:5:" in err and "ui.canvas" in err, err
 
 
+def test_a_canvas_pointer_hands_down_drag_and_up_in_its_own_coordinates(tmp_path):
+    """A canvas with pointer= on the C engine: a press on it hands its action
+    a read-only event (kind, x, y, source) at the canvas's own coordinates,
+    the drag that follows and the release, each traced as Python's are."""
+    import uitree_app
+    from runtime import host_app
+    from runtime.host import moy_log
+    uitree_app.use_engine("c")
+    carts = str(tmp_path / "carts")
+    host_app.moy_carts.ensure_dirs(carts)
+    _cart(carts, "Pointer", 'ui.app("Pointer", { icon = "calc" })\n'
+          'local s = ui.state { got = "" }\n'
+          'ui.action("feel", "Feel", function(ev) s.got = s.got .. ev.kind .. ":" .. ev.source .. " " end,\n'
+          '  { takes = "pointer" })\n'
+          'ui.page("p", function()\n'
+          '  ui.canvas("pad", { h = 120, pointer = "feel", draw = function(x, y, w, h) rect(x, y, w, h, 8) end })\n'
+          'end)\n')
+    ws, drv, frame, open_cart = _console(carts)
+    seq = moy_log.next()
+    open_cart(ws, "Pointer")
+    for _ in range(4):
+        frame()
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    cx, cy = ws.sys_canvas.w // 2, ws.sys_canvas.h // 2
+    drv.touch(cx, cy)
+    frame()
+    drv.touch_drag(cx + 5, cy + 3)
+    frame()
+    drv.touch_up()
+    frame()
+    frame()
+    assert ws.run.player.cart_error is None, ws.run.player.cart_error
+    lines = [r[4].split("[trace] ", 1)[1] for r in moy_log.read(seq, 4000) if "[trace] " in r[4]]
+    acts = [" ".join(l.split()[1:]) for l in lines if l.split()[1:2] == ["action"]]
+    assert acts == ["action feel from pointer down on canvas 'pad'", "action feel from pointer drag on canvas 'pad'",
+                    "action feel from pointer up on canvas 'pad'"], lines
+    assert any("down:touch drag:touch up:touch" in l for l in lines), lines
+
+
 def test_a_cancelled_timer_runs_nothing(tmp_path):
     from runtime import host_app
     from runtime.host import moy_log
