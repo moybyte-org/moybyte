@@ -18,6 +18,8 @@
  *   e:node_action(node, a) e:build_end()
  *   e:open() e:close() e:want_focus(key)
  *   e:frame(flags)              -> uit_run_frame over the run's canvas
+ *   e:on_draw(fn)               a canvas's draw, fn(node, x, y, w, h), called
+ *                               inside the frame; what it raises the frame raises
  *   e:next()                    -> kind, a, b, c, text; nil where none waits
  *   e:trace_next()              -> "KIND\1NAME\1TEXT", nil where none waits
  *   e:can(a, row) e:letter(ch) e:dialog() e:unfocused()
@@ -42,13 +44,21 @@
 
 typedef struct {
     uit_t *e;
+    lua_State *L;           // the state a frame runs in, while it runs
+    int draw;               // on_draw's function (a registry ref), LUA_NOREF none
+    int raised;             // what a draw raised inside the frame (a registry ref), raised after it
 } moycore_uit_t;
 
-static uit_t *moycore_uit(lua_State *L)
+static moycore_uit_t *moycore_uit_of(lua_State *L)
 {
     moycore_uit_t *u = (moycore_uit_t *)luaL_checkudata(L, 1, MOYCORE_UIT_MT);
     if (u->e == NULL) luaL_error(L, "the UI tree store is freed");
-    return u->e;
+    return u;
+}
+
+static uit_t *moycore_uit(lua_State *L)
+{
+    return moycore_uit_of(L)->e;
 }
 
 static int moycore_uit_int(lua_State *L, int i)
@@ -74,6 +84,8 @@ static int l_uit_new(lua_State *L)
 {
     moycore_uit_t *u = (moycore_uit_t *)lua_newuserdatauv(L, sizeof *u, 0);
     u->e = uit_new();
+    u->L = NULL;
+    u->draw = u->raised = LUA_NOREF;
     if (u->e == NULL) return luaL_error(L, "no memory for a UI tree store");
     luaL_setmetatable(L, MOYCORE_UIT_MT);
     return 1;
@@ -86,6 +98,9 @@ static int l_uit_free(lua_State *L)
         uit_free(u->e);
         u->e = NULL;
     }
+    luaL_unref(L, LUA_REGISTRYINDEX, u->draw);
+    luaL_unref(L, LUA_REGISTRYINDEX, u->raised);
+    u->draw = u->raised = LUA_NOREF;
     return 0;
 }
 
@@ -270,10 +285,51 @@ static int l_uit_want_focus(lua_State *L)
     return 0;
 }
 
+/* A canvas's draw, called by the walk inside the frame: on_draw's function
+ * with the node and its rect. What it raises is kept, the frame's other draws
+ * skipped, and raised once the frame is over (never through the walk). */
+static void moycore_uit_draw(void *ud, int node, int x, int y, int w, int h)
+{
+    moycore_uit_t *u = (moycore_uit_t *)ud;
+    lua_State *L = u->L;
+    if (L == NULL || u->raised != LUA_NOREF || u->draw == LUA_NOREF) return;
+    lua_rawgeti(L, LUA_REGISTRYINDEX, u->draw);
+    lua_pushinteger(L, node);
+    lua_pushinteger(L, x);
+    lua_pushinteger(L, y);
+    lua_pushinteger(L, w);
+    lua_pushinteger(L, h);
+    if (lua_pcall(L, 5, 0, 0) != LUA_OK) u->raised = luaL_ref(L, LUA_REGISTRYINDEX);
+}
+
+static int l_uit_on_draw(lua_State *L)
+{
+    moycore_uit_t *u = moycore_uit_of(L);
+    luaL_unref(L, LUA_REGISTRYINDEX, u->draw);
+    u->draw = LUA_NOREF;
+    if (!lua_isnoneornil(L, 2)) {
+        luaL_checktype(L, 2, LUA_TFUNCTION);
+        lua_pushvalue(L, 2);
+        u->draw = luaL_ref(L, LUA_REGISTRYINDEX);
+    }
+    uit_on_draw(u->e, u->draw == LUA_NOREF ? NULL : moycore_uit_draw, u);
+    return 0;
+}
+
 static int l_uit_frame(lua_State *L)
 {
-    uit_t *e = moycore_uit(L);
-    lua_pushinteger(L, uit_run_frame(e, moycore_ui_canvas(), moycore_uit_int(L, 2)));
+    moycore_uit_t *u = moycore_uit_of(L);
+    int flags = moycore_uit_int(L, 2);
+    u->L = L;
+    int r = uit_run_frame(u->e, moycore_ui_canvas(), flags);
+    u->L = NULL;
+    if (u->raised != LUA_NOREF) {
+        lua_rawgeti(L, LUA_REGISTRYINDEX, u->raised);
+        luaL_unref(L, LUA_REGISTRYINDEX, u->raised);
+        u->raised = LUA_NOREF;
+        return lua_error(L);
+    }
+    lua_pushinteger(L, r);
     return 1;
 }
 
@@ -423,7 +479,7 @@ static void moycore_uitree_open(lua_State *L)
         {"build_begin", l_uit_build_begin}, {"node", l_uit_node}, {"prop", l_uit_prop},
         {"node_action", l_uit_node_action}, {"build_end", l_uit_build_end},
         {"open", l_uit_open}, {"close", l_uit_close}, {"want_focus", l_uit_want_focus},
-        {"frame", l_uit_frame}, {"next", l_uit_next}, {"trace_next", l_uit_trace_next},
+        {"frame", l_uit_frame}, {"on_draw", l_uit_on_draw}, {"next", l_uit_next}, {"trace_next", l_uit_trace_next},
         {"can", l_uit_can}, {"letter", l_uit_letter}, {"dialog", l_uit_dialog},
         {"unfocused", l_uit_unfocused}, {"back_dialog", l_uit_back_dialog},
         {"back_popover", l_uit_back_popover}, {"focused", l_uit_focused},

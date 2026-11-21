@@ -1485,11 +1485,11 @@ local PROPS = {
   menu = {}, item = { icon = 1, label = 1, mkind = 1 },
   table = { cols = 1, cur = 1, on = 1, changed = 1, empty = 1, focus = 1, hint = 1 }, col = {},
   split = { dir = 1, sizes = 1, gap = 1, pad = 1, align = 1 }, grid = { cols = 1, rows = 1, gap = 1, pad = 1 },
-  panel = {},
+  panel = {}, canvas = { draw = 1, h = 1, w = 1, focus = 1, ground = 1 },
 }
 -- the kinds only the C engine draws
 local C_KINDS = { progress = 1, seg = 1, text_view = 1, menu = 1, item = 1, table = 1, col = 1, split = 1, grid = 1,
-                  panel = 1 }
+                  panel = 1, canvas = 1 }
 -- the props only the C engine draws, by kind
 local C_PROPS = { group = { close = 1 }, row = { close = 1, gap = 1, pad = 1, mid = 1 },
                   button = { marked = 1, tone = 1, w = 1 }, slider = { look = 1 }, rows = { changed = 1 } }
@@ -1497,8 +1497,10 @@ local COND_PROPS = { shown = 1, focus = 1, when = 1, marked = 1 }
 local NAME_PROPS = { key = 1, on = 1, cut = 1, changed = 1, commit = 1, current = 1, cur = 1, by = 1, new = 1,
                      buttons = 1, default = 1, close = 1, off = 1, kind = 1, face = 1, size = 1, wrap = 1,
                      align = 1, input = 1, wash = 1, anchor = 1, arg = 1, look = 1, labels = 1, syntax = 1,
-                     mkind = 1, dir = 1 }
-local NUM_PROPS = { max = 1, lines = 1, lo = 1, hi = 1, span = 1, w = 1, gap = 1, pad = 1, rows = 1 }
+                     mkind = 1, dir = 1, ground = 1 }
+local NUM_PROPS = { max = 1, lines = 1, lo = 1, hi = 1, span = 1, w = 1, gap = 1, pad = 1, rows = 1, h = 1 }
+-- a function the engine calls inside its frame
+local FN_PROPS = { draw = 1 }
 -- a list of texts or ints, one prop a value
 local LIST_PROPS = { sizes = 1 }
 local BOOL_PROPS = { follow = 1, check = 1, grow = 1, secret = 1, alone = 1, mid = 1 }
@@ -1507,7 +1509,8 @@ local WORDS = { kind = { normal = 1, primary = 1, danger = 1, tonal = 1 }, off =
                 wrap = { cut = 1, word = 1 }, align = { start = 1, center = 1, ["end"] = 1 },
                 input = { text = 1, number = 1, password = 1 }, wash = { page = 1, view = 1, none = 1 },
                 look = { ["end"] = 1, share = 1 }, mkind = { danger = 1 }, dir = { row = 1, col = 1 },
-                syntax = { plain = 1, sgr = 1, python = 1, lua = 1, json = 1, markdown = 1 } }
+                syntax = { plain = 1, sgr = 1, python = 1, lua = 1, json = 1, markdown = 1 },
+                ground = { surface = 1, surface_alt = 1, surface_light = 1, panel = 1, lcd = 1, desktop = 1 } }
 -- a prop that is another type, or takes other words, on one kind
 local KIND_TYPE = { progress = { max = "int" }, table = { cols = "list" }, grid = { cols = "num" } }
 local KIND_WORDS = { look = { seg = { seg = 1, cycle = 1 }, progress = { count = 1 }, slider = { bar = 1, steps = 1 } },
@@ -1542,7 +1545,11 @@ local function check_opts(kind, o, at)
     end
     local kt = KIND_TYPE[kind] and KIND_TYPE[kind][k]
     local kw = KIND_WORDS[k] and KIND_WORDS[k][kind]
-    if kw then
+    if FN_PROPS[k] then
+      if type(v) ~= "function" then
+        fail("N01", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "a function: draw = function(x, y, w, h) ... end", describe(v))
+      end
+    elseif kw then
       if not kw[v] then fail("N01", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "one of " .. table.concat(sorted_keys(kw), ", "), describe(v)) end
     elseif kt == "tpl" then
       if type(v) ~= "string" then fail("N01", at, "ui." .. kind .. "'s " .. k .. " is " .. describe(v), "a template (a text)", describe(v)) end
@@ -2161,6 +2168,20 @@ function T.panel(key, body)
   end
   n.o = { key = key }
   run_body(n, body)
+  return n
+end
+
+-- a rect the app draws itself: draw(x, y, w, h) is called inside each frame,
+-- with the cart's own verbs, and writes no state
+function T.canvas(key, o)
+  local at = where()
+  local n = node("canvas", at)
+  if type(key) ~= "string" or not key:match("^[%a_][%w_]*$") then
+    fail("N01", at, "ui.canvas's key is " .. describe(key), "a word: ui.canvas(\"dial\", { draw = draw })", describe(key))
+  end
+  n.o = check_opts("canvas", o, at)
+  if n.o.draw == nil then fail("N01", at, "ui.canvas(" .. q(key) .. ") has no draw", "draw = function(x, y, w, h) ... end", "none") end
+  n.o.key = key
   return n
 end
 
