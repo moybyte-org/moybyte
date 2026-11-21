@@ -85,7 +85,8 @@ def test_a_tap_on_close_runs_the_page_s_action(tmp_path):
         drv.frame(1 / 30)
     finally:
         SE.fire = real
-    assert ran == ["close"] and wm_strip_ui.TAP[0] is not None
+    assert ran == ["close"]
+    assert wm_strip_ui.TAP[0] is None         # the WM's hook is held while its action runs
     assert "calc" not in wm.windows
 
 

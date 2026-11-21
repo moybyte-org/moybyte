@@ -607,6 +607,7 @@ class BarLayer:
         self._chip_stops = []         # the page's chip rects on the desk (`focus_items`, `_page_stop`)
         _ui_draw.on_bar(False)
         _bar_engine.forget()          # (what another console's bar handed the page)
+        _bar_ui.PAINT[0] = _bar_ui.TAP[0] = _bar_ui.CHIP[0] = _bar_ui.ITEM[0] = None
 
     def invalidate(self):
         """Repaint every cached bar strip on the next frame: something its key
