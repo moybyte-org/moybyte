@@ -3209,8 +3209,35 @@ static int txt_row_h(const moy_ui_ctx_t *c, const txt_plan_t *p, int h) {
     return p->lines <= 1 && !c->has_at && h < mua_row_h(c) ? mua_row_h(c) : h;
 }
 
+static moy_ui_said_fn said;
+
+// `v` in decimal into b at n: the length after it.
+static size_t said_int(char *b, size_t n, int32_t v) {
+    char d[12];
+    int k = 0;
+    uint32_t u = v < 0 ? 0u - (uint32_t)v : (uint32_t)v;
+    if (v < 0) {
+        b[n++] = '-';
+    }
+    do {
+        d[k++] = (char)('0' + u % 10);
+        u /= 10;
+    } while (u);
+    while (k) {
+        b[n++] = d[--k];
+    }
+    return n;
+}
+
+void moy_ui_api_said(moy_ui_said_fn fn) {
+    said = fn;
+}
+
 void moy_ui_api_label(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t text,
                       const moy_ui_over_t *o) {
+    if (said) {
+        said(MOY_UI_SAID_LABEL, text.p, text.n, NULL, 0, c->txt.role);
+    }
     o = mua_over(o);
     int stacked;
     txt_plan_t p;
@@ -3302,6 +3329,9 @@ static int ring_reach(const moy_ui_ctx_t *c) {
 
 int moy_ui_api_button(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label, int kind,
                       const moy_ui_over_t *o) {
+    if (said) {
+        said(MOY_UI_SAID_BUTTON, label.p, label.n, NULL, 0, -1);
+    }
     o = mua_over(o);
     int bar = kind == MOY_UI_BUTTON_BAR;
     if (kind < 0 || kind >= 5) {
@@ -3411,6 +3441,15 @@ int moy_ui_api_toggle(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
 int32_t moy_ui_api_slider(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,
                           int32_t v, int32_t lo, int32_t hi, const moy_ui_over_t *o) {
     o = mua_over(o);
+    if (said) {
+        char b[40];
+        size_t n = said_int(b, 0, lo);
+        b[n++] = ' ';
+        n = said_int(b, n, hi);
+        b[n++] = ' ';
+        b[n++] = o->steps == 1 ? '1' : '0';
+        said(MOY_UI_SAID_SLIDER, label.p, label.n, (const uint8_t *)b, n, -1);
+    }
     if (hi < lo) {
         int32_t t = lo;
         lo = hi;
@@ -3460,6 +3499,9 @@ void moy_ui_api_group_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
 
 void moy_ui_api_group(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t caption,
                       const moy_ui_over_t *o) {
+    if (said && caption.n) {
+        said(MOY_UI_SAID_GROUP, caption.p, caption.n, NULL, 0, -1);
+    }
     if (caption.n == 0 && o != NULL && o->card == 1) {
         moy_ui_api_group_card(c, s);
         return;
@@ -3507,6 +3549,10 @@ void moy_ui_api_group(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t cap
 
 int moy_ui_api_value(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy_ui_span_t label,
                      moy_ui_span_t value, const moy_ui_over_t *o) {
+    if (said) {
+        said(kind == MOY_UI_V_LINK ? MOY_UI_SAID_LINK : MOY_UI_SAID_INFO, label.p, label.n, value.p,
+             value.n, -1);
+    }
     o = mua_over(o);
     if (kind != MOY_UI_V_LINK) {
         kind = MOY_UI_V_INFO;
@@ -3617,6 +3663,9 @@ int mua_rule_h(const moy_ui_ctx_t *c) {
 
 void moy_ui_api_hints(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const uint8_t *items, size_t len,
                       const moy_ui_over_t *o) {
+    if (said) {
+        said(MOY_UI_SAID_HINTS, items, len, NULL, 0, -1);
+    }
     (void)o;
     moy_ui_box_t b;
     if (moy_ui_hint_input() == MOY_UI_INPUT_TOUCH) {
@@ -3879,12 +3928,22 @@ int32_t moy_ui_api_list(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
 int moy_ui_api_icon(moy_ui_ctx_t *c, moy_ui_span_t name) {
     c->icon_slot = (int16_t)moy_ui_icon_slot(name.p, name.n);
     c->icon_glyph = (int16_t)moy_ui_icon_glyph(name.p, name.n);
+    if (said) {
+        said(MOY_UI_SAID_ICON, name.p, name.n, NULL, 0, c->icon_slot >= 0 || c->icon_glyph >= 0);
+    }
     return c->icon_slot >= 0 || c->icon_glyph >= 0;
 }
 
 void moy_ui_api_progress(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label, int32_t v,
                          int32_t hi, const moy_ui_over_t *o) {
     o = mua_over(o);
+    if (said) {
+        char b[40];
+        size_t n = said_int(b, 0, v);
+        b[n++] = ' ';
+        n = said_int(b, n, hi);
+        said(MOY_UI_SAID_PROGRESS, label.p, label.n, (const uint8_t *)b, n, -1);
+    }
     int stacked;
     int count = o->steps == 1;
     // a count stacked: its label on a row and its bar under it, in from the

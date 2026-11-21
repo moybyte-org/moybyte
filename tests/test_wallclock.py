@@ -186,7 +186,7 @@ def test_the_zone_is_stored_and_read_back_at_boot(tmp_path):
 
 
 def test_the_settings_row_opens_the_picker_and_a_pick_sets_the_zone(tmp_path):
-    from runtime import settings_layer
+    from runtime import host_app
     ws = build_ws(tmp_path)
     ws.open_settings()
     sl = ws.settings_layer
@@ -199,16 +199,18 @@ def test_the_settings_row_opens_the_picker_and_a_pick_sets_the_zone(tmp_path):
     sl._draw_page()
     pick = [k for k, (p, _tz) in enumerate(wc.ZONES) if p == "Tokyo"][0]
     # focus on Tokyo's row (a long list lays out the rows in view and the
-    # focused one, uitree_app.VROWS_MIN) and its link activated
-    real, real_focus = settings_layer._ui.link, settings_layer._ui.focus
+    # focused one, uitree_app.VROWS_MIN) and A on its link
     want = wc.ZONES[pick][1] + "/use"
-    settings_layer._ui.link = lambda label, value=None, o=None: \
-        (o or {}).get("id") == want or real(label, value, o)
-    settings_layer._ui.focus = lambda id=None: want if id is None else real_focus(id)
-    try:
+    page = sl.pages.pages["tz"][0]
+    page.want_focus = want              # a handler's ui.focus(KEY): lands where the row draws
+    for _ in range(2):
         sl._draw_page()
-    finally:
-        settings_layer._ui.link, settings_layer._ui.focus = real, real_focus
+    assert page.focus_key == want
+    drv = host_app.ConsoleDriver(ws)
+    drv.press("a")
+    for _ in range(3):
+        ws.mark_dirty()
+        drv.frame(1 / 30)
     assert not sl.has_page()
     assert wc.zone() == "JST-9" and ws.system.get("tz") == "JST-9"
     assert wc.place(wc.zone()) == "Tokyo"

@@ -290,12 +290,17 @@ int uit_focused(const uit_t *e, char *buf, size_t cap);
 // The last frame's stop `i` (from 0): its kind (UIT_SEG with the cycle look
 // answers UIT_KINDS), its id into buf; -1 past the last.
 int uit_stop(const uit_t *e, int i, char *buf, size_t cap);
+// The key of the popover shown at the page's root into buf: 1, else 0 (none shown).
+int uit_popover(uit_t *e, char *buf, size_t cap);
 // The id the first stop of row `rowkey` of the list whose cur= is state `cur` draws under
 // (a table's own key: one stop) into buf: 1, else 0 (no such list or row).
 int uit_row_stop(uit_t *e, const char *cur, const char *rowkey, char *buf, size_t cap);
 // The last frame's page rect into out[0..3] and its shown foot's into out[4..7]:
 // whether a foot was shown.
 int uit_page_rects(const uit_t *e, int32_t out[8]);
+// The gens a gen-carrying page's regions draw under: the last frame's page's, then each cards
+// list's and split group's now, in node order, into out (at most cap): their count, 0 where the page carries none.
+int uit_gens(uit_t *e, int32_t *out, int cap);
 // The band's items as the last frame's state names them, NUL-separated
 // (the last NUL included): their length; written only where it fits cap.
 int uit_hints(uit_t *e, char *buf, size_t cap);

@@ -1645,15 +1645,13 @@ def test_the_page_always_shows_the_address_and_how_to_sign_in(tmp_path, monkeypa
     """The look's type fits the address and the sign-in's one sentence beside
     the code, so the page shows them always (docs/history/look_2026-10.md step
     33). The token stays in the code: it is a credential, never shown as text."""
-    from runtime import ui
+    from ui_said import said as saying
     ws = _mode_ws(tmp_path)
     ws.web.toggle()
-    said = []
-    real = ui.label
-    monkeypatch.setattr(ui, "label", lambda t, o=None: (said.append((t, (o or {}).get("face"))),
-                                                         real(t, o))[1])
     ws.mark_dirty()
-    ws.frame(1 / 30.0)
+    with saying() as got:
+        ws.frame(1 / 30.0)
+    said = [(e[1], e[2]) for e in got if e[0] == "label"]
     url = ws.web.url()
     host = url.replace("http://", "").split("#")[0]
     assert (host.rstrip("/"), "mono") in said

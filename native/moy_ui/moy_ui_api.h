@@ -954,6 +954,18 @@ void moy_ui_text_tones(const int16_t tones[6]);
 // The verbs (§1). `o` may be NULL. Text is a span.
 void moy_ui_api_page(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
                      const moy_ui_over_t *o, moy_ui_box_t *content);
+// A host test's tap on the verbs that put words on the page: each label, value row, group
+// caption, button, hints band, icon and slider as its verb is called, with its texts (`b` NULL
+// where it has one; a band's items NUL-separated; a slider's `b` "LO HI STEPS", a progress
+// row's "V HI"), for a label
+// the face role its text options ask (-1: none), for an icon whether the theme's set draws it.
+// NULL, the default and a board's only value, taps nothing.
+enum { MOY_UI_SAID_LABEL = 1, MOY_UI_SAID_INFO, MOY_UI_SAID_LINK, MOY_UI_SAID_GROUP,
+       MOY_UI_SAID_BUTTON, MOY_UI_SAID_HINTS, MOY_UI_SAID_ICON, MOY_UI_SAID_SLIDER,
+       MOY_UI_SAID_PROGRESS };
+typedef void (*moy_ui_said_fn)(int verb, const uint8_t *a, size_t an, const uint8_t *b, size_t bn,
+                               int role);
+void moy_ui_api_said(moy_ui_said_fn fn);
 void moy_ui_api_label(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t text,
                       const moy_ui_over_t *o);
 // `kind` a button kind's index (moy_ui_button_kinds: normal, primary, tonal,

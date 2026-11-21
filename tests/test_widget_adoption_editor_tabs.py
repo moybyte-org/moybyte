@@ -123,8 +123,8 @@ def test_code_chrome_is_drawn_by_the_toolkit(tmp_path, monkeypatch):
         [a for a in code_layer._TOOL_ACTION.values() if cl.box(a) is None]
     assert counter.n["button"] == keys * (ws.frame_state.frames_drawn - k)
     assert cl.box("find_q") is not None and cl.box("case") is not None
-    assert counter.n["status_row"] >= 1       # the status line of fields
-    assert counter.n["dialog"] == 0
+    assert cl.page.rect_of("find_strip") is not None      # the row of its field, its count and Aa, placed this frame
+    assert counter.n["dialog"] == 0 and not cl.page.dialog_shown()
 
 
 def test_code_popups_are_menus_of_the_verbs(tmp_path, monkeypatch):
@@ -137,7 +137,7 @@ def test_code_popups_are_menus_of_the_verbs(tmp_path, monkeypatch):
     cl.run("complete_open")
     _frame(ws)
     _frame(ws)
-    assert [p.key for p in cl.page.shown_popovers()] == ["complete"]
+    assert cl.page.popover_key() == "complete"
     words = [r.word for r in cl.s.cands]
     assert words and all(w.startswith("pr") for w in words)
     assert cl.row_box("cand", words[0]) is not None
@@ -146,7 +146,7 @@ def test_code_popups_are_menus_of_the_verbs(tmp_path, monkeypatch):
     cl.run("goto_open")
     _frame(ws)
     _frame(ws)
-    assert [p.key for p in cl.page.shown_popovers()] == ["goto"]
+    assert cl.page.popover_key() == "goto"
     assert [(r.name, r.line) for r in cl.s.defs] == [("update", 1), ("draw", 3)]
     assert cl.row_box("def_at", "1") is not None and cl.row_box("def_at", "3") is not None
 
@@ -161,5 +161,5 @@ def test_the_crash_popup_is_a_popover_of_the_verbs(tmp_path, monkeypatch):
     _frame(ws)
     cl = ws.code_layer
     assert counter.n["dialog"] == 0
-    assert [p.key for p in cl.page.shown_popovers()] == ["stopped"]
+    assert cl.page.popover_key() == "stopped"
     assert cl.s.stopped == ws.crash_popup

@@ -121,9 +121,9 @@ def test_the_desk_text_moves_its_own_cells_gen_not_the_pages(tmp_path):
         ws.mark_dirty()
         ws.frame(1 / 30)
     eng = sl.licences.page
-    gens = lambda: (eng._page_o["gen"],) + tuple(c[0]["gen"] for c in eng._cells.values())  # noqa: E731
-    assert eng._gen_ok and len(eng._cells) == 2
+    gens = eng.gens
     before = gens()
+    assert before is not None and len(before) == 3, before        # the page and its two cells
     sl.licences.read(eng.s._v["parts"][1]._f["id"])
     ws.mark_dirty()
     ws.frame(1 / 30)

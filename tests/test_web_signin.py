@@ -815,7 +815,6 @@ def test_settings_lists_the_paired_browsers_and_forgets_one(tmp_path, monkeypatc
     """Settings -> Paired browsers: each browser by its name and the day it
     was last seen, choosing one forgets it (its sessions end), and the SSH
     host key's fingerprint under them."""
-    from runtime import ui
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "ws" / "carts"))
     h = _host(tmp_path)
@@ -831,12 +830,11 @@ def test_settings_lists_the_paired_browsers_and_forgets_one(tmp_path, monkeypatc
     sl = ws.settings_layer
     assert sl._paired_words == "2"
     sl.open_page("paired")
-    said, links = [], []
-    real_label, real_link = ui.label, ui.link
-    monkeypatch.setattr(ui, "label", lambda t, o=None: (said.append(t), real_label(t, o))[1])
-    monkeypatch.setattr(ui, "link", lambda t, v=None, o=None: (links.append((t, v)),
-                                                               real_link(t, v, o))[1])
-    drv.frame(1 / 30.0)
+    from ui_said import said as saying
+    with saying() as got:
+        drv.frame(1 / 30.0)
+    said = [e[1] for e in got if e[0] == "label"]
+    links = [(e[1], e[2]) for e in got if e[0] == "link"]
     assert ("Test on Host", "Seen " + _day_of(nb.web_keys()[0][2])) in links
     assert any(t == "Firefox on Linux" for t, _v in links)
     assert "".join(t for t in said if t.startswith("SHA256:") or t.isalnum()) \

@@ -388,6 +388,23 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
         setattr(m, f.__name__, f)
     moy_ui_face.install(m, lib, _ctx, sink, _span0, _over, box_of)
     m.calls = lambda: lib.moy_ui_calls()
+    said_fn = c.CFUNCTYPE(None, c.c_int, c.c_void_p, c.c_size_t, c.c_void_p, c.c_size_t, c.c_int)
+    lib.moy_ui_api_said.argtypes, lib.moy_ui_api_said.restype = [said_fn], None
+    held = [None]
+
+    def said_tap(fn):
+        """A host test's tap on the verbs that put words on the page (moy_ui_api_said):
+        fn(verb, a, b, role) per call, the texts decoded (b None where the verb has one);
+        None takes the tap off."""
+        if fn is None:
+            held[0] = None
+            lib.moy_ui_api_said(said_fn())
+            return
+        held[0] = said_fn(lambda v, a, an, b, bn, r: fn(
+            v, c.string_at(a, an).decode("utf-8") if an else "",
+            c.string_at(b, bn).decode("utf-8") if b else None, r))
+        lib.moy_ui_api_said(held[0])
+    m.said_tap = said_tap
     m.glyph_names = lambda: glyphs
     m.glyph_id = glyph_id
     m.icon_mask = icon_mask

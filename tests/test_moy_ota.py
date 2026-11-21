@@ -29,6 +29,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 from ota_http import Server  # noqa: E402
 from test_ota_signing import TEST_KEYS, sign_with_test_key  # noqa: E402
 import moy_ota_health  # noqa: E402  (the health half: its thresholds and marker)
+from ui_said import said  # noqa: E402
 from runtime import net_binding as nb  # noqa: E402
 
 
@@ -1088,10 +1089,9 @@ def _screen_over(tmp_path, board, srv, blob):
 
 
 def _dialling_screen(tmp_path, board, monkeypatch):
-    """The update screen over a board whose saved network never answers, its
-    radio lease and the labels it draws recorded."""
+    """The update screen over a board whose saved network never answers, and
+    its radio lease recorded."""
     from runtime import host_app
-    from runtime.system import update_ui
 
     fake = _fake_time(ticks=True)
     monkeypatch.setitem(sys.modules, "time", fake)
@@ -1103,11 +1103,7 @@ def _dialling_screen(tmp_path, board, monkeypatch):
     lease = []
     ws.spine.wifi_hold = lambda tag, pid=None: lease.append(("hold", tag))
     ws.spine.wifi_release = lambda tag, pid=None: lease.append(("release", tag))
-    labels = []
-    real = update_ui._ui.label
-    monkeypatch.setattr(update_ui._ui, "label",
-                        lambda text, *a, **k: (labels.append(text), real(text, *a, **k))[1])
-    return ws, ws.update_ui, dialled, lease, labels, fake
+    return ws, ws.update_ui, dialled, lease, fake
 
 
 def test_the_checking_screen_draws_while_the_link_dials_and_back_cancels(
@@ -1115,14 +1111,16 @@ def test_the_checking_screen_draws_while_the_link_dials_and_back_cancels(
     """A P4's slow association takes up to 20 s: the screen keeps drawing
     (joining WiFi, its dots stepping) instead of freezing, and B leaves it,
     dropping the dial and the radio's lease."""
-    ws, uu, dialled, lease, labels, fake = _dialling_screen(tmp_path, board, monkeypatch)
+    ws, uu, dialled, lease, fake = _dialling_screen(tmp_path, board, monkeypatch)
     uu.open_update_online()
     assert lease == [("hold", "update")]
-    for _ in range(6):
-        uu._pump_update(0.0)
-        del labels[:]
-        uu._draw_update(0.0)
-        fake.now += 3000
+    with said() as got:
+        for _ in range(6):
+            uu._pump_update(0.0)
+            del got[:]
+            uu._draw_update(0.0)
+            fake.now += 3000
+    labels = [e[1] for e in got if e[0] == "label"]
     assert uu._upd_phase == "checking" and board.u.joining and dialled == [1]
     assert any(t.startswith("joining WiFi.") for t in labels), labels
     assert board.u.check_online() is None and board.u.pending
@@ -1132,7 +1130,7 @@ def test_the_checking_screen_draws_while_the_link_dials_and_back_cancels(
 
 
 def test_the_checking_screen_gives_up_after_the_dial_budget(tmp_path, board, monkeypatch):
-    ws, uu, dialled, lease, labels, fake = _dialling_screen(tmp_path, board, monkeypatch)
+    ws, uu, dialled, lease, fake = _dialling_screen(tmp_path, board, monkeypatch)
     uu.open_update_online()
     uu._pump_update(0.0)                 # the one-frame CHECKING gate
     uu._pump_update(0.0)                 # the dial
@@ -1144,15 +1142,17 @@ def test_the_checking_screen_gives_up_after_the_dial_budget(tmp_path, board, mon
 
 def test_the_c6_check_waits_on_the_link_without_holding_the_frame(
         tmp_path, board, monkeypatch):
-    ws, uu, dialled, lease, labels, fake = _dialling_screen(tmp_path, board, monkeypatch)
+    ws, uu, dialled, lease, fake = _dialling_screen(tmp_path, board, monkeypatch)
     cu = board.mod.C6Updater(board.u)
     assert cu.check("stable") == "pending" and cu.error is None
     board.u.cancel()
     ws.c6_updater = cu
     uu.open_update_c6()
-    for _ in range(4):
-        uu._pump_update(0.0)
-        uu._draw_update(0.0)
+    with said() as got:
+        for _ in range(4):
+            uu._pump_update(0.0)
+            uu._draw_update(0.0)
+    labels = [e[1] for e in got if e[0] == "label"]
     assert uu._upd_phase == "c6_checking" and board.u.joining
     assert any(t.startswith("joining WiFi.") for t in labels), labels
 

@@ -821,6 +821,10 @@ class CEngine(Engine):
 
     focus_key = property(_focus_key, _no_set)
 
+    def popover_key(self):
+        """The key of the popover shown, or None: the engine's."""
+        return self._x.popover() if self._visiting() else None
+
     def row_stop(self, cur, rowkey):
         """The id the first stop of row `rowkey` of the list whose cur= is
         `cur` draws under, or None (no such list or row): the engine's."""
@@ -850,6 +854,11 @@ class CEngine(Engine):
                 return out
             out[got[1]] = _KIND_NAMES[got[0]]
             i += 1
+
+    def gens(self):
+        """The gens the page's regions drew under (the page's, then each
+        cards list's and split group's), or None where the page carries none: the engine's."""
+        return (self._x.gens() or None) if self._visiting() else None
 
     def hints(self):
         """The band's hints as the last frame left the page: (verb, text, ...), the engine's."""

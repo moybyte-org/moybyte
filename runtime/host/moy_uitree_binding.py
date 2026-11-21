@@ -78,8 +78,10 @@ _SIGS = (
     ("uit_still", [_P, _P, _I, _I, _I, _I, _I, _I, _I], _I),
     ("uit_dump", [_P, c.c_char_p, _Z], _I),
     ("uit_hints", [_P, c.c_char_p, _Z], _I),
+    ("uit_gens", [_P, c.POINTER(c.c_int32), _I], _I),
     ("uit_page_rects", [_P, c.POINTER(c.c_int32)], _I),
     ("uit_row_stop", [_P, c.c_char_p, c.c_char_p, c.c_char_p, _Z], _I),
+    ("uit_popover", [_P, c.c_char_p, _Z], _I),
     ("uit_stats", [_P, _I32], _I),
     ("uit_layout_hash", [], c.c_uint32),
     ("uit_save", [_P, c.c_char_p, _Z, _S, c.c_uint32, c.c_char_p, _Z], _I),
@@ -427,6 +429,11 @@ class Engine:
         d = self._L.uit_lent_place(io, n, x0, w, h, fs, pad, hair, c.byref(nh), need)
         return d, [tuple(io[6 * i + 3:6 * i + 6]) for i in range(n)], list(hair[:nh.value]), need[0]
 
+    def popover(self):
+        if not self._L.uit_popover(self._e, self._buf, 512):
+            return None
+        return self._buf.value.decode("utf-8")
+
     def row_stop(self, cur, key):
         if not self._L.uit_row_stop(self._e, b(cur), b(key), self._buf, 512):
             return None
@@ -436,6 +443,11 @@ class Engine:
         r = (c.c_int32 * 8)()
         foot = self._L.uit_page_rects(self._e, r)
         return tuple(r[:4]), tuple(r[4:]) if foot else None
+
+    def gens(self):
+        g = (c.c_int32 * 16)()
+        n = self._L.uit_gens(self._e, g, 16)
+        return tuple(g[:min(n, 16)])
 
     def hints(self):
         n = self._L.uit_hints(self._e, None, 0)

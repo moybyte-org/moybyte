@@ -70,16 +70,15 @@ def test_the_strip_follows_focus_out_of_the_field_in_the_same_frame(tmp_path, mo
     page settled with the field's strip under Brightness)."""
     from runtime import settings_layer
     ws, drv, sl = _name_field(tmp_path)
-    drawn = []
-    real = settings_layer._ui.hints
-    monkeypatch.setattr(settings_layer._ui, "hints",
-                        lambda items, *a: (drawn.append(tuple(items)), real(items, *a))[1])
+    from ui_said import said
     _type(drv, "q")
     ui_draw.input_kind("tdeck")
     _mic(ws, MIC, text=True)
     ws.mark_dirty()
-    drv.frame(_DT)
-    assert drawn[-1] != settings_layer._HINT_TYPE, drawn[-1]
+    with said() as got:
+        drv.frame(_DT)
+    drawn = [e[1] for e in got if e[0] == "hints"]
+    assert drawn and drawn[-1] != tuple(settings_layer._HINT_TYPE), drawn
 
 
 def test_mic_outside_a_field_is_still_the_console_key(tmp_path):

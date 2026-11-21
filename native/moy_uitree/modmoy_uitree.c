@@ -616,9 +616,18 @@ static mp_obj_t eng_leave(mp_obj_t self)
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(eng_leave_obj, eng_leave);
 
+static mp_obj_t eng_popover(mp_obj_t self)
+{
+    char key[64];               // a node id: the toolkit keeps 31 bytes
+    if (!uit_popover(eng(self), key, sizeof key))
+        return mp_const_none;
+    return mp_obj_new_str(key, strlen(key));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(eng_popover_obj, eng_popover);
+
 static mp_obj_t eng_row_stop(mp_obj_t self, mp_obj_t cur, mp_obj_t key)
 {
-    char id[UIT_ID_MAX + 1];
+    char id[64];                // a node id: the toolkit keeps 31 bytes
     if (!uit_row_stop(eng(self), CSTR(cur), CSTR(key), id, sizeof id))
         return mp_const_none;
     return mp_obj_new_str(id, strlen(id));
@@ -636,6 +645,17 @@ static mp_obj_t eng_page_rects(mp_obj_t self)
     return mp_obj_new_tuple(2, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(eng_page_rects_obj, eng_page_rects);
+
+static mp_obj_t eng_gens(mp_obj_t self)
+{
+    int32_t g[16];
+    int n = uit_gens(eng(self), g, 16);
+    mp_obj_t o[16];
+    for (int i = 0; i < n && i < 16; i++)
+        o[i] = mp_obj_new_int(g[i]);
+    return mp_obj_new_tuple(n < 16 ? n : 16, o);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(eng_gens_obj, eng_gens);
 
 static mp_obj_t eng_hints(mp_obj_t self)
 {
@@ -694,8 +714,10 @@ static const mp_rom_map_elem_t eng_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_focused), MP_ROM_PTR(&eng_focused_obj) },
     { MP_ROM_QSTR(MP_QSTR_draft), MP_ROM_PTR(&eng_draft_obj) },
     { MP_ROM_QSTR(MP_QSTR_hints), MP_ROM_PTR(&eng_hints_obj) },
+    { MP_ROM_QSTR(MP_QSTR_gens), MP_ROM_PTR(&eng_gens_obj) },
     { MP_ROM_QSTR(MP_QSTR_page_rects), MP_ROM_PTR(&eng_page_rects_obj) },
     { MP_ROM_QSTR(MP_QSTR_row_stop), MP_ROM_PTR(&eng_row_stop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_popover), MP_ROM_PTR(&eng_popover_obj) },
     { MP_ROM_QSTR(MP_QSTR_stop), MP_ROM_PTR(&eng_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_leave), MP_ROM_PTR(&eng_leave_obj) },
     { MP_ROM_QSTR(MP_QSTR_letter), MP_ROM_PTR(&eng_letter_obj) },

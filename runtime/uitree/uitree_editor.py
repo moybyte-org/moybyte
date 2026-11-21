@@ -1404,11 +1404,15 @@ class Engine(uitree_app.Engine):
         w = n.p["w"](row) if "w" in n.p else 200
         name = n.p["anchor"](row) if "anchor" in n.p else None
         a = self._part_anchor(name) if name else None
-        if a is not None and "." not in name and n.kids and n.kids[0].kind == "field":
-            # hung from a whole node, a popover that opens on its field
-            # (Go to) stands centred over that node's top
+        if a is not None and "." not in name:
+            # hung from a whole node, a popover stands over that node's top:
+            # one that opens on its field (Go to) centred, a list (the
+            # scripts) at its start, under the bar's tab that opened it
             w = min(w, a[2] - 16 * self.fs)
-            a = (a[0] + (a[2] - w) // 2, a[1] + 4 * self.fs, w, 0)
+            if n.kids and n.kids[0].kind == "field":
+                a = (a[0] + (a[2] - w) // 2, a[1] + 4 * self.fs, w, 0)
+            else:
+                a = (a[0], a[1], w, 0)
         if a is not None:
             _v.at(*a)
         if not _v.popover(n.key, w) and "close" in n.l:
@@ -1606,6 +1610,11 @@ class Engine(uitree_app.Engine):
             if got is not None:
                 return got
         return None
+
+    def popover_key(self):
+        """The key of the popover shown (the first, in the shown tree), or None."""
+        p = self._pops(self.root, None) if self.root is not None else None
+        return p.key if p is not None else None
 
     def popover_shown(self):
         return self.root is not None and self._pops(self.root, None) is not None

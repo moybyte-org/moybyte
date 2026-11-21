@@ -142,17 +142,15 @@ def test_toast_renders(tmp_path):
     assert probe.distinct_pixels_in(drv.rgb888(), 3) > 4        # not a blank frame
 
 
-def _count_line(page):
-    """The page's count row as it reads now."""
-    def find(n):
-        if n.kind == "progress":
-            return n
-        for k in n.kids:
-            got = find(k)
-            if got is not None:
-                return got
-        return None
-    return find(page.page.root).p["label"](None)
+def _count_line(ws, drv):
+    """The page's count row as a frame drawn now reads it."""
+    from ui_said import said
+    with said() as got:
+        ws.mark_dirty()
+        drv.frame(1 / 30)
+    rows = [e[1] for e in got if e[0] == "progress"]
+    assert len(rows) == 1, got
+    return rows[0]
 
 
 def test_the_count_line_says_none_some_and_all(tmp_path):
@@ -166,13 +164,15 @@ def test_the_count_line_says_none_some_and_all(tmp_path):
     sl.open_page("achievements")
     drv.frame(1 / 30)
     page = sl.achievements
-    assert _count_line(page) == "None found yet"
+    assert _count_line(ws, drv) == "None found yet"
     s = achievements_ui.s
 
     def every():
         s.found, s.none, s.every = s.total, False, True
     page.page.run(every, action="every")
-    assert _count_line(page) == "All 15 found!"
+    import uitree
+    uitree.commit(page.page)            # a handler's writes reach the page at its commit
+    assert _count_line(ws, drv) == "All 15 found!"
 
 
 def test_the_achievements_page_opens_from_about(tmp_path):
@@ -203,7 +203,7 @@ def test_the_achievements_page_opens_from_about(tmp_path):
             groups.append(r._f["group"])
     assert groups == ["Moybyte", "Harpoon Pop"]
     assert (page.page.s._v["found"], page.page.s._v["total"]) == (1, 15)
-    assert _count_line(page) == "1 of 15 found"
+    assert _count_line(ws, drv) == "1 of 15 found"
     import settings_rows
     assert settings_rows.s.ach_words == "1 of 15"
     page.focus("system first_open")

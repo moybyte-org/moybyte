@@ -945,6 +945,11 @@ class Engine(S.Builder):
                 return ("%s/%s" % (rowkey, k.key))[:ID_MAX]
         return None
 
+    def popover_key(self):
+        """The key of the popover shown, or None."""
+        p = self._popover_shown()
+        return p.key if p is not None else None
+
     def row_stop(self, cur, rowkey):
         """The id the first stop of row `rowkey` of the list whose cur= is
         `cur` draws under, or None (no such list or row)."""
@@ -1115,6 +1120,13 @@ class Engine(S.Builder):
         else:
             self._hk = None
         return h
+
+    def gens(self):
+        """The gens the page's regions drew under (the page's, then each
+        cards list's and split group's), or None where the page carries none."""
+        if not self._gen_ok:
+            return None
+        return (self._page_o["gen"],) + tuple(c[0]["gen"] for c in self._cells.values())
 
     def hints(self):
         """The band's hints as the last frame left the page: (verb, text, ...)."""

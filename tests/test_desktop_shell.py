@@ -275,13 +275,19 @@ def test_settings_shows_volume_brightness_and_name(tmp_path):
     after Text size (owner call 2026-10-17: the rows stay on the page)."""
     ws, drv = _settings_page(tmp_path)
     sl = ws.settings_layer
-    general = next(g for g in sl.rows.engine.root.kids if g.src.get("caption") == "General")
-    nodes = {n.key: n for n in general.kids}
-    keys = [n.key for n in general.kids]
+    from ui_said import said
+    with said() as got:
+        ws.mark_dirty()
+        drv.frame(1 / 30)
+    groups = [e[1] for e in got if e[0] == "group"]
+    assert groups.index("General") + 1 == groups.index("Play")
+    stops = sl.rows.engine.stop_kinds()             # the page's stops, top to bottom
+    keys = list(stops)
+    # General's rows, Play's first after them
     assert keys.index("font_scale") < keys.index("volume") < keys.index("brightness") \
-        < keys.index("name")
-    assert nodes["volume"].kind == nodes["brightness"].kind == "slider"
-    assert nodes["name"].kind == "field"
+        < keys.index("name") < keys.index("steady")
+    assert stops["volume"] == stops["brightness"] == "slider"
+    assert stops["name"] == "field"
 
 
 def test_the_volume_row_sets_the_console_level(tmp_path):
@@ -315,31 +321,21 @@ def test_volume_is_a_stepped_bar_with_the_muted_icon_at_zero(tmp_path, monkeypat
     """Volume and Brightness draw as the power popover's seven-step gauge (a
     `steps` slider: no number), the theme's muted-speaker icon before Volume
     at 0 (owner, 2026-10-19: Brightness is Volume's bar)."""
-    from runtime import settings_layer as S
+    from ui_said import said
     ws, drv = _settings_page(tmp_path)
-    icons, sliders = [], {}
-    real_icon, real_slider = S._ui.icon, S._ui.slider
-
-    def icon(name, o=None):
-        icons.append((name, real_icon(name, o)))
-        return icons[-1][1]
-
-    def slider(label, v, lo, hi, o=None):
-        sliders[label] = (lo, hi, o)
-        return real_slider(label, v, lo, hi, o)
-    monkeypatch.setattr(S._ui, "icon", icon)
-    monkeypatch.setattr(S._ui, "slider", slider)
     ws.settings_layer.set_level("volume", 0)
     ws.mark_dirty()
-    drv.frame(1 / 30)
-    assert ("mute", True) in icons, "the theme's set draws the muted speaker"
+    with said() as got:
+        drv.frame(1 / 30)
+    assert ("icon", "mute", True) in got, "the theme's set draws the muted speaker"
+    sliders = {e[1]: e[2:] for e in got if e[0] == "slider"}
     for label in ("Volume", "Brightness"):
-        assert sliders[label][:2] == (0, 7) and sliders[label][2]["steps"] is True
+        assert sliders[label] == (0, 7, True), sliders
     ws.settings_layer.set_level("volume", 4)
-    icons.clear()
     ws.mark_dirty()
-    drv.frame(1 / 30)
-    assert not any(n == "mute" for n, _ok in icons)
+    with said() as got:
+        drv.frame(1 / 30)
+    assert not any(e[:2] == ("icon", "mute") for e in got)
 
 
 def test_brightness_and_name_are_stored(tmp_path):

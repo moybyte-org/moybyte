@@ -729,6 +729,15 @@ static int popover_of(uit_t *e)
     return -1;
 }
 
+int uit_popover(uit_t *e, char *buf, size_t cap)
+{
+    int p = popover_of(e);
+    if (p < 0 || !buf || !cap)
+        return 0;
+    snprintf(buf, cap, "%s", uit_str(e, NODE(p)->key));
+    return 1;
+}
+
 int uit_back_popover(uit_t *e, char *buf, size_t cap)
 {
     int p = popover_of(e);
@@ -897,6 +906,18 @@ static void walk(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int m
 
 // A field (`_r_field`): a commit field types into its draft, written by
 // Enter or focus leaving it; another writes its state at each edit.
+// What Enter in a field runs: the action Shift+Enter answers where Shift is held and it is on,
+// else the field's on=.
+static int field_enter(uit_t *e, const moy_ui_ctx_t *c, int on)
+{
+    if (!(c->in[MOY_UI_IN_MODS] & MOY_UI_MOD_SHIFT))
+        return on;
+    for (int a = 0; a < e->nacts; a++)
+        if (e->acts[a].flags & UIT_A_SHIFT_ENTER)
+            return uit_act_can(e, a, -1, -1) ? a : on;
+    return on;
+}
+
 static void draw_field(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row)
 {
     const uit_node_t *N = NODE(k);
@@ -942,14 +963,14 @@ static void draw_field(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k,
         if (done) {
             commit_field(e, k);
             if (N->on >= 0)
-                fire(e, N->on, k, -1, -1, NULL);
+                fire(e, field_enter(e, c, N->on), k, -1, -1, NULL);
         }
         return;
     }
     if (moved)
         wrote_text(e, k, D->buf, nl, "typed", N->changed);
     if (done && N->on >= 0)
-        fire(e, N->on, k, -1, -1, NULL);
+        fire(e, field_enter(e, c, N->on), k, -1, -1, NULL);
 }
 
 // A text view's lines: a model's rows (each its text field), or a text cut at its newlines (none
@@ -3867,8 +3888,9 @@ static void menu_rows(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k)
 }
 
 // A popover on a placed page (`uitree_editor.Engine._r_popover`): hung from its anchor= (a
-// whole text editor, or a part of one), `w=` wide; one that opens on a field hung from a whole
-// node stands centred over that node's top. Its field, its words as they flow, its menu rows,
+// whole text editor, or a part of one), `w=` wide; one hung from a whole node stands over that
+// node's top, centred where it opens on a field, else at its start. Its field, its words as
+// they flow, its menu rows,
 // anything else as it draws; a note (words alone) names its close in its own band.
 static void placed_popover(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k)
 {
@@ -3879,10 +3901,14 @@ static void placed_popover(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, in
         uint32_t n, mark = e->scratch.n, at = uit_tmpl_render(e, N->t_value, -1, -1, &n);
         const char *name = e->scratch.p + at;
         if (n && anchor_rect(e, name, n, a)) {
-            if (!memchr(name, '.', n) && N->kid != UIT_NONE && NODE(N->kid)->kind == UIT_FIELD) {
+            if (!memchr(name, '.', n)) {
+                // hung from a whole node: over its top, a field's popover centred, a list at
+                // its start
                 int32_t most = a[2] - 16 * e->fs;
                 w = w < most ? w : most;
-                a[0] += fdiv(a[2] - w, 2), a[1] += 4 * e->fs, a[2] = w, a[3] = 0;
+                if (N->kid != UIT_NONE && NODE(N->kid)->kind == UIT_FIELD)
+                    a[0] += fdiv(a[2] - w, 2), a[1] += 4 * e->fs;
+                a[2] = w, a[3] = 0;
             }
             moy_ui_api_at(c, a[0], a[1], a[2], a[3]);
         }
@@ -3974,6 +4000,23 @@ int uit_page_rects(const uit_t *e, int32_t out[8])
     else
         out[4] = out[5] = out[6] = out[7] = 0;
     return e->nnodes && e->foot >= 0;
+}
+
+int uit_gens(uit_t *e, int32_t *out, int cap)
+{
+    if (!e->nnodes || e->page_gen < 0)
+        return 0;
+    int n = 0;
+    if (n < cap)
+        out[n] = e->page_gen;
+    n++;
+    for (int k = 1; k < e->nnodes; k++)
+        if (NODE(k)->kind == UIT_CARDS || (NODE(k)->kind == UIT_GROUP && NODE(NODE(k)->parent)->kind == UIT_SPLIT)) {
+            if (n < cap)
+                out[n] = uit_cell_gen(e, k);
+            n++;
+        }
+    return n;
 }
 
 int uit_hints(uit_t *e, char *buf, size_t cap)
@@ -4089,6 +4132,7 @@ int uit_frame(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int x, int y, i
     }
     if (e->gen_vals & GV_INPUT)
         e->gv += (uint32_t)(input + 1) * 40503u;
+    e->page_gen = -1;
     if ((flags & UIT_F_GEN) && e->gen_safe) {
         uint32_t g = (uint32_t)e->gen + e->edits + e->gv;
         for (int i = 0; i < e->nslots; i++)
@@ -4096,6 +4140,7 @@ int uit_frame(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int x, int y, i
                 g += e->slots[i].ver;
         int32_t gen = (int32_t)(g & 0x7fffffff);
         moy_ui_over_put(&o, MOY_UI_OV_GEN, &gen);
+        e->page_gen = gen;
     }
     // a handheld's foot lies outside the page, the keys band (the content's last line) under it
     e->foot = (int16_t)foot_of(e);
