@@ -1,0 +1,67 @@
+name: Bug report
+description: Something in Moybyte broke or looks wrong (for planned work and ideas, open a blank issue)
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Only the first two answers are required; the rest helps us find it faster. One bug per issue is easiest for us to track and close, but a short list is fine if they are all in the same place.
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where did it happen?
+      options:
+        - On a board's own screen
+        - In the browser, a console page served by a board (you typed the board's address)
+        - In the browser, a static web page (not served by a board)
+        - On the host simulator (tools/simulate_desktop.py)
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, what you saw. A list of several small things is fine.
+    validations:
+      required: true
+  - type: dropdown
+    id: board
+    attributes:
+      label: Which board?
+      description: The board with the screen, or the board serving the browser page. Leave empty if none or unsure.
+      options:
+        - T-Deck Plus (tdeck)
+        - Waveshare ESP32-P4 7B (p4)
+        - Guition JC3248W535 (guition_s3)
+        - Guition JC8012P4A1C 10.1" (guition_p4)
+        - Seeed XIAO ESP32-S3 Zero (xiao_zero)
+        - ESP32-C3 Zero (c3_zero)
+        - Other
+  - type: input
+    id: version
+    attributes:
+      label: Version and channel
+      description: About shows it, like "0.8 · Stable". On the host, the git commit.
+      placeholder: "0.8 · Stable"
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and OS
+      description: For a browser report.
+      placeholder: "Chrome 130 on Windows 11"
+  - type: input
+    id: theme
+    attributes:
+      label: Theme and screen size
+      description: Settings → Appearance, if the bug is in the look or layout (a theme, its size, a custom theme, the window style).
+      placeholder: "Big theme, custom theme with a tint"
+  - type: input
+    id: cart
+    attributes:
+      label: Cart name, if one is involved
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Screenshot, photo or log
+      description: Drag a file in. On a board, Settings → About → System log and Last crash hold its own record; for a browser report, the browser console's errors help.
