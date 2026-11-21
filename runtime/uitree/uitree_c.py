@@ -1206,8 +1206,11 @@ class CEditorEngine(CEngine, _ed.Engine):
             app, frame = now.app, now.frame
             now.app, now.frame = self, True
             try:
-                r = self._te_rect
-                r[0], r[1], r[2], r[3] = x, y, w, h
+                r = self._te_rect       # a word an assignment: an unpacking of four builds a tuple
+                r[0] = x
+                r[1] = y
+                r[2] = w
+                r[3] = h
                 self._r_text_editor(te, None, r)
                 if self._x.back_popover() != -2:
                     for part in te.parts:      # where a popover may hang from: its caret, its word
