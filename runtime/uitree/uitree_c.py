@@ -170,13 +170,12 @@ class CEngine(Engine):
 
     def close(self):
         """The visit is over (its host left the page): the store frees what
-        the visit made and keeps the declarations and the lowered page, so
-        the next open draws with no build. The state's values stay Python's
-        and are pushed again at that open."""
+        the visit made and keeps the declarations, the lowered page and
+        each slot's value, so the next open draws with no build and pushes
+        only the state that moved since."""
         Engine.close(self)
         if self._x is not None:
             self._x.close()
-            self._pushed = {}
             self._shut = True
 
     def forget(self):
@@ -695,11 +694,10 @@ class CEngine(Engine):
     def open(self, arg=None, hook="opened"):
         """A visit: the page the store holds is the first page's, kept from
         the last visit (a build reads no state, B01), else built at the first
-        frame; the hook's state pushed at the commit that ends the open."""
+        frame; what the hook moved pushed at the commit that ends the open."""
         x = self._made()
         x.open()
         self._shut = False
-        self._pushed = {}
         Engine.open(self, arg, hook)
         if self._lowered is not None and self._lowered is self.pages[0]:
             self.root = LOWERED

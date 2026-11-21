@@ -297,20 +297,12 @@ void uit_close(uit_t *e)
     UIT_FREE(e->arr);
     e->arr = NULL;
     free_drew(e);
+    // a slot keeps its value: the front end pushes at the next open only what moved
     for (int i = 0; i < e->nslots; i++) {
         uit_slot_t *S = &e->slots[i];
-        UIT_FREE(S->s);
-        UIT_FREE(S->cells);
-        UIT_FREE(S->at);
         UIT_FREE(S->sync);
         S->sync = NULL;
         S->sync_set = 0;
-        S->s = S->cells = NULL;
-        S->at = NULL;
-        S->sn = S->scap = S->cells_n = 0;
-        S->nrows = 0;
-        S->i = 0;
-        S->f = 0;
     }
     for (int i = 0; i < e->norders; i++) {
         UIT_FREE(e->orders[i].key);

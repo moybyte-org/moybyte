@@ -72,11 +72,12 @@ typedef struct uit uit_t;
 
 uit_t *uit_new(void);
 void uit_free(uit_t *e);
-// The visit is over: what it made (state values, ids, orders, drafts,
-// events, the trace, the scratch) is freed, and the declarations and the
-// lowered page are cut to what they hold; the focus stays. The page is drawn
-// again with no build once every state is pushed again: after a uit_open (a
-// new visit), or as it was (a host that drew it again without one).
+// The visit is over: what it made (ids, orders, drafts, the lists' cursor
+// syncs, events, the trace, the scratch) is freed, and the declarations, the
+// lowered page and each state slot's value are cut to what they hold; the
+// focus stays. The page is drawn again with no build once the state that
+// moved since is pushed: after a uit_open (a new visit), or as it was (a host
+// that drew it again without one).
 void uit_close(uit_t *e);
 // The last error's text (a refused name, a source and where it stopped).
 const char *uit_error(const uit_t *e);

@@ -2,8 +2,9 @@
 unix-micropython` builds): every block the engine holds is counted by its
 allocator (`moy_uitree.mem()`, native/moy_uitree/moy_uitree.c), which a board
 points at PSRAM. A page made at boot holds nothing until it opens; a page
-left keeps only its lowered tree (`Engine.close`), so opening and leaving
-every page again and again ends where the first round ended, and letting
+left keeps only its lowered tree and its state's values (`Engine.close`), so
+opening and leaving every page again and again ends where the first round
+ended but for what the values hold (the log's lines grow with the log), and letting
 each go (`forget`) ends at the bytes the desk started with. A page opened
 again draws the tree it kept: no build, no lowering.
 """
@@ -20,9 +21,10 @@ import test_frame_alloc as FA  # noqa: E402
 # The engine bytes at the T-Deck's desk before any page opens: every page the
 # console makes at boot (Settings' rows, Wi-Fi, the log) holds no store yet.
 DESK_BYTES = 0
-# The lowered trees of the pages below, kept after each is left (45,367 B
-# when this was written; the rows page is 18.5 KB of it).
-KEPT_MAX = 48 * 1024
+# The lowered trees and state values of the pages below, kept after each is
+# left (52,333 B when this was written, 9.7 KB of it values; the rows page is
+# 17 KB of it).
+KEPT_MAX = 56 * 1024
 ROUNDS = 20
 
 DRIVER = r'''
@@ -87,7 +89,7 @@ def mem(loop):
             steps(2)
             if r == 0:
                 out["kept"][name] = live() - before
-        out["rounds"].append(live())
+        out["rounds"].append((live(), sum(e._x.stats()[6] for e in ALL if e._x is not None)))
     for e in ALL:
         e.forget()
     out["forgot"] = live()
@@ -112,13 +114,14 @@ def test_the_desk_holds_no_engine_bytes_before_a_page_opens(result):
 
 
 def test_leaving_a_page_keeps_its_tree_and_nothing_grows(result):
-    """Each round opens and leaves every page; after the first round the
-    engine bytes are the same at every round's end, and they are the
-    lowered trees the pages keep."""
+    """Each round opens and leaves every page; the engine bytes at every
+    round's end less the state values the stores hold are the same, and
+    they are the lowered trees and values the pages keep."""
     rounds = result["rounds"]
-    assert len(set(rounds[1:])) == 1 and rounds[-1] == rounds[0], rounds
-    assert sum(result["kept"].values()) == rounds[0] - result["desk"], result["kept"]
-    assert rounds[0] <= KEPT_MAX, (rounds[0], result["kept"])
+    held = [b - v for b, v in rounds]
+    assert len(set(held)) == 1, rounds
+    assert sum(result["kept"].values()) == rounds[0][0] - result["desk"], result["kept"]
+    assert rounds[0][0] <= KEPT_MAX, (rounds[0], result["kept"])
 
 
 def test_letting_every_page_go_returns_every_byte(result):
