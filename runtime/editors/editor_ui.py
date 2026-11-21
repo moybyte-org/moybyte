@@ -253,3 +253,5 @@ def theme_space():
 SIZES = ("z_cards", "z_right", "z_run", "z_palette", "z_paint", "z_sheet", "z_sounds", "z_theme")
 SPACES = {"settings": settings_space, "code": code_space, "art": art_space,
           "world": world_space, "sound": sound_space, THEME: theme_space}
+# The pages only a desk opens: a board with no desk carries none compiled (tools/uitree_compile.py).
+DESK_PAGES = tuple(SPACES.values())
