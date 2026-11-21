@@ -1,7 +1,7 @@
 {
  "surface": "settings_tz",
  "config": "p4_1024x600_fs2_windowed",
- "commit": "30d44f7de",
+ "commit": "d46d59298",
  "script": [
   "k:down",
   "k:down",
@@ -14,35 +14,35 @@
  "frames": [
   [
    "(open)",
-   "b626418d281a9f65006e12cf02161eeafd9bf296cd86de412bfd9a1785c0f55b"
+   "73bd2f931eed4ea8abcec51f92d1a661210d45d5674d86d0f019519b4ebbdea4"
   ],
   [
    "k:down",
-   "dae13c04c4e0e187cdb02ac617093bfdb33a013b677e6f0fd219bc581438aab6"
+   "7c474f9a92aff24c10eaf805b221fc1dccec6685f6f1a8f6e7925eb358f14c73"
   ],
   [
    "k:down",
-   "26df7afd54360d02313d7140e0dabe9c3e5066d8741a87ac171ef859484bf086"
+   "d2e6654590d720425bc63f1e68d081c12b236066853645c0817b18c7b3b1406b"
   ],
   [
    "k:down",
-   "00dc220e2b5073b3460d4c1c9cb195efb9380c25b92a854c51927b4c3fb80c51"
+   "dfc947871773029811c6efad1282a6b99efd577fae6b930114e9bac56a1e6b4c"
   ],
   [
    "k:a",
-   "c95543162293bfe22dd85d0414b0057e8af5fb61d0d08c6333397d97128b806b"
+   "2e60d5ecd7c6ab8d072ea982915502764b37eba6e8e3e64b6868ee69f8ea070e"
   ],
   [
    "f:2",
-   "c95543162293bfe22dd85d0414b0057e8af5fb61d0d08c6333397d97128b806b"
+   "2e60d5ecd7c6ab8d072ea982915502764b37eba6e8e3e64b6868ee69f8ea070e"
   ],
   [
    "k:a",
-   "0ffb00a68a4b1465b629fbef256797126086edd956f7a9ddf9aab560ddf0c20f"
+   "dd070986e69bb0f39ff638c651db98de29b38d793575d503b93907ed96189b2e"
   ],
   [
    "back",
-   "61cfc620b2c59ee5a20c98dd3168afa6c687ce39dba654720da00361fc3c2992"
+   "2e60d5ecd7c6ab8d072ea982915502764b37eba6e8e3e64b6868ee69f8ea070e"
   ]
  ]
 }

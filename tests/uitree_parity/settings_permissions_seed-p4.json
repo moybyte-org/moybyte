@@ -1,7 +1,7 @@
 {
  "surface": "settings_permissions_seed",
  "config": "p4_1024x600_cs2_fs1_windowed",
- "commit": "23a5ba407",
+ "commit": "d46d59298",
  "script": [
   "k:down",
   "k:down",
@@ -10,19 +10,19 @@
  "frames": [
   [
    "(open)",
-   "a757910ad1b2ddeb7ff84e16e0e02d4fea5c8a3249af59103a8da4ad0d7d71eb"
+   "1e040fb92215936d366a3cc25e198d9ed0e45991868f803b5eab18664faca1ad"
   ],
   [
    "k:down",
-   "5b000353229e5ff56f6a1b54668c4dfd767184bc1ed09ea94e2c534cd9821ec2"
+   "dae0ede0c9700e339bc886c9e50b41b8f09b132562bb96d8d699511d7344e555"
   ],
   [
    "k:down",
-   "6c7586e30f94918b5578ae9dc737b8d25bd07968eb501ffc0e8ad0d0fddebb7d"
+   "a17a897f7a9ece36ce2371dc944ce5faf6b8cbb007acf57f7cd3dfee2cff4c4b"
   ],
   [
    "k:down",
-   "e544bccce0f787c701898d60bbe2df06808af8e6e57969f03cc8f5b8b5c851d2"
+   "7c06d35d1b63bc6fb0c4e3405c99b7819ba3433221a3b67e35c852f38ee65531"
   ]
  ]
 }

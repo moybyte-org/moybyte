@@ -1,7 +1,7 @@
 {
  "surface": "achievements",
  "config": "p4_1024x600_fs2_windowed",
- "commit": "e8c55f53f",
+ "commit": "d46d59298",
  "script": [
   "k:right",
   "k:a",
@@ -15,39 +15,39 @@
  "frames": [
   [
    "(open)",
-   "99bec2ed6c8b61b8fb9ce27838957d79044d6dd1c354a2980dd712b789bad226"
+   "415ea509c7c88eb7c0c238ba2c4d4d6c8b963abe04fd21a27276a9418519a3a4"
   ],
   [
    "k:right",
-   "9055cd0ab19e083409608d347733175db7b222dde232b269e360d00f7bed66fe"
+   "8f578364ba726a6dc27bb16043ee3275d421e3aaacbc1c0adf83b4138fd77213"
   ],
   [
    "k:a",
-   "53ae3c86b4bc0707f73a37321b14338de87d99fd59d3319a0562c2c38b36b950"
+   "baab59b894925c14932a36ee2f94e17fa97115bfb6132a56f9015c75ad5c3eaf"
   ],
   [
    "back",
-   "9055cd0ab19e083409608d347733175db7b222dde232b269e360d00f7bed66fe"
+   "8f578364ba726a6dc27bb16043ee3275d421e3aaacbc1c0adf83b4138fd77213"
   ],
   [
    "k:down",
-   "263db14deabeb7048b4be1255da1763416e7469757bf9d3a44a87c177d7834ec"
+   "2ee0a5522d79b8ccfa22f0eb173482ed6effdee011c4bebc37a30412e21745c1"
   ],
   [
    "k:down",
-   "b0d480e7136b1b66fd29dc9f8544719119c620c9d4057b5f32d40bddd374a5fa"
+   "455a4d347a9872bb92dc57953cc03fa8cb390084a780a2a377357943c08a2962"
   ],
   [
    "k:down",
-   "b37c92bca49022d54aad86aa1b8b993e7f13d584a6abd5e7dff42d57537b531e"
+   "67e2eb39f56eb497d25c7b8feec1b2a8850c6d263c5c8e93c50382aaf0b8d2da"
   ],
   [
    "k:a",
-   "0f63380791410cff6a721b194fe8a3b5781fac7e007c7fade79493be73b60a6a"
+   "f1489fdee66533ec8cc1c2ea040352d19ffc6b2aff9bf73b0594ba677b4a332c"
   ],
   [
    "back",
-   "26c9a968a6e284df63e8a0c08cafc9181a855d5688f64559330a4dd572575f7d"
+   "4c03d35f63a83bf5e48a2c59ac32ebdaa843dce13c6d55fc484d7216597a25c1"
   ]
  ]
 }

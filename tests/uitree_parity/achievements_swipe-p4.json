@@ -1,7 +1,7 @@
 {
  "surface": "achievements",
  "config": "p4_1024x600_cs2_fs1_windowed",
- "commit": "4de0cd805",
+ "commit": "d46d59298",
  "script": [
   "swipe:-80",
   "f:20",
@@ -11,23 +11,23 @@
  "frames": [
   [
    "(open)",
-   "df8c1a8f18a7346a7e8bd5090ea9df5594604f3fef61d7ad7247b538efc820db"
+   "00e3a782118e8bab63715e93c7ce3b616c8106d4297a964b3873bfd410245d97"
   ],
   [
    "swipe:-80",
-   "955afd17ad0dc6d6e1b6969753254e7615d882a6c624f41b237febdc4209a2e0"
+   "c14ffcfea9bb76d5dd4b4d46fed616a6a00313c66d6ee20a303084c8cdbcdd60"
   ],
   [
    "f:20",
-   "3c88829ac96ff6a104cf52d289c76abed60f10b34b3a1835e2b9cec2c8f66822"
+   "04a83a903220a72a2a80336c1e0ae9b9745b073f7b110294c8885e6ed60f2416"
   ],
   [
    "swipe:-40",
-   "55073de766b4b81f35274a07fd56d89ebef25b8f1c4b32468b7b32535e9eb804"
+   "064f15d9c1533bcc40a34f653021359c4ee103333965bc0d90ace729a9717217"
   ],
   [
    "swipe:60",
-   "3e981a7f7a3dbfaee488a76a950c32cd26cac768b6470dcb3e0cc41a4cf4f088"
+   "a1ef6730e67081c278a2dfe59db07468b5947e3921beaa6ab8ea5f488dee3a3e"
   ]
  ]
 }
