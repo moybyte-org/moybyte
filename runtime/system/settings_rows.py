@@ -366,6 +366,7 @@ class RowsPage:
         self._ws = layer.ws
         self.last = {}                  # each model's rows as this page last wrote them
         self.kept = {}                  # what rows_poll read from a source that has not moved since
+        self.polled = False             # the open's hook polled: the frame that draws it does not again
 
     def all(self):
         """The page's damage: Settings draws another frame."""
@@ -373,10 +374,14 @@ class RowsPage:
 
     def open(self):
         self.engine.open(hook="rows_opened")
+        self.polled = True
 
     def draw(self, cv, th, rect, desk, dt):
-        self.engine.run(rows_poll, action="rows_poll")
-        ui.commit(self.engine)
+        if self.polled:
+            self.polled = False
+        else:
+            self.engine.run(rows_poll, action="rows_poll")
+            ui.commit(self.engine)
         self.engine.paint(dt, cv, th, rect, desk)
 
     def keys(self, i):
