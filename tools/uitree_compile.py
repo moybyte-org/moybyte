@@ -174,9 +174,9 @@ def has_desk(board_dir):
 
 
 def desk_pages():
-    """The pages only a desk opens: the Editor's workspaces (`editor_ui.SPACES`)."""
-    import editor_ui
-    return set(uitree_aot.key(f) for f in editor_ui.SPACES.values())
+    """The pages only a desk opens: those each module of `SYSTEM` names in
+    its `DESK_PAGES`."""
+    return set(uitree_aot.key(f) for m in SYSTEM for f in getattr(__import__(m), "DESK_PAGES", ()))
 
 
 def stage(modules_dir, require=False, desk=True):

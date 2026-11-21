@@ -134,6 +134,10 @@ def desk_page():
                 ui.text_view("text", face="ui", wrap="word")
 
 
+# The pages only a desk opens: a board with no desk carries none compiled (tools/uitree_compile.py).
+DESK_PAGES = (desk_page,)
+
+
 def text_page():
     with ui.page("{name}"):
         ui.label("{title}", face="caption", tone="dim")
