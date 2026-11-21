@@ -7,6 +7,7 @@ and a handheld's (its status cluster's ring room is not the page's yet), is
 import bar_ui
 import layout_base as LB
 import shell_layout as SL
+import uitree as S
 
 s = bar_ui.s
 LEFT = ("menu", "chips", "zone")
@@ -56,18 +57,27 @@ def _place(rect, names, cs, fs, clock_w, sys_len, n_items):
     return page
 
 
-def _states(names, cs, fs, clock_w, sys_len, n_items, glyph=None):
-    """The page's states written for a bar of widgets `names`."""
+_WINS = [None]                  # the `wins` rows last written (the window manager's, kept while they stand)
+
+
+def _states(names, cs, fs, clock_w, sys_len, n_items, glyph=None, wins=None):
+    """The page's states written for a bar of widgets `names`; `wins` the
+    chips' rows where given (a list the window manager keeps while it
+    stands: written again only when it is another)."""
     page = _page()
     page._bind()
+    if wins is not None and wins is not _WINS[0]:
+        _WINS[0] = wins
+        s._v["wins"] = S._check(s._t["wins"], wins, "s.wins")
+        s._ver["wins"] += 1
     g = 2 * cs
-    sg = max(g, 4 * fs)
+    sg = max(6 * cs, 4 * fs)        # a gap between inks (an icon item is its ink wide)
     ic = 16 * cs
     _put("sg", sg)
     _put("cw", clock_w)
     _put("sys_w", sys_len or ic)
     _put("status", bool(n_items) and ("wifi" in names or "battery" in names))
-    _put("status_w", n_items * ic + max(0, n_items - 1) * sg)
+    _put("status_w", n_items * ic + max(0, n_items - 1) * max(g, 4 * fs))   # BarLayer._status_x's stride
     for n in LEFT + RIGHT:
         if n != "battery":
             _put(SHOWN.get(n, n), n in names)
@@ -105,9 +115,7 @@ def pack(w, h, rows, cs, fs, clock_w, text_w=None, of=None, sys_len=0, cluster=N
             if r is None or (name != "status" and name not in names) or (name == "status" and not s._v["status"]):
                 continue
             x, _y, cw, _h = r
-            if name in ("wifi", "battery"):
-                r = (x, iy, ic, ic)
-            elif name in ("menu", "zone", "status"):
+            if name in ("menu", "zone", "status", "wifi", "battery"):
                 r = (x, iy, cw, ic)
             else:
                 r = (x, 0, cw, thick)
@@ -115,6 +123,23 @@ def pack(w, h, rows, cs, fs, clock_w, text_w=None, of=None, sys_len=0, cluster=N
             cells.append((name, r, n_items if name == "status" else None, slot))
         out.append((bar[0], rect, (thick - LB.BAR_ROWS * fs) // 2, tuple(cells)))
     return tuple(out)
+
+
+def chip_rects(rect, names, cs, fs, clock_w, sys_len, n_items, wins, out):
+    """The chips of a bar at `rect` (a packed bar of the page's shape) for
+    the window manager's rows `wins`: [(kind, rect)] into `out` (cleared)
+    on the canvas the bar lies on, a chip the row's fit rule dropped left
+    out."""
+    page = _states(names, cs, fs, clock_w, sys_len, n_items, wins=wins)
+    page.unit = cs
+    page.place((0, 0, rect[2], rect[3]), desk=True)
+    del out[:]
+    for row in wins:
+        k = row["k"]
+        r = page.rect_of(k + "/chip")
+        if r is not None:
+            out.append((k, (rect[0] + r[0], rect[1] + r[1], r[2], r[3])))
+    return out
 
 
 class _NoDamage:
@@ -132,7 +157,8 @@ _CTX = [None]                   # the bar's own toolkit context (its stops, its 
 _ORIGIN = [0, 0]                # where the page is drawn on its canvas: the bar's origin there
 
 
-def draw(cv, th, rect, names, cs, fs, clock_w, sys_len, n_items, wicon, time, glyph, clip=None):
+def draw(cv, th, rect, names, cs, fs, clock_w, sys_len, n_items, wicon, time, glyph, clip=None,
+         wins=None):
     """A frame of the bar page drawn onto `cv` at `rect` (a bar's, on its
     strip at 0, 0 or on a canvas the bar lies on), placed as `pack` placed
     it, the canvases drawn by `bar_ui.PAINT` in the bar's own coordinates.
@@ -140,7 +166,7 @@ def draw(cv, th, rect, names, cs, fs, clock_w, sys_len, n_items, wicon, time, gl
     again, every draw inside it, and `cv` left clipped to it. The
     toolkit's target the host's frame set is given back."""
     import ui_draw as D
-    page = _states(names, cs, fs, clock_w, sys_len, n_items, glyph)
+    page = _states(names, cs, fs, clock_w, sys_len, n_items, glyph, wins)
     _put("wicon", wicon)
     _put("time", time)
     pushed = getattr(page, "committed", None)

@@ -1072,6 +1072,22 @@ static mp_obj_t ui_text_cut(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_text_cut_obj, 2, 4, ui_text_cut);
 
+// bar_item_w(icon, label, h, fs): the width a bar item's content takes in a
+// box `h` high (moy_ui_bar_item_w): its icon's ink (a slot's name, "" none)
+// and its label whole.
+static mp_obj_t ui_bar_item_w(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t in, ln;
+    const char *ic = mp_obj_str_get_data(a[0], &in);
+    const char *lb = mp_obj_str_get_data(a[1], &ln);
+    int slot = in ? moy_ui_icon_slot((const uint8_t *)ic, in) : -1;
+    int glyph = in ? moy_ui_icon_glyph((const uint8_t *)ic, in) : -1;
+    moy_ui_span_t sp = {(const uint8_t *)lb, (uint16_t)ln};
+    return MP_OBJ_NEW_SMALL_INT(moy_ui_bar_item_w(slot, glyph, sp, (int)mp_obj_get_int(a[2]),
+                                                  (int)mp_obj_get_int(a[3])));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_bar_item_w_obj, 4, 4, ui_bar_item_w);
+
 // text_covers(s, font=0): whether `font` draws every character of `s` with
 // a glyph of its own (moy_text_covers).
 static mp_obj_t ui_text_covers(size_t n_args, const mp_obj_t *args) {
@@ -3206,6 +3222,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_glyph_names), MP_ROM_PTR(&ui_glyph_names_obj) },
     { MP_ROM_QSTR(MP_QSTR_glyph_id), MP_ROM_PTR(&ui_glyph_id_obj) },
     { MP_ROM_QSTR(MP_QSTR_icon_mask), MP_ROM_PTR(&ui_icon_mask_obj) },
+    { MP_ROM_QSTR(MP_QSTR_bar_item_w), MP_ROM_PTR(&ui_bar_item_w_obj) },
     { MP_ROM_QSTR(MP_QSTR_icons_use), MP_ROM_PTR(&ui_icons_use_obj) },
     { MP_ROM_QSTR(MP_QSTR_moy_use), MP_ROM_PTR(&ui_moy_use_obj) },
     { MP_ROM_QSTR(MP_QSTR_s), MP_ROM_PTR(&ui_s_obj) },

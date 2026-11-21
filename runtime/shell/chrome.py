@@ -271,13 +271,11 @@ def text_scale_floor(w, h, diagonal_in, ascent):
 
 
 def _bar_pack():
-    """The bars' packing: the bar page's on the C engine (`bar_engine.pack`),
-    else `shell_layout.pack`."""
-    import uitree_app
-    if uitree_app.engine_in_use() == "c":
-        import bar_engine
-        return bar_engine.pack
-    return _shell_layout.pack
+    """The bars' packing: the bar page's (`bar_engine.pack`, which answers
+    `shell_layout.pack`'s for a bar the page does not place), on either
+    engine, as the page draws on either."""
+    import bar_engine
+    return bar_engine.pack
 
 class Layout(LayoutBase):
     """Responsive desktop-shell geometry (#39): the status strip, cart icon grid,

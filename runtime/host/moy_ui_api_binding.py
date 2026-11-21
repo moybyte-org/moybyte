@@ -407,6 +407,16 @@ def install(m, lib, h, counts, glyphs, kinds, states, tokens):
     m.said_tap = said_tap
     m.glyph_names = lambda: glyphs
     m.glyph_id = glyph_id
+
+    def bar_item_w(icon, label, h, fs):
+        """The width a bar item's content takes in a box `h` high: its icon's
+        ink (an icon set slot's name, "" none) and its label whole."""
+        ib = _b(icon or "")
+        sp, keep = span(label or "")
+        return lib.moy_ui_bar_item_w(lib.moy_ui_icon_slot(ib, len(ib)) if ib else -1,
+                                     lib.moy_ui_icon_glyph(ib, len(ib)) if ib else -1,
+                                     sp, int(h), int(fs))
+    m.bar_item_w = bar_item_w
     m.icon_mask = icon_mask
     m.icons_use = icons_use
     m.moy_use = moy_use

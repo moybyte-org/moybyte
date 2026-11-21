@@ -63,7 +63,7 @@ _NOROW = None           # the slot key of a node drawn outside a list
 _SLOTS_KEPT = 32        # a node's slots past which those not drawn last pass go
 # the options `_o` may leave in a slot's dict, cleared at each call
 _O_KEYS = ("disabled", "current", "signal", "steps", "fit", "secret", "hint", "syntax", "keys",
-           "face", "wrap", "follow", "badge", "locked", "tone", "icon", "image")
+           "face", "wrap", "follow", "badge", "locked", "tone", "icon", "image", "ink")
 
 
 class _Slot:
@@ -1492,6 +1492,11 @@ class Engine(S.Builder):
             text = ""
         kind = n.l.get("kind", "normal")
         if kind == "bar":
+            tone = self._t(n, "tone", row) if "tone" in n.p else ""
+            if len(tone) == 7 and tone[0] == "#":
+                o["ink"] = int(tone[1:], 16)
+            elif tone in _v._ROLES:
+                o["ink"] = tone
             t = _v._T
             hit = _v._C.api_button(t[0], t[1], t[2], text, BAR_KIND, _v._over(o))
         else:

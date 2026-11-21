@@ -264,6 +264,11 @@ def _not_paged(edge, cells):
     return False
 
 
+def _old_packing():
+    from runtime import shell_layout
+    return shell_layout.pack
+
+
 def frames(config, surface, script, carts_dir=None):
     """The settled frame after the opening and after each step of `script`,
     on a fresh workstation of golden configuration `config`. `surface` is a
@@ -278,14 +283,17 @@ def frames(config, surface, script, carts_dir=None):
     if surface.prepare is not None:
         os.makedirs(carts_dir, exist_ok=True)
         surface.prepare(carts_dir)
-    ws = g._build(g.CONFIGS[config], carts_dir)
-    out = []
     # a run compares a page with its old self: the desk's bar stays on the
-    # old painters here (the bar page's own pictures are the shell goldens')
-    from runtime import bar_layer
-    paged = bar_layer._paged
+    # old painters and the old packing here (the bar page's own pictures are
+    # the shell goldens')
+    from runtime import bar_layer, chrome
+    paged, packing = bar_layer._paged, chrome._bar_pack
     bar_layer._paged = _not_paged
+    chrome._bar_pack = _old_packing
+    out = []
+    ws = None
     try:
+        ws = g._build(g.CONFIGS[config], carts_dir)
         surface.open(ws)
         driver = ConsoleDriver(ws)
         cv = ws.glass_canvas
@@ -296,7 +304,9 @@ def frames(config, surface, script, carts_dir=None):
             out.append(Frame(step, _settle(ws, g, driver), cv.w, cv.h, probe(ws)))
     finally:
         bar_layer._paged = paged
-        ws.home.go_home()
+        chrome._bar_pack = packing
+        if ws is not None:
+            ws.home.go_home()
         from runtime import scheduler
         scheduler.SCHED.reset()
         g._ui().theme_uninstall()

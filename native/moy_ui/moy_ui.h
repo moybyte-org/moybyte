@@ -314,6 +314,11 @@ uint32_t moy_ui_icon_font(int size24);
 // `slot`, the largest that `b` holds, centred, else glyph `glyph` at the
 // font scale `fs`. 1 when drawn.
 int moy_ui_icon_in(const moy_ui_sink_t *s, int slot, int glyph, moy_ui_box_t b, int ci, int fs);
+// The columns icon slot `slot` inks in a square box `box` wide, as
+// moy_ui_icon_in draws it there: 1 and *x0 up to *x1 (exclusive) from the
+// box's left, or 0 (*x0, *x1 untouched) where the live set draws it as no
+// mask (Moy, a glyph, none).
+int moy_ui_icon_ink(int slot, int box, int *x0, int *x1);
 // An icon mask through a sink (docs/history/look_2026-10.md step 16): the glyph at
 // index byte `code` of font `font` (an icon set's file, tools/make_icons.py;
 // moy_text_glyph, never decoded as text) at (x, y), the top left of its
@@ -640,15 +645,22 @@ int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, i
                   const moy_ui_button_t *k, int phase);
 int moy_ui_button_x(moy_ui_box_t b, int flags, moy_ui_span_t label, int fs);
 // The shell's bar item on box b (a cell the bar's height across): no plate;
-// its icon (F_ICON, k->icon or k->glyph) at the largest multiple of 16 the box
-// holds, centred, else its label in the ui face at the box's start (a clock in
-// a cell as wide as its widest time), in the chrome ink (k->colors[1]
-// where given: a status item's state; the dim chrome ink disabled). A unit is
-// that side's sixteenth. F_ON wears the cell's ON mark on the content and three
-// units along, one and a half across (a popover open from it); F_FOCUS the
-// bar's pill on the content and five units along, the box across: a plate under
-// the content, then a ring two units wide.
+// its icon (F_ICON, k->icon or k->glyph), its ink centred in the box, at the
+// largest multiple of 16 the box holds; with a label as well, the icon at 16
+// units of the label's scale at the box's start and the label six units
+// after its ink; a label alone at the box's start (a clock in a cell as wide
+// as its widest time). A label is cut at the box's end with an ellipsis, and
+// beside an icon left out where not even that fits. In the chrome ink
+// (k->colors[1] where given: a status item's state; the dim chrome ink
+// disabled). A unit is the icon side's sixteenth. F_ON wears the cell's ON
+// mark on the content and three units along, one and a half across (the
+// focused window's chip), the same whatever the shell's focus word (a bar's
+// strip is kept across it); F_FOCUS the bar's pill on the content and five units
+// along, the box across: a plate under the content, then a ring two units
+// wide. bar_item_w: the width its content takes in a box `h` high, its
+// icon's ink and its label whole (a row's natural width for the item).
 int moy_ui_bar_item(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, const moy_ui_button_t *k);
+int moy_ui_bar_item_w(int slot, int glyph, moy_ui_span_t label, int h, int fs);
 // A chip: a glyph, when it has one, REPLACES its label.
 int moy_ui_chip(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int interact,
                 const moy_ui_button_t *k, int phase);

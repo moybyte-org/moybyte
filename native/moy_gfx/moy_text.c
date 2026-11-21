@@ -779,6 +779,20 @@ int moy_text_glyph(const moy_text_target_t *t, uint32_t font, int index, int x, 
     return rec_of(f, index)[7] * scale;
 }
 
+int moy_text_glyph_ink(uint32_t font, int index, int *x0, int *x1) {
+    const row_t *r = font_row(font);
+    if (r == NULL || r->version != 2 || index < 0 || index >= MOY_FONT_INDEX) {
+        return 0;
+    }
+    const uint8_t *g = rec_of(&r->f2, index);
+    if (g[3] == 0) {
+        return 0;
+    }
+    *x0 = (int8_t)g[5];
+    *x1 = *x0 + g[3];
+    return 1;
+}
+
 int moy_text_paint(const moy_text_target_t *t, uint32_t font, uint8_t source,
                    const uint8_t *s, size_t n, int x, int y, uint16_t col, int scale,
                    int align, int maxw, const moy_text_paint_t *p) {

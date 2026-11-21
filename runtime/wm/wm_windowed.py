@@ -361,6 +361,9 @@ class WindowedWM(WindowPaint, WindowChrome, WindowOverlays, WindowRoute,
         self._chip_memo = None            # _chip_rects' inputs and answer
         self._cell_memo = None            # _chips_cell's packing and answer
         self._chip_keys = []              # _chips_gen's values, compared in place
+        self._wins_keys = []              # chip_model's values, compared in place
+        self._wins_rows = []              # chip_model's answer, kept while they stand
+        self._chip_paged = False          # whether the bar page draws the chips (_chips_made)
         self._chip_gen = 0
         self._chrome_count = 0            # the windows' `_chrome_gen`s are drawn from it
         self._desk_count = 0              # ...and the desk layer's `_desk_sig`s

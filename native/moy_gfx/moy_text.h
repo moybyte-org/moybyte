@@ -191,6 +191,11 @@ int moy_text_paint(const moy_text_target_t *t, uint32_t font, uint8_t source,
 int moy_text_glyph(const moy_text_target_t *t, uint32_t font, int index, int x, int y,
                    uint16_t col, int scale);
 
+// The columns the glyph at byte `index` of version 2 font `font` inks, from
+// its pen at scale 1, in *x0 up to *x1 (exclusive): 1, or 0 where it draws no
+// ink or `font` is unknown or not version 2 (*x0, *x1 untouched).
+int moy_text_glyph_ink(uint32_t font, int index, int *x0, int *x1);
+
 // The width `s` draws at `scale`, in pixels (0 for an unknown font): the sum
 // of its glyphs' advances and, in a version 2 font, its kerning pairs'.
 int moy_text_width(uint32_t font, const uint8_t *s, size_t n, int scale);

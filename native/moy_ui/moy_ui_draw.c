@@ -1046,24 +1046,60 @@ int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, i
     return MOY_UI_OK;
 }
 
+// A bar item's icon side in a box `h` high: with a label, the label's 16 units
+// at its scale; alone, the largest multiple of 16 the box's height holds.
+static int bar_side(int labelled, int h, int fs) {
+    return labelled ? 16 * fs : h >= 16 ? h / 16 * 16 : 16;
+}
+
+static const uint8_t s_ell[] = "\xe2\x80\xa6";
+
+int moy_ui_bar_item_w(int slot, int glyph, moy_ui_span_t label, int h, int fs) {
+    int icon = slot >= 0 || glyph >= 0;
+    tfont_t f = role_font(0, MOY_UI_FONT_UI);
+    int lw = label.n ? t_w(&f, label.p, label.n, fs) : 0;
+    if (!icon) {
+        return lw;
+    }
+    int side = bar_side(label.n > 0, h, fs), x0 = 0, x1 = side;
+    moy_ui_icon_ink(slot, side, &x0, &x1);
+    return x1 - x0 + (label.n ? 6 * (side / 16) + lw : 0);
+}
+
 int moy_ui_bar_item(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, const moy_ui_button_t *k) {
     draw_t d;
     open_draw(s, &d);
-    int fs = k->fs, least = b.w < b.h ? b.w : b.h;
-    int side = least >= 16 ? least / 16 * 16 : 16, u = side / 16;
+    int fs = k->fs;
     int ink = k->colors[1] != MOY_UI_FROM_STYLE ? k->colors[1]
                                                 : moy_ui_token(d.look, MOY_UI_T_CHROME_INK);
     if (flags & MOY_UI_F_DISABLED) {
         ink = moy_ui_token(d.look, MOY_UI_T_CHROME_INK_DIM);
     }
     int icon = (flags & MOY_UI_F_ICON) && (k->icon >= 0 || k->glyph >= 0);
-    int cw = icon ? side : t_w(&d.f, k->label.p, k->label.n, fs);
-    int cx = icon ? b.x + moy_ui_fdiv(b.w - cw, 2) : b.x, iy = b.y + moy_ui_fdiv(b.h - side, 2);
+    int labelled = icon && k->label.n;
+    int side = bar_side(labelled, b.h, fs), u = side / 16;
+    int x0 = 0, x1 = side;
+    if (icon) {
+        moy_ui_icon_ink(k->icon, side, &x0, &x1);
+    }
+    int iw = icon ? x1 - x0 : 0, gap = labelled ? 6 * u : 0;
+    // the label cut at the box's end with an ellipsis; none where not even that fits
+    int ell = 0, room = b.w - iw - gap;
+    size_t ln = k->label.n && (!icon || labelled) && room > 0
+                    ? moy_text_cut_px(d.f.id, k->label.p, k->label.n, room, fs, &ell)
+                    : 0;
+    int lw = ln || ell ? t_w(&d.f, k->label.p, ln, fs) + (ell ? t_w(&d.f, s_ell, 3, fs) : 0) : 0;
+    if (icon && lw > room) {
+        ln = 0, ell = 0, lw = 0;
+    }
+    int cw = icon ? iw + (lw ? gap + lw : 0) : lw;
+    int cx = icon && !lw ? b.x + moy_ui_fdiv(b.w - iw, 2) : b.x;
+    int iy = b.y + moy_ui_fdiv(b.h - side, 2);
     int mi = -1;
     if (flags & MOY_UI_F_ON) {
         moy_ui_box_t m = {(int16_t)(cx - 3 * u), (int16_t)(iy - 3 * u / 2), (int16_t)(cw + 6 * u),
                           (int16_t)(side + 3 * u)};
-        moy_ui_current(s, m, MOY_UI_ITEM_CELL, 5 * fs, s->shown ? 0 : MOY_UI_MARK_BACK, fs, &mi);
+        moy_ui_current(s, m, MOY_UI_ITEM_CELL, 5 * fs, 0, fs, &mi);
         ink = mi >= 0 ? mi : ink;
     }
     moy_ui_box_t pill = {(int16_t)(cx - 5 * u), b.y, (int16_t)(cw + 10 * u), b.h};
@@ -1071,10 +1107,15 @@ int moy_ui_bar_item(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, const moy
         moy_ui_focus(s, pill, MOY_UI_ITEM_CELL, 5 * fs, MOY_UI_MARK_PILL, u, NULL, &mi);
     }
     if (icon) {
-        moy_ui_box_t ib = {(int16_t)cx, (int16_t)iy, (int16_t)side, (int16_t)side};
+        moy_ui_box_t ib = {(int16_t)(cx - x0), (int16_t)iy, (int16_t)side, (int16_t)side};
         moy_ui_icon_in(s, k->icon, k->glyph, ib, ink, fs);
-    } else if (k->label.n) {
-        text(&d, k->label.p, k->label.n, cx, b.y + moy_ui_fdiv(b.h - d.f.line * fs, 2), ink);
+    }
+    if (lw) {
+        int tx = icon ? cx + iw + gap : cx, ty = b.y + moy_ui_fdiv(b.h - d.f.line * fs, 2);
+        text(&d, k->label.p, ln, tx, ty, ink);
+        if (ell) {
+            text(&d, s_ell, 3, tx + t_w(&d.f, k->label.p, ln, fs), ty, ink);
+        }
     }
     if (flags & MOY_UI_F_FOCUS) {
         moy_ui_focus(s, pill, MOY_UI_ITEM_CELL, 5 * fs, MOY_UI_MARK_PILL | MOY_UI_MARK_AFTER, u,

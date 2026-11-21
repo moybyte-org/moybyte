@@ -148,6 +148,7 @@ _DRAW_SIGS = (
                      _I], _I),
     ("moy_ui_button", [c.POINTER(_Sink), _Box, _I, _I, _I, c.POINTER(_Button), _I], _I),
     ("moy_ui_button_x", [_Box, _I, _Span, _I], _I),
+    ("moy_ui_bar_item_w", [_I, _I, _Span, _I, _I], _I),
     ("moy_ui_chip", [c.POINTER(_Sink), _Box, _I, _I, _I, c.POINTER(_Button), _I], _I),
     ("moy_ui_tab_rects", [_Box, c.c_char_p, _Z, _I, _I, _I, c.POINTER(_Box),
                           c.POINTER(_I)], _I),

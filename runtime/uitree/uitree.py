@@ -1954,7 +1954,7 @@ SCHEMA = {
     "info": dict(_C, label="text", value="text", icon="text", signal="int"),
     "link": dict(_C, value="text", label="text", icon="text", signal="int", focus="cond"),
     "button": dict(_C, kind="lit", label="text", icon="text", alone="lit", span="lit", arg="lit",
-                   focus="cond", grow="lit", marked="cond", w="int"),
+                   focus="cond", grow="lit", marked="cond", w="int", tone="text"),
     "toggle": dict(_C, label="text", on="action0", focus="cond", hint="text"),
     "slider": dict(_C, label="text", lo="int", hi="int", on="action0", focus="cond", look="lit",
                    icon="text"),

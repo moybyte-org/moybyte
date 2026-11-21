@@ -494,6 +494,20 @@ static int icon_d(pd_t *d, int slot, int glyph, moy_ui_box_t b, int ci) {
     return 0;
 }
 
+int moy_ui_icon_ink(int slot, int box, int *x0, int *x1) {
+    uint32_t f24 = moy_ui_icon_font(1), f16 = moy_ui_icon_font(0);
+    uint32_t font = box >= 24 && f24 ? f24 : f16 ? f16 : 0;
+    int a, e;
+    if (slot < 0 || slot == MOY_UI_ICON_MOY || !font ||
+        !moy_text_glyph_ink(font, MOY_UI_ICON_FIRST + slot, &a, &e)) {
+        return 0;
+    }
+    int ox = moy_ui_fdiv(box - (font == f24 ? 24 : 16), 2);
+    *x0 = ox + a;
+    *x1 = ox + e;
+    return 1;
+}
+
 int moy_ui_icon_in(const moy_ui_sink_t *s, int slot, int glyph, moy_ui_box_t b, int ci, int fs) {
     pd_t d;
     open_pd(s, &d, fs, 0);

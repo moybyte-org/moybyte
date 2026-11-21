@@ -983,7 +983,7 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
         tslot = &N->t_value;
     else if ((kind == UIT_CARDS && !strcmp(name, "h")) || (kind == UIT_POPOVER && !strcmp(name, "w")) ||
              (kind == UIT_ROW && !strcmp(name, "pad")) ||
-             ((kind == UIT_CARD || kind == UIT_PICTURE) && !strcmp(name, "tone")))
+             ((kind == UIT_CARD || kind == UIT_PICTURE || kind == UIT_BUTTON) && !strcmp(name, "tone")))
         tslot = &N->t_aux;
     else if ((!strcmp(name, "empty") && UIT_IS_LIST(kind)) ||
              (!strcmp(name, "hint") && (kind == UIT_TOGGLE || kind == UIT_FIELD)) ||

@@ -1472,6 +1472,19 @@ class BarLayer:
         """The themes' bar's widgets drawn by the bar page (`bar_engine.draw`)
         at `bar` on `cv` (its strip, or the canvas it lies on), `clip` the
         part drawn again; the page's canvases are `_page_paint`'s."""
+        names, cw, sys_w, n_items = self._page_names(cells)
+        ws = self.ws
+        L = ws.layout
+        self._page_at = (where, bar, cells)
+        _bar_ui.PAINT[0] = self._page_paint
+        _bar_engine.draw(cv, ws.theme_colors, bar, names, L.cs, L.fs, cw or L.clock_w, sys_w,
+                         n_items, ws.wifi_icon_kind(), self.clock_text(), self._battery_state() != 0,
+                         clip, self._wins())
+
+    @staticmethod
+    def _page_names(cells):
+        """A packed bar's widgets as the page takes them: their names, the
+        clock's, the system button's widths and the status items' count."""
         names = []
         cw = sys_w = n_items = 0
         for name, r, text, _slot in cells:
@@ -1482,13 +1495,24 @@ class BarLayer:
                 sys_w = r[2]
             elif name == "status":
                 n_items = text or 0
-        ws = self.ws
-        L = ws.layout
-        self._page_at = (where, bar, cells)
-        _bar_ui.PAINT[0] = self._page_paint
-        _bar_engine.draw(cv, ws.theme_colors, bar, names, L.cs, L.fs, cw or L.clock_w, sys_w,
-                         n_items, ws.wifi_icon_kind(), self.clock_text(), self._battery_state() != 0,
-                         clip)
+        return names, cw, sys_w, n_items
+
+    def _wins(self):
+        """The chips' rows, the window manager's (`chip_model`), else None."""
+        got = getattr(self.ws.wm, "chip_model", None)
+        return got() if got is not None else None
+
+    def chip_rects(self, bar, out):
+        """The chips of packed bar `bar` placed by the bar page, [(kind,
+        rect)] on the root canvas into `out`, or None where the page does
+        not draw that bar (`_paged`)."""
+        edge, rect, _dy, cells = bar
+        if not _paged(edge, cells):
+            return None
+        names, cw, sys_w, n_items = self._page_names(cells)
+        L = self.ws.layout
+        return _bar_engine.chip_rects(rect, names, L.cs, L.fs, cw or L.clock_w, sys_w, n_items,
+                                      self._wins() or [], out)
 
     def _page_again(self, cv, where, bar, span):
         """The bar page drawn again over `span` (bar coordinates) of `bar`
@@ -2161,6 +2185,31 @@ class BarLayer:
             cv.camera(0, 0)
         self.strip_moved(cv, x, y, w, h)
         self._redraw_status(where)
+
+    def _chips_span(self, cell, bar):
+        """The chips' cell and the reach of their marks past it, five units
+        each way, inside the bar (bar coordinates)."""
+        x, y, w, h = cell
+        u = 5 * self.ws.layout.fs
+        a = max(0, x - u)
+        return (a, y, min(bar[1][2], x + w + u) - a, h)
+
+    def redraw_chips(self, where):
+        """The chips' cell of an already-drawn bar drawn again by the bar
+        page, the marks' reach past it included: True, or False where the
+        page does not draw that bar (`_paged`) and the window manager
+        paints them."""
+        got = self.cell(where, "chips")
+        if got is None or not _paged(got[0][0], got[0][3]) or self.zone_is_game(where) \
+                or self._in_window(where):
+            return False
+        got = self.repaint_cell(where, "chips", self._chips_span)
+        if got is None:
+            return False
+        cv, bar, (x, y, w, h), _looked = got
+        bx, by = bar[1][0], bar[1][1]
+        self._page_again(cv, where, bar, self._chips_span((x - bx, y - by, w, h), bar))
+        return True
 
     def _redraw_status(self, where):
         """Repaint the status items' cell of an already-drawn bar, the open

@@ -386,10 +386,11 @@ def test_the_focused_windows_chip_is_raised_under_the_current_mark(tmp_path):
     _settle(ws)
     cv = ws.wm.root_canvas
     chips = ws.wm._chip_rects()
-    assert chips and all(r[3] == 28 for _k, r, _l in chips)
+    assert chips and len({r[3] for _k, r, _l in chips}) == 1
     bar = _px(cv, 600, 20)
+    side = 16 * ws.layout.fs
     for key, (x, y, w, h), _label in chips:
-        inside = _px(cv, x + w - 4, y + h // 2)
+        inside = _px(cv, x + w // 2, y + (h - side) // 2 - 1)     # the mark, above the content
         assert (inside != bar) == (key == ws.wm.focus_key)
 
 

@@ -1686,6 +1686,10 @@
     "w": {
      "type": "int",
      "level": 2
+    },
+    "tone": {
+     "type": "tpl",
+     "level": 2
     }
    }
   },

@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "moy_text.h"
+#include "moy_ui_tables.h"
 #include "moy_uitree_int.h"
 
 #define NODE(k) (&e->nodes[k])
@@ -197,6 +198,28 @@ static void id_put(uit_t *e, int k, int model, int row, const char *id)
     (void)model;
 }
 
+// A button's tone= as the override's ink: a role of the look's token row by its name, or
+// "#RRGGBB"; -1 for none.
+static int32_t button_ink(const char *p, uint32_t n)
+{
+    if (n == 7 && p[0] == '#') {
+        int32_t v = 0;
+        for (uint32_t i = 1; i < 7; i++) {
+            char ch = p[i];
+            int d = ch >= '0' && ch <= '9' ? ch - '0' : ch >= 'a' && ch <= 'f' ? ch - 'a' + 10
+                    : ch >= 'A' && ch <= 'F' ? ch - 'A' + 10 : -1;
+            if (d < 0)
+                return -1;
+            v = v * 16 + d;
+        }
+        return v;
+    }
+    for (int i = 0; i < MOY_UI_TOKENS && n; i++)
+        if (strlen(moy_ui_token_names[i]) == n && !memcmp(moy_ui_token_names[i], p, n))
+            return MOY_UI_O_ROLE + i;
+    return -1;
+}
+
 // The override a stop draws with (`_o`): its id, `disabled` where its
 // action is greyed off, its icon given to the toolkit.
 static void over_for(uit_t *e, int k, int model, int row, moy_ui_ctx_t *c, moy_ui_over_t *o, char id[UIT_ID_MAX + 1])
@@ -220,6 +243,12 @@ static void over_for(uit_t *e, int k, int model, int row, moy_ui_ctx_t *c, moy_u
     if (N->mark >= 0) {
         int32_t on = uit_cond_eval(e, N->mark, model, row) != 0;
         moy_ui_over_put(o, MOY_UI_OV_CURRENT, &on);
+    }
+    if (N->kind == UIT_BUTTON && N->t_aux >= 0) {
+        uint32_t n, at = uit_tmpl_render(e, N->t_aux, model, row, &n);
+        int32_t ink = button_ink(e->scratch.p + at, n);
+        if (ink >= 0)
+            moy_ui_over_put(o, MOY_UI_OV_INK, &ink);
     }
     if (N->t_icon >= 0) {
         uint32_t n, at = uit_tmpl_render(e, N->t_icon, model, row, &n);
@@ -2826,6 +2855,24 @@ static int32_t natural(uit_t *e, int k, int model, int row, int32_t h)
     if (N->kind == UIT_BUTTON) {
         if (N->t_value >= 0)
             return len_of(e, N->t_value, model, row, 0);     // a bar item: its own width
+        if (N->lit == MOY_UI_BUTTON_BAR) {
+            // a bar item: its icon's ink and its label (moy_ui_bar_item_w)
+            const char *ic = N->act >= 0 ? uit_str(e, e->acts[N->act].icon) : "";
+            uint32_t in = strlen(ic), ia = 0;
+            int slot = -1, glyph = -1;
+            if (N->t_icon >= 0) {
+                ia = uit_tmpl_render(e, N->t_icon, model, row, &in);
+                ic = e->scratch.p + ia;
+            }
+            if (in) {
+                slot = moy_ui_icon_slot((const uint8_t *)ic, in);
+                glyph = moy_ui_icon_glyph((const uint8_t *)ic, in);
+            }
+            n = 0, at = 0;
+            if (!((N->btn & BT_ALONE) && (N->t_icon >= 0 || in)))
+                at = text(e, k, 0, model, row, &n);
+            return moy_ui_bar_item_w(slot, glyph, sspan(e, at, n), h, e->fs);
+        }
         if (N->t_icon >= 0 && (N->btn & BT_ALONE))
             return h;
         at = text(e, k, 0, model, row, &n);
@@ -2849,7 +2896,9 @@ static int32_t natural(uit_t *e, int k, int model, int row, int32_t h)
     }
     if (N->kind == UIT_ROW) {
         // a row in a row: its cells' widths and gaps where none grows; one with nothing shown
-        // a spacer
+        // a spacer; a grow= row a fill
+        if (N->lit & RW_GROW)
+            return -1;
         int16_t kids[PLACE_KIDS], km[PLACE_KIDS], kr[PLACE_KIDS];
         int st = 0, sts = 0, nk = row_kids(e, k, model, row, kids, km, kr, &st, &sts);
         int32_t sum = 0;

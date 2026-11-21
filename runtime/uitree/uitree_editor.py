@@ -528,6 +528,13 @@ class Engine(uitree_app.Engine):
         if k.kind == "button":
             if k.src.get("w") is not None:
                 return self._len(k, "w", row, 0)    # a bar item: its own width
+            if k.l.get("kind") == "bar":
+                # a bar item: its icon's ink and its label (moy_ui_bar_item_w)
+                icon = self._t(k, "icon", row) if "icon" in k.p else (k.act.icon if k.act else "") or ""
+                label = self._t(k, "label", row) if "label" in k.p else ""
+                if k.l.get("alone") and ("icon" in k.p or (k.act and k.act.icon)):
+                    label = ""
+                return _v._C.bar_item_w(icon, label, h, max(1, getattr(self, "fs", 1)))
             if "icon" in k.p and k.l.get("alone"):
                 return h
             return _v.text_size(self._t(k, "label", row))[0] + 28
@@ -544,7 +551,9 @@ class Engine(uitree_app.Engine):
             return self._len(k, "w", row, 0)        # a fixed cell along x, as h= down
         if k.kind == "row":
             # a row in a row: its cells' widths and gaps where none grows;
-            # one with nothing shown a spacer
+            # one with nothing shown a spacer; a grow= row a fill
+            if k.l.get("grow"):
+                return None
             rws = []
             kids = self._row_kids(k, row, rws)
             nat = [self._natural(c, r, h) for c, r in zip(kids, rws)]

@@ -775,10 +775,50 @@ class WindowChrome:
             return m[5]
         return self._chips_made(got, lay, fs, side)
 
+    def chip_model(self):
+        """The bar page's `wins` (bar_ui): a row per open window in the order
+        they opened -- its kind, its chip title, its icon, whether it holds
+        the focus (its chip marked) and its ink: a minimised window's the
+        chrome ink, another's the dim chrome ink, the focused one's its
+        mark's. The list is kept while all of that stands, compared in
+        place, so the page's state is written only on a change."""
+        k = self._wins_keys
+        i = 0
+        same = True
+        for kind in self._kinds:
+            win = self.windows.get(kind)
+            if win is None:
+                continue
+            on = kind == self.focus_key and not win.minimized
+            t = self._chip_title(win)
+            if i + 4 > len(k):
+                k.extend((None, None, None, None))
+                same = False
+            if k[i] != kind or k[i + 1] != t or k[i + 2] != on or k[i + 3] != win.minimized:
+                k[i], k[i + 1], k[i + 2], k[i + 3] = kind, t, on, win.minimized
+                same = False
+            i += 4
+        if i != len(k):
+            del k[i:]
+            same = False
+        if same:
+            return self._wins_rows
+        rows = []
+        for j in range(0, i, 4):
+            win = self.windows[k[j]]
+            icon = self._icon_slot(win)
+            if icon not in _iconsets.SLOT:
+                icon = _ICON_GLYPHS.get(win.kind, "app")
+            rows.append({"k": k[j], "title": k[j + 1], "icon": icon, "on": k[j + 2],
+                         "tone": "" if k[j + 2] else "chrome_ink" if k[j + 3] else "chrome_ink_dim"})
+        self._wins_rows = rows
+        return rows
+
     def _chips_made(self, got, lay, fs, side):
         """`_chip_rects`' answer made again (its comprehensions' cells are
         made on every call of the function that holds them, so they live
-        here, where only a change runs)."""
+        here, where only a change runs): the bar page's where it draws the
+        bar (`BarLayer.chip_rects`), else the look's arithmetic below."""
         (edge, (bx, by, bw, bh), _dy, _cells), (_n, (cx, cy, cw, ch), _t, slot) = got
         kinds = tuple(k for k in self._kinds if k in self.windows)
         if not kinds:
@@ -789,6 +829,12 @@ class WindowChrome:
             titles = tuple(self._chip_title(self.windows[k]) for k in kinds)
         out = []
         self._chip_memo = (kinds, titles, got, fs, lay.cs, out)
+        paged = None if side else self.ws.bar_layer.chip_rects(got[0], [])
+        self._chip_paged = paged is not None
+        if paged is not None:
+            for k, r in paged:
+                out.append((k, r, titles[kinds.index(k)]))
+            return out
         if side:
             side = 16 * lay.cs
             x = bx + (bw - side) // 2
@@ -854,6 +900,8 @@ class WindowChrome:
         # The chips blend (their labels' and plates' edges) over the bar's
         # band, which the bar painted once: its ground goes down again first
         # in the root's bar, so a chip repaint is a full repaint's pixels.
+        if self._chip_paged and self.ws.bar_layer.redraw_chips("desk"):
+            return
         self.ws.bar_layer.repaint_cell("desk", "chips")
         line_h = self.root_ctx.layout.line_h
         self._draw_look_chips(sc, th, fs, line_h)
@@ -885,7 +933,8 @@ class WindowChrome:
         return self._chip_gen
 
     def _draw_look_chips(self, sc, th, fs, line_h):
-        """The taskbar chips as the look's tabs (docs/history/look_2026-10.md step 14):
+        """The taskbar chips of a bar the bar page does not draw (a side
+        bar's, a centred slot's) as the look's tabs (docs/history/look_2026-10.md step 14):
         the window's icon (in `_win_icon`'s order) then its title, the
         focused window's chip raised under the current mark, another open
         window's in the dim ink. The focused chip's content takes the ink the
