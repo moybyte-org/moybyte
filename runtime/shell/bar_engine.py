@@ -15,7 +15,7 @@ s = bar_ui.s
 LEFT = ("menu", "chips", "zone")
 RIGHT = ("wifi", "battery", "clock")
 _PAGE = [None]
-SHOWN = {"wifi": "wifi_on", "clock": "clock_on"}     # a widget's shown= state, where not its name
+SHOWN = {"menu": "menu_on", "wifi": "wifi_on", "clock": "clock_on"}     # a widget's shown= state, where not its name
 _SHOWN = tuple((n, SHOWN.get(n, n)) for n in LEFT + RIGHT if n != "battery")
 _DIRTY = [False]                # a state written since the page's store last took the writes
 _LAST = [None] * 8              # the bar `_states` wrote last: names, cs, fs, clock_w, sys_len, n, glyph, wins
@@ -234,6 +234,11 @@ def item_key(k):
     return _KEYS[k] + "/item"
 
 
+def chip_key(kind):
+    """The id of window `kind`'s chip's stop on the page."""
+    return kind + "/chip"
+
+
 def fire(stop):
     """The action of the page's stop `stop` (an id `_page_stop` named: a
     widget's name, `item_key(k)`) run as the page runs it."""
@@ -245,6 +250,13 @@ def fire(stop):
         for row in s._v["items"]:
             if row.k == k:
                 page.run_action(acts["item"], (row,), "the bar's keys")
+                return
+        return
+    if stop.endswith("/chip"):
+        k = stop[:-5]
+        for row in s._v["wins"]:
+            if row.k == k:
+                page.run_action(acts["chip"], (row,), "the bar's keys")
                 return
         return
     page.run_action(acts[stop], (), "the bar's keys")

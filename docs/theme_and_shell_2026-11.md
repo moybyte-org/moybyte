@@ -1917,8 +1917,13 @@ it; the focused item takes the bar's focus ring (below), and
 the hint strip under it names the bar's keys (`ui_draw.BAR_KEYS`: change,
 confirm and back, in the input's own keys). A caret keeps up for itself, so
 the Code tab and the theme mode's Config walk no focus onto the bar: their
-bar is a touch's, and the system menu's Home is their way out. The desk's
-windows keep their own ways.
+bar is a touch's, and the system menu's Home is their way out. On the desk
+(desktop mode) the keys reach the desk's bar the same two ways from the
+focused window's surface (the desk's own with no window focused): its
+items are the system button, a chip per window, the status items, Wi-Fi,
+the battery and the clock; confirm on a chip brings its window forward as
+a tap does, and down, back and stop hand the keys back to the window. A
+full-screen window covers the bar, and the keys stay its.
 
 **The bar's focus mark is the ring** (owner calls 2026-10-27 and 2026-11-05),
 in the tabs' shape whatever the theme's marks (`ui_draw.focus`'s `pill`,
@@ -1929,7 +1934,8 @@ is one height, the system tile's, centred across the bar
 (`BarLayer._pill`); on a handheld the status cluster wears one ring round
 its icons; on the zone's targets it is their rect and a ring round it. On
 a bar the bar page draws (`runtime/shell/bar_ui.py`), an item that is a
-bar item (Wi-Fi, the battery, the clock, a status item) wears the bar
+bar item (the system button, a chip, Wi-Fi, the battery, the clock, a
+status item) wears the bar
 item's own focus mark instead, drawn by the page: the theme's pill tint
 under the item and its ring, the cell's height (owner call 2026-11-21:
 the engine's one look stands where it differs from an old bar detail),
