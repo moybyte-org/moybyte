@@ -161,7 +161,8 @@ NATIVE = {
              "moy_sh", "moy_tty", "moy_ssh"},
     "web": {"moy_gfx", "moy_lua", "moy_audio", "moycore", "moy_png", "js",
             "jsffi", "moy_index", "moy_store", "moy_spine", "moy_glass",
-            "moy_input", "moy_net", "moy_kernel", "moy_play", "moy_app", "moy_ui"},
+            "moy_input", "moy_net", "moy_kernel", "moy_play", "moy_app", "moy_ui",
+            "moy_uitree"},
 }
 
 # A usermod that registers more than its own name: moy_kernel is the kernel's
@@ -253,9 +254,10 @@ GENERATED = {
     # board's headroom floor -- so a flashed Zero came up an empty console and its
     # carts arrived over a USB cable, or never.
     "zero": {"carts_data", "_ota_build"},
-    # The font set, the module every console board generates too
-    # (tools/make_font.py module, the board's `font_tier`).
-    "web": {"fonts_data"},
+    # The font set and the console's compiled pages, the modules every console
+    # board generates too (tools/make_font.py module, the board's `font_tier`;
+    # tools/uitree_compile.py --staged).
+    "web": {"fonts_data", "uitree_pages"},
 }
 
 # Directory-shaped modules: a package staged wholesale rather than file by file.

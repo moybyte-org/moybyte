@@ -15,9 +15,9 @@ variants.
 Under MOYBYTE_WEB_E2E the real wasm console (dist/, booted in node) is held
 to the host's workstation built in each board's arrangement -- the shell the
 goldens pin -- frame for frame: the home, the desk, the Editor's Config tab,
-Settings, Files and Appearance under the seed themes, pixel for pixel; and
-the console page awards achievements as a board does (the one-cart player
-keeps none). tests/test_editor_ladder_icons.py and tests/test_web_fonts.py
+Settings, Files and Appearance under the seed themes, pixel for pixel; the
+console page awards achievements as a board does (the one-cart player keeps
+none); and its pages run on the C engine from the compiled pages it carries. tests/test_editor_ladder_icons.py and tests/test_web_fonts.py
 run the wasm too.
 """
 
@@ -172,6 +172,30 @@ def test_the_browser_console_awards_achievements_as_a_board_does():
     assert line, r.stdout[-3000:]
     got = json.loads(line[0].split("ACH ", 1)[1])
     assert got["after"] > got["before"], got     # First Steps, as on a board
+
+
+def test_the_browser_console_draws_its_pages_on_the_c_engine_from_compiled_pages():
+    """The wasm carries native/moy_uitree and the console's compiled pages
+    (firmware/web_runner/build.sh), so its pages run on the C engine as on a
+    board, the reference engine's modules never imported."""
+    from web_e2e import require
+    require()
+    if not (WEB / "dist" / "micropython.mjs").exists():
+        pytest.skip("no built firmware/web_runner/dist")
+    report = ("import json, sys, uitree_app, uitree_aot\n"
+              "print('UIT ' + json.dumps({'engine': uitree_app.engine_in_use(), 'pages': len(uitree_aot.BLOBS),"
+              " 'ref': sorted(m for m in ('uitree_ref', 'uitree_ref_editor') if m in sys.modules)}))\n")
+    steps = [{"frames": 30}, {"py": "_ws.open_settings()\n"}, {"frames": 10}, {"py": report}]
+    with tempfile.TemporaryDirectory() as tmp:
+        scenario = Path(tmp) / "uit.json"
+        scenario.write_text(json.dumps({"size": [320, 240], "windowed": False, "steps": steps}))
+        r = subprocess.run(["node", "pageshot.mjs", str(scenario), str(Path(tmp) / "shots")],
+                           cwd=WEB, capture_output=True, text=True, timeout=300)
+    assert r.returncode == 0 and "Traceback" not in r.stdout, r.stdout[-3000:] + r.stderr[-500:]
+    line = [ln for ln in r.stdout.splitlines() if "UIT " in ln]
+    assert line, r.stdout[-3000:]
+    got = json.loads(line[0].split("UIT ", 1)[1])
+    assert got["engine"] == "c" and got["pages"] > 0 and got["ref"] == [], got
 
 
 # -- the frames themselves -----------------------------------------------------

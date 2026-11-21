@@ -91,7 +91,9 @@ build that takes this module writes it into its staged modules
 (`moybyte_stage_uitree_pages` in `tools/esp32_build_lib.sh`, which runs
 `tools/uitree_compile.py --staged` over the console's pages, `SYSTEM`); where
 the host cannot compile, the image carries none and every page builds on the
-device. The host and the browser carry none either: their pages build.
+device. The browser's build (`firmware/web_runner/build.sh`) takes the same
+step and keeps the desk's pages too, since it shows both arrangements. The
+host carries none: its pages build.
 
 **What stays in RAM.** A load copies the blob into the store (the compiler prints
 each blob's size). After `uit_build_end` the nodes, props, templates, ops, conditions,
