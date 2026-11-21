@@ -1,7 +1,7 @@
-"""A row from a model on both engines (`ui.rows` in a placed row:
-native/moy_uitree's row_kids / fit_cells, uitree_editor's `_row_kids` /
-`_fit_cells`): the same cells at the same rects (`rect_of("ROWKEY/KEY")`)
-and the same pixels at every size, as the list grows past the row's room,
+"""A row from a model on the C engine (`ui.rows` in a placed row:
+native/moy_uitree's row_kids / fit_cells): the cells at the rects
+(`rect_of("ROWKEY/KEY")`) and the pixels the reference engine recorded
+(tests/uitree_reference/) at every size, as the list grows past the row's room,
 its titles lengthen and the marked row moves."""
 
 import ast
@@ -40,14 +40,9 @@ def _run(engine, config):
 
 
 @pytest.mark.parametrize("config", CONFIGS)
-def test_a_row_from_a_model_draws_alike_on_both_engines(config, tmp_path):
+def test_a_row_from_a_model_draws_as_the_reference_did(config):
     import uitree_c
-    import uitree_ref_editor
-    ref = _run(uitree_ref_editor.Engine, config)
-    R.held(__file__, "model_row/" + config, ref)
-    c = _run(uitree_c.CEditorEngine, config)
-    assert [f.state for f in c] == [f.state for f in ref]
-    P.compare(ref, c, tmp_path, "model_row")
+    R.held(__file__, "model_row/" + config, _run(uitree_c.CEditorEngine, config))
 
 
 def _cells(f):
@@ -55,8 +50,8 @@ def _cells(f):
 
 
 def test_a_model_s_cells_take_their_text_then_cut_the_widest_then_drop():
-    import uitree_ref_editor
-    f = _run(uitree_ref_editor.Engine, "tdeck_320x240_fs1_dark")
+    import uitree_c
+    f = _run(uitree_c.CEditorEngine, "tdeck_320x240_fs1_dark")
     first = _cells(f[0])
     assert sorted(first) == ["w0/chip", "w1/chip"], first
     assert first["w0/chip"][2] > first["w1/chip"][2], first          # Settings wider than Editor
@@ -70,14 +65,14 @@ def test_a_model_s_cells_take_their_text_then_cut_the_widest_then_drop():
 
 def test_a_row_from_a_model_outside_a_placed_row_is_b03():
     import uitree as S
-    import uitree_ref
+    import uitree_c
 
     def build():
         with S.page("P"):
             with S.rows("wins", dir="row"):
                 S.button("chip", label="{.title}")
     import uitree_model_row as F
-    eng = uitree_ref.Engine(S.decl_of(F), build, None, None, None)
+    eng = uitree_c.CEngine(S.decl_of(F), build, None, None, None)
     with pytest.raises(S.UIError) as e:
         eng._build()
     assert e.value.code == "B03", e.value

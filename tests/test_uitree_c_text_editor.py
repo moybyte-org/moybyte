@@ -1,9 +1,10 @@
 """The Editor's text editor on the C engine: the store places it by the
 one rule (whole lines), its document stays Python's and the front end
-draws its rows in the rect (`uitree_ref_editor.Engine._r_text_editor`), what
+draws its rows in the rect (`uitree_editor.Engine._r_text_editor`), what
 its templates read of the document (`{code.line}`) is a row the store
 holds, and the arrows and typed bytes reach the document ahead of the
-store's keys. Both engines draw the same pixels and leave the same state."""
+store's keys. It draws the pixels and leaves the state the reference engine
+recorded (tests/uitree_reference/)."""
 
 import sys
 from pathlib import Path
@@ -47,19 +48,15 @@ def _run(engine, config):
 
 
 @pytest.mark.parametrize("config", CONFIGS)
-def test_a_text_editor_draws_and_types_alike_on_both_engines(config, tmp_path):
+def test_a_text_editor_draws_and_types_as_the_reference_did(config):
     import uitree_c
-    import uitree_ref_editor
-    _, ref = _run(uitree_ref_editor.Engine, config)
-    R.held(__file__, "text_editor/" + config, ref)
     _, c = _run(uitree_c.CEditorEngine, config)
-    states = [f.state for f in ref]
+    states = [f.state for f in c]
     assert " L1:1 0 " in states[0] and any("gutter=False" in t for t in states), states
     assert any("finding=True" in t and "('find_strip', (" in t for t in states), states
     assert any("picking=True" in t for t in states) and "picking=False" in states[-1], states
     assert any(t.split()[0].startswith("repr") or t.split()[0].startswith("range") for t in states), states
-    assert [f.state for f in c] == [f.state for f in ref]
-    P.compare(ref, c, tmp_path, "text_editor")
+    R.held(__file__, "text_editor/" + config, c)
 
 
 def test_two_shown_units_answering_one_chord_is_u08():

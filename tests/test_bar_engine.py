@@ -1,9 +1,9 @@
 """The shell's bar laid out by the engine (runtime/shell/bar_engine.py over the page bar_ui.py): for
 the themes' bar, on every glass a desk runs and with any count of the apps'
-status items, the cells `bar_engine.pack` places are `shell_layout.pack`'s, on
-the reference and on the C engine, but for the tray's icons, each its ink
-wide with the tray's gap between inks (and the fills beside them, which take
-what the tray leaves): the same on both engines."""
+status items, the cells `bar_engine.pack` places on the C engine are
+`shell_layout.pack`'s, but for the tray's icons, each its ink wide with the
+tray's gap between inks (and the fills beside them, which take what the tray
+leaves): what the reference engine recorded (tests/uitree_reference/)."""
 
 import pytest
 
@@ -28,14 +28,12 @@ def _console(tmp_path_factory):
     host_app.build_workstation(str(tmp_path_factory.mktemp("console")), sys_size=(320, 240), font_scale=1)
 
 
-def _packs(engine):
-    import uitree_app
+def _packs():
     import bar_engine
-    uitree_app.use_engine(engine)
     bar_engine._PAGE[0] = None
     out = []
     try:
-        assert type(bar_engine._page()).__name__ == ("CEditorPage" if engine == "c" else "Page")
+        assert type(bar_engine._page()).__name__ == "CEditorPage"
         for w, h, rows, cs, fs in GLASS:
             for items in (0, 1, 3):
                 for gone in WITHOUT:
@@ -56,14 +54,11 @@ def _packs(engine):
                                     assert gc[1][1] == wc[1][1] and gc[1][3] == wc[1][3], why
         return out
     finally:
-        uitree_app.use_engine("reference")
         bar_engine._PAGE[0] = None
 
 
 def test_the_engine_places_the_themes_bar_where_pack_does():
-    ref = _packs("reference")
-    R.held(__file__, "packs", ref)
-    assert _packs("c") == ref
+    R.held(__file__, "packs", _packs())
 
 
 def test_a_layout_the_page_does_not_hold_is_pack_s():

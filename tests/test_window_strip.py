@@ -4,7 +4,7 @@ page draws the back chevron, the icon and title and the three buttons as bar
 items; the window manager resolves a tap from the page's rects and runs the
 button's page action; a strip is drawn by the engine into a kept layer and
 stamped from it, inside the canvas's clip, so a drag frame does no page
-work. Both engines lay the strip out alike."""
+work. The strip lays out as the reference engine recorded (tests/uitree_reference/)."""
 
 import sys
 
@@ -28,31 +28,22 @@ def _rows(cv, r):
     return [bytes(cv._buf[((y + j) * cv.w + x) * 2:((y + j) * cv.w + x + w) * 2]) for j in range(h)]
 
 
-def test_the_strip_s_buttons_are_the_page_s_alike_on_both_engines(tmp_path):
-    import uitree_app
+def test_the_strip_s_buttons_are_the_page_s_as_the_reference_placed_them(tmp_path):
     ws = _moy_desk(tmp_path)
     ws.spine.open_app(ws.app("calc"))
     ws.frame(1 / 30)
     wm = ws.wm
     win = wm.windows["calc"]
-    got = []
-    try:
-        for engine in ("c", "reference"):
-            uitree_app.use_engine(engine)
-            SE._PAGE[0] = None
-            got.append(wm._frame_buttons(win))
-    finally:
-        uitree_app.use_engine("c")
-        SE._PAGE[0] = None
-    R.held(__file__, "frame_buttons", got[1])
-    assert got[0] == got[1]
-    assert [n for n, _r, _s in got[0]] == ["min", "max", "close"]
+    SE._PAGE[0] = None
+    got = wm._frame_buttons(win)
+    R.held(__file__, "frame_buttons", got)
+    assert [n for n, _r, _s in got] == ["min", "max", "close"]
     sx, sy, sw, sh = _strip(ws, win)
-    for _n, (bx, by, bw, bh), right in got[0]:
+    for _n, (bx, by, bw, bh), right in got:
         assert right and sx <= bx and bx + bw <= sx + sw and by == sy and bh == sh
     a = wm._strip_args(win)
     head = SE.head(*a)
-    assert head[0] + head[2] <= got[0][0][1][0]          # the title ends before minimise
+    assert head[0] + head[2] <= got[0][1][0]          # the title ends before minimise
 
 
 def test_a_long_title_is_cut_and_the_buttons_keep_their_place(tmp_path):

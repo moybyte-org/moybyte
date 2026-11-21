@@ -155,22 +155,16 @@ class _Damage:
         pass
 
 
-def _answer(engine, mod):
-    """The code a build of `mod`'s page raises on `engine` ("reference" or
-    "c": the C engine in the direct build), and its line; (None, 0) when it
-    builds."""
+def _answer(mod):
+    """The code a build of `mod`'s page raises on the C engine's direct
+    build, and its line; (None, 0) when it builds."""
     import ui_draw
     import uitree as S
-    import uitree_ref
     import uitree_c
-    cls = uitree_c.CEngine if engine == "c" else uitree_ref.Engine
-    eng = cls(S.decl_of(mod), mod.build, ui_draw.AppHost(), None, _Damage())
+    eng = uitree_c.CEngine(S.decl_of(mod), mod.build, ui_draw.AppHost(), None, _Damage())
     try:
-        if engine == "c":
-            assert eng.direct
-            eng._ready()
-        else:
-            eng._build()
+        assert eng.direct
+        eng._ready()
     except uitree_c.EngineGap:
         return "gap", 0
     except S.UIError as e:
@@ -178,16 +172,11 @@ def _answer(engine, mod):
     return None, 0
 
 
-def _both(name, src, tmp_path):
-    return (_answer("reference", _load(name + "_ref", src, tmp_path)),
-            _answer("c", _load(name + "_c", src, tmp_path)))
-
-
 @pytest.mark.parametrize("case", sorted(CASES))
 def test_a_mistake_raises_its_code_on_the_direct_build(case, tmp_path):
     src = STATE + "        " + CASES[case] + "\n"
-    (ref, ref_line), (c, c_line) = _both("direct_%d" % sorted(CASES).index(case), src, tmp_path)
-    R.held(__file__, "case/" + case, [ref, ref_line])
+    c, c_line = _answer(_load("direct_%d_c" % sorted(CASES).index(case), src, tmp_path))
+    ref, ref_line = R.recorded(__file__, "case/" + case)        # what the reference engine raised
     if case in C_DIFFERS:
         assert (ref, c) == C_DIFFERS[case], "C now answers as the reference: drop the case from C_DIFFERS"
         return
@@ -208,8 +197,8 @@ def test_the_planted_mistakes_raise_their_codes_on_the_direct_build(code, tmp_pa
     import uitree as S
     src, line = M.PY[code]
     try:
-        (ref, ref_line), (c, c_line) = _both("planted_" + code.lower(), src, tmp_path)
-        R.held(__file__, "planted/" + code, [ref, ref_line])
+        c, c_line = _answer(_load("planted_%s_c" % code.lower(), src, tmp_path))
+        ref, ref_line = R.recorded(__file__, "planted/" + code)
     except S.UIError as e:            # the module's declarations: the same Python on every engine
         assert e.code == code
         return

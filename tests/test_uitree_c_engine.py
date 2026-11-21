@@ -1,9 +1,9 @@
 """The conformance fixtures on the C engine (native/moy_uitree, driven by
 runtime/uitree/uitree_c.py): the same app file, the same input script, held
-to the reference (the Python replay, `uitree_ref.Engine`):
+to what the Python reference engine gave before it was deleted:
 
-- the reference's trace verbatim (NAME/trace.txt), and the reference run's;
-- the same pixels on the whole glass, every frame, at both sizes;
+- its trace verbatim (NAME/trace.txt), and its run's (tests/uitree_reference/);
+- its pixels on the whole glass, every frame, at both sizes;
 - the tree as the engine's store holds it, printed as the reference's dump
   (NAME/dump.txt).
 """
@@ -30,15 +30,13 @@ def _expected(name, what):
 
 
 @functools.lru_cache(maxsize=None)
-def _run(engine, name, config):
+def _run(name, config):
     import uitree_app
-    import uitree_ref
     import uitree_c
     import uitree_parity as P
     app_py, cart = C.fixture(name)
     mod = C._module(app_py)
-    eng = uitree_c.CEngine if engine == "c" else uitree_ref.Engine
-    cls = uitree_app.app_layer("conf_" + name, C._title(cart), mod.build, engine=eng)
+    cls = uitree_app.app_layer("conf_" + name, C._title(cart), mod.build, engine=uitree_c.CEngine)
     seen = {}
 
     def opened(ws):
@@ -49,7 +47,7 @@ def _run(engine, name, config):
 
 @pytest.mark.parametrize("name", NAMES)
 def test_the_c_trace_is_the_references(name):
-    trace, _, kind = _run("c", name, C.CONFIGS[0])
+    trace, _, kind = _run(name, C.CONFIGS[0])
     assert kind == "CEngine"
     assert trace == _expected(name, "trace.txt")
 
@@ -57,13 +55,8 @@ def test_the_c_trace_is_the_references(name):
 @pytest.mark.parametrize("config", C.CONFIGS)
 @pytest.mark.parametrize("name", NAMES)
 def test_the_c_glass_is_the_references(name, config):
-    tc, fc, _ = _run("c", name, config)
-    tp, fp, _ = _run("python", name, config)
-    R.held(__file__, "glass/%s/%s" % (name, config), [tp, fp])
-    assert tc == tp
-    assert len(fc) == len(fp)
-    bad = [(a.step, C.differing(a, b)) for a, b in zip(fp, fc) if a.buf != b.buf]
-    assert not bad, "frames differ (step, (box, pixels)): %r" % bad
+    tc, fc, _ = _run(name, config)
+    R.held(__file__, "glass/%s/%s" % (name, config), [tc, fc])
 
 
 class _Host:
@@ -139,20 +132,17 @@ def details():
 '''
 
 
-@pytest.mark.parametrize("engine", ("python", "c"))
-def test_a_pushed_page_opens_on_its_own_focus_node(engine, tmp_path):
+def test_a_pushed_page_opens_on_its_own_focus_node(tmp_path):
     """Spec §9: a fresh page's first frame lands focus on its focus= node,
     the pushed page's own, whatever the page under it drew."""
     import uitree_app
-    import uitree_ref
     import uitree_c
     import uitree_parity as P
     app_py = tmp_path / "pushed" / "app.py"
     app_py.parent.mkdir()
     app_py.write_text(PUSHED)
     mod = C._module(str(app_py))
-    cls = uitree_app.app_layer("pushed_" + engine, "Pushed", mod.build,
-                               engine=uitree_c.CEngine if engine == "c" else uitree_ref.Engine)
+    cls = uitree_app.app_layer("pushed_c", "Pushed", mod.build, engine=uitree_c.CEngine)
     seen = {}
 
     def opened(ws):
@@ -235,7 +225,6 @@ def build():
 
 def _long(tmp_path, engine, n, script, config=None):
     import uitree_app
-    import uitree_ref
     import uitree_c
     import uitree_parity as P
     app_py = tmp_path / ("long_%s_%d" % (engine, n)) / "app.py"
@@ -243,7 +232,7 @@ def _long(tmp_path, engine, n, script, config=None):
     app_py.write_text(LONG.replace("@N@", str(n)))
     mod = C._module(str(app_py))
     cls = uitree_app.app_layer("long_%s_%d" % (engine, n), "Long", mod.build,
-                               engine=uitree_c.CEngine if engine == "c" else uitree_ref.Engine)
+                               engine=uitree_c.CEngine)
     seen = {}
 
     def opened(ws):
@@ -256,17 +245,13 @@ def _long(tmp_path, engine, n, script, config=None):
 
 
 @pytest.mark.parametrize("n", (50, 120))
-def test_a_long_list_walks_past_its_fortieth_row_alike_on_both_engines(tmp_path, n):
+def test_a_long_list_walks_past_its_fortieth_row_as_the_reference_did(tmp_path, n):
     """A rows list of more than the toolkit's 40 stops a frame lays out its
-    rows in view (uitree_ref.VROWS_MIN; native/moy_uitree's draw_vrows):
-    the keys walk focus past the 40th row and open it, a swipe scrolls it
-    back, and both engines draw every frame alike."""
-    import uitree_parity as P
+    rows in view (native/moy_uitree's draw_vrows): the keys walk focus past
+    the 40th row and open it, a swipe scrolls it back, every frame as the
+    reference engine recorded it."""
     script = ["k:down"] * 46 + ["k:a", "swipe:200", "f:20", "k:down", "swipe:-300", "f:20", "k:up"]
-    ref = _long(tmp_path, "python", n, script)
-    R.held(__file__, "long/%d" % n, ref)
     c = _long(tmp_path, "c", n, script)
-    assert ref[46].state.split()[0] == "r46/go", ref[46].state
-    assert ref[47].state.split() == ["r46/go", "r46"], ref[47].state
-    assert [f.state for f in c] == [f.state for f in ref]
-    P.compare(ref, c, tmp_path, "long%d" % n)
+    assert c[46].state.split()[0] == "r46/go", c[46].state
+    assert c[47].state.split() == ["r46/go", "r46"], c[47].state
+    R.held(__file__, "long/%d" % n, c)

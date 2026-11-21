@@ -1,7 +1,7 @@
 """The bar's look in the toolkit (`button kind="bar"`, moy_ui_bar_item): a
-row of bar items draws the same pixels and places every cell at the same
-rect on the reference (`uitree_ref_editor.Engine`) and on the C engine, at
-every size, its focus walked across them and their marks moved."""
+row of bar items draws on the C engine the pixels and places every cell at
+the rect the reference engine recorded (tests/uitree_reference/), at every
+size, its focus walked across them and their marks moved."""
 
 import ast
 import sys
@@ -37,20 +37,16 @@ def _run(engine, config):
 
 
 @pytest.mark.parametrize("config", CONFIGS)
-def test_bar_items_draw_alike_on_both_engines(config, tmp_path):
+def test_bar_items_draw_as_the_reference_did(config):
     import uitree_c
-    import uitree_ref_editor
-    ref = _run(uitree_ref_editor.Engine, config)
-    R.held(__file__, "bar/" + config, ref)
     c = _run(uitree_c.CEditorEngine, config)
-    assert {f.state.split()[0] for f in ref} >= {"menu", "wifi", "tick"}, [f.state for f in ref]
-    assert [f.state for f in c] == [f.state for f in ref]
-    P.compare(ref, c, tmp_path, "bar_look")
+    assert {f.state.split()[0] for f in c} >= {"menu", "wifi", "tick"}, [f.state for f in c]
+    R.held(__file__, "bar/" + config, c)
 
 
 def test_a_bar_item_takes_its_row_s_height_and_its_own_width():
-    import uitree_ref_editor
-    f = _run(uitree_ref_editor.Engine, "p4_1024x600_cs2_fs1_windowed")
+    import uitree_c
+    f = _run(uitree_c.CEditorEngine, "p4_1024x600_cs2_fs1_windowed")
     r = dict(ast.literal_eval(f[0].state.split(" ", 1)[1]))
     assert r["menu"][1] == r["bar"][1] and r["menu"][3] == r["bar"][3], r
     assert r["wifi"][2] == 16 and r["tick"][2] == 40, r

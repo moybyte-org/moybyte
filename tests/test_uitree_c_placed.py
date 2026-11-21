@@ -1,8 +1,9 @@
 """The placed layout on the C engine (native/moy_uitree's `stack`, the one
 rule a container gives its children rects by): a page on the Editor's
-placed kinds draws the reference's pixels (`uitree_ref_editor.Engine`) on every
-size, its regions and cells read back at the reference's rects, and a host's
-placement with nothing drawn (`place`) agrees with it too."""
+placed kinds draws the pixels the reference engine recorded
+(tests/uitree_reference/) on every size, its regions and cells read back at
+the recorded rects, and a host's placement with nothing drawn (`place`)
+agrees with it too."""
 
 import sys
 from pathlib import Path
@@ -38,16 +39,12 @@ def _run(engine, config):
 
 
 @pytest.mark.parametrize("config", CONFIGS)
-def test_a_placed_page_draws_and_places_alike_on_both_engines(config, tmp_path):
+def test_a_placed_page_draws_and_places_as_the_reference_did(config):
     import uitree_c
-    import uitree_ref_editor
-    _, ref = _run(uitree_ref_editor.Engine, config)
-    R.held(__file__, "placed/" + config, ref)
     seen, c = _run(uitree_c.CEditorEngine, config)
-    assert "rows" in {f.state.split()[1] for f in ref}, "the script never reached the switch's other case"
-    assert "('q', (" in ref[0].state and "('pad', (" in ref[0].state, ref[0].state
-    assert [f.state for f in c] == [f.state for f in ref]
-    P.compare(ref, c, tmp_path, "placed")
+    assert "rows" in {f.state.split()[1] for f in c}, "the script never reached the switch's other case"
+    assert "('q', (" in c[0].state and "('pad', (" in c[0].state, c[0].state
+    R.held(__file__, "placed/" + config, c)
 
 
 def test_a_placement_draws_nothing_and_gives_the_regions_rects():
@@ -55,19 +52,15 @@ def test_a_placement_draws_nothing_and_gives_the_regions_rects():
     the stacked rows, the regions a host places and the cells along a row
     (a bar's host reads them), drawing none of them."""
     import uitree_c
-    import uitree_ref_editor
     import uitree_placed as F
     import ui_draw
-    got = []
-    for cls in (uitree_ref_editor.Page, uitree_c.CEditorPage):
-        e = cls(F.build, ui_draw.AppHost(), type("D", (), {"all": lambda self: None})())
-        e.open()
-        e.fs = 1                # the scale a host's placement reads (its frames set it)
-        e.place((10, 20, 300, 200), desk=False)
-        got.append([(k, e.rect_of(k)) for k in KEYS])
-    R.held(__file__, "place", got[0])
-    assert got[0] == got[1]
-    rects = dict(got[1])
+    e = uitree_c.CEditorPage(F.build, ui_draw.AppHost(), type("D", (), {"all": lambda self: None})())
+    e.open()
+    e.fs = 1                # the scale a host's placement reads (its frames set it)
+    e.place((10, 20, 300, 200), desk=False)
+    got = [(k, e.rect_of(k)) for k in KEYS]
+    R.held(__file__, "place", got)
+    rects = dict(got)
     assert rects["find_row"] is not None and rects["q"] is not None, rects
     fx, _, fw, _ = rects["find_row"]
     assert fx <= rects["q"][0] and rects["q"][0] + rects["q"][2] <= fx + fw, rects

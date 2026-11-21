@@ -1,8 +1,8 @@
 """The layout rule along x (a placed row: fixed cells take their width, the
 fills share what is left, a region stacks its own children in the row's
 whole height, a row of regions fills its stack): a page of a bar and a row
-of regions draws the same pixels and places every cell at the same rect on
-the reference (`uitree_ref_editor.Engine`) and on the C engine, on every size."""
+of regions draws on the C engine the pixels and places every cell at the rect the
+reference engine recorded (tests/uitree_reference/), on every size."""
 
 import sys
 from pathlib import Path
@@ -37,18 +37,14 @@ def _run(engine, config):
 
 
 @pytest.mark.parametrize("config", CONFIGS)
-def test_a_row_lays_its_cells_out_by_the_rule_alike_on_both_engines(config, tmp_path):
+def test_a_row_lays_its_cells_out_by_the_rule_as_the_reference_did(config):
     import uitree_c
-    import uitree_ref_editor
-    ref = _run(uitree_ref_editor.Engine, config)
-    R.held(__file__, "row/" + config, ref)
     c = _run(uitree_c.CEditorEngine, config)
-    assert "rows" in {f.state.split()[1] for f in ref}, "the script never reached the switch's other case"
-    first = ref[0].state
+    assert "rows" in {f.state.split()[1] for f in c}, "the script never reached the switch's other case"
+    first = c[0].state
     for key in ("logo", "meter", "left", "side"):
         assert "('%s', (" % key in first, first
-    assert [f.state for f in c] == [f.state for f in ref]
-    P.compare(ref, c, tmp_path, "across")
+    R.held(__file__, "row/" + config, c)
 
 
 def test_fixed_cells_take_their_width_and_the_fills_share_the_rest():
@@ -56,8 +52,8 @@ def test_fixed_cells_take_their_width_and_the_fills_share_the_rest():
     desk's scale 1), the meter and the status line splitting what is left;
     the body's regions the row's whole height, the body a fill of the page."""
     import ast
-    import uitree_ref_editor
-    f = _run(uitree_ref_editor.Engine, "p4_1024x600_cs2_fs1_windowed")[0]
+    import uitree_c
+    f = _run(uitree_c.CEditorEngine, "p4_1024x600_cs2_fs1_windowed")[0]
     rects = dict(ast.literal_eval(f.state.split(" ", 2)[2]))
     assert rects["logo"][2] == 40 and rects["side"][2] == 56, rects
     assert rects["left"][3] == rects["body"][3] == rects["side"][3], rects
@@ -85,17 +81,12 @@ def _run_bar(engine, config):
 
 
 @pytest.mark.parametrize("config", CONFIGS)
-def test_a_bar_s_pieces_lay_out_alike_on_both_engines(config, tmp_path):
+def test_a_bar_s_pieces_lay_out_as_the_reference_did(config):
     """pad=, gap= (a literal and a state), w= from a state, a row in a row,
-    a spacer, a mid of fills and a mid of fixed cells: the same rects and
-    pixels on both engines."""
+    a spacer, a mid of fills and a mid of fixed cells: the rects and pixels
+    the reference recorded."""
     import uitree_c
-    import uitree_ref_editor
-    ref = _run_bar(uitree_ref_editor.Engine, config)
-    R.held(__file__, "bar/" + config, ref)
-    c = _run_bar(uitree_c.CEditorEngine, config)
-    assert [f.state for f in c] == [f.state for f in ref]
-    P.compare(ref, c, tmp_path, "across_bar")
+    R.held(__file__, "bar/" + config, _run_bar(uitree_c.CEditorEngine, config))
 
 
 def test_the_bar_s_pieces_place_by_their_rule():
@@ -104,8 +95,8 @@ def test_the_bar_s_pieces_place_by_their_rule():
     clearing both sides, the centre run centred with each side's fill
     sharing its own side, the spacer pushing the tail to the row's end."""
     import ast
-    import uitree_ref_editor
-    f = _run_bar(uitree_ref_editor.Engine, "p4_1024x600_cs2_fs1_windowed")
+    import uitree_c
+    f = _run_bar(uitree_c.CEditorEngine, "p4_1024x600_cs2_fs1_windowed")
     r = dict(ast.literal_eval(f[0].state.split(" ", 1)[1]))
     bx, _, bw, _ = r["bar"]
     assert r["bump"][0] == bx + 2 and r["zone"][0] == r["bump"][0] + r["bump"][2] + 2, r

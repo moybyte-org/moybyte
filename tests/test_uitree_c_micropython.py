@@ -1,13 +1,13 @@
 """The C engine on the boards' MicroPython (the board model `make
 unix-micropython` builds, `moy_uitree` compiled in): the four conformance
-fixtures driven by their scripts through the reference engine and through the
-C engine in one booted console, held to the same trace and the same pixels;
+fixtures driven by their scripts through the C engine in one booted console,
+held to the trace and the pixels the reference engine recorded
+(tests/uitree_reference/);
 then what a frame of each allocates and costs, and what opening a long page
 of standard rows costs, printed for the record (`-s`).
 """
 
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -118,35 +118,30 @@ class BarLook:
 
 def bar(out):
     """The row a page lends the bar (tests/uitree_fixtures/uitree_bar_row.py)
-    in three zones, on both engines: `uit_lent` and `uit_lent_place` on the
-    boards' MicroPython."""
+    in three zones: `uit_lent` and `uit_lent_place` on the boards'
+    MicroPython."""
     import uitree as S
     import ui_draw
     import uitree_c
     import uitree_editor
-    import uitree_ref_editor
-    out["bar"] = {}
-    for tag, cls in (("py", uitree_ref_editor.Engine), ("c", uitree_c.CEditorEngine)):
-        mod = _load("bar_%s" % tag, BAR_SRC)
-        eng = cls(S.decl_of(mod.__name__), mod.page, ui_draw.AppHost(), None, Damage())
-        eng.open(hook="none")
-        look = BarLook()
-        z = uitree_editor.BarZone(eng, look)
-        for w in (400, 160, 80):
-            z.draw_zone(None, (0, 0, w, 20))
-        eng.run(setattr, mod.s, "playing", True)
-        z.draw_zone(None, (0, 0, 400, 20))
-        out["bar"][tag] = look.drawn + [z.zone_need(20)]
+    mod = _load("bar_c", BAR_SRC)
+    eng = uitree_c.CEditorEngine(S.decl_of(mod.__name__), mod.page, ui_draw.AppHost(), None, Damage())
+    eng.open(hook="none")
+    look = BarLook()
+    z = uitree_editor.BarZone(eng, look)
+    for w in (400, 160, 80):
+        z.draw_zone(None, (0, 0, w, 20))
+    eng.run(setattr, mod.s, "playing", True)
+    z.draw_zone(None, (0, 0, 400, 20))
+    out["bar"] = look.drawn + [z.zone_need(20)]
 
 
 def _use(tag):
-    """Engines made after this: "reference", "c" (the C engine, its build
-    direct: C compiles every template) or "c_checked" (the reference's
-    checked build, lowered)."""
-    import uitree_app
+    """Pages made after this: "c" (the C engine, its build direct: C
+    compiles every template) or "c_checked" (`uitree.Builder`'s checked
+    build, lowered)."""
     import uitree_c
     uitree_c.BUILD = "checked" if tag == "c_checked" else "direct"
-    uitree_app.use_engine("reference" if tag == "reference" else "c")
 
 
 def _digest(buf):
@@ -166,8 +161,6 @@ def conf(loop):
     import gc
     import time
     import uitree as S
-    import uitree_app
-    import uitree_ref
     import uitree_c
     ws = loop.ws
     _steps(loop, 20)
@@ -175,42 +168,32 @@ def conf(loop):
     box = (0, 0, cv.w, cv.h)
     out = {"fixtures": {}, "cost": {}}
     S.TRACING = True
-    import uitree_ref_editor
-    pairs = (uitree_ref.Engine, uitree_c.CEngine)
-    for name, src, script, pair in [f + (pairs,) for f in FIXTURES] + [
-            ("placed", PLACED_SRC, PLACED_SCRIPT, (uitree_ref_editor.Engine, uitree_c.CEditorEngine)),
-            ("text_editor", TE_SRC, TE_SCRIPT, (uitree_ref_editor.Engine, uitree_c.CEditorEngine)),
-            ("across", ACROSS_SRC, ACROSS_SCRIPT, (uitree_ref_editor.Engine, uitree_c.CEditorEngine)),
-            ("across_bar", ACROSS_BAR_SRC, ACROSS_BAR_SCRIPT, (uitree_ref_editor.Engine, uitree_c.CEditorEngine)),
-            ("bar_look", BAR_LOOK_SRC, BAR_LOOK_SCRIPT, (uitree_ref_editor.Engine, uitree_c.CEditorEngine)),
-            ("grid", GRID_SRC, GRID_SCRIPT, pairs),
-            ("model_row", MROW_SRC, MROW_SCRIPT, (uitree_ref_editor.Engine, uitree_c.CEditorEngine))]:
-        runs = {}
-        for tag, cls in zip(("py", "c"), pair):
-            mod = _load("conf_%s_%s" % (name, tag), src)
-            eng, host = _engine(cls, mod)
-            eng.open()
-            frames = []
+    flow, placed = uitree_c.CEngine, uitree_c.CEditorEngine
+    for name, src, script, cls in [f + (flow,) for f in FIXTURES] + [
+            ("placed", PLACED_SRC, PLACED_SCRIPT, placed), ("text_editor", TE_SRC, TE_SCRIPT, placed),
+            ("across", ACROSS_SRC, ACROSS_SCRIPT, placed), ("across_bar", ACROSS_BAR_SRC, ACROSS_BAR_SCRIPT, placed),
+            ("bar_look", BAR_LOOK_SRC, BAR_LOOK_SCRIPT, placed), ("grid", GRID_SRC, GRID_SCRIPT, flow),
+            ("model_row", MROW_SRC, MROW_SCRIPT, placed)]:
+        mod = _load("conf_%s_c" % name, src)
+        eng, host = _engine(cls, mod)
+        eng.open()
+        digests = []
+        _frame(eng, host, cv, th, box)
+        digests.append(_digest(cv._buf))
+        for step in script:
+            if step == "back":
+                eng.back()
+            else:
+                eng.keys(Inp(step[2:]))
             _frame(eng, host, cv, th, box)
-            frames.append(bytes(cv._buf))
-            for step in script:
-                if step == "back":
-                    eng.back()
-                else:
-                    eng.keys(Inp(step[2:]))
-                _frame(eng, host, cv, th, box)
-                frames.append(bytes(cv._buf))
-            runs[tag] = (list(eng.trace), frames)
-        same = [i for i in range(len(runs["py"][1])) if runs["py"][1][i] == runs["c"][1][i]]
-        out["fixtures"][name] = {"trace_py": runs["py"][0], "trace_c": runs["c"][0],
-                                 "frames": len(runs["py"][1]), "same": len(same),
-                                 "digests_py": [_digest(b) for b in runs["py"][1]],
-                                 "digests_c": [_digest(b) for b in runs["c"][1]]}
-        runs = None
+            digests.append(_digest(cv._buf))
+        out["fixtures"][name] = {"trace_c": list(eng.trace), "digests_c": digests}
+        eng = mod = None
         gc.collect()
     S.TRACING = False
     for name, src in (("long", LONG_SRC), ("counter", FIXTURES[0][1])):
-        for tag, cls in (("py", uitree_ref.Engine), ("c", uitree_c.CEngine), ("c_checked", uitree_c.CEngine)):
+        for tag in ("c", "c_checked"):
+            cls = uitree_c.CEngine
             _use(tag)
             gc.collect()
             mod = _load("cost_%s_%s" % (name, tag), src)
@@ -222,7 +205,7 @@ def conf(loop):
             _frame(eng, host, cv, th, box)
             first = time.ticks_diff(time.ticks_us(), t1)
             opened = time.ticks_diff(t1, t0)
-            _use("reference")
+            _use("c")
             gc.collect()
             held = gc.mem_alloc() - m0
             for _ in range(5):
@@ -242,7 +225,7 @@ def conf(loop):
                 "open_us": opened, "first_frame_us": first, "open_first_frame_us": opened + first,
                 "held_bytes": held, "paint_us_median": us[len(us) // 2],
                 "paint_alloc_max": max(alloc), "paint_alloc_median": sorted(alloc)[len(alloc) // 2],
-                "stats": eng.stats() if tag != "py" else None}
+                "stats": eng.stats()}
             eng = mod = None
     bar(out)
     out["settings"] = settings(loop)
@@ -288,7 +271,7 @@ def _rows_frames(ws, sl, settings_rows, uitree_app, tag):
         t0 = time.ticks_us()
         _use(tag)
         page = settings_rows.RowsPage(sl, host)
-        _use("reference")
+        _use("c")
         page.open()
         t1 = time.ticks_us()
         host.begin(cv, th, box)
@@ -335,7 +318,7 @@ def settings(loop):
         frames, r = _rows_frames(ws, sl, settings_rows, uitree_app, tag)
         _use(tag)
         sl.rows = settings_rows.RowsPage(sl, sl._host)
-        _use("reference")
+        _use("c")
         ws.open_settings()
         _steps(loop, 20)
         r["digests"] = [_digest(b) for b in frames]
@@ -387,7 +370,7 @@ def settings(loop):
     return out
 '''
 
-SETTINGS_RUNS = ("reference", "c", "c_checked")
+SETTINGS_RUNS = ("c", "c_checked")
 
 # each a step of Settings' rows on the T-Deck, every change undone (Volume starts at its top)
 SETTINGS_KEYS = ["down", "down", "right", "left", "down", "right", "left", "down", "left", "left",
@@ -406,7 +389,7 @@ def _fixtures():
     return out
 
 
-# the placed page (tests/uitree_fixtures/uitree_placed.py) on both engines: the row, the switch's
+# the placed page (tests/uitree_fixtures/uitree_placed.py): the row, the switch's
 # other case and the tools
 PLACED_SCRIPT = ["k:right", "k:a", "k:right", "k:a", "k:down", "k:a", "k:down", "k:up"]
 # the text editor (tests/uitree_fixtures/uitree_text_editor.py): the caret walked, the gutter
@@ -448,18 +431,10 @@ def result(tmp_path_factory):
     return info, text
 
 
-def _latin(lines):
-    """MicroPython's repr escapes a str's characters 0x80-0xff (`\\xb7`), which
-    the C engine's trace writes as CPython's repr does: read back as they are."""
-    return [re.sub(r"\\x([89a-f][0-9a-f])", lambda m: chr(int(m.group(1), 16)), t) for t in lines]
-
-
-def test_the_c_engine_on_the_boards_micropython_draws_the_reference(result):
+def test_the_c_engine_on_the_boards_micropython_draws_as_the_reference_did(result):
     info, text = result
     for name, f in info["fixtures"].items():
-        assert C.norm_trace(f["trace_c"]) == C.norm_trace(_latin(f["trace_py"])), name
-        R.held(__file__, "conf/" + name, [C.norm_trace(_latin(f["trace_py"])), f["digests_py"]])
-        assert f["same"] == f["frames"], (name, f["same"], f["frames"])
+        R.held(__file__, "conf/" + name, [C.norm_trace(f["trace_c"]), f["digests_c"]])
     for k, v in sorted(info["cost"].items()):
         print(k, json.dumps(v))
     # A still frame of a page on the C engine allocates nothing, in either build.
@@ -468,11 +443,10 @@ def test_the_c_engine_on_the_boards_micropython_draws_the_reference(result):
             assert info["cost"][name + "_" + tag]["paint_alloc_median"] == 0, info["cost"][name + "_" + tag]
 
 
-def test_a_lent_row_lays_out_alike_on_both_engines_on_the_boards_micropython(result):
+def test_a_lent_row_lays_out_as_the_reference_did_on_the_boards_micropython(result):
     info, _text = result
-    R.held(__file__, "bar", info["bar"]["py"])
-    assert info["bar"]["c"] == info["bar"]["py"]
-    assert len(info["bar"]["c"]) > 10
+    R.held(__file__, "bar", info["bar"])
+    assert len(info["bar"]) > 10
 
 
 def _median(xs):
@@ -482,18 +456,18 @@ def _median(xs):
 
 def test_settings_rows_on_the_c_engine_draw_the_reference_and_shift_cheaper(result):
     """Settings' rows page on the C engine in the booted console: every frame
-    of a script of keys is the reference's, its drag shifts as the
-    reference's does, and a shift frame allocates less than the Settings drag
-    pin allows (test_frame_alloc's SETTINGS_FRAME) and less than the
-    reference's. Each engine's numbers are printed for the record (`-s`)."""
+    of a script of keys is what the reference engine recorded, in either
+    build, its drag shifts, and a shift frame allocates less than the
+    Settings drag pin allows (test_frame_alloc's SETTINGS_FRAME) and no more
+    than the reference's recorded median. Each build's numbers are printed
+    for the record (`-s`)."""
     info, text = result
     st = info["settings"]
-    ref, c = st["reference"], st["c"]
-    assert c["engine"] == "CPage" and st["c_checked"]["engine"] == "CPage" and ref["engine"] == "Page"
-    R.held(__file__, "settings_rows", ref["digests"])
-    for r in (c, st["c_checked"]):
-        assert len(r["same"]) == r["frames"], ("frames that differ", sorted(set(range(r["frames"])) - set(r["same"])))
-    for tag, r in (("reference", ref), ("c", c), ("c_checked", st["c_checked"])):
+    c, ck = st["c"], st["c_checked"]
+    assert c["engine"] == "CPage" and ck["engine"] == "CPage"
+    R.held(__file__, "settings_rows", c["digests"])
+    assert len(ck["same"]) == ck["frames"], ("frames that differ", sorted(set(range(ck["frames"])) - set(ck["same"])))
+    for tag, r in (("c", c), ("c_checked", ck)):
         drawn = [d for d in r["drag"] if d[1]]
         shifted = [d[0] for d in drawn if d[2]]
         r["shift_median"] = _median(shifted)
@@ -504,6 +478,6 @@ def test_settings_rows_on_the_c_engine_draw_the_reference_and_shift_cheaper(resu
                                "held_bytes": r["held_bytes"]}))
         assert len(drawn) > 30 and len(shifted) > len(drawn) // 2, (tag, len(shifted), len(drawn))
     assert c["shift_median"] < FA.SETTINGS_FRAME, c["shift_median"]
-    R.held(__file__, "settings_shift_median", ref["shift_median"])
-    assert c["shift_median"] <= ref["shift_median"], (c["shift_median"], ref["shift_median"])
+    ref_median = R.recorded(__file__, "settings_shift_median")      # the reference engine's
+    assert c["shift_median"] <= ref_median, (c["shift_median"], ref_median)
 

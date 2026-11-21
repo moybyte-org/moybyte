@@ -1,10 +1,10 @@
-"""The keys between two pages, one per engine, each in a context of its
+"""The keys between two pages on the C engine, each in a context of its
 own (`moy_ui_api_edge`, `moy_ui_api_enter`): a step that finds no stop past
 the focused one answers its way and leaves focus where it was; the page
 the keys come into lands focus on its stop nearest the side they come in
 by, in the frame that draws it. Its ring and its hints follow: the glass of
-a reference page beside a C one, and of a C page beside a reference one,
-is the glass of two reference pages, frame by frame."""
+two C pages is the glass the reference engine recorded for two of its own
+pages, frame by frame (tests/uitree_reference/)."""
 
 import sys
 from pathlib import Path
@@ -42,8 +42,8 @@ def glass(tmp_path_factory):
     return ws.sys_canvas, ws.theme_colors
 
 
-def _session(glass, kinds, across, script):
-    """Two pages on engines `kinds` ("ref" or "c"), side by side where
+def _session(glass, across, script):
+    """Two pages on the C engine, side by side where
     `across`, else one over the other; `script` the keys, each to the page
     holding them, an edge handing them on. Answers (frames, [(page holding
     the keys, each page's focus)] a step)."""
@@ -51,7 +51,6 @@ def _session(glass, kinds, across, script):
     import ui_draw
     import uitree as S
     import uitree_app
-    import uitree_ref
     import uitree_c
     import uitree_two_pages as F
     cv, th = glass
@@ -59,9 +58,8 @@ def _session(glass, kinds, across, script):
     boxes = ([(0, 0, W // 2, H), (W // 2, 0, W - W // 2, H)] if across
              else [(0, 0, W, H // 2), (0, H // 2, W, H - H // 2)])
     pages = []
-    for kind, build in zip(kinds, (F.first, F.second)):
-        cls = uitree_c.CEngine if kind == "c" else uitree_ref.Engine
-        e = cls(S.decl_of(F.__name__), build, ui_draw.AppHost(), None, Damage())
+    for build in (F.first, F.second):
+        e = uitree_c.CEngine(S.decl_of(F.__name__), build, ui_draw.AppHost(), None, Damage())
         e.open()
         pages.append(e)
     owner = [0]
@@ -94,19 +92,15 @@ DOWN_UP = ["down", "down", "down", "down", "up", "up", "up"]
 RIGHT_LEFT = ["down", "right", "down", "left", "right"]
 
 
-@pytest.mark.parametrize("kinds", (("ref", "c"), ("c", "ref"), ("c", "c")))
 @pytest.mark.parametrize("across", (False, True), ids=("stacked", "side_by_side"))
-def test_the_keys_cross_between_two_engines_pages_as_between_two_references(glass, kinds, across):
+def test_the_keys_cross_between_two_pages_as_the_reference_did(glass, across):
     script = RIGHT_LEFT if across else DOWN_UP
-    ref, ref_seen = _session(glass, ("ref", "ref"), across, script)
-    R.held(__file__, "two_refs/" + ("side_by_side" if across else "stacked"), [ref, ref_seen])
-    got, seen = _session(glass, kinds, across, script)
-    assert seen == ref_seen
-    assert [i for i in range(len(ref)) if ref[i] != got[i]] == []
+    got, seen = _session(glass, across, script)
+    R.held(__file__, "two_refs/" + ("side_by_side" if across else "stacked"), [got, seen])
 
 
 def test_an_edge_hands_the_keys_on_and_the_page_entered_lands_by_its_side(glass):
-    _f, seen = _session(glass, ("ref", "c"), False, DOWN_UP)
+    _f, seen = _session(glass, False, DOWN_UP)
     owners = [s[0] for s in seen]
     assert 1 in owners and owners[-1] == 0, seen
     # down past "three" enters the second page at its first stop; up past "four" the first at its last
@@ -114,7 +108,7 @@ def test_an_edge_hands_the_keys_on_and_the_page_entered_lands_by_its_side(glass)
     assert seen[i][2] == "four" and seen[i - 1][1] == "three", seen
     j = owners.index(0, i)
     assert seen[j][1] == "three", seen
-    _f, seen = _session(glass, ("c", "ref"), True, RIGHT_LEFT)
+    _f, seen = _session(glass, True, RIGHT_LEFT)
     i = [s[0] for s in seen].index(1)
     assert seen[i][2] == "four", seen         # right from "two": the second page's leftmost, topmost
     j = [s[0] for s in seen].index(0, i)

@@ -1,6 +1,6 @@
 """`slot`: a rect a placed page reserves for content another owner draws (a
 window's body, another process's page). The one stacking rule places it as
-a fill, its rect reads back (`rect_of`), and neither engine draws in it.
+a fill, its rect reads back (`rect_of`), and the engine draws nothing in it.
 And a growing button (`grow=`): a fill of its placed row, as a window's
 title takes what its buttons leave."""
 
@@ -35,26 +35,19 @@ def build():
         ui.canvas("foot", _foot, h=20)
 
 
-def _placed(engine, rect, unit):
-    import uitree_app
+def _placed(rect, unit):
     import uitree_editor
-    uitree_app.use_engine(engine)
-    try:
-        p = uitree_editor.page(build, None, None)
-        p.unit = unit
-        p.place(rect, desk=True)
-        return {k: p.rect_of(k) for k in ("strip", "head", "close", "body", "foot")}
-    finally:
-        uitree_app.use_engine("c")
+    p = uitree_editor.page(build, None, None)
+    p.unit = unit
+    p.place(rect, desk=True)
+    return {k: p.rect_of(k) for k in ("strip", "head", "close", "body", "foot")}
 
 
-def test_a_slot_is_a_fill_of_its_stack_read_back_alike_on_both_engines():
+def test_a_slot_is_a_fill_of_its_stack_read_back_as_the_reference_did():
     for rect in ((10, 20, 400, 300), (0, 0, 1024, 600), (5, 5, 120, 90)):
         for unit in (1, 2):
-            c = _placed("c", rect, unit)
-            r = _placed("reference", rect, unit)
-            R.held(__file__, "slot/%r/%d" % (rect, unit), r)
-            assert c == r, (rect, unit)
+            c = _placed(rect, unit)
+            R.held(__file__, "slot/%r/%d" % (rect, unit), c)
             x, y, w, h = rect
             sx, sy, sw, sh = c["body"]
             assert (sx, sw) == (x, w)
@@ -70,20 +63,12 @@ def build_grown():
             ui.button("close", icon="close", alone=True, kind="bar")
 
 
-def test_a_growing_bar_item_takes_what_the_row_leaves_alike_on_both_engines():
-    import uitree_app
+def test_a_growing_bar_item_takes_what_the_row_leaves_as_the_reference_did():
     import uitree_editor
-    got = []
-    for engine in ("c", "reference"):
-        uitree_app.use_engine(engine)
-        try:
-            p = uitree_editor.page(build_grown, None, None)
-            p.unit = 2
-            p.place((0, 0, 300, 40), desk=True)
-            got.append((p.rect_of("head"), p.rect_of("close")))
-        finally:
-            uitree_app.use_engine("c")
-    R.held(__file__, "grown", got[1])
-    assert got[0] == got[1]
-    (hx, _, hw, _), (cx, _, cw, _) = got[0]
+    p = uitree_editor.page(build_grown, None, None)
+    p.unit = 2
+    p.place((0, 0, 300, 40), desk=True)
+    got = (p.rect_of("head"), p.rect_of("close"))
+    R.held(__file__, "grown", got)
+    (hx, _, hw, _), (cx, _, cw, _) = got
     assert hx == 4 and cx + cw == 296 and hx + hw + 4 == cx       # pad and gap 2 units of 2: the head fills
