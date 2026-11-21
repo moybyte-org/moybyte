@@ -115,8 +115,6 @@ def test_the_cells_fit_one_128_wide_sheet_and_never_overlap():
         px = {(x + i, y + j) for i in range(w) for j in range(h)}
         assert not px & taken
         taken |= px
-    # the sheet's title-button cells; the back chevron has none (a glyph or the icon set's)
-    assert ui_draw.FRAME_BUTTONS == tuple(TH["frame_button_names"]) + ("back",)
     assert len(TH["sprite_slots"]) == 16 and TH["sprite_slots"][0] is None
 
 
@@ -310,16 +308,6 @@ def test_the_frame_takes_the_windows_9_slice_and_the_title_buttons():
             assert px[y * 200 + 20] == plain[y * 200 + 20]
             assert px[y * 200 + 181] == plain[y * 200 + 181]
         assert px[91 * 200 + 100] == plain[91 * 200 + 100]
-        for name, (bx, by, bw, bh), _right in ui_draw.frame_buttons(win, th_h, "SPRIG", True, fs):
-            sub = ui_draw.FRAME_BUTTONS.index(name)
-            want = _model(_cell("window.button", "active" if active else "inactive", sub),
-                          (bx, by, bw, bh), fs, slots, size=(200, 100))
-            want_head = head
-            for y in range(by, by + bh):
-                for x in range(bx, bx + bw):
-                    w = want[y * 200 + x]
-                    assert px[y * 200 + x] == (w if w != BG else want_head[y * 200 + x]), \
-                        (name, x, y)
 
 
 def test_one_op_a_sprite_and_never_outside_its_box():

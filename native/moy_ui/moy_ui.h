@@ -286,9 +286,8 @@ int moy_ui_sink_glyph(const moy_ui_sink_t *s, int g, int x, int y, int w, int h,
                       int scale);
 // The live theme's icon set for the parts the C draws (docs/history/look_2026-10.md
 // step 16): its mask files at 16 and 24 px (0 where it has none, the whole
-// set off when both are) and the glyph codes of close, maximize and
-// minimize, by MOY_UI_FB_*. runtime/toolkit/iconsets.py installs it at a look change.
-void moy_ui_icons_use(uint32_t f16, uint32_t f24, const uint8_t codes[3]);
+// set off when both are). runtime/toolkit/iconsets.py installs it at a look change.
+void moy_ui_icons_use(uint32_t f16, uint32_t f24);
 // Moy's tile (slot 0, MOY_UI_ICON_MOY), which is pixel art in every theme: 16x16
 // palette indices, `clear` the one that draws nothing; NULL takes it away.
 // runtime/toolkit/iconsets.py installs the pixel set's with the set. moy_ui_moy answers
@@ -296,10 +295,6 @@ void moy_ui_icons_use(uint32_t f16, uint32_t f24, const uint8_t codes[3]);
 #define MOY_UI_ICON_MOY 0
 void moy_ui_moy_use(const uint8_t px[256], int clear);
 const uint8_t *moy_ui_moy(int *clear);
-// Title button `id`'s icon, the set's largest mask that box `b` holds,
-// centred, in RGB565 `col`: 1 when drawn, 0 where no set is installed or
-// its font is gone (the caller draws its glyph).
-int moy_ui_icon_button(const moy_text_target_t *t, int id, moy_ui_box_t b, uint16_t col);
 #define MOY_UI_ICON_FIRST 0x21          // slot 0's byte in a mask file; slot n's is FIRST + n
 // The icon set's slot named `name` (tools/make_icons.py's order; `gear`,
 // `batt` and `edit` are aliases of settings, battery and pencil), -1 none.
@@ -411,13 +406,6 @@ void moy_ui_frame_geom(int w, int h, int th, int active, int mode, int out[MOY_U
 // the sides and the foot inside the rounded outline, the ring, the rule; with
 // `matte`, the columns as wide as the foot inside each side as well.
 void moy_ui_depth_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int active, int matte);
-// The token a title draws in under the depth's header: the value ink on a
-// focused `fill` header, the chrome ink, the dim chrome ink behind.
-int moy_ui_depth_title_ink(int active);
-// The slot the window's line icon takes left of its title (win.icon), a
-// square `th` * 20 / 44 on a side, past the back chevron where `btns` has
-// one; 0 where the frame draws no icon.
-int moy_ui_frame_icon(moy_ui_box_t w, int th, int btns, moy_ui_box_t *slot);
 // What a window leaves to the layer under it: its shadow at `mode`'s size and
 // its outline's partly covered pixels, blended over what that layer just
 // painted (runtime/wm/wm_desk.py draws it, clipped to what it repainted).
@@ -700,48 +688,26 @@ int moy_ui_part(const char *name, size_t n);
 // -- window frames (docs/theme_and_shell_2026-11.md §3.5) ---------------------------------------
 //
 // A window's decoration in the built-in style the installed shape chooses
-// (style.json's theme.frames), with its title alignment and button order.
-// Every style draws inside one footprint, the one the WMs' damage, hit-tests
-// and content rects are built on: the window box's one-pixel ring, the
-// `title_h` strip under its top edge, and the three-pixel drop shadow right
-// of and below the box. The `window.title` and `window.button` surfaces a
-// theme names are painted in place of the style's own; the title takes
-// `window.title`'s text effect. The role sheet's `window` 9-slice replaces
-// the ring's top row and the strip, and a title button's sprite its surface
-// and glyph (docs/theme_and_shell_2026-11.md §3.6). States are MOY_THEME_S_ACTIVE /
-// _INACTIVE.
-enum { MOY_UI_FB_CLOSE = 0, MOY_UI_FB_MAX = 1, MOY_UI_FB_MIN = 2, MOY_UI_FB_BACK = 3 };
-// What a full-screen row draws in maximise's place (moy_ui_icon_button's id;
-// never a layout's).
-#define MOY_UI_FB_RESTORE 4
-// A frame's optional buttons (`btns`): a minimise, and the back chevron at
-// the head of the strip, before the icon and the title, that a window whose
-// app has opened a page of it shows (docs/history/look_2026-10.md step 27a).
-// MOY_UI_FRAME_MATTE rides the same word and is no button: the window's
-// content stands in from its sides by the foot (the game window's matte,
+// (style.json's theme.frames), or the theme's depth. Every style draws inside
+// one footprint, the one the WMs' damage, hit-tests and content rects are
+// built on: the window box's one-pixel ring, the `title_h` strip under its
+// top edge, and the three-pixel drop shadow right of and below the box. The
+// frame draws nothing on the strip but its ground (and classic's identity
+// stripe, in a colour of `title`'s): the back chevron, icon, title and
+// buttons are the window manager's strip page (runtime/wm/wm_strip_ui.py).
+// The `window.title` surface a theme names is painted in place of the
+// strip's own ground; the role sheet's `window` 9-slice replaces the ring's
+// top row and the strip (docs/theme_and_shell_2026-11.md §3.6). States are
+// MOY_THEME_S_ACTIVE / _INACTIVE.
+// `btns`: MOY_UI_FRAME_MIN and MOY_UI_FRAME_BACK are the window manager's
+// word for the strip's minimise and back chevron, which the frame does not
+// read; MOY_UI_FRAME_MATTE rides the same word: the window's content stands
+// in from its sides by the foot (the game window's matte,
 // WindowChrome._win_edge), so the body paints those columns too, as it
-// paints the foot. MOY_UI_FRAME_FULL is a full-screen window's
-// row (docs/media/look_2026-10/MAXIMISE_VARIANTS.md, V2): the strip's title
-// and buttons alone, on the ground already under them -- no ring, strip,
-// line or shadow -- and maximise drawn as restore. MOY_UI_FRAME_BARE is
-// the frame with nothing on its strip: ring, strip, line and shadow, no
-// title, buttons or pinstripes (the window manager's strip page draws
-// those, runtime/wm/wm_strip_ui.py); a classic stripe still takes the title's
-// colour.
+// paints the foot.
 #define MOY_UI_FRAME_MIN 1
 #define MOY_UI_FRAME_BACK 2
 #define MOY_UI_FRAME_MATTE 8
-#define MOY_UI_FRAME_FULL 16
-#define MOY_UI_FRAME_BARE 32
-#define MOY_UI_FRAME_BUTTONS 4
-typedef struct {
-    moy_ui_box_t box;
-    uint8_t id;                     // MOY_UI_FB_*
-    uint8_t right;                  // 1: in the group right of the title
-} moy_ui_frame_button_t;
-// The strip's buttons as the frame draws them, left to right; the count.
-int moy_ui_frame_buttons(moy_ui_box_t win, int title_h, moy_ui_span_t title, int btns, int fs,
-                         moy_ui_frame_button_t out[MOY_UI_FRAME_BUTTONS]);
 int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t win, int title_h, moy_ui_span_t title,
                  int active, int btns, int fs);
 // The bar's band in the frame's style (`bar`'s surface where the theme names

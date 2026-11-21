@@ -424,8 +424,9 @@ frozen 2026-10-11, `surfaces` and `frame` defined 2026-10-12, `fonts` and
 - **`frame`**: `style`, one of `classic`, `tab`, `platinum`, `win9x`, `flat`;
   `title_align`, one of `left`, `center`, `right`; `buttons`, each of `C`
   (close), `M` (minimise), `Z` (maximise) and `T` (the title) once, a `|`
-  between them allowed. What a theme leaves out is its style's own (§3.5); a
-  value the key does not take is dropped.
+  between them allowed. What a theme leaves out is its style's own; a value
+  the key does not take is dropped. `title_align` and `buttons` are read and
+  draw nothing (§3.5).
 - **`fonts`**: role → a font file in the package, a role of
   style.json's `theme.font_roles`; a file name is 1 to 24 of
   `a-z`, `0-9`, `_`, `-`, `.`, not starting with `.`, so it never names a
@@ -575,8 +576,8 @@ API's group card and value rows, `docs/history/look_2026-10.md` step 12, whose
 primitives paint no surface); then the chrome the WMs and the bar
 draw, style.json's `theme.parts`: `window`, `window.title`, `window.button`,
 `bar`, `bar.item`, `desk`, `desk.icon`. A window's buttons are one part
-(ruled 2026-10-12, the pick that builds least: the frame style tells them
-apart, §3.5). `tests/test_theme_loader.py` holds this paragraph to the
+(ruled 2026-10-12, the pick that builds least), which nothing draws since the
+strip page took the buttons (§3.5). `tests/test_theme_loader.py` holds this paragraph to the
 tables. A part added later is additive (§2) and joins the style file as a
 kind.
 
@@ -758,45 +759,36 @@ another role than `title` hands the toolbar's text that role's ink of
 
 ### 3.5 Frame styles and window decoration
 
-Window frames are a **built-in style chosen by name**: `classic` (D1's), `tab`
-(a Haiku-style title tab as wide as its title), `platinum`, `win9x`, `flat`.
-Parameters: title alignment and a button-order string (`C|T|MZ`: close left,
-title, minimise and maximise right). The styles are our code; a theme only
-chooses. SerenityOS and xfwm4 work this way (§11). On the fullscreen tiers the
-"window" is the app's full-screen strip, so the same style draws that strip.
+Window frames are a **built-in style chosen by name**: `classic` (D1's), `tab`,
+`platinum`, `win9x`, `flat`. The styles are our code; a theme only chooses.
+SerenityOS and xfwm4 work this way (§11). A style draws a window's ring, its
+strip's ground and its shadow; what stands on the strip is every style's one
+strip page (below). A theme's title alignment and button order (`frame`'s
+`title_align` and `buttons`) are still read into the theme and draw nothing
+(K14, owner 2026-11-21: the old styles take the one strip, and replacing those
+themes is a job of its own).
 
 **As built** (`native/moy_ui/moy_ui_draw.c`'s `moy_ui_frame`, reached through
-`ui.frame` from `runtime/wm/wm_chrome.py`; 2026-10-12). `classic`
+`ui.frame` from `runtime/wm/wm_chrome.py`). `classic`
 is D1's: a one-pixel ring and the strip's bottom line in
-`shade_dark`, the hard black shadow, the app's identity stripe at the strip's
-left with the title beside it, and a square close (its glyph boxed in the
-title's ink). `flat` is the frame the WM drew in Python before D1, less the
-strip's bottom line: a ring in `chrome_ink` (`dim` when inactive), no stripe,
-the plain close glyph; `tab` keeps that ring and a red close. `win9x` lights the ring from the top
-left, sets a title bar inside a frame of `panel`, and boxes each button as
-Win95's `bevel2` with its glyph in `chrome_ink`. `platinum` centres the title,
-pinstripes the active strip in `shade_lo` either side of it, and draws small
-raised boxes with marks of their own (none for close, a square for maximise,
-two bars for minimise). `tab` draws the strip in `panel` with a raised tab as
-wide as its buttons and title. Each style has its own title alignment and
-button order (classic, win9x and flat `T|MZC`, platinum `C|T|ZM`, tab
-`C|T|MZ`), which `title_align` and `buttons` replace; nothing draws these, or
-the styles' own titles and buttons, since 2026-11-21. A
-framed window's frame is drawn bare (`ui_draw.FRAME_BARE`: the style's ring,
-strip, line and shadow), and the strip page (`runtime/wm/wm_strip_ui.py`) draws on
-it what every style shares: the back chevron, the icon and the title cut with
-"…", then minimise, maximise and close at the right, each a bar item in the
-title's ink. The engine draws that strip into a layer kept for what it shows,
-and every frame stamps it (`runtime/wm/wm_strip.py`), so a drag does no
-page work. A full-screen window's row is the same page on the row's band,
-its maximise drawn as restore. The fat-finger hit-test reads the buttons from
-the page, each group resolving taps out to the
-window edge on its own side. The bar's
-band (`ui.frame_band`) is the style's too: `win9x` lights its top row, the
-others draw today's band, and a theme's `bar` surface replaces it. A
-`window.title` or `window.button` surface a theme names is painted in place of
-the style's own; the title takes `window.title`'s text effect; a taskbar chip
-paints `bar.item` (focused `on`, minimised `disabled`).
+`shade_dark`, the hard black shadow and the app's identity stripe at the
+strip's left. `flat` is the frame the WM drew in Python before D1, less the
+strip's bottom line: a ring in `chrome_ink` (`dim` when inactive), no stripe.
+`win9x` lights the ring from the top left and sets a title bar inside a frame
+of `panel`; `tab` keeps `flat`'s ring and raises the whole strip; `platinum`
+draws `flat`'s ring with the strip's bottom line. The strip page
+(`runtime/wm/wm_strip_ui.py`) draws on that ground the back chevron, the icon
+and the title cut with "…", then minimise, maximise and close at the right,
+each a bar item in the title's ink. The engine draws the strip into a layer
+kept for what it shows, and every frame stamps it (`runtime/wm/wm_strip.py`),
+so a drag does no page work. A full-screen window's row is the same page on
+the row's band, its maximise drawn as restore. The fat-finger hit-test reads
+the buttons from the page, each group resolving taps out to the window edge on
+its own side. The bar's band (`ui.frame_band`) is the style's too: `win9x`
+lights its top row, the others draw today's band, and a theme's `bar` surface
+replaces it. A `window.title` surface a theme names is painted in place of the
+style's strip ground (a `window.button` surface is read and drawn by nothing);
+a taskbar chip paints `bar.item` (focused `on`, minimised `disabled`).
 
 Ruled 2026-10-12, each the pick that builds least:
 - **One footprint for every style**: the window box's one-pixel ring, the
@@ -809,9 +801,6 @@ Ruled 2026-10-12, each the pick that builds least:
   within it through surfaces and sprites. **Later, if asked:** `border` (about
   1-4 px) and `title_h` as theme metrics, read by the WM on relayout; gated by
   the window-drag benches (`tools/p4_bench.py`) and the window tests.
-- **Whether the strip spans the window is the style's**, not a parameter: `tab`
-  does not, and the strip beyond its tab is `panel`, the window's own, since a
-  see-through strip would need the WM's damage to cover the desk under it.
 - **The shadow is `shade_dark`** in every style but `classic`, which keeps its
   black. It stays the footprint's three pixels in `classic` too: D1's two-pixel
   hard shadow is the surfaces' (`shadow`, §3.4), and a window's two-pixel one
@@ -820,7 +809,7 @@ Ruled 2026-10-12, each the pick that builds least:
 - **The identity stripe's colour is the title's** (ruled 2026-10-12, the pick
   that builds least): no app declares a colour, so `classic` picks one of the
   six PICO-8 accents (blue, green, orange, pink, yellow, red) by a hash of the
-  title's bytes; the stripe is `3 * fs` wide and the title moves right of it.
+  title's bytes; the stripe is `3 * fs` wide.
 - **`window`'s own surface is not read**: the ring is the style's, and a
   surface under the content would be filled and then covered every chrome draw.
 
@@ -834,7 +823,7 @@ shadow's reach).
 
 - **One sheet per theme at fixed cells** (style.json's `theme.sprite_cells`,
   in 8-pixel tiles of one 128-wide sheet): the title buttons (close, maximise,
-  minimise) per window state, and 9-slices for `window` per window state,
+  minimise) per window state, which nothing draws (§3.5), and 9-slices for `window` per window state,
   `button` per state and `desk.icon`'s tile. The fixed cells are what made
   Winamp's classic skins paintable in any paint program (§11). A part with a
   sprite draws the sprite; a part without one draws its surface — a cell left
@@ -851,13 +840,11 @@ shadow's reach).
 - **Drawn in C, in one call each** (`native/moy_ui/moy_ui_draw.c`'s
   `sprite`). A 9-slice is one C call, not nine `spr` wrapper calls: its
   8-pixel corners whole, its edges and centre tiled, scaled by the chrome
-  scale as a glyph is; a title button is its cell centred in the button's
-  box. Neither draws outside its box, slot 0 leaves what is under it, and
+  scale as a glyph is. It never draws outside its box, slot 0 leaves what is under it, and
   each slot resolves through the look's slot table, so a tinted glyph is a
   sheet in two slots and there is **no per-tint RGB bake cache**. The
   `window` 9-slice is the frame above the content — the ring's top row and
-  the title strip, in place of the style's — under the title and the
-  buttons; the ring's sides and foot and the shadow stay the style's, inside
+  the title strip, in place of the style's — under the strip page; the ring's sides and foot and the shadow stay the style's, inside
   §3.5's footprint.
 - **Icons:** a theme may ship its own icon tiles (`icons`, the pixel icon
   set's shape: eight 16-pixel tiles a row, one a slot of

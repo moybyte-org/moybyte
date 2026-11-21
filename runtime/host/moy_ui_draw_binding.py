@@ -11,7 +11,7 @@ API's verbs read. Host only.
 import ctypes as c
 
 from runtime.moy_ui_binding import (DEFAULT, FROM_STYLE, STALE, _Box, _BtnStyle,
-                                    _Button, _Cell, _FrameButton, _I, _I16x3, _Line,
+                                    _Button, _Cell, _I, _I16x3, _Line,
                                     _R4, _Row, _SPACE, _Sink, _Span, _check)
 
 
@@ -156,9 +156,8 @@ def install(m, lib, tokens):
         _check(lib.moy_ui_sink_glyph(c.byref(s), int(g), b.x, b.y, b.w, b.h, int(ci),
                                      fs_or(scale, s)))
 
-    def icons_use(f16, f24, close, maximize, minimize):
-        codes = (c.c_uint8 * 3)(int(close), int(maximize), int(minimize))
-        lib.moy_ui_icons_use(int(f16), int(f24), c.byref(codes))
+    def icons_use(f16, f24):
+        lib.moy_ui_icons_use(int(f16), int(f24))
 
     def moy_use(px, clear):
         if px is None:
@@ -329,21 +328,6 @@ def install(m, lib, tokens):
         sp, keep = span_if(title)
         _check(lib.moy_ui_frame(c.byref(s), box_of(rect), int(title_h), sp,
                                 1 if active else 0, int(btns), int(fs)))
-
-    def frame_buttons(rect, title_h, title, btns, fs):
-        sp, keep = span_if(title)
-        out = (_FrameButton * 4)()                  # MOY_UI_FRAME_BUTTONS
-        n = lib.moy_ui_frame_buttons(box_of(rect), int(title_h), sp, int(btns), int(fs), out)
-        return tuple((b.id, b.box.x, b.box.y, b.box.w, b.box.h, b.right) for b in out[:n])
-
-    def frame_icon(rect, title_h, btns, into=None):
-        out = _Box()
-        if not lib.moy_ui_frame_icon(box_of(rect), int(title_h), int(btns), c.byref(out)):
-            return None
-        if into is not None:
-            into[0], into[1], into[2], into[3] = out.x, out.y, out.w, out.h
-            return into
-        return (out.x, out.y, out.w, out.h)
 
     def bar_part(cv, look, part, rect, on, fill=None):
         if part == 5 and fill is not None:          # MOY_UI_BARP_TILE
@@ -527,7 +511,7 @@ def install(m, lib, tokens):
 
     for f in (row, cell, label, bar_rect, scrollbar, fill_uncovered, fade,
               button, button_x, chip, tab_rects, tab, status, hints, game_btn, game_icon_btn,
-              mini_btn, toolbar, paint, frame, frame_buttons, frame_band, frame_geom, frame_icon, bar_part,
+              mini_btn, toolbar, paint, frame, frame_band, frame_geom, bar_part,
               scrim, scrim_alpha, tile, unlock, rec, modal, modal_band, month_h, perf,
               frame_under, frame_under_fill, frame_under_onto, cast, dialog, text_field, panel,
               focus, current,

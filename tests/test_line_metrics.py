@@ -217,19 +217,6 @@ def test_a_labelled_tab_ends_its_label_a_pad_inside_its_chip(sample, fs):
         assert box[2] <= x + w - pad, (label, box, (x, w))
 
 
-@pytest.mark.parametrize("fs", [1, 2])
-def test_a_frames_title_stays_clear_of_its_buttons(sample, fs):
-    win, th_ = (10, 10, 180, 100), 18 * fs
-
-    def draw(cv, on):
-        ui_draw.frame(cv, TH, win, th_, LONG if on else "", True, True, fs)
-
-    box = _ink(draw, w=220, h=140, fs=fs)
-    assert _inside(box, (win[0], win[1], win[2], th_ + 1))
-    for _id, (x, y, w, h), _right in ui_draw.frame_buttons(win, th_, LONG, True, fs):
-        assert box[2] <= x or x + w <= box[0]
-
-
 def test_the_game_canvas_stays_on_petme128():
     """game_btn, game_icon_btn and text_field draw on the game canvas, which
     a theme does not reach (§6): the same pixels whatever the roles name."""

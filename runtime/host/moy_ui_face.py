@@ -137,14 +137,6 @@ class moy_ui_depth_t(_c.Structure):
     ]
 
 
-class moy_ui_frame_button_t(_c.Structure):
-    _fields_ = [
-        ("box", moy_ui_box_t),
-        ("id", _c.c_uint8),
-        ("right", _c.c_uint8),
-    ]
-
-
 class moy_ui_sink_t(_c.Structure):
     _fields_ = [
         ("kind", _c.c_uint8),

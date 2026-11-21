@@ -43,10 +43,6 @@ def frame():
     ui_draw.use_depth(None, False)
 
 
-def _names(btns):
-    return [(n, right) for n, _r, right in btns]
-
-
 def test_the_frame_key_reads_and_notes(frame):
     assert frame(style="win9x", title_align="center", buttons="C|T|MZ") == 0
     assert frame(style="beos") == N_DROPPED
@@ -62,29 +58,6 @@ def test_the_frame_key_reads_and_notes(frame):
 def test_the_styles_and_orders_are_style_jsons():
     assert TH["frames"] == ["classic", "tab", "platinum", "win9x", "flat"]
     assert sorted(TH["frame_buttons"]) == sorted("CMZT")
-
-
-@pytest.mark.parametrize("style,want", [
-    ("classic", [("min", True), ("max", True), ("close", True)]),
-    ("flat", [("min", True), ("max", True), ("close", True)]),
-    ("win9x", [("min", True), ("max", True), ("close", True)]),
-    ("platinum", [("close", False), ("max", True), ("min", True)]),
-    ("tab", [("close", False), ("min", True), ("max", True)]),
-])
-def test_each_styles_own_button_order(frame, style, want):
-    frame(style=style)
-    btns = ui_draw.frame_buttons((10, 10, 300, 200), 18, "HELLO", True, 1)
-    assert _names(btns) == want
-    no_min = ui_draw.frame_buttons((10, 10, 300, 200), 18, "HELLO", False, 1)
-    assert _names(no_min) == [b for b in want if b[0] != "min"]
-
-
-def test_a_theme_orders_the_buttons(frame):
-    frame(style="classic", buttons="ZT|CM")
-    btns = ui_draw.frame_buttons((0, 0, 200, 100), 18, "T", True, 1)
-    assert _names(btns) == [("max", False), ("close", True), ("min", True)]
-    left = btns[0][1]
-    assert left[0] == 2 and btns[-1][1][0] + btns[-1][1][2] == 200 - 2
 
 
 @pytest.mark.parametrize("style", TH["frames"])
@@ -108,10 +81,6 @@ def test_every_style_stays_in_the_footprint(frame, style, active, fs):
             content = x + 1 <= i < x + w - 1 and y + 1 + t <= j < y + h - 1
             if content or not (inside or shadow):
                 assert px[j * cv.w + i] == BG, (style, i, j)
-    # the buttons are inside the strip
-    for _n, (bx, by, bw, bh), _s in ui_draw.frame_buttons((x, y, w, h), t, "A LONG WINDOW TITLE",
-                                                      True, fs):
-        assert x < bx and bx + bw < x + w and y < by and by + bh <= y + 1 + t
 
 
 def test_every_style_s_strip_holds_its_buttons_right_of_the_title(tmp_path, frame):
@@ -188,25 +157,6 @@ def _px(cv, x, y):
 
 
 @pytest.mark.parametrize("light", [True, False])
-def test_the_title_buttons_are_minimize_maximize_close(looked, light):
-    """Every built-in theme's controls are minimize, maximize and close as
-    title buttons, each a 28-pixel target inside the 44-row header, and a
-    running game's window has no minimize."""
-    looked("moy", light)
-    rect = (100, 50, 400, 300)
-    btns = ui_draw.frame_buttons(rect, 44, "CALC", True, 1)
-    assert _names(btns) == [("min", True), ("max", True), ("close", True)]
-    for _n, (x, y, w, h), _right in btns:
-        assert w >= 28 and h >= 28
-        assert 100 < x and x + w < 500 and 50 < y and y + h <= 50 + 45
-    pitch = [b[1][0] for b in btns]
-    assert pitch[1] - pitch[0] == pitch[2] - pitch[1] == 34
-    game = ui_draw.frame_buttons(rect, 44, "GAME", False, 1)
-    assert _names(game) == [("max", True), ("close", True)]
-    assert ui_draw.frame_icon(rect, 44) == (116, 62, 20, 20)
-
-
-@pytest.mark.parametrize("light", [True, False])
 def test_moys_header_is_the_windows_colour_under_a_value_bar(looked, light):
     """`win.header: bar`: the focused window's header is the window's colour
     under a 4-pixel value bar across its top; a window behind has no bar,
@@ -229,18 +179,15 @@ def test_moys_header_is_the_windows_colour_under_a_value_bar(looked, light):
     assert ui_draw.frame_geom(w, h, 44)[0] > 0                      # rounded
 
 
-def test_a_header_fill_and_close_alone(looked):
+def test_a_header_fill(looked):
     """A look's `win.header: fill` fills a focused header with `value` (a
-    window behind takes `win.fill_back`, else its colour), `win.controls:
-    close` leaves close alone, and `win.icon: false` leaves no icon slot."""
+    window behind takes `win.fill_back`, else its colour)."""
     from test_ui_style_data import _install, _uninstall
     _install({"format": 2, "name": "wp", "inherits": "moy", "look": {
         "win": {"header": "fill", "controls": "close", "icon": False, "rule": 0}}})
     try:
         th, cv = looked("wp", True)
         rect = (20, 20, 300, 160)
-        assert _names(ui_draw.frame_buttons(rect, 44, "T", True, 1)) == [("close", True)]
-        assert ui_draw.frame_icon(rect, 44) is None
         ui_draw.frame(cv, th, rect, 44, "T", True, True, 1)
         assert _px(cv, 170, 40) == _px(cv, 170, 64) == _word(th["value"])
         cv.cls(th["desktop"])
@@ -252,15 +199,12 @@ def test_a_header_fill_and_close_alone(looked):
 
 
 def test_a_theme_naming_a_frame_style_keeps_its_frame():
-    """A package whose `frame` is nearer than its look draws its frame style:
-    no icon slot, its own boxes."""
+    """A package whose `frame` is nearer than its look draws its frame style,
+    not the look's depth."""
     install_theme("night")
     ui_draw.use_depth("night", False)
     try:
-        assert ui_draw.frame_icon((0, 0, 300, 200), 18) is None
-        assert _names(ui_draw.frame_buttons((0, 0, 300, 200), 18, "T", True, 1)) == [
-            ("min", True), ("max", True), ("close", True)]
-        assert ui_draw.frame_buttons((0, 0, 300, 200), 18, "T", True, 1)[0][1][2] == 16
+        assert not ui_draw.depth()[12]
     finally:
         ui_draw.use_depth(None, False)
 

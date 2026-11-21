@@ -5,7 +5,7 @@
 #   -- interaction state              widget_state
 #   -- the style                      metrics, state_colors (C)
 #   -- the theme's shape              use_shape, paint (C)
-#   -- window frames                  frame, frame_buttons, frame_band (C)
+#   -- window frames                  frame, frame_band (C)
 #   -- depth                          use_depth, depth, frame_geom, frame_under, frame_under_fill, frame_under_onto, cast (C)
 #   -- glyphs                         glyph, glyph_id (C); s, the string table (C)
 #   -- widgets                        button, chip
@@ -1348,37 +1348,17 @@ def paint(cv, th, rect, part, state=REST):
 # chooses (docs/theme_and_shell_2026-11.md §3.5): the styles are C, a theme only picks
 # one, its title alignment and its button order.
 
-FRAME_BUTTONS = ("close", "max", "min", "back")     # MOY_UI_FB_*
-FRAME_MIN, FRAME_BACK, FRAME_MATTE, FRAME_FULL, FRAME_BARE = 1, 2, 8, 16, 32   # MOY_UI_FRAME_*
+FRAME_MIN, FRAME_BACK, FRAME_MATTE = 1, 2, 8     # MOY_UI_FRAME_*
 
 
 def frame(cv, th, rect, title_h, title, active, btns, fs):
-    """Window `rect`'s frame: its ring, its `title_h` strip with `title` and
-    the strip's buttons, its drop shadow. `btns`: FRAME_MIN for a minimise
-    button, FRAME_BACK for the back chevron at the head of the strip (True:
-    a minimise), FRAME_MATTE for a content rect standing in from the
-    sides by the foot, whose columns the depth's body then paints too, and
-    FRAME_FULL for a full-screen window's row: the title and the buttons
-    alone, on what is under them, maximise drawn as restore; FRAME_BARE for
-    nothing on the strip (the window manager's strip page draws it)."""
+    """Window `rect`'s frame: its ring, its `title_h` strip's ground (and a
+    classic stripe in a colour of `title`'s), its drop shadow; what lies on
+    the strip is the window manager's strip page (runtime/wm/wm_strip_ui.py).
+    `btns`: FRAME_MATTE for a content rect standing in from the sides by the
+    foot, whose columns the depth's body then paints too (FRAME_MIN and
+    FRAME_BACK ride the same word as the window manager's, unread here)."""
     _C.frame(cv, _LOOK if th is _TH else _look(th), rect, title_h, title, active, int(btns), fs)
-
-
-def frame_buttons(rect, title_h, title, btns, fs):
-    """The strip's buttons as `frame` draws them, left to right:
-    [(name, rect, right)], `right` True for the group right of the title."""
-    return [(FRAME_BUTTONS[b[0]], (b[1], b[2], b[3], b[4]), b[5] == 1)
-            for b in _C.frame_buttons(rect, title_h, title, int(btns), fs)]
-
-
-def frame_icon(rect, title_h, btns=0, out=None):
-    """The slot (x, y, w, h) the frame leaves for the window's line icon left
-    of its title, past a back chevron `btns` asks for, or None where it draws
-    none (a frame style's frame, `win.icon` off). With `out`, a list of four,
-    the slot is written into it and it is the answer."""
-    if out is None:
-        return _C.frame_icon(rect, title_h, int(btns))
-    return _C.frame_icon(rect, title_h, int(btns), out)
 
 
 # --- depth: the theme's radii, shadow and edges (docs/history/look_2026-10.md step 6) ---
