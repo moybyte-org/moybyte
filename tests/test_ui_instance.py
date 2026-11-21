@@ -55,6 +55,8 @@ NOT_LINKED = {"modmoy_ui.c": "the MicroPython face: one VM's, never linked into 
 BLOCK = "the theme block's: the console writes it between frames, a copy pulls it"
 SHARED = {
     ("moy_ui_api.c", "s_main"): "the main instance itself",
+    ("moy_ui_api.c", "said"): "a host test's tap (moy_ui_api_said), set and cleared around its "
+                              "frames; never set on a board",
     ("moy_ui.c", "s_ui"): BLOCK,
     ("moy_ui.c", "s_disabled"): BLOCK,
     ("moy_ui.c", "s_danger_ink"): BLOCK,

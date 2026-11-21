@@ -93,9 +93,10 @@ def test_a_kind_the_engine_lacks_is_refused_by_name():
 
     def build():
         with S.page("P"):
-            S.rule()
+            with S.grid(1, 1):
+                pass
     eng = uitree_c.CEngine(S.decl_of(S.module_of(mod.build)), build, _Host(), None, None)
-    with pytest.raises(uitree_c.EngineGap, match="rule"):
+    with pytest.raises(uitree_c.EngineGap, match="grid"):
         eng._ready()
 
 
