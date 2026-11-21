@@ -521,7 +521,7 @@ RUNS = (
      ["k:down", "k:a", "f:2", "k:down", "k:a", "f:2", "back"],
      {i: (NO_FALSE_HINT + "; " if i >= 5 else "") + CUT_ENDS_IN_ELLIPSIS for i in range(7)}),
     ("settings_paired-desk", "settings_paired", "p4_1024x600_fs2_windowed",
-     ["k:down", "k:down", "k:a", "f:2", "k:down", "k:a", "f:2"], {6: NO_FALSE_HINT, 7: NO_FALSE_HINT}),
+     ["k:down", "k:down", "k:a", "f:2", "k:down", "k:a", "f:2"]),
     ("settings_paired_none-big", "settings_paired_none", "big_800x480_fs3_dark", ["k:down", "back"],
      {0: NO_FALSE_HINT, 1: NO_FALSE_HINT}),
     # the image on the card: A installs it a chunk a frame, B stops the
@@ -556,7 +556,7 @@ RUNS = (
     ("settings_rows_full-tdeck", "settings_rows_full", "tdeck_320x240_fs1_dark",
      ["k:down"] * 24 + ["k:right", "k:up", "k:up"]),
     ("settings_rows_full-desk", "settings_rows_full", "p4_1024x600_fs2_windowed",
-     ["k:down"] * 22 + ["k:a", "k:down", "k:right"], dict.fromkeys((23, 24, 25), LICENCES_K5)),
+     ["k:down"] * 22 + ["k:a", "k:down", "k:right"]),
     # the ring at its foot, scrolled up and down again, and closed
     ("settings_log-tdeck", "settings_log", "tdeck_320x240_fs1_dark",
      ["f:2", "k:up", "k:up", "k:up", "k:down", "back"], dict.fromkeys(range(6), LOG_BACK_BAND)),
@@ -571,7 +571,7 @@ RUNS = (
      dict.fromkeys(range(15, 21), WIFI_OWN_HINT)),
     ("settings_wifi-desk", "settings_wifi", "p4_1024x600_fs2_windowed",
      ["k:down", "k:a", "f:2", "k:down", "k:a", "t:abc", "enter", "f:2", "k:down", "k:down",
-      "k:a", "f:2", "back"], dict.fromkeys(range(9, 13), WIFI_OWN_HINT)),
+      "k:a", "f:2", "back"]),
     ("settings_wifi_none-big", "settings_wifi_none", "big_800x480_fs3_dark", ["k:down", "k:a", "f:2"],
      dict.fromkeys(range(4), WIFI_OWN_HINT)),
     # the bar's Wi-Fi popover: an open network joined, a locked one's
