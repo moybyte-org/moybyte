@@ -278,6 +278,7 @@ class Model(T):
         self.fields = {k: _decl(v, k)[0] for k, v in fields.items()}
         self.zero = {k: _decl(v, k)[1] for k, v in fields.items()}
         self.init = ()
+        self.cells = tuple((k,) + _accept(t) for k, t in self.fields.items())
 
 
 class RowOf(T):
@@ -471,7 +472,42 @@ class Row:
         return "Row(%s)" % ", ".join("%s=%r" % kv for kv in self._f.items())
 
 
+_NONE = type(None)
+
+
+def _accept(t):
+    """A model field's check compiled: the types `_check` takes for `t`
+    without converting, compared by identity, and an enum's values (`None`
+    where only `_check` decides)."""
+    opt = isinstance(t, Opt)
+    b = t.base if opt else t
+    ts = ((bool,) if b is BOOL else (int,) if b is INT else (int, float) if b is NUM
+          else (str,) if b is TEXT or isinstance(b, (RowOf, Enum)) else None)
+    if ts is None:
+        return None, None
+    return (ts + (_NONE,) if opt else ts), (b.values if isinstance(b, Enum) else None)
+
+
 def _row(m, d, what):
+    if type(d) is Row:
+        d = d._f
+    if type(d) is dict:
+        f = {}
+        for k, ts, vals in m.cells:
+            v = d.get(k, _NONE)
+            if v is _NONE:
+                break
+            if ts is not None and type(v) in ts and (vals is None or v in vals or v is None):
+                f[k] = v
+            else:
+                f[k] = _check(m.fields[k], v, "%s.%s" % (what, k))
+        else:
+            if len(d) == len(f):
+                return Row(m, f)
+    return _row_slow(m, d, what)
+
+
+def _row_slow(m, d, what):
     if isinstance(d, Row):
         d = d._f
     if not isinstance(d, dict):
