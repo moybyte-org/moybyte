@@ -114,9 +114,11 @@ def test_every_style_stays_in_the_footprint(frame, style, active, fs):
         assert x < bx and bx + bw < x + w and y < by and by + bh <= y + 1 + t
 
 
-def test_a_left_group_does_not_swallow_the_title(tmp_path, frame):
-    """Platinum's close box sits left of the title: a tap on the title still
-    drags, and a tap by the box still closes."""
+def test_every_style_s_strip_holds_its_buttons_right_of_the_title(tmp_path, frame):
+    """The strip page lays every frame style's strip alike: the title, then
+    minimise, maximise and close at the right (Platinum's close box no
+    longer sits left of it). A tap on the title still drags, a tap by a
+    box still takes it."""
     from test_wm_windowed import _drv, _ws
     ws = _ws(tmp_path)
     frame(style="platinum")
@@ -124,11 +126,13 @@ def test_a_left_group_does_not_swallow_the_title(tmp_path, frame):
     ws.open_settings()
     _drv(ws).frame(1 / 30)
     win = ws.wm.windows["settings"]
-    btns = dict((n, r) for n, r, _s in ws.wm._frame_buttons(win))
+    got = ws.wm._frame_buttons(win)
+    assert [n for n, _r, _s in got] == ["min", "max", "close"] and all(s for _n, _r, s in got)
+    btns = dict((n, r) for n, r, _s in got)
     cx, cy, cw, ch = btns["close"]
     assert ws.wm._strip_button_hit(win, cx + cw // 2, cy + ch // 2) == "close"
-    assert ws.wm._strip_button_hit(win, win.x + 1, cy) == "close"
-    assert ws.wm._strip_button_hit(win, win.x + win.w // 2, cy) is None
+    assert ws.wm._strip_button_hit(win, win.x + win.w - 1, cy) == "close"
+    assert ws.wm._strip_button_hit(win, win.x + 1, cy) is None
     mx = btns["max"]
     assert ws.wm._strip_button_hit(win, mx[0] + 1, mx[1] + 1) == "max"
 

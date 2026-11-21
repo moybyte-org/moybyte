@@ -723,11 +723,16 @@ enum { MOY_UI_FB_CLOSE = 0, MOY_UI_FB_MAX = 1, MOY_UI_FB_MIN = 2, MOY_UI_FB_BACK
 // paints the foot. MOY_UI_FRAME_FULL is a full-screen window's
 // row (docs/media/look_2026-10/MAXIMISE_VARIANTS.md, V2): the strip's title
 // and buttons alone, on the ground already under them -- no ring, strip,
-// line or shadow -- and maximise drawn as restore.
+// line or shadow -- and maximise drawn as restore. MOY_UI_FRAME_BARE is
+// the frame with nothing on its strip: ring, strip, line and shadow, no
+// title, buttons or pinstripes (the window manager's strip page draws
+// those, runtime/wm/wm_strip_ui.py); a classic stripe still takes the title's
+// colour.
 #define MOY_UI_FRAME_MIN 1
 #define MOY_UI_FRAME_BACK 2
 #define MOY_UI_FRAME_MATTE 8
 #define MOY_UI_FRAME_FULL 16
+#define MOY_UI_FRAME_BARE 32
 #define MOY_UI_FRAME_BUTTONS 4
 typedef struct {
     moy_ui_box_t box;

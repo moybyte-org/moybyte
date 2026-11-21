@@ -1803,6 +1803,10 @@ int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, moy_ui_span_t t
     open_draw(s, &d);
     frame_lay_t L;
     frame_layout(d.sh, w, th, title, btns, fs, d.cart, &L);
+    int bare = (btns & MOY_UI_FRAME_BARE) != 0;
+    if (bare) {
+        L.maxc = 0, L.tn = 0, L.n = 0;
+    }
     int st = active ? MOY_THEME_S_ACTIVE : MOY_THEME_S_INACTIVE;
     int look = d.look;
     int edge = L.style == MOY_THEME_FRAME_CLASSIC
@@ -1868,7 +1872,7 @@ int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, moy_ui_span_t t
         } else if (!surface(&d, strip, MOY_THEME_P_WINDOW_TITLE, st, bg, edge)) {
             fill(&d, strip.x, strip.y, strip.w, strip.h, bg);
         }
-        if (L.style == MOY_THEME_FRAME_PLATINUM && active) {
+        if (L.style == MOY_THEME_FRAME_PLATINUM && active && !bare) {
             // the pinstripes either side of the title, cleared round it and the boxes
             moy_ui_box_t pin = {(int16_t)(w.x + 1 + 2 * fs), (int16_t)(w.y + 1 + 3 * fs),
                                 (int16_t)(w.w - 2 - 4 * fs), (int16_t)(th - 6 * fs)};

@@ -269,6 +269,21 @@ def _old_packing():
     return shell_layout.pack
 
 
+_WS = [None]
+
+
+def _old_strip(cv, th, x, y, w, h, title_h, title, focused, btns, fs, unit, icon, tone, back, look, inset):
+    """A window's strip on the old painter (the frame with its title and
+    buttons, the icon in its slot), over the frame drawn bare."""
+    from runtime import ui_draw
+    btns &= ~ui_draw.FRAME_BARE
+    rect = (x, y, w, h)
+    ui_draw.frame(cv, th, rect, title_h, title, focused, btns, fs)
+    slot = ui_draw.frame_icon(rect, title_h, btns)
+    if slot is not None and _WS[0] is not None:
+        _WS[0].draw_icon(icon, slot, th["chrome_ink" if tone == "title_ink" else tone], cv)
+
+
 def frames(config, surface, script, carts_dir=None):
     """The settled frame after the opening and after each step of `script`,
     on a fresh workstation of golden configuration `config`. `surface` is a
@@ -284,16 +299,18 @@ def frames(config, surface, script, carts_dir=None):
         os.makedirs(carts_dir, exist_ok=True)
         surface.prepare(carts_dir)
     # a run compares a page with its old self: the desk's bar stays on the
-    # old painters and the old packing here (the bar page's own pictures are
-    # the shell goldens')
-    from runtime import bar_layer, chrome
-    paged, packing = bar_layer._paged, chrome._bar_pack
+    # old painters and the old packing here, and a window's strip on the old
+    # frame (the bar page's and the strip page's own pictures are the shell
+    # goldens')
+    from runtime import bar_layer, chrome, wm_strip
+    paged, packing, stamp = bar_layer._paged, chrome._bar_pack, wm_strip.stamp
     bar_layer._paged = _not_paged
     chrome._bar_pack = _old_packing
+    wm_strip.stamp = _old_strip
     out = []
     ws = None
     try:
-        ws = g._build(g.CONFIGS[config], carts_dir)
+        ws = _WS[0] = g._build(g.CONFIGS[config], carts_dir)
         surface.open(ws)
         driver = ConsoleDriver(ws)
         cv = ws.glass_canvas
@@ -305,6 +322,8 @@ def frames(config, surface, script, carts_dir=None):
     finally:
         bar_layer._paged = paged
         chrome._bar_pack = packing
+        wm_strip.stamp = stamp
+        _WS[0] = None
         if ws is not None:
             ws.home.go_home()
         from runtime import scheduler

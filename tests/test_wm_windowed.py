@@ -3826,9 +3826,9 @@ def test_a_looks_label_ink_and_shadow_draw_the_desk_labels(tmp_path, monkeypatch
 
 
 def test_a_window_under_the_look_is_titled_and_drawn_whole(tmp_path):
-    """The title is the app's as it names it, the line icon and the chip's
-    are the set's slot for the app, and the rounded frame draws no grip
-    (its corner still resizes)."""
+    """The title is the app's as it names it, the strip's icon (a bar item
+    of the strip page) and the chip's are the set's slot for the app, and
+    the rounded frame draws no grip (its corner still resizes)."""
     ws = _moy_desk(tmp_path)
     ws.spine.open_app(ws.app("calc"))
     ws.frame(1 / 30)
@@ -3841,9 +3841,9 @@ def test_a_window_under_the_look_is_titled_and_drawn_whole(tmp_path):
         drawn.append(kind), real(kind, rect, ink, cv))[1]
     grips = []
     real_fill = wm.root_canvas.rect
-    wm._win_chrome(win, True)
+    assert wm._strip_icon(win) == "calc"
     wm._draw_look_chips(wm.root_canvas, ws.theme_colors, 1, wm.root_ctx.layout.line_h)
-    assert drawn == ["calc", "calc"]
+    assert drawn == ["calc"]
     gx, gy, gw, gh = wm._grip_rect(win)
     wm.root_canvas.rect = lambda *a: (grips.append(a), real_fill(*a))[1]
     try:

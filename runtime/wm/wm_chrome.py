@@ -25,6 +25,8 @@ import ui_draw as _ui_draw
 from bar_layer import glyph as _bar_glyph
 import iconsets as _iconsets
 from wm_parts import _set_rect
+import wm_strip as _strip
+import wm_strip_ui as _strip_ui
 
 # The frame itself (ring, strip, title, buttons, shadow) is the theme's frame
 # style, drawn in C (ui.frame); the letterbox bezel keeps the shadow's black.
@@ -143,12 +145,75 @@ class WindowChrome:
         # (_win_edge): the frame's body paints that matte, as it does the foot.
         matte = _ui_draw.FRAME_MATTE if win.edge > self._frame_edge() else 0
         rect = _set_rect(win._frame_rect, win.x, win.y, win.w, win.h)
-        _ui_draw.frame(self.root_canvas, self.ws.theme_colors, rect,
-                  win.title_h, title, focused, int(btns) | matte, fs)
-        slot = _ui_draw.frame_icon(rect, win.title_h, btns, win._icon_rect)
-        if slot is not None:
-            self._win_icon(win, slot, focused)
+        th = self.ws.theme_colors
+        bare = int(btns) | matte | _ui_draw.FRAME_BARE
+        cv = self.root_canvas
+        _ui_draw.frame(cv, th, rect, win.title_h, title, focused, bare, fs)
+        _strip.stamp(cv, th, win.x, win.y, win.w, win.h, win.title_h, title, focused, bare, fs,
+                     self._strip_unit(fs), self._strip_icon(win), self._strip_tone(focused),
+                     bool(btns & _ui_draw.FRAME_BACK), look, self._win_radius(win))
         self._win_grip(win, focused)
+
+    def _strip_unit(self, fs):
+        """The strip page's unit: the chrome's unit at the window's font
+        scale (2 on a desk at chrome size 1, the font scale on a handheld)."""
+        return _layout_base.unit() * _layout_base.chrome_size(fs)
+
+    def _strip_icon(self, win):
+        """The icon a window's strip and its chip show: its icon set slot,
+        else its kind's glyph."""
+        icon = self._icon_slot(win)
+        return icon if icon in _iconsets.SLOT else _ICON_GLYPHS.get(win.kind, "app")
+
+    def _strip_tone(self, focused):
+        """The strip's ink as a role: the title's ink on the focused
+        window's strip (the depth's on a filled header, `value_ink`), the
+        dimmed chrome ink behind."""
+        if not focused:
+            return "chrome_ink_dim"
+        if _ui_draw.depth()[12]:
+            return "value_ink" if self.ws.look.live.look[0].get("win.header") == _HEAD_FILL \
+                else "chrome_ink"
+        return "title_ink"
+
+    def _strip_args(self, win):
+        """The strip's rect and what it shows, for `wm_strip`."""
+        btns = self._win_btns(win)
+        return (_set_rect(win._strip_rect, win.x + 1, win.y + 1, win.w - 2, win.title_h),
+                self._strip_unit(self._fs()), self._win_title(win), self._strip_icon(win),
+                self._strip_tone(win.kind == self.focus_key), bool(btns & _ui_draw.FRAME_BACK),
+                self._win_radius(win))
+
+    def strip_run(self, win, name, focused):
+        """Strip button `name` of `win`, tapped: a framed window's runs its
+        strip page's action (`wm_strip_ui`, which calls `_strip_do`); a
+        full-screen row's runs at once."""
+        if win.saved is not None:
+            self._strip_do(win, name, focused)
+            return
+        self._strip_at = (win, focused)
+        _strip_ui.TAP[0] = self._strip_tapped
+        try:
+            _strip.fire(name)
+        finally:
+            self._strip_at = None
+
+    def _strip_tapped(self, name):
+        at = self._strip_at
+        if at is not None:
+            self._strip_do(at[0], name, at[1])
+
+    def _strip_do(self, win, name, focused):
+        if name == "close":
+            self._close_window(win.kind)
+        elif name == "back":
+            self._win_back(win)
+        elif name == "max":
+            self.toggle_max(win)
+        elif name == "min":
+            self.minimize(win, True)
+            if focused:
+                self.move_focus(None)
 
     def _is_game(self, win):
         """Whether `win` is a game's window: the player's, running a game.
@@ -555,8 +620,8 @@ class WindowChrome:
             return _ui_draw.frame_buttons(self._row_rect(win), win.title_h, "",
                                           self._win_btns(win) | _ui_draw.FRAME_FULL,
                                           self._fs())
-        return _ui_draw.frame_buttons((win.x, win.y, win.w, win.h), win.title_h,
-                                      self._win_title(win), self._win_btns(win), self._fs())
+        a = self._strip_args(win)
+        return _strip.buttons(a[0], a[1], a[2], a[3], a[4], a[5], a[6], [])
 
     def _win_back(self, win):
         """The window's back -- its chevron, and Esc and B while it holds the

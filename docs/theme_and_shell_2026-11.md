@@ -780,9 +780,17 @@ raised boxes with marks of their own (none for close, a square for maximise,
 two bars for minimise). `tab` draws the strip in `panel` with a raised tab as
 wide as its buttons and title. Each style has its own title alignment and
 button order (classic, win9x and flat `T|MZC`, platinum `C|T|ZM`, tab
-`C|T|MZ`), which `title_align` and `buttons` replace. A window's strip buttons
-are laid out by the same C (`ui.frame_buttons`) the fat-finger hit-test reads,
-each group resolving taps out to the window edge on its own side. The bar's
+`C|T|MZ`), which `title_align` and `buttons` replace; these, and the styles'
+own titles and buttons, reach a full-screen window's row only (2026-11-21). A
+framed window's frame is drawn bare (`ui_draw.FRAME_BARE`: the style's ring,
+strip, line and shadow), and the strip page (`runtime/wm/wm_strip_ui.py`) draws on
+it what every style shares: the back chevron, the icon and the title cut with
+"…", then minimise, maximise and close at the right, each a bar item in the
+title's ink. The engine draws that strip into a layer kept for what it shows,
+and every frame stamps it (`runtime/wm/wm_strip.py`), so a drag does no
+page work. The fat-finger hit-test reads a strip's buttons from its page and a
+full-screen row's from `ui.frame_buttons`, each group resolving taps out to the
+window edge on its own side. The bar's
 band (`ui.frame_band`) is the style's too: `win9x` lights its top row, the
 others draw today's band, and a theme's `bar` surface replaces it. A
 `window.title` or `window.button` surface a theme names is painted in place of
