@@ -49,9 +49,9 @@ CACHE = os.path.join(native_build.ROOT, ".build", "host")
 # One flag set for every part, as an image has one: libmoy's pixel is the
 # boards' RGB565; MOY_WITH_LUA compiles libmoy's Lua binding; MOY_PLAY_HOST
 # gives the kernel's Player its sessions side by side; MOYCORE_UI the Lua
-# face of the public UI API.
+# face of the public UI API, MOYCORE_UITREE the UI tree engine's.
 CFLAGS = native_build.BASE_CFLAGS + [
-    "-DMOY_PIXEL_RGB565=1", "-DMOY_WITH_LUA=1", "-DMOY_PLAY_HOST=1", "-DMOYCORE_UI=1",
+    "-DMOY_PIXEL_RGB565=1", "-DMOY_WITH_LUA=1", "-DMOY_PLAY_HOST=1", "-DMOYCORE_UI=1", "-DMOYCORE_UITREE=1",
     # The web host's folders are a developer machine's: a tmp_path under a
     # long TMPDIR runs past a board's 96 bytes.
     "-DMOY_WEB_PATH_MAX=4096",

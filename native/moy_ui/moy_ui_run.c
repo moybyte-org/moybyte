@@ -336,6 +336,13 @@ int moy_ui_run_table_part(void *target, int32_t out[8]) {
     return i;
 }
 
+int moy_ui_run_with(void *target, moy_ui_run_fn fn, void *ud) {
+    OPEN(target);
+    int v = fn(ud, c, &r.s, c->surface, run_face());
+    close_run(&r, MOY_UI_OK);
+    return v;
+}
+
 // A verb that opens a nest: MOY_UI_DEEP where it answered MOY_UI_API_DEEP.
 static int nest_rc(int32_t v) {
     return v == MOY_UI_API_DEEP ? MOY_UI_DEEP : MOY_UI_OK;

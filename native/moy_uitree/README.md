@@ -4,7 +4,9 @@
 function describes, held in a node store, drawn by walking it through
 native/moy_ui's verbs. `runtime/uitree/uitree_c.py` is its Python front end;
 `runtime/host/moy_uitree_binding.py` binds it on the host, `modmoy_uitree.c`
-on MicroPython.
+on MicroPython. A Lua app's pages reach it through `native/moycore/moycore_uitree.h`
+(its store as a Lua object) and `runtime/run/uitree_engine.lua`, the Lua
+layer's front end.
 
 | file | holds |
 |---|---|
@@ -12,6 +14,7 @@ on MicroPython.
 | `moy_uitree_lang.c` | templates and conditions, compiled at the call that names them |
 | `moy_uitree_walk.c` | the frame: the walk, focus, hints, dialogs, the placed layout |
 | `moy_uitree_aot.c` | a page compiled ahead of time: `uit_save`, `uit_load` |
+| `moy_uitree_run.c` | a page's frame on a run (`uit_run_frame`): the walk over the RUN face's context and sink, a Lua or compiled app's |
 
 ## A compiled page
 

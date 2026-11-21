@@ -23,6 +23,9 @@
 #if MOYCORE_UI
 #include "moycore_ui.h"
 #endif
+#if MOYCORE_UI && MOYCORE_UITREE
+#include "moycore_uitree.h"
+#endif
 #include "moycore_scene.h"
 #include "moy_codec.h"
 #include "moy_img.h"
@@ -1484,6 +1487,9 @@ int moycore_lua_open(const struct moy_app_run *app, char *err, size_t n)
     moycore_superset_open(RUN.L);
 #if MOYCORE_UI
     moycore_ui_open(RUN.L);
+#endif
+#if MOYCORE_UI && MOYCORE_UITREE
+    moycore_uitree_open(RUN.L);
 #endif
     media_open(RUN.L);
     if (moy_app_lua_open != NULL) moy_app_lua_open(RUN.L, app);
