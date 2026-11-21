@@ -50,8 +50,8 @@ def test_a_placed_page_draws_and_places_alike_on_both_engines(config, tmp_path):
 
 def test_a_placement_draws_nothing_and_gives_the_regions_rects():
     """`place` lays the regions out over a host's area with no frame begun:
-    the stacked rows and the regions a host places, not the cells inside
-    a row (a frame places those)."""
+    the stacked rows, the regions a host places and the cells along a row
+    (a bar's host reads them), drawing none of them."""
     import uitree_c
     import uitree_editor
     import uitree_placed as F
@@ -65,4 +65,6 @@ def test_a_placement_draws_nothing_and_gives_the_regions_rects():
         got.append([(k, e.rect_of(k)) for k in KEYS])
     assert got[0] == got[1]
     rects = dict(got[1])
-    assert rects["find_row"] is not None and rects["q"] is None, rects
+    assert rects["find_row"] is not None and rects["q"] is not None, rects
+    fx, _, fw, _ = rects["find_row"]
+    assert fx <= rects["q"][0] and rects["q"][0] + rects["q"][2] <= fx + fw, rects

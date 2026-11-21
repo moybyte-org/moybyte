@@ -1052,6 +1052,12 @@ int uit_prop(uit_t *e, int node, const char *name, const char *src, const char *
             N->btn = (uint16_t)strtol(src, NULL, 10);
         return add_prop(e, node, name, src, repr, PK_LIT, 0);
     }
+    if (kind == UIT_CANVAS && !strcmp(name, "grow")) {
+        // a fill along a row, its w= the basis its share is over (CV_GROW)
+        if (src[0] == 'T' || src[0] == '1')
+            N->lit |= CV_GROW;
+        return add_prop(e, node, name, src, repr, PK_LIT, (N->lit & CV_GROW) != 0);
+    }
     if (kind == UIT_ROW && !strcmp(name, "mid")) {
         // a row in a row centred on it (RW_MID)
         if (strcmp(src, "True") && strcmp(src, "False") && strcmp(src, "1") && strcmp(src, "0"))

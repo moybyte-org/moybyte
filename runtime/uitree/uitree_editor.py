@@ -41,7 +41,7 @@ from ui_host import _outside
 _SYN = {"python": "python", "lua": "lua", "json": "json", "markdown": "markdown", "plain": "plain"}
 _FILL = ("switch", "panes", "pane", "text_editor", "slot", "panel", "case", "canvas", "legacy")
 # what the hosted phase walks to place the legacy nodes: the regions
-_PLACED = ("case", "switch", "panes", "pane", "panel", "legacy")
+_PLACED = ("case", "switch", "panes", "pane", "panel", "legacy", "row")
 _REGIONS = ("case", "switch", "panel")          # a row's cells that stack their own children
 _WHOLE = _REGIONS + ("status", "canvas", "row")     # a row's cells the row's whole height
 _BARE = {"bare": True}      # a page whose bodies its host drew opens over them
@@ -513,7 +513,7 @@ class Engine(uitree_app.Engine):
                 return _ud.print_width(self._t(k, "text", row), self.fs) + 2 * pad + 2
             finally:
                 _ud.print_font(was)
-        if k.kind == "canvas" and k.src.get("w"):
+        if k.kind == "canvas" and k.src.get("w") and not k.l.get("grow"):
             return self._len(k, "w", row, 0)        # a fixed cell along x, as h= down
         if k.kind == "row":
             # a row in a row: its cells' widths and gaps where none grows;
@@ -564,31 +564,35 @@ class Engine(uitree_app.Engine):
         if n.key:
             self.anchors[n.key] = rect
         kids = self._row_kids(n, row)
-        if any(k.kind == "status" for k in n.kids) and not any(k.kind == "status" for k in kids):
+        if any(k.kind == "status" for k in n.kids) and not any(k.kind == "status" for k in kids) and \
+                not self.placing:
             _ud.status_row(self.cv, self.th, rect, ())     # a status row's band, its line hidden
         nat = [self._natural(k, row, h) for k in kids]
         if not any(v is None for v in nat):
             for i in [i for i, k in enumerate(kids) if k.kind == "tabs"][:1]:
                 nat[i] = None
+        # a fill's basis: a growing canvas's w=, which its share is over
+        base = [self._len(k, "w", row, 0) if v is None and k.kind == "canvas" else 0
+                for k, v in zip(kids, nat)]
         gap = self._len(n, "gap", row, self._row_gap())
         pad = self._len(n, "pad", row, 0)
         x0, x1 = x + pad, x + w - pad
         mid = next((i for i, k in enumerate(kids) if k.kind == "row" and k.l.get("mid")), None)
         ws = [0] * len(kids)
         if mid is None:
-            self._share(nat, ws, 0, len(kids), x1 - x0 - gap * max(0, len(kids) - 1))
+            self._share(nat, base, ws, 0, len(kids), x1 - x0 - gap * max(0, len(kids) - 1))
         else:
             # the mid centred on the row: each side's fills share that side's room
-            a = x0 + sum(v or 0 for v in nat[:mid]) + gap * mid
-            b = x1 - sum(v or 0 for v in nat[mid + 1:]) - gap * (len(kids) - 1 - mid)
+            a = x0 + sum(v or b for v, b in zip(nat[:mid], base)) + gap * mid
+            b = x1 - sum(v or b for v, b in zip(nat[mid + 1:], base[mid + 1:])) - gap * (len(kids) - 1 - mid)
             c = x + w // 2
             if nat[mid] is None:        # a mid of fills: the widest span centred that clears both
                 half = max(0, min(c - a, b - c))
                 ms, ws[mid] = c - half, 2 * half
             else:
                 ms, ws[mid] = x + (w - nat[mid]) // 2, nat[mid]
-            self._share(nat, ws, 0, mid, ms - x0 - gap * mid)
-            self._share(nat, ws, mid + 1, len(kids), x1 - (ms + ws[mid]) - gap * (len(kids) - 1 - mid))
+            self._share(nat, base, ws, 0, mid, ms - x0 - gap * mid)
+            self._share(nat, base, ws, mid + 1, len(kids), x1 - (ms + ws[mid]) - gap * (len(kids) - 1 - mid))
         for i, k in enumerate(kids):
             if i == 0:
                 x = x0
@@ -599,23 +603,27 @@ class Engine(uitree_app.Engine):
             kw = ws[i]
             r = (x, y, kw, h) if k.kind in _WHOLE else (x, y + 2, kw, h - 4)   # a band, a region: the row's height
             self._put_rect(k.key, r)
-            if k.kind == "button":
+            if k.kind == "row" or self.placing:
+                self._draw(k, row, r)       # a placement records the cells, drawing none
+            elif k.kind == "button":
                 self._r_button(k, row, rect, at=r)
-            elif k.kind == "row":
-                self._draw(k, row, r)
             else:
                 _v.at(*r)
                 self._draw(k, row, r)
             x += kw + gap
 
     @staticmethod
-    def _share(nat, ws, i0, i1, room):
-        """Cells i0..i1 their widths: a fixed one its own, the fills an even
-        share of what `room` leaves."""
+    def _share(nat, base, ws, i0, i1, room):
+        """Cells i0..i1 their widths: a fixed one its own, the fills their
+        basis and an even share of what `room` leaves, the last of them the
+        remainder."""
         grow = sum(1 for v in nat[i0:i1] if v is None)
-        rest = room - sum(v for v in nat[i0:i1] if v is not None)
+        rest = room - sum(v if v is not None else b for v, b in zip(nat[i0:i1], base[i0:i1]))
+        each = rest // max(1, grow)
+        last = max([i for i in range(i0, i1) if nat[i] is None] or [-1])
         for i in range(i0, i1):
-            ws[i] = nat[i] if nat[i] is not None else max(0, rest // max(1, grow))
+            ws[i] = nat[i] if nat[i] is not None else \
+                max(0, base[i] + each + (rest - each * grow if i == last else 0))
 
     def _r_tools(self, n, row, rect):
         if n.l.get("lend"):

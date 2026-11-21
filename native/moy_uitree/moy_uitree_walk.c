@@ -2707,7 +2707,7 @@ static int32_t natural(uit_t *e, int k, int model, int row, int32_t h)
         int mn, pad = moy_ui_metrics(MOY_UI_K_STATUS, &mn)[1] * e->fs;
         return text_px(role_font(MOY_UI_FONT_UI, &fi), p, n, e->fs) + 2 * pad + 2;
     }
-    if (N->kind == UIT_CANVAS && N->t_value >= 0) {
+    if (N->kind == UIT_CANVAS && N->t_value >= 0 && !(N->lit & CV_GROW)) {
         if (e->tmpls[N->t_value].lit && !int_of(e, N->t_value, model, row, 0))
             return -1;                  // w=0 grows
         return len_of(e, N->t_value, model, row, 0);     // a fixed cell along x, as h= down
@@ -2732,17 +2732,19 @@ static int32_t natural(uit_t *e, int k, int model, int row, int32_t h)
     return -1;
 }
 
-// Cells i0..i1 their widths: a fixed one its own, the fills an even share of what `room` leaves.
-static void row_share(const int32_t *nat, int32_t *ws, int i0, int i1, int32_t room)
+// Cells i0..i1 their widths: a fixed one its own, the fills their basis and an even share of what
+// `room` leaves, the last of them the remainder.
+static void row_share(const int32_t *nat, const int32_t *base, int32_t *ws, int i0, int i1, int32_t room)
 {
-    int grow = 0;
+    int grow = 0, last = -1;
     for (int i = i0; i < i1; i++)
         if (nat[i] < 0)
-            grow++;
+            grow++, last = i, room -= base[i];
         else
             room -= nat[i];
+    int32_t each = fdiv(room, grow > 1 ? grow : 1);
     for (int i = i0; i < i1; i++) {
-        int32_t v = nat[i] >= 0 ? nat[i] : fdiv(room, grow > 1 ? grow : 1);
+        int32_t v = nat[i] >= 0 ? nat[i] : base[i] + each + (i == last ? room - each * (grow > 1 ? grow : 1) : 0);
         ws[i] = v < 0 ? 0 : v;
     }
 }
@@ -2753,11 +2755,11 @@ static void row_cells(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, 
                       const int32_t r[4])
 {
     int16_t kids[PLACE_KIDS];
-    int32_t nat[PLACE_KIDS], ws[PLACE_KIDS];
+    int32_t nat[PLACE_KIDS], ws[PLACE_KIDS], base[PLACE_KIDS];
     int st = 0, st_shown = 0, mid = -1, grow = 0;
     int n = row_kids(e, k, model, row, kids, &st, &st_shown);
     const uit_node_t *R = NODE(k);
-    if (st && !st_shown) {
+    if (st && !st_shown && !e->placing) {
         moy_ui_box_t b = {(int16_t)r[0], (int16_t)r[1], (int16_t)r[2], (int16_t)r[3]};
         moy_ui_status(s, b, (const uint8_t *)"", 0, 0, s->fs);     // a status row's band, its line hidden
     }
@@ -2773,20 +2775,23 @@ static void row_cells(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, 
                 nat[i] = -1;            // a row of fixed cells: its tabs take the rest
                 break;
             }
+    for (int i = 0; i < n; i++)         // a fill's basis: a growing canvas's w=, its share over it
+        base[i] = nat[i] < 0 && NODE(kids[i])->kind == UIT_CANVAS ? len_of(e, NODE(kids[i])->t_value, model, row, 0) : 0;
     int32_t gap = R->kind == UIT_ROW ? len_of(e, R->t_value, model, row, row_gap(e)) : row_gap(e);
     int32_t pad = R->kind == UIT_ROW ? len_of(e, R->t_aux, model, row, 0) : 0;
     int32_t x0 = r[0] + pad, x1 = r[0] + r[2] - pad, ms = 0, b = 0;
     if (mid < 0)
-        row_share(nat, ws, 0, n, x1 - x0 - gap * (n > 1 ? n - 1 : 0));
+        row_share(nat, base, ws, 0, n, x1 - x0 - gap * (n > 1 ? n - 1 : 0));
     else {
         int32_t a = x0 + gap * mid, cx = r[0] + fdiv(r[2], 2);
         b = x1 - gap * (n - 1 - mid);
         for (int i = 0; i < n; i++)
-            if (i != mid && nat[i] >= 0) {
+            if (i != mid) {
+                int32_t v = nat[i] >= 0 ? nat[i] : base[i];
                 if (i < mid)
-                    a += nat[i];
+                    a += v;
                 else
-                    b -= nat[i];
+                    b -= v;
             }
         if (nat[mid] < 0) {             // a mid of fills: the widest span centred that clears both
             int32_t half = cx - a < b - cx ? cx - a : b - cx;
@@ -2795,8 +2800,8 @@ static void row_cells(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, 
             ms = cx - half, ws[mid] = 2 * half;
         } else
             ms = r[0] + fdiv(r[2] - nat[mid], 2), ws[mid] = nat[mid];
-        row_share(nat, ws, 0, mid, ms - x0 - gap * mid);
-        row_share(nat, ws, mid + 1, n, x1 - (ms + ws[mid]) - gap * (n - 1 - mid));
+        row_share(nat, base, ws, 0, mid, ms - x0 - gap * mid);
+        row_share(nat, base, ws, mid + 1, n, x1 - (ms + ws[mid]) - gap * (n - 1 - mid));
     }
     int32_t x = x0;
     for (int i = 0; i < n; i++) {
@@ -2814,13 +2819,14 @@ static void row_cells(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, 
         if (gk == UIT_STATUS || gk == UIT_CASE || gk == UIT_SWITCH || gk == UIT_PANEL || gk == UIT_CANVAS ||
             gk == UIT_ROW)
             cell[1] = r[1], cell[3] = r[3];     // a band, a region: the row's height
-        if (gk == UIT_BUTTON) {
+        if (e->placing || gk == UIT_ROW)
+            place_at(e, c, s, g, model, row, cell);     // a placement records the cells, drawing none
+        else if (gk == UIT_BUTTON) {
             put_rect(e, g, cell);
             moy_ui_api_at(c, cell[0], cell[1], cell[2], cell[3]);
             draw(e, c, s, g, model, row);
         } else {
-            if (gk != UIT_ROW)
-                moy_ui_api_at(c, cell[0], cell[1], cell[2], cell[3]);
+            moy_ui_api_at(c, cell[0], cell[1], cell[2], cell[3]);
             place_at(e, c, s, g, model, row, cell);
         }
         x += kw + gap;
@@ -2929,13 +2935,13 @@ static void place_at(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, i
     case UIT_PANEL:
         draw_panel(e, c, s, k, model, row, r);
         return;
+    case UIT_ROW:
+        row_cells(e, c, s, k, model, row, r);
+        return;
     }
     if (e->placing)
         return;
     switch (N->kind) {
-    case UIT_ROW:
-        row_cells(e, c, s, k, model, row, r);
-        return;
     case UIT_TOOLS:
         if (N->lit & TL_LEND)
             return;                     // drawn at the site it is lent to

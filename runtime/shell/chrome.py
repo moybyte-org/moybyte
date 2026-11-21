@@ -269,6 +269,16 @@ def text_scale_floor(w, h, diagonal_in, ascent):
     return max(1, n)
 
 
+
+def _bar_pack():
+    """The bars' packing: the bar page's on the C engine (`bar_engine.pack`),
+    else `shell_layout.pack`."""
+    import uitree_app
+    if uitree_app.engine_in_use() == "c":
+        import bar_engine
+        return bar_engine.pack
+    return _shell_layout.pack
+
 class Layout(LayoutBase):
     """Responsive desktop-shell geometry (#39): the status strip, cart icon grid,
     page chevrons, management buttons, and Settings rows derived from
@@ -383,7 +393,7 @@ class Layout(LayoutBase):
                         if _ui_draw.font_v2(_ui_draw.font()[0]) else 5 * self.font_w)
         sys_len = _sys_tile(self.status_h)[2]
         of = _lb_bars()
-        self.bars = _shell_layout.pack(self.w, self.h, self.status_h, cs, fs,
+        self.bars = _bar_pack()(self.w, self.h, self.status_h, cs, fs,
                                        self.clock_w, _bar_text_w, of=of, sys_len=sys_len)
         self._pack_of = (of, cs, fs, sys_len)
         # {where: the packing its bar takes}, the bar layer's to fill
@@ -467,7 +477,7 @@ class Layout(LayoutBase):
         not (an app's status item came or went, `shell_layout.ITEMS`): the
         cells, the surfaces' rooms and the named rects."""
         of, cs, fs, sys_len = self._pack_of
-        self.bars = _shell_layout.pack(self.w, self.h, self.status_h, cs, fs, self.clock_w,
+        self.bars = _bar_pack()(self.w, self.h, self.status_h, cs, fs, self.clock_w,
                                        _bar_text_w, of=of, sys_len=sys_len)
         self.room = {}
         self.batt_btn = self._cell("battery")
@@ -479,7 +489,7 @@ class Layout(LayoutBase):
         the flex widgets' (`BarLayer._make_room`): the same bars in force,
         glass and scales, so every other cell is where `bars` has it."""
         of, cs, fs, sys_len = self._pack_of
-        return _shell_layout.pack(self.w, self.h, self.status_h, cs, fs, self.clock_w,
+        return _bar_pack()(self.w, self.h, self.status_h, cs, fs, self.clock_w,
                                   _bar_text_w, of=_shell_layout.without(of, names),
                                   sys_len=sys_len)
 
