@@ -53,7 +53,7 @@ _SEP_DOT, _SEP_ASCII = " \u00b7 ", " - "
 _SEPS = (_SEP_DOT, _SEP_ASCII)
 _PLAY = "Play"
 
-# The title icon of a window no app cart draws (`_win_icon`).
+# The glyph of a window whose icon the icon set lacks (`_strip_icon`).
 _ICON_GLYPHS = {"menu": "code", "projects": "projects", "settings": "gear",
                 "update": "get", "desktop": "run", "tasks": "run"}
 # ...and the slot of an icon set (runtime/toolkit/iconsets.py) each draws.
@@ -248,19 +248,32 @@ class WindowChrome:
 
     def _paint_row(self, win, cv, title=None):
         """A full-screen row's head and controls on `cv` (the glass's
-        coordinates): the back chevron where its app has a page open, the
-        window's icon and title, then minimise, restore and close at the
-        right, drawn by the frame as on every strip (`FRAME_FULL`)."""
+        coordinates): the strip page (`wm_strip_ui`) on the row, as on every
+        window's strip -- the back chevron where its app has a page open, the
+        window's icon and title, then minimise, restore and close -- in the
+        band's ink over the band's ground, which is under it already."""
         self.ws.icon_spec()               # the look's icon set, for the buttons
-        btns = self._win_btns(win) | _ui_draw.FRAME_FULL
-        rect = self._row_rect(win)
         if title is None:
             title = self._full_title(win)
-        _ui_draw.frame(cv, self.ws.theme_colors, rect, win.title_h,
-                       title, True, btns, self._fs())
-        slot = _ui_draw.frame_icon(rect, win.title_h, btns)
-        if slot is not None:
-            self._win_icon(win, slot, True, cv, row=True)
+        win._row_t = title
+        a = self._row_args(win)
+        _strip.draw(cv, self.ws.theme_colors, a[0], a[1], title, a[3], a[4], a[5], 0, True)
+
+    def _row_args(self, win):
+        """A full-screen row's strip-page rect and what it shows, as
+        `_strip_args` answers a framed window's: the row's band (no ring),
+        the title it last showed, the band's ink, no
+        corner columns."""
+        r = self._row_rect(win)
+        return (_set_rect(win._strip_rect, r[0], r[1], r[2], r[3]),
+                self._strip_unit(self._fs()), win._row_t, self._strip_icon(win),
+                "chrome_ink",
+                bool(self._win_btns(win) & _ui_draw.FRAME_BACK), 0)
+
+    def _row_head(self, win):
+        """A full-screen row's icon and title cell (the strip page's head)."""
+        a = self._row_args(win)
+        return _strip.head(a[0], a[1], a[2], a[3], a[4], a[5], a[6])
 
     def _full_title(self, win):
         """A full-screen row's title: the Editor's names its cart alone
@@ -276,39 +289,11 @@ class WindowChrome:
                 t = str(cart)
         if win.kind == "desktop" or win.row:
             return t
-        rect = self._row_rect(win)
-        btns = self._win_btns(win) | _ui_draw.FRAME_FULL
-        x = _ui_draw.frame_icon(rect, win.title_h, btns)
         n = _layout_base.chrome_size(self._fs()) * 8 // _layout_base.render_scale()
-        x = (x[0] + x[2] + n + 2) if x is not None else win.x + 2 * n
+        x = self._row_head(win)[0] + win.title_h // 2 + n + 2   # past the head's icon
         room = self._full_slot(win) - n - x
         fid = _ui_draw.font("title")[0]
         return _ui_draw._C.text_cut(t, max(0, room), self._fs(), fid)
-
-    def _win_icon(self, win, slot, focused, cv=None, row=False):
-        """The window's icon in the slot its frame leaves left of the title:
-        its kind's icon of the theme's icon set where the set draws one (a
-        shell app's by its id), else its app cart's icon at the largest whole
-        scale that fits, else its glyph, in the title's ink (on a full-screen
-        `row`, the band's)."""
-        ws = self.ws
-        sc = self.root_canvas if cv is None else cv
-        x, y, w, h = slot
-        role = "chrome_ink" if focused else "chrome_ink_dim"
-        if focused and not row and _ui_draw.depth()[12] \
-                and ws.look.live.look[0].get("win.header") == _HEAD_FILL:
-            role = "value_ink"            # on the `value` header (moy_ui_depth_title_ink)
-        ink = ws.theme_colors[role]
-        if ws.draw_icon(self._icon_slot(win), slot, ink, sc):
-            return
-        img = self._win_icon_img(win)
-        if img is not None:
-            iw = getattr(img, "w", 16) or 16
-            s = max(1, w // iw)
-            sc.spr(img, x + (w - iw * s) // 2, y + (h - iw * s) // 2, s)
-            return
-        if not ws.draw_icon("app", slot, ink, sc):
-            _bar_glyph(_ICON_GLYPHS.get(win.kind, "app"), slot, ink, sc)
 
     def _theme_doc(self, win):
         """The theme the Editor's window holds in its theme mode, or None."""
@@ -617,9 +602,8 @@ class WindowChrome:
         if win.saved is not None:
             if self._is_game(win):
                 return []
-            return _ui_draw.frame_buttons(self._row_rect(win), win.title_h, "",
-                                          self._win_btns(win) | _ui_draw.FRAME_FULL,
-                                          self._fs())
+            a = self._row_args(win)
+            return _strip.buttons(a[0], a[1], a[2], a[3], a[4], a[5], a[6], [], True)
         a = self._strip_args(win)
         return _strip.buttons(a[0], a[1], a[2], a[3], a[4], a[5], a[6], [])
 
@@ -1000,7 +984,8 @@ class WindowChrome:
     def _draw_look_chips(self, sc, th, fs, line_h):
         """The taskbar chips of a bar the bar page does not draw (a side
         bar's, a centred slot's) as the look's tabs (docs/history/look_2026-10.md step 14):
-        the window's icon (in `_win_icon`'s order) then its title, the
+        the window's icon (its icon set slot, its app cart's sprite, else its
+        glyph) then its title, the
         focused window's chip raised under the current mark, another open
         window's in the dim ink. The focused chip's content takes the ink the
         look gives current content (Moy's accent), the plate's second cue. A
