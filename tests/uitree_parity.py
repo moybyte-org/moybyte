@@ -260,6 +260,69 @@ def _zone_tap(ws, driver, i):
     driver.frame(DT)
 
 
+MASK = b"\x1f\xf8"           # the one colour the WM's chrome is hashed as
+
+
+def _chrome_rects(ws):
+    """[(key, (x, y, w, h))] the window manager's own chrome takes on the glass, in
+    z-order: each framed window's title strip, and each full-screen row's
+    head and controls (the band's lent zone between them is the app's). A
+    parity run holds a SURFACE to its old self; the WM draws these, so both
+    halves hash them as one colour."""
+    wm = getattr(ws, "wm", None)
+    order = getattr(wm, "z_order", None)
+    if not order:
+        return []
+    out = []
+    for key in order:
+        win = wm.windows.get(key)
+        if win is None or win.minimized or win.docked is not None:
+            continue
+        if win.saved is None:
+            out.append((key, (win.x + 1, win.y + 1, win.w - 2, win.title_h)))
+        elif win.row:
+            out.append((key, (win.x, win.y, win.w, win.row)))
+        elif not wm._is_game(win) and wm._band_is_row(win.kind):
+            h = wm._row_h()
+            span = wm.band_span() if wm._installed is win else None
+            if span is None:
+                out.append((key, (win.x, win.y, win.w, h)))
+            else:
+                out.append((key, (win.x, win.y, span[0] - win.x, h)))
+                out.append((key, (span[1], win.y, win.x + win.w - span[1], h)))
+    return out
+
+
+def _masked(ws, buf, w, h):
+    """`buf` with the WM's chrome (`_chrome_rects`) filled with MASK, each
+    rect clipped by the windows above its own."""
+    wm = getattr(ws, "wm", None)
+    rects = _chrome_rects(ws)
+    if not rects:
+        return buf
+    order = list(wm.z_order)
+    out = bytearray(buf)
+    for key, (rx, ry, rw, rh) in rects:
+        above = [(win.x, win.y, win.w, win.h) for win in
+                 (wm.windows.get(k) for k in order[order.index(key) + 1:])
+                 if win is not None and not win.minimized and win.docked is None]
+        for y in range(max(0, ry), min(h, ry + rh)):
+            spans = [(max(0, rx), min(w, rx + rw))]
+            for ax, ay, aw, ah in above:
+                if ay <= y < ay + ah:
+                    nxt = []
+                    for a, b in spans:
+                        if ax > a:
+                            nxt.append((a, min(b, ax)))
+                        if ax + aw < b:
+                            nxt.append((max(a, ax + aw), b))
+                    spans = [(a, b) for a, b in nxt if a < b]
+            for a, b in spans:
+                if a < b:
+                    out[(y * w + a) * 2:(y * w + b) * 2] = MASK * (b - a)
+    return bytes(out)
+
+
 def _not_paged(edge, cells):
     return False
 
@@ -267,21 +330,6 @@ def _not_paged(edge, cells):
 def _old_packing():
     from runtime import shell_layout
     return shell_layout.pack
-
-
-_WS = [None]
-
-
-def _old_strip(cv, th, x, y, w, h, title_h, title, focused, btns, fs, unit, icon, tone, back, look, inset):
-    """A window's strip on the old painter (the frame with its title and
-    buttons, the icon in its slot), over the frame drawn bare."""
-    from runtime import ui_draw
-    btns &= ~ui_draw.FRAME_BARE
-    rect = (x, y, w, h)
-    ui_draw.frame(cv, th, rect, title_h, title, focused, btns, fs)
-    slot = ui_draw.frame_icon(rect, title_h, btns)
-    if slot is not None and _WS[0] is not None:
-        _WS[0].draw_icon(icon, slot, th["chrome_ink" if tone == "title_ink" else tone], cv)
 
 
 def frames(config, surface, script, carts_dir=None):
@@ -299,31 +347,33 @@ def frames(config, surface, script, carts_dir=None):
         os.makedirs(carts_dir, exist_ok=True)
         surface.prepare(carts_dir)
     # a run compares a page with its old self: the desk's bar stays on the
-    # old painters and the old packing here, and a window's strip on the old
-    # frame (the bar page's and the strip page's own pictures are the shell
-    # goldens')
-    from runtime import bar_layer, chrome, wm_strip
-    paged, packing, stamp = bar_layer._paged, chrome._bar_pack, wm_strip.stamp
-    bar_layer._paged = _not_paged
-    chrome._bar_pack = _old_packing
-    wm_strip.stamp = _old_strip
+    # old painters and the old packing here (the bar page's own pictures are
+    # the shell goldens'; a commit before the bar's page has neither hook)
+    from runtime import bar_layer, chrome
+    paged, packing = getattr(bar_layer, "_paged", None), getattr(chrome, "_bar_pack", None)
+    if paged is not None:
+        bar_layer._paged = _not_paged
+    if packing is not None:
+        chrome._bar_pack = _old_packing
     out = []
     ws = None
     try:
-        ws = _WS[0] = g._build(g.CONFIGS[config], carts_dir)
+        ws = g._build(g.CONFIGS[config], carts_dir)
         surface.open(ws)
         driver = ConsoleDriver(ws)
         cv = ws.glass_canvas
         probe = surface.probe or (lambda ws: "")
-        out.append(Frame("(open)", _settle(ws, g, driver), cv.w, cv.h, probe(ws)))
+        out.append(Frame("(open)", _masked(ws, _settle(ws, g, driver), cv.w, cv.h),
+                         cv.w, cv.h, probe(ws)))
         for step in script:
             _step(ws, driver, step)
-            out.append(Frame(step, _settle(ws, g, driver), cv.w, cv.h, probe(ws)))
+            out.append(Frame(step, _masked(ws, _settle(ws, g, driver), cv.w, cv.h),
+                             cv.w, cv.h, probe(ws)))
     finally:
-        bar_layer._paged = paged
-        chrome._bar_pack = packing
-        wm_strip.stamp = stamp
-        _WS[0] = None
+        if paged is not None:
+            bar_layer._paged = paged
+        if packing is not None:
+            chrome._bar_pack = packing
         if ws is not None:
             ws.home.go_home()
         from runtime import scheduler

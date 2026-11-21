@@ -1442,16 +1442,12 @@ static mp_obj_t ui_icon_mask(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_icon_mask_obj, 6, 6, ui_icon_mask);
 
-// icons_use(f16, f24, close, maximize, minimize): the icon set the C parts draw
-static mp_obj_t ui_icons_use(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    uint8_t codes[3] = {(uint8_t)mp_obj_get_int(a[2]), (uint8_t)mp_obj_get_int(a[3]),
-                        (uint8_t)mp_obj_get_int(a[4])};
-    moy_ui_icons_use((uint32_t)mp_obj_get_int_truncated(a[0]),
-                     (uint32_t)mp_obj_get_int_truncated(a[1]), codes);
+// icons_use(f16, f24): the icon set the C parts draw
+static mp_obj_t ui_icons_use(mp_obj_t f16, mp_obj_t f24) {
+    moy_ui_icons_use((uint32_t)mp_obj_get_int_truncated(f16), (uint32_t)mp_obj_get_int_truncated(f24));
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_icons_use_obj, 5, 5, ui_icons_use);
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_icons_use_obj, ui_icons_use);
 
 // moy_use(px, clear): Moy's 16x16 tile of palette indices (256 bytes), its
 // clear index; px None takes it away (moy_ui_moy_use).
@@ -1802,43 +1798,6 @@ static mp_obj_t ui_frame(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_frame_obj, 8, 8, ui_frame);
 
-// frame_buttons(rect, title_h, title, btns, fs) -> ((id, x, y, w, h, right), ...)
-// left to right
-static mp_obj_t ui_frame_buttons(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_frame_button_t b[MOY_UI_FRAME_BUTTONS];
-    int n = moy_ui_frame_buttons(box_of(a[0]), mp_obj_get_int(a[1]), span_of(a[2]),
-                                 mp_obj_get_int(a[3]), mp_obj_get_int(a[4]), b);
-    mp_obj_t out[MOY_UI_FRAME_BUTTONS];
-    for (int i = 0; i < n; i++) {
-        mp_obj_t t[6] = {MP_OBJ_NEW_SMALL_INT(b[i].id), MP_OBJ_NEW_SMALL_INT(b[i].box.x),
-                         MP_OBJ_NEW_SMALL_INT(b[i].box.y), MP_OBJ_NEW_SMALL_INT(b[i].box.w),
-                         MP_OBJ_NEW_SMALL_INT(b[i].box.h), MP_OBJ_NEW_SMALL_INT(b[i].right)};
-        out[i] = mp_obj_new_tuple(6, t);
-    }
-    return mp_obj_new_tuple(n, out);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_frame_buttons_obj, 5, 5, ui_frame_buttons);
-
-// frame_icon(rect, title_h, btns[, out]) -> the line icon's slot (x, y, w, h),
-// or None; with `out`, a list of four, the slot is written into it and it is
-// the answer (a moving window's strip asks every frame)
-static mp_obj_t ui_frame_icon(size_t n_args, const mp_obj_t *a) {
-    moy_ui_box_t b;
-    if (!moy_ui_frame_icon(box_of(a[0]), mp_obj_get_int(a[1]), mp_obj_get_int(a[2]), &b)) {
-        return mp_const_none;
-    }
-    mp_obj_t t[4] = {MP_OBJ_NEW_SMALL_INT(b.x), MP_OBJ_NEW_SMALL_INT(b.y),
-                     MP_OBJ_NEW_SMALL_INT(b.w), MP_OBJ_NEW_SMALL_INT(b.h)};
-    if (n_args > 3 && a[3] != mp_const_none) {
-        for (int i = 0; i < 4; i++) {
-            mp_obj_subscr(a[3], MP_OBJ_NEW_SMALL_INT(i), t[i]);
-        }
-        return a[3];
-    }
-    return mp_obj_new_tuple(4, t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_frame_icon_obj, 3, 4, ui_frame_icon);
 
 // bar_part(cv, look, part, rect, on[, fill]) -> whether the depth drew the
 // bar part; `fill`, a look colour, fills a desk icon's tile (BARP_TILE)
@@ -3288,8 +3247,6 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_toolbar), MP_ROM_PTR(&ui_toolbar_obj) },
     { MP_ROM_QSTR(MP_QSTR_paint), MP_ROM_PTR(&ui_paint_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame), MP_ROM_PTR(&ui_frame_obj) },
-    { MP_ROM_QSTR(MP_QSTR_frame_buttons), MP_ROM_PTR(&ui_frame_buttons_obj) },
-    { MP_ROM_QSTR(MP_QSTR_frame_icon), MP_ROM_PTR(&ui_frame_icon_obj) },
     { MP_ROM_QSTR(MP_QSTR_bar_part), MP_ROM_PTR(&ui_bar_part_obj) },
     { MP_ROM_QSTR(MP_QSTR_scrim), MP_ROM_PTR(&ui_scrim_obj) },
     { MP_ROM_QSTR(MP_QSTR_scrim_alpha), MP_ROM_PTR(&ui_scrim_alpha_obj) },

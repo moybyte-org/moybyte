@@ -4,7 +4,7 @@ the buttons leave, its title cut with "…"), then minimise, maximise and
 close, every one a bar item (`button kind="bar"`) in the strip's ink
 (`tone`); on a full-screen window's row maximise shows restore
 (`max_icon`). The window manager places it on the strip of the frame it drew
-bare (`ui_draw.FRAME_BARE`), reads the buttons' rects back for its tap
+(`ui_draw.frame`: the strip's ground, nothing on it), reads the buttons' rects back for its tap
 resolution, and runs a tapped button's action (`wm_strip.fire`); the
 strip's drag and the frame's resize stay the window manager's own held
 press."""

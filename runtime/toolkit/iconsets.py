@@ -469,9 +469,9 @@ def plus(cv, rect, ink, spec_, stepped=False):
 
 
 def use_parts(spec_):
-    """Install `spec_`'s masks for the parts the C draws (a depth frame's
-    title buttons, `moy_ui.icons_use`): a smooth set's 16 and 24 px files,
-    or none (a pixel set's or no set: the C draws its glyphs); and Moy's
+    """Install `spec_`'s masks for the parts the C draws
+    (`moy_ui.icons_use`): a smooth set's 16 and 24 px files, or none (a
+    pixel set's or no set: the C draws its glyphs); and Moy's
     pixel tile, in every set (`moy_ui.moy_use`), so the engine's icons draw
     Moy where a part names it (the pause card's title)."""
     f16 = f24 = 0
@@ -481,8 +481,7 @@ def use_parts(spec_):
             f16 = f16 or _pick(n, 16, True)[0]
             got = _pick(n, 24, True)
             f24 = f24 or (got[0] if got[1] == 24 else 0)
-    _ui_draw._C.icons_use(f16, f24, FIRST + SLOT["close"], FIRST + SLOT["maximize"],
-                          FIRST + SLOT["minimize"])
+    _ui_draw._C.icons_use(f16, f24)
     # Moy, pixel art in every set: its tile, so `ui.icon("moy")` draws it
     img = pixel_image("moy", spec_[2] if spec_ is not None and spec_[0] == "pixel" else None)
     if img is None:
@@ -494,7 +493,7 @@ def use_parts(spec_):
 def reset():
     """Free the loaded masks and forget them and the tiles: the masks are font
     rows of their own, beside the theme's, in the process's slots."""
-    _ui_draw._C.icons_use(0, 0, 0, 0, 0)
+    _ui_draw._C.icons_use(0, 0)
     for fid in _FONTS.values():
         if fid:
             _ui_draw.font_free(fid)

@@ -1,6 +1,6 @@
 """A window's title strip drawn and placed from the strip page
 (`wm_strip_ui`): `draw` is a frame of the page onto the strip of a frame the
-window manager drew bare, `buttons` the strip's buttons as the window
+window manager drew, `buttons` the strip's buttons as the window
 manager's tap resolution reads them, `fire` a button's action run as the
 page runs it. One page serves every window: what a window shows is written
 into its states before each draw, a write that changes nothing marking
@@ -77,7 +77,7 @@ def _place(rect, unit, title, icon, tone, back, inset, full=False):
 def buttons(rect, unit, title, icon, tone, back, inset, out, full=False):
     """The strip at `rect`'s buttons into `out` (cleared), left to right:
     [(name, rect, right)] on the canvas the strip lies on, `right` False
-    for the back chevron alone, as `ui_draw.frame_buttons` answers.
+    for the back chevron alone.
     `inset`: the columns at each end the frame's corners take, which the
     strip's pad keeps clear. `full`: a full-screen window's row."""
     page = _place(rect, unit, title, icon, tone, back, inset, full)
@@ -132,7 +132,7 @@ def _hit(k, cv, w, h, title_h, title, focused, btns, fs, unit, icon, tone, back,
 
 def stamp(cv, th, x, y, w, h, title_h, title, focused, btns, fs, unit, icon, tone, back, look, inset):
     """Window (x, y, w, h)'s strip onto `cv`, whose frame the caller drew
-    bare (`ui_draw.FRAME_BARE` in `btns`): the strip's layer, made by the
+    (`ui_draw.frame`, `btns` its word): the strip's layer, made by the
     engine where none kept shows this, stamped at (x + 1, y + 1) inside
     `cv`'s clip, `inset` columns at each end left to the frame (a depth's
     rounded corners, which the strip's pad keeps its items out of). `look` is the look's generation. A canvas with no

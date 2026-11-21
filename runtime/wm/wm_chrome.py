@@ -146,10 +146,10 @@ class WindowChrome:
         matte = _ui_draw.FRAME_MATTE if win.edge > self._frame_edge() else 0
         rect = _set_rect(win._frame_rect, win.x, win.y, win.w, win.h)
         th = self.ws.theme_colors
-        bare = int(btns) | matte | _ui_draw.FRAME_BARE
+        word = int(btns) | matte
         cv = self.root_canvas
-        _ui_draw.frame(cv, th, rect, win.title_h, title, focused, bare, fs)
-        _strip.stamp(cv, th, win.x, win.y, win.w, win.h, win.title_h, title, focused, bare, fs,
+        _ui_draw.frame(cv, th, rect, win.title_h, title, focused, word, fs)
+        _strip.stamp(cv, th, win.x, win.y, win.w, win.h, win.title_h, title, focused, word, fs,
                      self._strip_unit(fs), self._strip_icon(win), self._strip_tone(focused),
                      bool(btns & _ui_draw.FRAME_BACK), look, self._win_radius(win))
         self._win_grip(win, focused)

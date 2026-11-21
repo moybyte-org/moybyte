@@ -725,17 +725,15 @@ int moy_ui_pattern_unreadable(int look, const moy_ui_shape_t *sh, uint8_t (*out)
 // -- the icon set (moy_ui.h) ---------------------------------------------------------
 
 static uint32_t s_icon_font[2];         // the 16 and 24 px masks
-static uint8_t s_icon_code[3];
 
-static void moy_ui_icons_use_w(uint32_t f16, uint32_t f24, const uint8_t codes[3]) {
+static void moy_ui_icons_use_w(uint32_t f16, uint32_t f24) {
     s_icon_font[0] = f16;
     s_icon_font[1] = f24;
-    memcpy(s_icon_code, codes, sizeof(s_icon_code));
 }
 
-void moy_ui_icons_use(uint32_t f16, uint32_t f24, const uint8_t codes[3]) {
+void moy_ui_icons_use(uint32_t f16, uint32_t f24) {
     moy_ui_theme_write(1);
-    moy_ui_icons_use_w(f16, f24, codes);
+    moy_ui_icons_use_w(f16, f24);
     moy_ui_theme_write(0);
 }
 
@@ -830,38 +828,13 @@ uint32_t moy_ui_icon_font(int size24) {
     return s_icon_font[size24 ? 1 : 0];
 }
 
-int moy_ui_icon_button(const moy_text_target_t *t, int id, moy_ui_box_t b, uint16_t col) {
-    uint8_t code;
-    if (id == MOY_UI_FB_BACK) {
-        // the set's `back`, beside the three it was installed with
-        int slot = s_icon_code[0] != 0 ? moy_ui_icon_slot((const uint8_t *)"back", 4) : -1;
-        if (slot < 0) {
-            return 0;
-        }
-        code = (uint8_t)(MOY_UI_ICON_FIRST + slot);
-    } else if (id < 0 || id > 2 || s_icon_code[id] == 0) {
-        return 0;
-    } else {
-        code = s_icon_code[id];
-    }
-    int box = b.w < b.h ? b.w : b.h;
-    int k = box >= 24 && s_icon_font[1] != 0 ? 1 : 0;
-    uint32_t font = s_icon_font[k] != 0 ? s_icon_font[k] : s_icon_font[1 - k];
-    int size = font == s_icon_font[1] ? 24 : 16;
-    if (font == 0) {
-        return 0;
-    }
-    return moy_text_glyph(t, font, code, b.x + moy_ui_fdiv(b.w - size, 2),
-                          b.y + moy_ui_fdiv(b.h - size, 2), col, 1) >= 0;
-}
-
 // -- the theme as a block (moy_ui.h) ------------------------------------------------
 
 int moy_ui_recs_ui(moy_ui_rec_t *r) {
     moy_ui_rec_t v[] = {
         {NULL, (void **)&s_ui, sizeof(ui_t)}, {&s_disabled, NULL, sizeof(s_disabled)},
         {&s_danger_ink, NULL, sizeof(s_danger_ink)}, {s_font, NULL, sizeof(s_font)},
-        {s_icon_font, NULL, sizeof(s_icon_font)}, {s_icon_code, NULL, sizeof(s_icon_code)},
+        {s_icon_font, NULL, sizeof(s_icon_font)},
         {s_moy, NULL, sizeof(s_moy)}, {&s_moy_clear, NULL, sizeof(s_moy_clear)},
     };
     memcpy(r, v, sizeof(v));
