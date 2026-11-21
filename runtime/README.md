@@ -12,7 +12,7 @@ device required, so it is the fast dev loop.
 | `shell/` | the console kernel: `console` and its `console_*` bases, `chrome`, the layer stack and the bars, the shell's stores and services, the input state |
 | `wm/` | the window managers: `wm` (the small screen's back stack), `wm_windowed` and its `wm_*` parts |
 | `toolkit/` | the draw toolkit: the public UI API (`ui`), `ui_draw` and its `ui_*` halves, widgets, layouts, fonts, icons, the clock (`ticks`) |
-| `uitree/` | the UI tree API (`import uitree as ui`): typed state, named actions, pages as build functions, replayed into the toolkit's verbs |
+| `uitree/` | the UI tree API (`import uitree as ui`): typed state, named actions, pages as build functions, drawn by the C engine (native/moy_uitree) or replayed into the toolkit's verbs by the reference |
 | `home/` | the home: `launcher_layer` and its `home_*` parts |
 | `system/` | the system's own surfaces: Settings, the bar's popovers, the perf HUD, update, about, achievements, licences, the web console, the wallpaper, QR |
 | `apps/` | the built-in apps: calc, files, get carts, paint, my art, the storybook, appearance, the text console |
@@ -155,8 +155,10 @@ frames its old code drew.
 | file | what it is |
 |---|---|
 | `uitree.py` | **(shared, staged)** the API an app imports as `ui`: declarations per app module (`Decl`), the types, templates and conditions, node kinds, the build, the errors (each with its code, file:line and fix) |
-| `uitree_app.py` | **(shared, staged)** the replay into the toolkit's verbs: `Engine` (a built tree in a frame its host began, handlers run as one commit), `App` and `app_layer` (a registered app whose screen is a build), `Page` (a build hosted by a surface still on today's verbs) |
-| `uitree_editor.py` | **(shared, staged)** the Editor's kinds over the replay: rows, tabs, panes (the desk Editor's sizes, held sizes, divider resets, pane focus and grow), the text editor, slots, the status line, and the bridge's `legacy` node (a surface still on today's verbs hosted in a region: its host runs `Engine.hosted` before it begins the frame) |
+| `uitree_app.py` | **(shared, staged)** what both engines share: `Engine` (a built tree in a frame its host began: its state, handlers run as one commit, the page's open and close, roles and edges), `App` and `app_layer` (a registered app whose screen is a build), `Page` (a build hosted by a surface still on today's verbs), and which engine they are made on (`use_engine`, `hosted_page`) |
+| `uitree_ref.py` | **(shared, staged)** the reference engine (`use_engine("reference")`): the replay into the toolkit's verbs, the frame, focus, hints, input and the placed layout over `uitree_app.Engine`; the C engine's path imports none of it |
+| `uitree_editor.py` | **(shared, staged)** the Editor's kinds as both engines share them: the panes' sizes and rules (held sizes, divider resets), the hosted surfaces a region places (`Engine.hosted`, which a host runs before it begins the frame), the text editor's view over its document, and the row a page lends the bar (`BarZone`) |
+| `uitree_ref_editor.py` | **(shared, staged)** the reference's replay of the Editor's kinds: rows, tabs, panes and their dividers, pane focus and grow, the text editor, slots, the status line, popovers hung from a part, and the bridge's `legacy` node (a surface still on today's verbs hosted in a region) |
 | `uitree_doc.py` | **(shared, staged)** a `ui.doc`'s engine side: the Code tab's `CodeEditor` and the op journal under one object |
 | `uitree_pics.py` | **(shared, staged)** an `image` value found, decoded, cached under a byte budget and drawn |
 

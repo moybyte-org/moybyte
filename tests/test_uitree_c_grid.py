@@ -1,5 +1,5 @@
 """`ui.grid` on the C engine (native/moy_uitree's draw_grid) held to the
-reference (`uitree_app.Engine._r_grid`): the same pixels and the same focus
+reference (`uitree_ref.Engine._r_grid`): the same pixels and the same focus
 walk at every size, a span= button two cells wide, a hidden one's cells
 left empty."""
 
@@ -36,9 +36,9 @@ def _run(engine, config):
 
 @pytest.mark.parametrize("config", CONFIGS)
 def test_a_grid_draws_alike_on_both_engines(config, tmp_path):
-    import uitree_app
+    import uitree_ref
     import uitree_c
-    ref = _run(uitree_app.Engine, config)
+    ref = _run(uitree_ref.Engine, config)
     c = _run(uitree_c.CEngine, config)
     states = [f.state for f in ref]
     assert any(s.endswith(" 1 True") for s in states) and any(s.endswith(" False") for s in states), states

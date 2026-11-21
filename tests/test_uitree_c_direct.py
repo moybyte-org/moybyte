@@ -159,9 +159,9 @@ def _answer(engine, mod):
     builds."""
     import ui_draw
     import uitree as S
-    import uitree_app
+    import uitree_ref
     import uitree_c
-    cls = uitree_c.CEngine if engine == "c" else uitree_app.Engine
+    cls = uitree_c.CEngine if engine == "c" else uitree_ref.Engine
     eng = cls(S.decl_of(mod), mod.build, ui_draw.AppHost(), None, _Damage())
     try:
         if engine == "c":

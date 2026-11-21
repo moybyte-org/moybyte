@@ -132,5 +132,5 @@ def build():
 
 
 def layer():
-    import uitree_editor
-    return uitree_app.app_layer("uitree_legacy", "Legacy fixture", build, engine=uitree_editor.Engine)
+    import uitree_ref_editor
+    return uitree_app.app_layer("uitree_legacy", "Legacy fixture", build, engine=uitree_ref_editor.Engine)

@@ -1,6 +1,6 @@
 """The Editor's half of `uitree`: the document a `ui.doc` declares
 (runtime/uitree/uitree_doc.py) under its verbs, and the Editor's replay
-(runtime/uitree/uitree_editor.py) hosting an app built from tabs, a text
+(runtime/uitree/uitree_ref_editor.py) hosting an app built from tabs, a text
 editor, a find strip, a popover hung from the caret and panes, on every
 size the shell goldens draw."""
 
@@ -91,10 +91,10 @@ def test_a_handler_changes_a_document_only_through_its_verbs():
 def test_app_layer_takes_only_an_engine_class():
     import uitree as S
     import uitree_app
-    import uitree_editor
+    import uitree_ref_editor
     import uitree_editor_app as E
     cls = E.layer()
-    assert cls.ENGINE == (uitree_editor.Engine,)
+    assert cls.ENGINE == (uitree_ref_editor.Engine,)
     with pytest.raises(S.UIError) as e:
         uitree_app.app_layer("x", "X", E.build, engine=object)
     assert e.value.code == "N01"
@@ -124,7 +124,7 @@ def test_an_editor_app_types_finds_completes_and_plays(config, tmp_path):
     fs = P.frames(config, _open(seen), script, str(tmp_path / "carts"))
     eng = seen["app"].engine
     trace = eng.trace_text()
-    assert type(eng).__name__ == "Engine" and type(eng).__module__.endswith("uitree_editor")
+    assert type(eng).__name__ == "Engine" and type(eng).__module__.endswith("uitree_ref_editor")
     assert "action  find " in trace and "action  find_close from back on row 'find_strip'" in trace, trace
     assert "action  complete_open" in trace and "action  complete" in trace, trace
     assert "action  play" in trace and E.s.played == 1, trace

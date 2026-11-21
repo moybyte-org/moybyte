@@ -13,12 +13,14 @@ checked tree is lowered into the engine's store, and each frame is one call
 into C that walks it through the toolkit's verbs. Python runs for handlers
 only: the commit's writes are pushed to C's slots at its end, and the
 engine's own writes (a toggle, a list's cursor) are pulled back before any
-handler runs. Same app file, same trace, same pixels as `uitree_app.Engine`."""
+handler runs. Same app file, same trace, same pixels as the reference (`uitree_ref.Engine`)."""
 
 import sys
 
+from moy_input import SHIFT as _SHIFT
 import ui as _v
 import ui_draw as _D
+import layout_base as _lb
 
 import uitree as S
 from uitree_app import Engine, Page
@@ -35,7 +37,7 @@ class EngineGap(S.UIError):
 
     def __init__(self, what):
         S.UIError.__init__(self, "E00", "the C engine does not draw %s yet" % what,
-                           fix="run this app on the reference engine (uitree_app.Engine)")
+                           fix="run this app on the reference engine (uitree_ref.Engine)")
 
 
 # the engine's numbers (native/moy_uitree/moy_uitree.h)
@@ -1146,7 +1148,7 @@ class CEditorEngine(CEngine, _ed.Engine):
                 act = self._acts[got[0]]
                 self.run_action(act, self.args_for(act), "typed %r on popover %r" % (chr(ch), got[1]))
                 if not self.popover_shown():
-                    return self._into_doc(next(iter(self.views)), ch, bool(getattr(i, "mods", 0) & _ed._SHIFT))
+                    return self._into_doc(next(iter(self.views)), ch, bool(getattr(i, "mods", 0) & _SHIFT))
         ek = self.editor_keys()
         if ek is None:
             return False
@@ -1155,10 +1157,10 @@ class CEditorEngine(CEngine, _ed.Engine):
         if not self.host_arrows:
             for name, dy, dx in (("up", -1, 0), ("down", 1, 0), ("left", 0, -1), ("right", 0, 1)):
                 if i.pressed(name):
-                    doc.move(dy, dx, True if getattr(i, "mods", 0) & _ed._SHIFT else None)
+                    doc.move(dy, dx, True if getattr(i, "mods", 0) & _SHIFT else None)
                     moved = True
         if text:
-            self._into_doc(ek, ch, bool(getattr(i, "mods", 0) & _ed._SHIFT))
+            self._into_doc(ek, ch, bool(getattr(i, "mods", 0) & _SHIFT))
             moved = True
         if moved:
             self._damage.all()
@@ -1207,7 +1209,7 @@ class CEditorEngine(CEngine, _ed.Engine):
     def _pane_sync(self):
         """The desk unit, the pane the keys reach, the pointer and the clock,
         handed to the engine before it lays the panes out or draws a divider."""
-        self.du = self.unit or max(1, _ed._lb.chrome_size(getattr(self, "fs", 1)) // _ed._lb.render_scale())
+        self.du = self.unit or max(1, _lb.chrome_size(getattr(self, "fs", 1)) // _lb.render_scale())
         self._x.panes_set(self.du, self.pane_cur, self._mouse(), self.clock)
         self._x.set_unit(self.unit)
 

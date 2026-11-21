@@ -1,5 +1,5 @@
 """The bridge (`ui.legacy`, spec §7.7) and the panes on the desk Editor's
-rules (runtime/uitree/uitree_editor.py), over the fixture
+rules (runtime/uitree/uitree_ref_editor.py), over the fixture
 tests/uitree_fixtures/uitree_legacy_app.py on every size the shell goldens
 draw: a hosted surface drawn in its own verbs pass BEFORE the page's, its
 pixels kept under the page's pass and under a popover's, its pointer, keys,
@@ -300,14 +300,14 @@ def test_a_legacy_node_needs_the_editor_replay_and_a_hosted_phase(tmp_path):
     its pass); the Editor's refuses one whose host ran no hosted phase."""
     import types
     import uitree as S
-    import uitree_app
-    import uitree_editor
+    import uitree_ref
+    import uitree_ref_editor
     import uitree_legacy_app as E
-    base = uitree_app.Engine(S.decl_of(S.module_of(E.build)), E.build, None, None, None)
+    base = uitree_ref.Engine(S.decl_of(S.module_of(E.build)), E.build, None, None, None)
     with pytest.raises(S.UIError) as e:
         base._r_legacy(types.SimpleNamespace(key="list", where=None), None, (0, 0, 1, 1))
     assert e.value.code == "N03"
-    ed = uitree_editor.Engine(S.decl_of(S.module_of(E.build)), E.build, None, None, None)
+    ed = uitree_ref_editor.Engine(S.decl_of(S.module_of(E.build)), E.build, None, None, None)
     ed.frame_no = 3
     with pytest.raises(S.UIError) as e:
         ed._r_legacy(types.SimpleNamespace(key="list", where=None), None, (0, 0, 1, 1))

@@ -190,6 +190,7 @@ def test_the_app_declaration_names_its_title_and_fields_once():
     second declaration is D01, a malformed size D02; an app hosted with no
     declaration and no title is D04, and back= names an action."""
     import uitree_app
+    import uitree_ref
     ui.state(n=3)
     ui.action("leave", "Leave", nothing)
     assert _code(lambda: ui.app("T", x=3)) == "D01"
@@ -207,7 +208,7 @@ def test_the_app_declaration_names_its_title_and_fields_once():
     class _Damage:
         def all(self):
             pass
-    eng = uitree_app.Page(page, None, _Damage())
+    eng = uitree_ref.Page(page, None, _Damage())
     assert eng.back() and eng.q[-1][0].name == "leave" and eng.q[-1][2] == "the app's back"
     d.back = "nope"
     assert _code(lambda: uitree_app.app_layer("t", None, page)) == "A01"

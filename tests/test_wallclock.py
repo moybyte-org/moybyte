@@ -199,7 +199,7 @@ def test_the_settings_row_opens_the_picker_and_a_pick_sets_the_zone(tmp_path):
     sl._draw_page()
     pick = [k for k, (p, _tz) in enumerate(wc.ZONES) if p == "Tokyo"][0]
     # focus on Tokyo's row (a long list lays out the rows in view and the
-    # focused one, uitree_app.VROWS_MIN) and A on its link
+    # focused one, uitree_ref.VROWS_MIN) and A on its link
     want = wc.ZONES[pick][1] + "/use"
     page = sl.pages.pages["tz"][0]
     page.want_focus = want              # a handler's ui.focus(KEY): lands where the row draws

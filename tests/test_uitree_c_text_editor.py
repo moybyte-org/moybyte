@@ -1,6 +1,6 @@
 """The Editor's text editor on the C engine: the store places it by the
 one rule (whole lines), its document stays Python's and the front end
-draws its rows in the rect (`uitree_editor.Engine._r_text_editor`), what
+draws its rows in the rect (`uitree_ref_editor.Engine._r_text_editor`), what
 its templates read of the document (`{code.line}`) is a row the store
 holds, and the arrows and typed bytes reach the document ahead of the
 store's keys. Both engines draw the same pixels and leave the same state."""
@@ -48,8 +48,8 @@ def _run(engine, config):
 @pytest.mark.parametrize("config", CONFIGS)
 def test_a_text_editor_draws_and_types_alike_on_both_engines(config, tmp_path):
     import uitree_c
-    import uitree_editor
-    _, ref = _run(uitree_editor.Engine, config)
+    import uitree_ref_editor
+    _, ref = _run(uitree_ref_editor.Engine, config)
     _, c = _run(uitree_c.CEditorEngine, config)
     states = [f.state for f in ref]
     assert " L1:1 0 " in states[0] and any("gutter=False" in t for t in states), states

@@ -1,6 +1,6 @@
 """The conformance fixtures on the C engine (native/moy_uitree, driven by
 runtime/uitree/uitree_c.py): the same app file, the same input script, held
-to the reference (the Python replay, `uitree_app.Engine`):
+to the reference (the Python replay, `uitree_ref.Engine`):
 
 - the reference's trace verbatim (NAME/trace.txt), and the reference run's;
 - the same pixels on the whole glass, every frame, at both sizes;
@@ -31,11 +31,12 @@ def _expected(name, what):
 @functools.lru_cache(maxsize=None)
 def _run(engine, name, config):
     import uitree_app
+    import uitree_ref
     import uitree_c
     import uitree_parity as P
     app_py, cart = C.fixture(name)
     mod = C._module(app_py)
-    eng = uitree_c.CEngine if engine == "c" else uitree_app.Engine
+    eng = uitree_c.CEngine if engine == "c" else uitree_ref.Engine
     cls = uitree_app.app_layer("conf_" + name, C._title(cart), mod.build, engine=eng)
     seen = {}
 
@@ -141,6 +142,7 @@ def test_a_pushed_page_opens_on_its_own_focus_node(engine, tmp_path):
     """Spec §9: a fresh page's first frame lands focus on its focus= node,
     the pushed page's own, whatever the page under it drew."""
     import uitree_app
+    import uitree_ref
     import uitree_c
     import uitree_parity as P
     app_py = tmp_path / "pushed" / "app.py"
@@ -148,7 +150,7 @@ def test_a_pushed_page_opens_on_its_own_focus_node(engine, tmp_path):
     app_py.write_text(PUSHED)
     mod = C._module(str(app_py))
     cls = uitree_app.app_layer("pushed_" + engine, "Pushed", mod.build,
-                               engine=uitree_c.CEngine if engine == "c" else uitree_app.Engine)
+                               engine=uitree_c.CEngine if engine == "c" else uitree_ref.Engine)
     seen = {}
 
     def opened(ws):
@@ -231,6 +233,7 @@ def build():
 
 def _long(tmp_path, engine, n, script, config=None):
     import uitree_app
+    import uitree_ref
     import uitree_c
     import uitree_parity as P
     app_py = tmp_path / ("long_%s_%d" % (engine, n)) / "app.py"
@@ -238,7 +241,7 @@ def _long(tmp_path, engine, n, script, config=None):
     app_py.write_text(LONG.replace("@N@", str(n)))
     mod = C._module(str(app_py))
     cls = uitree_app.app_layer("long_%s_%d" % (engine, n), "Long", mod.build,
-                               engine=uitree_c.CEngine if engine == "c" else uitree_app.Engine)
+                               engine=uitree_c.CEngine if engine == "c" else uitree_ref.Engine)
     seen = {}
 
     def opened(ws):
@@ -253,7 +256,7 @@ def _long(tmp_path, engine, n, script, config=None):
 @pytest.mark.parametrize("n", (50, 120))
 def test_a_long_list_walks_past_its_fortieth_row_alike_on_both_engines(tmp_path, n):
     """A rows list of more than the toolkit's 40 stops a frame lays out its
-    rows in view (uitree_app.VROWS_MIN; native/moy_uitree's draw_vrows):
+    rows in view (uitree_ref.VROWS_MIN; native/moy_uitree's draw_vrows):
     the keys walk focus past the 40th row and open it, a swipe scrolls it
     back, and both engines draw every frame alike."""
     import uitree_parity as P

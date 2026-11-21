@@ -49,6 +49,7 @@ def _session(glass, kinds, across, script):
     import ui_draw
     import uitree as S
     import uitree_app
+    import uitree_ref
     import uitree_c
     import uitree_two_pages as F
     cv, th = glass
@@ -57,7 +58,7 @@ def _session(glass, kinds, across, script):
              else [(0, 0, W, H // 2), (0, H // 2, W, H - H // 2)])
     pages = []
     for kind, build in zip(kinds, (F.first, F.second)):
-        cls = uitree_c.CEngine if kind == "c" else uitree_app.Engine
+        cls = uitree_c.CEngine if kind == "c" else uitree_ref.Engine
         e = cls(S.decl_of(F.__name__), build, ui_draw.AppHost(), None, Damage())
         e.open()
         pages.append(e)

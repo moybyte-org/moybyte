@@ -1894,7 +1894,7 @@ def test_the_code_tabs_text_view_allocates_nothing_typed_or_gliding_on_the_c_eng
     assert not bad, bad
 
 
-@pytest.mark.xfail(strict=True, reason="the reference engine (uitree_editor.Engine) is the host's checker, "
+@pytest.mark.xfail(strict=True, reason="the reference engine (uitree_ref_editor.Engine) is the host's checker, "
                    "not a board's frame path (K7): its text editor's pass and its walk allocate a frame, "
                    "and only cheap fixes go into it; the C engine's arm holds the bill")
 def test_the_code_tabs_text_view_allocates_nothing_typed_or_gliding_on_the_reference(result):

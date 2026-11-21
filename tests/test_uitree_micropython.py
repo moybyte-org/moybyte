@@ -234,12 +234,14 @@ def pages(loop):
     _steps(loop)
     ws.spine.exit()
     _steps(loop, 4)
+    # every page above ran on the C engine, which imports none of the reference's modules
+    shown["reference"] = sorted(m for m in ("uitree_ref", "uitree_ref_editor") if m in sys.modules)
     # the bridge (ui.legacy): a page on the Editor's kinds hosting a surface
     # on today's verbs, its hosted phase before the host begins the frame
     with open(ROOT + "/fakes/uitree_legacy_app.py", "w") as f:
         f.write(@LEGACY@)
     import uitree_legacy_app as LA
-    import uitree_editor
+    import uitree_ref_editor
     import ui_draw
     import ui
 
@@ -247,7 +249,7 @@ def pages(loop):
         def all(self):
             pass
     lh = ui_draw.AppHost()
-    lp = uitree_editor.Page(LA.build, lh, Damage())
+    lp = uitree_ref_editor.Page(LA.build, lh, Damage())
     lp.open()
     cv, th = ws.sys_canvas, ws.theme_colors
     box = (0, 0, cv.w, cv.h)
@@ -274,7 +276,7 @@ def pages(loop):
     editor_ui._desk[0] = pd
     spaces = {}
     for key in ("settings", "code", "art", "world", "sound", "theme"):
-        sp = uitree_editor.Page(editor_ui.SPACES[key], lh, Damage())
+        sp = uitree_ref_editor.Page(editor_ui.SPACES[key], lh, Damage())
         sp.unit = 1
         pd.page = sp
         sp.place((6, 46, 1012, 548))
@@ -315,6 +317,7 @@ def test_every_ported_page_builds_and_draws_on_the_boards_micropython(tmp_path):
     shown, painted = info["shown"], info["painted"]
     assert not info["errors"], (info["errors"][:3], text[-3000:])
     assert shown["engine"] == "c", "a board whose image carries moy_uitree runs the C engine"
+    assert shown["reference"] == [], "the C engine's console imported the reference: %r" % shown["reference"]
     assert shown["rows"] == "settings", shown
     assert shown["wifi"] == "wifi" and shown["wifi_popover"] == "wifi", shown
     assert [shown[p] for p in ("tz", "paired", "log", "permissions", "licences", "achievements")] == \

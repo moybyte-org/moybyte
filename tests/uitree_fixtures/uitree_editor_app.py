@@ -138,6 +138,6 @@ def build():
 
 def layer():
     import uitree_app
-    import uitree_editor
+    import uitree_ref_editor
     return uitree_app.app_layer("uitree_editor", "Editor fixture", build,
-                                engine=uitree_editor.Engine)
+                                engine=uitree_ref_editor.Engine)

@@ -1,6 +1,6 @@
 """The placed layout on the C engine (native/moy_uitree's `stack`, the one
 rule a container gives its children rects by): a page on the Editor's
-placed kinds draws the reference's pixels (`uitree_editor.Engine`) on every
+placed kinds draws the reference's pixels (`uitree_ref_editor.Engine`) on every
 size, its regions and cells read back at the reference's rects, and a host's
 placement with nothing drawn (`place`) agrees with it too."""
 
@@ -39,8 +39,8 @@ def _run(engine, config):
 @pytest.mark.parametrize("config", CONFIGS)
 def test_a_placed_page_draws_and_places_alike_on_both_engines(config, tmp_path):
     import uitree_c
-    import uitree_editor
-    _, ref = _run(uitree_editor.Engine, config)
+    import uitree_ref_editor
+    _, ref = _run(uitree_ref_editor.Engine, config)
     seen, c = _run(uitree_c.CEditorEngine, config)
     assert "rows" in {f.state.split()[1] for f in ref}, "the script never reached the switch's other case"
     assert "('q', (" in ref[0].state and "('pad', (" in ref[0].state, ref[0].state
@@ -53,11 +53,11 @@ def test_a_placement_draws_nothing_and_gives_the_regions_rects():
     the stacked rows, the regions a host places and the cells along a row
     (a bar's host reads them), drawing none of them."""
     import uitree_c
-    import uitree_editor
+    import uitree_ref_editor
     import uitree_placed as F
     import ui_draw
     got = []
-    for cls in (uitree_editor.Page, uitree_c.CEditorPage):
+    for cls in (uitree_ref_editor.Page, uitree_c.CEditorPage):
         e = cls(F.build, ui_draw.AppHost(), type("D", (), {"all": lambda self: None})())
         e.open()
         e.fs = 1                # the scale a host's placement reads (its frames set it)

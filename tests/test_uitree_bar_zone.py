@@ -61,12 +61,13 @@ def engine(request):
 def _zone(engine="reference"):
     import ui_draw
     import uitree_editor
+    import uitree_ref_editor
     import uitree_bar_row as F
     if engine == "c":
         import uitree_c
         page = uitree_c.CEditorPage(F.page, ui_draw.AppHost(), _Damage())
     else:
-        page = uitree_editor.Page(F.page, ui_draw.AppHost(), _Damage())
+        page = uitree_ref_editor.Page(F.page, ui_draw.AppHost(), _Damage())
     page.open(hook="none")
     look = _Look()
     return F, page, look, uitree_editor.BarZone(page, look)
@@ -178,12 +179,13 @@ def test_the_need_is_every_cell_an_icon(engine):
 def _head(engine):
     import ui_draw
     import uitree_editor
+    import uitree_ref_editor
     import editor_ui
     if engine == "c":
         import uitree_c
         page = uitree_c.CEditorPage(editor_ui.head, ui_draw.AppHost(), _Damage())
     else:
-        page = uitree_editor.Page(editor_ui.head, ui_draw.AppHost(), _Damage())
+        page = uitree_ref_editor.Page(editor_ui.head, ui_draw.AppHost(), _Damage())
     page.open(hook="none")
     look = _Look()
     return editor_ui, page, look, uitree_editor.BarZone(page, look)

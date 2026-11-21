@@ -39,8 +39,9 @@ built, once, at open.
 It imports no engine: `tools/uitree_check.py` runs an app's page functions
 with this module and the engine's prop check alone (`moy_uitree.check_prop`,
 the contract's one table of kinds and props, which every front checks a
-node's props against). The replay into the toolkit's verbs is
-`uitree_app.py` (the Editor's kinds: `uitree_editor.py`).
+node's props against). The engines share `uitree_app.py` (the Editor's
+kinds: `uitree_editor.py`); the C engine is `uitree_c.py`, the reference's
+replay into the toolkit's verbs `uitree_ref.py` (`uitree_ref_editor.py`).
 
 Every mistake is a `UIError`: a code, the app's file and line, what was
 expected, what was found and the fix. There are no warnings.
@@ -128,7 +129,8 @@ def dotted(s, lead=False):
     return "".join(out)
 
 # the layer's own files: an error's file:line is the first frame outside them
-_SKIP = ("uitree.py", "uitree_app.py", "uitree_editor.py", "uitree_doc.py", "uitree_pics.py")
+_SKIP = ("uitree.py", "uitree_app.py", "uitree_editor.py", "uitree_ref.py", "uitree_ref_editor.py",
+         "uitree_doc.py", "uitree_pics.py")
 
 
 def _base(path):

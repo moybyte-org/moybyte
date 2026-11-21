@@ -123,8 +123,9 @@ def bar(out):
     import ui_draw
     import uitree_c
     import uitree_editor
+    import uitree_ref_editor
     out["bar"] = {}
-    for tag, cls in (("py", uitree_editor.Engine), ("c", uitree_c.CEditorEngine)):
+    for tag, cls in (("py", uitree_ref_editor.Engine), ("c", uitree_c.CEditorEngine)):
         mod = _load("bar_%s" % tag, BAR_SRC)
         eng = cls(S.decl_of(mod.__name__), mod.page, ui_draw.AppHost(), None, Damage())
         eng.open(hook="none")
@@ -159,6 +160,7 @@ def conf(loop):
     import time
     import uitree as S
     import uitree_app
+    import uitree_ref
     import uitree_c
     ws = loop.ws
     _steps(loop, 20)
@@ -166,16 +168,16 @@ def conf(loop):
     box = (0, 0, cv.w, cv.h)
     out = {"fixtures": {}, "cost": {}}
     S.TRACING = True
-    import uitree_editor
-    pairs = (uitree_app.Engine, uitree_c.CEngine)
+    import uitree_ref_editor
+    pairs = (uitree_ref.Engine, uitree_c.CEngine)
     for name, src, script, pair in [f + (pairs,) for f in FIXTURES] + [
-            ("placed", PLACED_SRC, PLACED_SCRIPT, (uitree_editor.Engine, uitree_c.CEditorEngine)),
-            ("text_editor", TE_SRC, TE_SCRIPT, (uitree_editor.Engine, uitree_c.CEditorEngine)),
-            ("across", ACROSS_SRC, ACROSS_SCRIPT, (uitree_editor.Engine, uitree_c.CEditorEngine)),
-            ("across_bar", ACROSS_BAR_SRC, ACROSS_BAR_SCRIPT, (uitree_editor.Engine, uitree_c.CEditorEngine)),
-            ("bar_look", BAR_LOOK_SRC, BAR_LOOK_SCRIPT, (uitree_editor.Engine, uitree_c.CEditorEngine)),
+            ("placed", PLACED_SRC, PLACED_SCRIPT, (uitree_ref_editor.Engine, uitree_c.CEditorEngine)),
+            ("text_editor", TE_SRC, TE_SCRIPT, (uitree_ref_editor.Engine, uitree_c.CEditorEngine)),
+            ("across", ACROSS_SRC, ACROSS_SCRIPT, (uitree_ref_editor.Engine, uitree_c.CEditorEngine)),
+            ("across_bar", ACROSS_BAR_SRC, ACROSS_BAR_SCRIPT, (uitree_ref_editor.Engine, uitree_c.CEditorEngine)),
+            ("bar_look", BAR_LOOK_SRC, BAR_LOOK_SCRIPT, (uitree_ref_editor.Engine, uitree_c.CEditorEngine)),
             ("grid", GRID_SRC, GRID_SCRIPT, pairs),
-            ("model_row", MROW_SRC, MROW_SCRIPT, (uitree_editor.Engine, uitree_c.CEditorEngine))]:
+            ("model_row", MROW_SRC, MROW_SCRIPT, (uitree_ref_editor.Engine, uitree_c.CEditorEngine))]:
         runs = {}
         for tag, cls in zip(("py", "c"), pair):
             mod = _load("conf_%s_%s" % (name, tag), src)
@@ -199,7 +201,7 @@ def conf(loop):
         gc.collect()
     S.TRACING = False
     for name, src in (("long", LONG_SRC), ("counter", FIXTURES[0][1])):
-        for tag, cls in (("py", uitree_app.Engine), ("c", uitree_c.CEngine), ("c_checked", uitree_c.CEngine)):
+        for tag, cls in (("py", uitree_ref.Engine), ("c", uitree_c.CEngine), ("c_checked", uitree_c.CEngine)):
             _use(tag)
             gc.collect()
             mod = _load("cost_%s_%s" % (name, tag), src)

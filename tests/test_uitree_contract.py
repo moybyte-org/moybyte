@@ -32,7 +32,8 @@ with open(os.path.join(CONTRACT, "contract.json"), encoding="utf-8") as _f:
     TABLE = json.load(_f)
 
 PY_FILES = [str(runtime_file(f)) for f in
-            ("uitree.py", "uitree_app.py", "uitree_c.py", "uitree_editor.py", "uitree_doc.py", "uitree_pics.py")] + \
+            ("uitree.py", "uitree_app.py", "uitree_c.py", "uitree_editor.py", "uitree_ref.py", "uitree_ref_editor.py",
+             "uitree_doc.py", "uitree_pics.py")] + \
            [os.path.join(ROOT, "tools", "uitree_check.py")]
 LUA_FILES = [str(runtime_file("lua_ext.py").parent / f)
              for f in ("uitree.lua", "uitree_replay.lua", "uitree_engine.lua", "uitree_check.lua")] + \

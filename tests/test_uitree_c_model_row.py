@@ -41,8 +41,8 @@ def _run(engine, config):
 @pytest.mark.parametrize("config", CONFIGS)
 def test_a_row_from_a_model_draws_alike_on_both_engines(config, tmp_path):
     import uitree_c
-    import uitree_editor
-    ref = _run(uitree_editor.Engine, config)
+    import uitree_ref_editor
+    ref = _run(uitree_ref_editor.Engine, config)
     c = _run(uitree_c.CEditorEngine, config)
     assert [f.state for f in c] == [f.state for f in ref]
     P.compare(ref, c, tmp_path, "model_row")
@@ -53,8 +53,8 @@ def _cells(f):
 
 
 def test_a_model_s_cells_take_their_text_then_cut_the_widest_then_drop():
-    import uitree_editor
-    f = _run(uitree_editor.Engine, "tdeck_320x240_fs1_dark")
+    import uitree_ref_editor
+    f = _run(uitree_ref_editor.Engine, "tdeck_320x240_fs1_dark")
     first = _cells(f[0])
     assert sorted(first) == ["w0/chip", "w1/chip"], first
     assert first["w0/chip"][2] > first["w1/chip"][2], first          # Settings wider than Editor
@@ -68,14 +68,14 @@ def test_a_model_s_cells_take_their_text_then_cut_the_widest_then_drop():
 
 def test_a_row_from_a_model_outside_a_placed_row_is_b03():
     import uitree as S
-    import uitree_app
+    import uitree_ref
 
     def build():
         with S.page("P"):
             with S.rows("wins", dir="row"):
                 S.button("chip", label="{.title}")
     import uitree_model_row as F
-    eng = uitree_app.Engine(S.decl_of(F), build, None, None, None)
+    eng = uitree_ref.Engine(S.decl_of(F), build, None, None, None)
     with pytest.raises(S.UIError) as e:
         eng._build()
     assert e.value.code == "B03", e.value
