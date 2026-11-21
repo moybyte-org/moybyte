@@ -235,6 +235,44 @@ def test_the_props_only_the_c_engine_draws_lower_and_draw(tmp_path):
     assert err and "error[E00] main.lua:8:" in err and "ui.slider's look" in err, err
 
 
+def test_tabs_cards_and_a_rows_group_draw_and_a_filter_is_refused_on_the_c_engine(tmp_path):
+    """Tabs over an enum, cards with their card, and a rows' group open on
+    the C engine and draw; a rows' filter, which the engine does not draw
+    (nor for a Python app), stops the run at its line with E00."""
+    import uitree_app
+    from runtime import host_app
+    uitree_app.use_engine("c")
+    carts = str(tmp_path / "carts")
+    host_app.moy_carts.ensure_dirs(carts)
+    head = ('ui.app("%s", { icon = "calc" })\n'
+            'local s = ui.state { tab = ui.enum("a", "b", { init = "a" }), q = "",\n'
+            '  items = ui.model { key = "id", id = "", kind = "" } }\n'
+            'ui.labels("TABS", { a = "A", b = "B" })\n'
+            'ui.action("pick", "Pick", function(row) end, { takes = "row" })\n'
+            'ui.hook("opened", function() s.items:set({ { id = "one", kind = "x" }, { id = "two", kind = "y" } }) end)\n'
+            'ui.page("p", function()\n%s\nend)\n')
+    pages = {
+        "Tabbed": '  ui.tabs("tab", { labels = "TABS", offered = { b = "q" } })',
+        "Shelf": '  ui.cards("items", { w = 80, h = 60 }, function() ui.card("pick", { label = "{.id}", sub = "{.kind}" }) end)',
+        "Grouped": '  ui.rows("items", { group = "{.kind}" }, function() ui.label("{.id}") end)',
+        "Found": '  ui.rows("items", { filter = "q" }, function() ui.label("{.id}") end)',
+    }
+    for name, page in pages.items():
+        _cart(carts, name, head % (name, page))
+    ws, drv, frame, open_cart = _console(carts)
+    for name in ("Tabbed", "Shelf", "Grouped"):
+        open_cart(ws, name)
+        for _ in range(4):
+            frame()
+        assert ws.run.player.cart_error is None, (name, ws.run.player.cart_error)
+        ws.spine.exit_to_caller()
+    open_cart(ws, "Found")
+    for _ in range(4):
+        frame()
+    err = ws.run.player.cart_error
+    assert err and "error[E00] main.lua:8:" in err and "filter" in err, err
+
+
 def test_a_canvas_draws_with_the_carts_verbs_inside_the_frame(tmp_path):
     """A canvas's draw runs inside the C engine's frame at the canvas's rect
     and draws with the cart's own verbs; a draw that writes state stops the

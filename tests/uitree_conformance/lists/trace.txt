@@ -1,0 +1,15 @@
+state items [3 rows] +3 -0 ~0 moved 0 (in opened)
+build build page (builds 1)
+state tab 'all' -> 'few' (from tabs 'tab')
+action pick from link 'apple/pick' on 'Lists'
+state picked '' -> 'Picked Apples' (in pick)
+drew label '{picked}' -> 'Picked Apples'
+action pick from link 'pear/pick' on 'Lists'
+state picked 'Picked Apples' -> 'Picked Pears' (in pick)
+drew label '{picked}' -> 'Picked Pears'
+state sel '' -> 'bread' (focus)
+action open from card 'bread/open' on 'Lists'
+state picked 'Picked Pears' -> 'Opened bread' (in open)
+drew label '{picked}' -> 'Opened bread'
+action open from card 'bread/open' on 'Lists'
+state tab 'few' -> 'all' (from tabs 'tab')

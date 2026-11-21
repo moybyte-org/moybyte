@@ -30,12 +30,13 @@ local E_CHECK = -6
 local KINDS = { page = 1, group = 2, label = 3, info = 4, link = 5, button = 6, toggle = 7, rows = 8, dialog = 9,
                 seg = 10, slider = 11, field = 12, empty = 13, progress = 14, text_view = 15, scroll = 16, menu = 17,
                 item = 18, split = 19, switch = 22, case = 23, table = 24, col = 25, foot = 26, popover = 30,
-                canvas = 20, row = 32, panel = 39, rule = 41, note = 42, grid = 43 }
+                canvas = 20, tabs = 21, cards = 27, card = 28, row = 32, panel = 39, rule = 41, note = 42, grid = 43 }
 local BASE = { bool = BOOL, int = INT, number = NUM, text = TEXT, enum = ENUM, rowof = ROWOF, model = MODEL }
 local FIELD = { bool = BOOL, int = INT, number = NUM, text = TEXT, enum = TEXT }
 -- a prop whose value is a literal the dump prints as one (its Python repr)
 local LIT = { kind = 1, wrap = 1, face = 1, size = 1, align = 1, alone = 1, span = 1, arg = 1, grow = 1, max = 1,
-              secret = 1, commit = 1, look = 1, cur = 1, current = 1, check = 1, follow = 1 }
+              secret = 1, commit = 1, look = 1, cur = 1, current = 1, check = 1, follow = 1, filter = 1, dir = 1,
+              icons = 1 }
 local FIX = "run this app on the reference engine: uitree_app.use_engine(\"reference\")"
 
 local X = nil                   -- the store, made at the first frame
@@ -229,9 +230,9 @@ local function c_key(n)
   local k = n.kind
   if k == "page" then return "page" end
   if k == "button" or k == "link" then return n.o.arg ~= nil and n.action .. "/" .. tostring(n.o.arg) or n.action end
-  if k == "item" then return n.action end
-  if k == "toggle" or k == "slider" or k == "field" or k == "seg" or k == "text_view" then return n.a[2] end
-  if k == "rows" or k == "table" then return n.a[1] end
+  if k == "item" or k == "card" then return n.action end
+  if k == "toggle" or k == "slider" or k == "field" or k == "seg" or k == "text_view" or k == "tabs" then return n.a[2] end
+  if k == "rows" or k == "table" or k == "cards" then return n.a[1] end
   if k == "switch" then return "switch:" .. n.a[1] end
   if k == "foot" then return "foot" end
   return n.o.key or n.rkey
@@ -268,6 +269,8 @@ local SHAPE = {
   split = { takes = { "dir", "sizes" }, last = function(n) return { pair("dir", n.o.dir), pair("sizes", n.o.sizes) } end },
   grid = { takes = { "cols", "rows" }, last = function(n) return { pair("cols", n.o.cols), pair("rows", n.o.rows) } end },
   canvas = { takes = { "draw" }, last = function(n) return { pair("draw", "draw") } end },
+  tabs = { bind = true, takes = { "labels", "offered" }, last = function(n) return { pair("labels", n.o.labels) } end },
+  cards = { model = true },
 }
 -- a prop given as a list that is one prop: its values joined, as the Python layer joins a tuple
 local JOINED = { sizes = 1 }
@@ -310,6 +313,11 @@ local function lower_node(n, parent, path)
   for _, k in ipairs(shape.takes or {}) do takes[k] = true end
   for _, k in ipairs(sorted(n.o)) do
     if not takes[k] then prop(k, n.o[k]) end
+  end
+  if n.o.offered then         -- one prop a value: its condition, the value its literal
+    for _, v in ipairs(sorted(n.o.offered)) do
+      check(X:prop(me, "offered", n.o.offered[v], v), "ui." .. n.kind .. " offered " .. q(v), n.at)
+    end
   end
   if shape.last then
     local h = shape.last(n)
