@@ -134,10 +134,19 @@ def test_a_badge_opens_centred_across_the_page_over_what_it_covers_alone(tmp_pat
     for i in range(3):
         _keys(drv, "a")
         assert pg.popover() is not None
-        boxes.append(_changed_box(shut, bytes(cv._buf), cv.w, cv.h, 24))
+        top, opened = shut, bytes(cv._buf)
+        boxes.append(_changed_box(top, opened, cv.w, cv.h, 24))
         _keys(drv, "b", "right")
         shut = bytes(cv._buf)
     assert boxes[0] == boxes[1] == boxes[2], boxes
-    x0, _y0, x1, _y1 = boxes[0]
+    x0, y0, x1, _y1 = boxes[0]
     if not desk:
         assert x0 > 8 and abs(x0 - (cv.w - x1)) <= 2, (boxes[0], cv.w)
+        return
+    # In a desk window the page is the window's content: the card's top edge,
+    # the first row it changes, stands centred in it and spans less than it.
+    cx, _cy, cw, _ch = ws.wm.windows["settings"].content_rect()
+    o = 2 * y0 * cv.w
+    xs = [x for x in range(cv.w) if top[o + 2 * x:o + 2 * x + 2] != opened[o + 2 * x:o + 2 * x + 2]]
+    left, right = xs[0] - cx, cx + cw - (xs[-1] + 1)
+    assert left > 8 and abs(left - right) <= 2, ((xs[0], xs[-1] + 1), (cx, cw))
