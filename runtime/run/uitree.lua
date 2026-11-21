@@ -1187,7 +1187,7 @@ end
 local APP_ROLES = { confirm = 1, back = 1, more = 1, menu = 1, left = 1, right = 1, up = 1, down = 1, space = 1,
                     search = 1, ["goto"] = 1, complete = 1, undo = 1, redo = 1, play = 1, tools = 1 }
 local SHELL_ROLES = { home = 1, full = 1, system = 1 }
-local TAKES_N = { none = 0, row = 1, arg = 1, char = 1 }
+local TAKES_N = { none = 0, row = 1, arg = 1, char = 1, pointer = 1 }
 
 local function check_arity(name, fn, takes, at)
   if not HAS_DEBUG or type(fn) ~= "function" then return end
@@ -1195,7 +1195,7 @@ local function check_arity(name, fn, takes, at)
   local want = TAKES_N[takes]
   if info.isvararg or info.nparams ~= want then
     local fix = takes == "none" and "function() ... end"
-                or "function(" .. (takes == "row" and "row" or takes == "char" and "ch" or "arg") .. ") ... end"
+                or "function(" .. (takes == "row" and "row" or takes == "char" and "ch" or takes == "pointer" and "ev" or "arg") .. ") ... end"
     fail("A03", at, q(name) .. "'s handler takes " .. (info.isvararg and "..." or tostring(info.nparams))
          .. " parameter" .. (info.nparams == 1 and "" or "s") .. ", and it is declared takes=" .. q(takes),
          want .. " parameter" .. (want == 1 and "" or "s"), info.isvararg and "a vararg" or tostring(info.nparams),
@@ -1283,7 +1283,7 @@ function T.action(name, label, fn, o)
   end
   takes = takes or "none"
   if not TAKES_N[takes] then
-    fail("A09", at, "the action " .. q(name) .. " takes " .. describe(takes), "\"none\", \"row\", \"arg\" or \"char\"", describe(takes))
+    fail("A09", at, "the action " .. q(name) .. " takes " .. describe(takes), "\"none\", \"row\", \"arg\", \"char\" or \"pointer\"", describe(takes))
   end
   if o.chars ~= nil and takes ~= "char" then
     fail("A02", at, "the action " .. q(name) .. " has chars and takes " .. q(takes), "takes = \"char\"", q(takes))
@@ -1334,8 +1334,8 @@ function T.hook(name, fn, o)
     elseif not HOOK_OPTS[k] then fail("N01", at, "ui.hook takes no option " .. q(k), "takes", q(k)) end
   end
   local takes = o.takes or "none"
-  if takes ~= "none" and takes ~= "row" and takes ~= "arg" then
-    fail("A09", at, "the hook " .. q(name) .. " takes " .. describe(takes), "\"none\", \"row\" or \"arg\"", describe(takes))
+  if takes ~= "none" and takes ~= "row" and takes ~= "arg" and takes ~= "pointer" then
+    fail("A09", at, "the hook " .. q(name) .. " takes " .. describe(takes), "\"none\", \"row\", \"arg\" or \"pointer\"", describe(takes))
   end
   claim(name, "hook", at)
   check_arity(name, fn, takes, at)
@@ -1485,7 +1485,7 @@ local PROPS = {
   menu = {}, item = { icon = 1, label = 1, mkind = 1 },
   table = { cols = 1, cur = 1, on = 1, changed = 1, empty = 1, focus = 1, hint = 1 }, col = {},
   split = { dir = 1, sizes = 1, gap = 1, pad = 1, align = 1 }, grid = { cols = 1, rows = 1, gap = 1, pad = 1 },
-  panel = {}, canvas = { draw = 1, h = 1, w = 1, focus = 1, ground = 1 },
+  panel = {}, canvas = { draw = 1, h = 1, w = 1, focus = 1, ground = 1, pointer = 1 },
   tabs = { labels = 1, icons = 1, on = 1, focus = 1, offered = 1 },
   cards = { cur = 1, current = 1, w = 1, h = 1, cols = 1, new = 1, changed = 1, group = 1 },
   card = { label = 1, sub = 1, badge = 1, icon = 1, tone = 1 },
@@ -1501,7 +1501,7 @@ local COND_PROPS = { shown = 1, focus = 1, when = 1, marked = 1 }
 local NAME_PROPS = { key = 1, on = 1, cut = 1, changed = 1, commit = 1, current = 1, cur = 1, by = 1, new = 1,
                      buttons = 1, default = 1, close = 1, off = 1, kind = 1, face = 1, size = 1, wrap = 1,
                      align = 1, input = 1, wash = 1, anchor = 1, arg = 1, look = 1, labels = 1, syntax = 1,
-                     mkind = 1, dir = 1, ground = 1, filter = 1, icons = 1 }
+                     mkind = 1, dir = 1, ground = 1, filter = 1, icons = 1, pointer = 1 }
 local NUM_PROPS = { max = 1, lines = 1, lo = 1, hi = 1, span = 1, w = 1, gap = 1, pad = 1, rows = 1, h = 1 }
 -- a function the engine calls inside its frame
 local FN_PROPS = { draw = 1 }
@@ -2305,6 +2305,7 @@ function T.canvas(key, o)
   end
   n.o = check_opts("canvas", o, at)
   if n.o.draw == nil then fail("N01", at, "ui.canvas(" .. q(key) .. ") has no draw", "draw = function(x, y, w, h) ... end", "none") end
+  if n.o.pointer ~= nil then use_action(n.o.pointer, "pointer", at, "ui.canvas(" .. q(key) .. ")'s pointer", false) end
   n.o.key = key
   return n
 end
@@ -2402,6 +2403,16 @@ local function page_def(name, at)
          "ui.page(\"" .. tostring(name) .. "\", build)")
   end
   return p
+end
+
+-- the event a canvas's pointer handler is handed: kind ("down", "drag",
+-- "up"), x and y in the canvas, source ("touch"); read-only
+local EvMT = { __newindex = function(_, k)
+  fail("S03", where(), "an event is read-only (ev." .. tostring(k) .. " = ...)", "a read", "a write",
+       "a canvas handler reads the event; it writes state")
+end }
+local function event(kind, x, y, source)
+  return setmetatable({}, { __index = { kind = kind, x = x, y = y, source = source }, __newindex = EvMT.__newindex })
 end
 
 local function fire(name, from, ...)
@@ -2719,7 +2730,7 @@ T._in = {
   KEYMAP = KEYMAP, SYS = SYS, STOPS = STOPS, C_KINDS = C_KINDS, C_PROPS = C_PROPS, DERIVED = DERIVED, ENGINE_OWNED = ENGINE_OWNED, stack = stack, R = R,
   BACK = BACK, ModelMT = ModelMT,
   fail = fail, q = q, show = show, trace = trace, lookup = lookup, render = render, cond = cond, truthy = truthy,
-  frozen = frozen, setv = setv, fire = fire, fire_placed = fire_placed, fire_fn = fire_fn, build_page = build_page, page_title = page_title,
+  frozen = frozen, event = event, setv = setv, fire = fire, fire_placed = fire_placed, fire_fn = fire_fn, build_page = build_page, page_title = page_title,
   model_of = model_of, touched = touched, bump = function() GEN = GEN + 1 end,
 }
 

@@ -18,7 +18,7 @@ __moy_uitree = nil
 local E, V, VER, DECL, ACTIONS, ACTION_ORDER = I.E, I.V, I.VER, I.DECL, I.ACTIONS, I.ACTION_ORDER
 local LABELS, KEYMAP, DERIVED, stack, R = I.LABELS, I.KEYMAP, I.DERIVED, I.stack, I.R
 local fail, q, trace, frozen, fire, fire_fn = I.fail, I.q, I.trace, I.frozen, I.fire, I.fire_fn
-local fire_placed = I.fire_placed
+local fire_placed, event = I.fire_placed, I.event
 local build_page, touched, T = I.build_page, I.touched, I.T
 
 -- the engine's numbers (native/moy_uitree/moy_uitree.h)
@@ -47,6 +47,10 @@ local LOWERED = nil             -- the page whose tree the store holds
 local KEYS = {}                 -- the keys of the lowered page's nodes
 local DRAWS = {}                -- a canvas's node -> its draw
 local ROWS = false              -- the lowered page lists rows (whose keys are data)
+local POINTERS = {}             -- each canvas of the lowered page a pointer is routed to: { node, key, its pointer= action }
+local DRAWN = {}                -- a canvas's node -> { x, y, w, h, the frame that drew it there }
+local FRAMES = 0                -- the frames run
+local HELD = nil                -- the canvas a press started on, held until its release
 
 if NEW == nil then
   fail("E00", "load", "the C engine is not in this build", "a build with native/moy_uitree's Lua face", "none", FIX)
@@ -323,7 +327,10 @@ local function lower_node(n, parent, path)
     local h = shape.last(n)
     for i = 1, 4 do if h[i] then prop(h[i][1], h[i][2]) end end
   end
-  if n.kind == "canvas" then DRAWS[me] = n.o.draw end
+  if n.kind == "canvas" then
+    DRAWS[me] = n.o.draw
+    if n.o.pointer then POINTERS[#POINTERS + 1] = { me, key, n.o.pointer } end
+  end
   if n.action then check(X:node_action(me, AIDX[n.action]), "ui." .. n.kind .. " " .. q(key) .. "'s action", n.at) end
   if n.kind == "dialog" then
     for _, b in ipairs(n.o.buttons) do check(X:node_action(me, AIDX[b]), "ui.dialog's button " .. q(b), n.at) end
@@ -354,7 +361,7 @@ local function anchors(n)
 end
 
 local function lower(p)
-  KEYS, ROWS, DRAWS = {}, false, {}
+  KEYS, ROWS, DRAWS, POINTERS, HELD, DRAWN = {}, false, {}, {}, nil, {}
   X:build_begin(string.format("%d %s", #stack, p.def.name):sub(1, 31))
   lower_node(p.root, -1, p.def.name)
   check(X:build_end(), "the page " .. q(p.def.name), p.def.at)
@@ -368,7 +375,11 @@ local function made()
   X = NEW()
   X:on_draw(function(node, x, y, w, h)
     local f = DRAWS[node]
-    if f then f(x, y, w, h) end
+    if f then
+      local r = DRAWN[node]
+      if r then r[1], r[2], r[3], r[4], r[5] = x, y, w, h, FRAMES else DRAWN[node] = { x, y, w, h, FRAMES } end
+      f(x, y, w, h)
+    end
   end)
   declare()
   for name in pairs(DECL) do push(name) end
@@ -398,6 +409,38 @@ local function wants_back()
   return #stack > 1 or X:dialog() >= 0 or X:popover() ~= nil or KEYMAP["role:back"] ~= nil
 end
 
+-- A canvas with pointer= is handed down, drag and up in its own coordinates,
+-- at the rect the last frame drew it at; the press that starts on it holds it
+-- until release (uitree_c.py's CEditorPage.point)
+local function pointers()
+  if #POINTERS == 0 and not HELD then return end
+  local tx, ty, tapped, held = touch()
+  local h = HELD
+  if h then
+    if tx ~= nil and held then
+      if tx ~= h.px or ty ~= h.py then
+        h.px, h.py = tx, ty
+        fire_placed(h.name, "pointer drag on canvas " .. q(h.key), event("drag", tx - h.x, ty - h.y, "touch"))
+      end
+      return
+    end
+    HELD = nil
+    fire_placed(h.name, "pointer up on canvas " .. q(h.key), event("up", (tx or h.px) - h.x, (ty or h.py) - h.y, "touch"))
+    return
+  end
+  if not tapped then return end
+  for _, p in ipairs(POINTERS) do
+    local r = DRAWN[p[1]]
+    if r and r[5] == FRAMES and tx >= r[1] and tx < r[1] + r[3] and ty >= r[2] and ty < r[2] + r[4] then
+      local key, name, x, y = p[2], p[3], r[1], r[2]
+      fire_placed(name, "pointer down on canvas " .. q(key), event("down", tx - x, ty - y, "touch"))
+      if held then HELD = { key = key, name = name, x = x, y = y, px = tx, py = ty }
+      else fire_placed(name, "pointer up on canvas " .. q(key), event("up", tx - x, ty - y, "touch")) end
+      return
+    end
+  end
+end
+
 local ROLE_KEYS = { more = function() return btnp("y") or keyp(109) end }
 
 I.BACK.frame = function(p)
@@ -409,6 +452,7 @@ I.BACK.frame = function(p)
     if p.refocus then X:want_focus(p.refocus); p.refocus = nil end
   end
   committed()
+  pointers()
   local pf = R.pending_focus
   if pf then
     R.pending_focus = nil
@@ -419,6 +463,7 @@ I.BACK.frame = function(p)
   end
   -- the bar's title is the app's (its window's): the page's title is the page's to draw
   if E.bar("", {}, {}, wants_back()) == -1 then back() end
+  FRAMES = FRAMES + 1
   local r = X:frame(F_BAND | F_TRACE | math.min(255, #stack) * F_PAGES)
   if r < 0 then fail("X01", "frame", "the C engine's frame found no run open", "a run", "none") end
   drain()
