@@ -1,0 +1,55 @@
+name: Feedback or suggestion
+description: Something that works but could be better, or an idea for how Moybyte should look or behave
+labels: ["feedback"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the ideas. Only the first two answers are required. Something broken? Use the bug report instead.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - The desk, home, windows or themes (the shell)
+        - Settings
+        - The editor (code, blocks, sprites, map, music)
+        - The store or installing a cart
+        - Wi-Fi, Bluetooth or an update
+        - A cart or game
+        - Several areas
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What would you change?
+      description: A list of several small things is fine.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why, or what is the problem today?
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where did you notice it?
+      options:
+        - On a board's own screen
+        - In the browser, a console page served by a board (you typed the board's address)
+        - In the browser, a static web page (not served by a board)
+        - On the host simulator (tools/simulate_desktop.py)
+        - Not sure
+  - type: input
+    id: board
+    attributes:
+      label: Which board?
+      description: The board with the screen, or the board serving the browser page.
+      placeholder: "ESP32-C3 Zero"
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Screenshot or sketch
+      description: Drag a file in.
