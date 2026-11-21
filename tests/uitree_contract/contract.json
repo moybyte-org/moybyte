@@ -1,6 +1,6 @@
 {
  "spec": "ui_api_spec_2026-11.md revision 4",
- "about": "The UI API's contract as data: every error code (§25.2), node kind and prop (§7), takes= value (§5.4), role (§13.1), retired name (§7.9), app field (§19.1) and system value (§14). Both reference layers are tested against it (tests/test_uitree_contract.py).",
+ "about": "The UI API's contract as data: every error code (§25.2), node kind and prop (§7), takes= value (§5.4), role (§13.1), retired name (§7.9), app field (§19.1) and system value (§14). Both reference layers are tested against it (tests/test_uitree_contract.py). `designed: true` marks an entry the Python reference does not build (the spec's **not built**), held to the code by tests/test_uitree_contract.py; Lua's gaps are known.json's.",
  "types": {
   "tpl": "a template",
   "cond": "a condition",
@@ -1235,11 +1235,13 @@
     },
     "arg": {
      "type": "name",
-     "level": 1
+     "level": 1,
+     "designed": true
     },
     "unit": {
      "type": "name",
-     "level": 1
+     "level": 1,
+     "designed": true
     },
     "nav": {
      "type": "word:off",
@@ -1278,8 +1280,7 @@
    "props": {
     "close": {
      "type": "action|hook",
-     "level": 2,
-     "designed": true
+     "level": 2
     },
     "pad": {
      "type": "int",
@@ -1296,11 +1297,13 @@
    "props": {
     "follow": {
      "type": "bool",
-     "level": 1
+     "level": 1,
+     "designed": true
     },
     "new": {
      "type": "name",
-     "level": 1
+     "level": 1,
+     "designed": true
     },
     "snap": {
      "type": "bool",
@@ -1373,18 +1376,15 @@
     },
     "wrap": {
      "type": "word:cut,word",
-     "level": 1,
-     "designed": true
+     "level": 1
     },
     "lines": {
      "type": "int",
-     "level": 1,
-     "designed": true
+     "level": 1
     },
     "align": {
      "type": "word:start,center,end",
-     "level": 1,
-     "designed": true
+     "level": 1
     }
    }
   },
@@ -1392,8 +1392,7 @@
    "head": null,
    "level": 1,
    "section": "7.2",
-   "props": {},
-   "designed": true
+   "props": {}
   },
   "info": {
    "head": "tpl",
@@ -1414,11 +1413,13 @@
     },
     "tag": {
      "type": "tpl",
-     "level": 1
+     "level": 1,
+     "designed": true
     },
     "tone": {
      "type": "tpl",
-     "level": 1
+     "level": 1,
+     "designed": true
     }
    }
   },
@@ -1465,41 +1466,51 @@
    "props": {
     "side": {
      "type": "tpl",
-     "level": 1
+     "level": 1,
+     "designed": true
     },
     "head": {
      "type": "tpl",
-     "level": 1
+     "level": 1,
+     "designed": true
     },
     "status": {
      "type": "tpl",
-     "level": 1
+     "level": 1,
+     "designed": true
     },
     "signal": {
      "type": "int",
-     "level": 1
+     "level": 1,
+     "designed": true
     },
     "tone": {
      "type": "tpl",
-     "level": 1
+     "level": 1,
+     "designed": true
     },
     "max": {
      "type": "int",
-     "level": 1
+     "level": 1,
+     "designed": true
     },
     "lines": {
      "type": "int",
-     "level": 1
+     "level": 1,
+     "designed": true
     },
     "on": {
      "type": "action",
-     "level": 1
+     "level": 1,
+     "designed": true
     },
     "cut": {
      "type": "action",
-     "level": 1
+     "level": 1,
+     "designed": true
     }
-   }
+   },
+   "designed": true
   },
   "toast": {
    "head": "tpl",
@@ -1508,13 +1519,16 @@
    "props": {
     "anchor": {
      "type": "key",
-     "level": 2
+     "level": 2,
+     "designed": true
     },
     "icon": {
      "type": "tpl",
-     "level": 2
+     "level": 2,
+     "designed": true
     }
-   }
+   },
+   "designed": true
   },
   "picture": {
    "head": "state",
@@ -1550,8 +1564,7 @@
     },
     "look": {
      "type": "word:count",
-     "level": 2,
-     "designed": true
+     "level": 2
     }
    }
   },
@@ -1562,25 +1575,21 @@
    "props": {
     "wrap": {
      "type": "word:cut,word",
-     "level": 2,
-     "designed": true
+     "level": 2
     },
     "follow": {
      "type": "bool",
-     "level": 2,
-     "designed": true
+     "level": 2
     },
     "syntax": {
      "type": "name",
-     "level": 2,
-     "designed": true
+     "level": 2
     },
     "face": {
      "type": "word:ui,title,mono,caption,result",
      "level": 2
     }
-   },
-   "designed": true
+   }
   },
   "month": {
    "head": null,
@@ -1650,8 +1659,7 @@
     },
     "marked": {
      "type": "cond",
-     "level": 2,
-     "designed": true
+     "level": 2
     }
    }
   },
@@ -1678,11 +1686,13 @@
     },
     "tag": {
      "type": "tpl",
-     "level": 1
+     "level": 1,
+     "designed": true
     },
     "tone": {
      "type": "tpl",
-     "level": 1
+     "level": 1,
+     "designed": true
     },
     "focus": {
      "type": "cond",
@@ -1697,29 +1707,36 @@
    "props": {
     "label": {
      "type": "tpl",
-     "level": 2
+     "level": 2,
+     "designed": true
     },
     "icon": {
      "type": "tpl",
-     "level": 2
+     "level": 2,
+     "designed": true
     },
     "arg": {
      "type": "lit",
-     "level": 2
+     "level": 2,
+     "designed": true
     },
     "marked": {
      "type": "cond",
-     "level": 2
+     "level": 2,
+     "designed": true
     },
     "fill": {
      "type": "tpl",
-     "level": 2
+     "level": 2,
+     "designed": true
     },
     "focus": {
      "type": "cond",
-     "level": 2
+     "level": 2,
+     "designed": true
     }
-   }
+   },
+   "designed": true
   },
   "toggle": {
    "head": "state",
@@ -1736,11 +1753,13 @@
     },
     "when": {
      "type": "cond",
-     "level": 1
+     "level": 1,
+     "designed": true
     },
     "off": {
      "type": "word:hide,grey",
-     "level": 1
+     "level": 1,
+     "designed": true
     },
     "label": {
      "type": "tpl",
@@ -1767,11 +1786,13 @@
     },
     "when": {
      "type": "cond",
-     "level": 1
+     "level": 1,
+     "designed": true
     },
     "off": {
      "type": "word:hide,grey",
-     "level": 1
+     "level": 1,
+     "designed": true
     },
     "label": {
      "type": "tpl",
@@ -1787,8 +1808,7 @@
     },
     "look": {
      "type": "word:steps",
-     "level": 2,
-     "designed": true
+     "level": 2
     },
     "icon": {
      "type": "tpl",
@@ -1811,11 +1831,13 @@
     },
     "when": {
      "type": "cond",
-     "level": 1
+     "level": 1,
+     "designed": true
     },
     "off": {
      "type": "word:hide,grey",
-     "level": 1
+     "level": 1,
+     "designed": true
     },
     "label": {
      "type": "tpl",
@@ -1835,7 +1857,8 @@
     },
     "grow": {
      "type": "bool",
-     "level": 1
+     "level": 1,
+     "designed": true
     },
     "commit": {
      "type": "bool",
@@ -1875,8 +1898,7 @@
     },
     "look": {
      "type": "word:cycle",
-     "level": 2,
-     "designed": true
+     "level": 2
     },
     "text": {
      "type": "tpl",
@@ -1918,33 +1940,41 @@
    "props": {
     "count": {
      "type": "tpl",
-     "level": 2
+     "level": 2,
+     "designed": true
     },
     "first": {
      "type": "tpl",
-     "level": 2
+     "level": 2,
+     "designed": true
     },
     "cols": {
      "type": "tpl",
-     "level": 2
+     "level": 2,
+     "designed": true
     },
     "face": {
      "type": "name",
-     "level": 2
+     "level": 2,
+     "designed": true
     },
     "slide": {
      "type": "bool",
-     "level": 2
+     "level": 2,
+     "designed": true
     },
     "on": {
      "type": "action|hook",
-     "level": 2
+     "level": 2,
+     "designed": true
     },
     "focus": {
      "type": "cond",
-     "level": 2
+     "level": 2,
+     "designed": true
     }
-   }
+   },
+   "designed": true
   },
   "rows": {
    "head": "model",
@@ -1961,7 +1991,8 @@
     },
     "check": {
      "type": "bool",
-     "level": 1
+     "level": 1,
+     "designed": true
     },
     "empty": {
      "type": "tpl",
@@ -1969,7 +2000,8 @@
     },
     "by": {
      "type": "name",
-     "level": 1
+     "level": 1,
+     "designed": true
     },
     "filter": {
      "type": "name",
@@ -2117,7 +2149,8 @@
     },
     "default": {
      "type": "action",
-     "level": 1
+     "level": 1,
+     "designed": true
     }
    }
   },
@@ -2140,7 +2173,8 @@
     },
     "unit": {
      "type": "name",
-     "level": 1
+     "level": 1,
+     "designed": true
     },
     "wash": {
      "type": "word:page,view,none",
@@ -2226,8 +2260,7 @@
     },
     "pad": {
      "type": "int",
-     "level": 2,
-     "designed": true
+     "level": 2
     }
    }
   },
@@ -2309,7 +2342,8 @@
     },
     "unit": {
      "type": "name",
-     "level": 2
+     "level": 2,
+     "designed": true
     },
     "head": {
      "type": "bool",
@@ -2370,15 +2404,18 @@
     },
     "reads": {
      "type": "list",
-     "level": 2
+     "level": 2,
+     "designed": true
     },
     "size": {
      "type": "list",
-     "level": 2
+     "level": 2,
+     "designed": true
     },
     "sized": {
      "type": "hook",
-     "level": 2
+     "level": 2,
+     "designed": true
     },
     "pointer": {
      "type": "action|hook",
@@ -2386,19 +2423,23 @@
     },
     "keys": {
      "type": "hook",
-     "level": 2
+     "level": 2,
+     "designed": true
     },
     "capture": {
      "type": "cond",
-     "level": 2
+     "level": 2,
+     "designed": true
     },
     "mark": {
      "type": "lit",
-     "level": 2
+     "level": 2,
+     "designed": true
     },
     "hint": {
      "type": "tpl",
-     "level": 2
+     "level": 2,
+     "designed": true
     },
     "focus": {
      "type": "cond",
@@ -2425,8 +2466,7 @@
     },
     "ground": {
      "type": "name",
-     "level": 2,
-     "designed": true
+     "level": 2
     },
     "w": {
      "type": "int",
@@ -2441,8 +2481,7 @@
    "props": {
     "draw": {
      "type": "fn",
-     "level": 1,
-     "designed": true
+     "level": 1
     },
     "pointer": {
      "type": "fn",
@@ -2460,8 +2499,7 @@
      "type": "fn",
      "level": 1
     }
-   },
-   "designed": true
+   }
   }
  },
  "takes": {
@@ -2492,7 +2530,8 @@
   },
   "key": {
    "level": 2,
-   "params": 1
+   "params": 1,
+   "designed": true
   }
  },
  "roles": {
@@ -2531,7 +2570,8 @@
   },
   "space": {
    "owner": "app",
-   "level": 2
+   "level": 2,
+   "designed": true
   },
   "search": {
    "owner": "app",

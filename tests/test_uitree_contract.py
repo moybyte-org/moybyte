@@ -193,6 +193,36 @@ def test_the_table_is_whole():
         assert k not in TABLE["kinds"]
 
 
+def not_built_marks(f):
+    """Every entry whose `designed` mark disagrees with the Python reference:
+    `designed: true` is exactly what the reference does not build."""
+    out = []
+
+    def mark(what, d, built):
+        if bool(d.get("designed")) == built:
+            out.append("%s is %s, marked %s" % (what, "built" if built else "not built",
+                                                 "designed" if built else "built"))
+    for k, d in TABLE["kinds"].items():
+        built = k in f["kinds"]
+        mark("kind " + k, d, built)
+        for p, pd in d["props"].items():
+            mark("prop %s.%s" % (k, p), pd, built and (p in f["kinds"][k] or p in f["common"]))
+    for name, table in (("action", "action_props"), ("hook", "hook_props")):
+        for p, pd in TABLE[table].items():
+            mark("%s prop %s" % (name, p), pd, p in f[name])
+    for t, d in TABLE["takes"].items():
+        mark("takes " + t, d, t in f["takes"])
+    for r, d in TABLE["roles"].items():
+        if d["owner"] == "app":
+            mark("role " + r, d, r in f["roles"])
+    return out
+
+
+def test_the_not_built_marks_are_the_python_layer_s():
+    wrong = not_built_marks(python_facts())
+    assert not wrong, "set or drop `designed` in tests/uitree_contract/contract.json:\n  " + "\n  ".join(wrong)
+
+
 def test_the_python_layer_holds_to_the_table():
     _held("python", python_facts())
 
