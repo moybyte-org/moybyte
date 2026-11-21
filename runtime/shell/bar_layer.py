@@ -660,7 +660,7 @@ class BarLayer:
             if got is None or getattr(got, "glass", False) or ws.wm.desk_open():
                 return
             where = "app"
-        elif layer is ws.tasks_layer and ws.windowed_chrome:
+        elif where in ("tasks", "settings") and ws.windowed_chrome:
             return                        # in a desk window its title strip is the bar
         self.draw_status_strip(where)
 

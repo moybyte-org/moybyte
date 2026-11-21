@@ -265,7 +265,8 @@ class SettingsLayer(Layer):
     The bar's lent zone is the back chevron and the title where the bar
     places no X (runtime/shell/bar_layer.py draws it from `back_title`): a tap on
     the chevron is `back`, as Esc and B are, one on the title knocks on the
-    secret door (#21)."""
+    secret door (#21). In a desk window the window's title strip is its bar
+    and the page fills the window under it."""
 
     B_BACK = True
     # Its keys move its page alone; whether a page still moves is its
@@ -1397,7 +1398,7 @@ class SettingsLayer(Layer):
 
     def handle_pointer(self, px, py, click):
         ws = self.ws
-        if click and ws.bar_layer.handle_bar_tap("settings", px, py):
+        if click and not ws.windowed_chrome and ws.bar_layer.handle_bar_tap("settings", px, py):
             return True
         if click:
             ws.ach_ui._secret_taps = 0
@@ -1423,11 +1424,18 @@ class SettingsLayer(Layer):
         self._draw_page()
 
     def _content(self):
-        """The rect the page fills: the layout's content rect."""
-        lay = self.ws.layout
+        """The rect the page fills: the layout's content rect; in a desk
+        window the window's whole content, under its title strip."""
+        ws = self.ws
+        if ws.windowed_chrome:
+            cv = ws.sys_canvas
+            x, y, w, h = 0, 0, cv.w, cv.h
+        else:
+            lay = ws.layout
+            x, y, w, h = lay.cx, lay.cy, lay.cw, lay.ch
         r = self._rect
-        if r[0] != lay.cx or r[1] != lay.cy or r[2] != lay.cw or r[3] != lay.ch:
-            r = self._rect = (lay.cx, lay.cy, lay.cw, lay.ch)
+        if r[0] != x or r[1] != y or r[2] != w or r[3] != h:
+            r = self._rect = (x, y, w, h)
         return r
 
     def _draw_page(self):

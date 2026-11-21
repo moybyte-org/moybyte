@@ -316,7 +316,6 @@ def test_the_status_widgets_give_way_only_where_the_ladder_needs_their_room(
 @pytest.mark.parametrize("where,opener", [
     ("menu", lambda ws: ws.open_in_editor(g._cart_by_title(ws, "Star Catcher"))),
     ("projects", lambda ws: ws.home.open_projects()),
-    ("settings", lambda ws: ws.open_settings()),
 ])
 def test_a_desk_window_zone_is_tapped_on_the_rect_it_is_drawn_on(tmp_path, monkeypatch,
                                                                  where, opener):

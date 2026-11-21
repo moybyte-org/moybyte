@@ -283,3 +283,20 @@ def test_the_time_zone_page_opens_on_its_zone_with_no_frame_forced(tmp_path):
     assert fid and fid.startswith("CET-1CEST"), fid
     x, y, w, h = sl._sub.box(fid)
     assert lay.cy <= y and y + h <= lay.cy + lay.ch, ((x, y, w, h), (lay.cy, lay.ch))
+
+
+def test_in_a_desk_window_the_page_starts_under_the_title_strip(tmp_path):
+    """In a desk window the title strip is Settings' bar: its page fills the
+    window's content, no empty band reserved over its first rows."""
+    ws = _ws(tmp_path, sys_size=(1024, 600), windowed=True)
+    drv = _drv(ws)
+    for _ in range(4):
+        drv.frame(_DT)
+    win = ws.wm.windows["settings"]
+    cx, cy, cw, _ch = win.content_rect()
+    cv = ws.glass_canvas
+    band = ws.layout.cy
+    buf = bytes(cv._buf)
+    seen = {buf[2 * (y * cv.w + x):2 * (y * cv.w + x) + 2]
+            for y in range(cy, cy + band) for x in range(cx, cx + cw)}
+    assert len(seen) > 2, "the window's top %d rows are one flat fill" % band
