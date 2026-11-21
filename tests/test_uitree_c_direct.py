@@ -100,7 +100,9 @@ CASES = {
     # conditions
     "a template condition": 'ui.label("x", shown="{b}")',
     "a choice condition": 'ui.label("x", shown="b?x")',
-    "& and | mixed": 'ui.label("x", shown="b & n | t")',
+    "&& and || mixed": 'ui.label("x", shown="b && n || t")',
+    "a single &": 'ui.label("x", shown="b & n")',
+    "brackets": 'ui.label("x", shown="(b && n)")',
     "an empty condition": 'ui.label("x", shown="")',
     "a number condition": 'ui.label("x", shown=3)',
     "brackets in a condition": 'ui.label("x", shown="(b)")',
@@ -113,7 +115,7 @@ CASES = {
     "@input's truth": 'ui.label("x", shown="@input")',
     "@input's no value": 'ui.label("x", shown="@input=foo")',
     "@input's value": 'ui.label("x", shown="@input=touch")',
-    "an empty term": 'ui.label("x", shown="b & ")',
+    "an empty term": 'ui.label("x", shown="b && ")',
     "a field outside a list in a condition": 'ui.label("x", shown=".id")',
     "a negated comparison": 'ui.label("x", shown="!n!=3")',
     # props and rows

@@ -201,6 +201,8 @@ CASES = {
     "C01": (APP + 'local s = ui.state { n = 0 }\nui.page("p", function() ui.label("x", { shown = "{n}" }) end)\n', 3, None),
     "C02": (APP + 'local s = ui.state { a = false, b = false, c = false }\n'
             'ui.page("p", function() ui.label("x", { shown = "a && b || c" }) end)\n', 3, None),
+    "C01 single": (APP + 'local s = ui.state { a = false, b = false }\n'
+                   'ui.page("p", function() ui.label("x", { shown = "a & b" }) end)\n', 3, None),
     "C03": (APP + 'local s = ui.state { a = false, b = false, c = false }\n'
             'ui.page("p", function() ui.label("x", { shown = "a && (b || c)" }) end)\n', 3, None),
     "D01": (APP + 'ui.app("T2", { icon = "calc" })' + PAGE, 2, None),

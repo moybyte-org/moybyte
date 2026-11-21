@@ -1197,24 +1197,58 @@ def _truth(t, name, where):
 STATS = {"bare_nonbool": 0}
 
 
+def _joins(src, where):
+    """The operators a condition joins its terms with: and is `&&`, or is
+    `||`; a single `&` or `|` is C01."""
+    i, ops = 0, set()
+    while i < len(src):
+        ch = src[i]
+        if ch in "&|":
+            if src[i + 1:i + 2] != ch:
+                raise UIError("C01", "condition %r joins with a single %s" % (src, ch), where=where,
+                              fix="and is &&, or is ||: %r" % _doubled(src))
+            ops.add(ch * 2)
+            i += 1
+        i += 1
+    return ops
+
+
+def _doubled(src):
+    out, i = "", 0
+    while i < len(src):
+        ch = src[i]
+        if ch in "&|":
+            out += ch * 2
+            i += 2 if src[i + 1:i + 2] == ch else 1
+            continue
+        out += ch
+        i += 1
+    return out
+
+
 def cond(src, ctx, where):
-    """A bare condition: name, !name, name=lit, name!=lit, joined by &."""
+    """A bare condition: name, !name, name=lit, name!=lit, joined by && or
+    by ||, never both and never bracketed (a derive does that)."""
     if isinstance(src, bool):
         return lambda row: src
     if not isinstance(src, str) or not src.strip():
         raise UIError("C01", "a condition is a text", found="%r (%s)" % (src, _pyt(src)),
-                      fix='shown="on", "!busy", "mode=edit", "a & !b"', where=where)
+                      fix='shown="on", "!busy", "mode=edit", "a && !b"', where=where)
     if "{" in src or "?" in src:
         raise UIError("C01", "a condition is bare, not a template", found=repr(src),
                       fix=repr(src.replace("{", "").replace("}", "")) if "{" in src
-                      else "conditions join with & only; compute anything more in a handler",
+                      else "terms joined by && or by ||; a derive computes anything more",
                       where=where)
-    any_of = "|" in src
-    if any_of and "&" in src:
-        raise UIError("C02", "a condition mixes & and |: %r" % src, where=where,
-                      fix="a condition needing both is a named bool in state, written by a handler")
+    ops = _joins(src, where)
+    if "(" in src or ")" in src:
+        raise UIError("C03", "condition %r has brackets" % src, where=where,
+                      fix='a derive: ui.derive("NAME", cond=%r), and test NAME' % src)
+    if len(ops) > 1:
+        raise UIError("C02", "condition %r mixes && and ||" % src, where=where,
+                      fix='a derive: ui.derive("ok", cond="a && (b || c)"), and shown="ok"')
+    any_of = "||" in ops
     terms = []
-    for term in src.split("|" if any_of else "&"):
+    for term in src.split("||" if any_of else "&&"):
         term = term.strip()
         neg = term.startswith("!") and not term.startswith("!=")
         body = term[1:] if neg else term
@@ -1251,18 +1285,23 @@ def cond(src, ctx, where):
 
 
 def cond_full(src, ctx, where):
-    """A derive's condition: terms as in `cond`, `!`, and brackets; `&` and
-    `|` may both appear, but one bracket level joins with one of them."""
-    toks, run = [], ""
-    for ch in src + "&":
+    """A derive's condition: terms as in `cond`, `!`, and brackets; `&&` and
+    `||` may both appear, but one bracket level joins with one of them."""
+    _joins(src, where)
+    toks, run, i = [], "", 0
+    while i < len(src):
+        ch = src[i]
         if ch in "()&|":
             if run.strip():
                 toks.append(run.strip())
-            toks.append(ch)
+            toks.append(ch if ch in "()" else ch * 2)
             run = ""
-        else:
-            run += ch
-    toks.pop()
+            i += 1 if ch in "()" else 2
+            continue
+        run += ch
+        i += 1
+    if run.strip():
+        toks.append(run.strip())
     pos = [0]
 
     def peek():
@@ -1299,17 +1338,17 @@ def cond_full(src, ctx, where):
 
     def level():
         parts, ops = [group()], set()
-        while peek() in ("&", "|"):
+        while peek() in ("&&", "||"):
             ops.add(take())
             parts.append(group())
         if len(ops) > 1:
-            raise UIError("C02", "derive condition %r mixes & and | at one level" % src, where=where,
-                          fix="bracket one side: a & (b | c)")
+            raise UIError("C02", "derive condition %r mixes && and || at one level" % src, where=where,
+                          fix="bracket one side: a && (b || c)")
         if not ops:
             return parts[0]
         # plain loops: a generator expression is an object a call, and a
         # derive is read every frame (a `shown=` naming it)
-        if ops == {"&"}:
+        if ops == {"&&"}:
             def ev_all(row):
                 for p in parts:
                     if not p(row):
@@ -1325,7 +1364,7 @@ def cond_full(src, ctx, where):
         return ev_any
     g = level()
     if peek() is not None:
-        raise UIError("C01", "derive condition %r: %r after the end" % (src, peek()), where=where, fix='join two conditions with & or |')
+        raise UIError("C01", "derive condition %r: %r after the end" % (src, peek()), where=where, fix='join two conditions with && or ||')
     return g
 
 
@@ -2057,7 +2096,7 @@ def _direct_src(kind, k, v, pt, where):
     if pt == "cond":
         if not isinstance(v, (str, bool)) or isinstance(v, str) and not v.strip():
             raise UIError("C01", "a condition is a text", found="%r (%s)" % (v, _pyt(v)),
-                          fix='shown="on", "!busy", "mode=edit", "a & !b"', where=where)
+                          fix='shown="on", "!busy", "mode=edit", "a && !b"', where=where)
     elif pt == "texts":
         if isinstance(v, str) or not isinstance(v, (list, tuple)):
             raise UIError("N01", "ui.%s %s= is a list of texts" % (kind, k), where=where,

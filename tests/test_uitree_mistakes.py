@@ -35,6 +35,8 @@ PY = {
     "C01": (H + "s = ui.state(n=0)\n" + PAGE + "        ui.label(\"x\", shown=\"{n}\")\n", 5),
     "C02": (H + "s = ui.state(a=False, b=False, c=False)\n" + PAGE
             + "        ui.label(\"x\", shown=\"a && b || c\")\n", 5),
+    "C03": (H + "s = ui.state(a=False, b=False, c=False)\n" + PAGE
+            + "        ui.label(\"x\", shown=\"a && (b || c)\")\n", 5),
     "E01": (H + "s = ui.state(e=ui.enum(\"a\", \"b\"))\n", 2),
     "E02": (H + "s = ui.state(e=ui.enum(\"a\", \"b\", init=\"c\"))\n", 2),
     "E03": (H + "s = ui.state(e=ui.enum(\"a\", init=\"a\"))\n", 2),

@@ -782,9 +782,8 @@ local function cond_term(part, e, ctx, at)
   end
   lhs = (lhs or body):match("^%s*(.-)%s*$")
   if lhs == "" then fail("T01", at, "the condition " .. q(e) .. " has an empty term", "name, !name or name=value", q(part)) end
-  if lhs:find("[%s&]") or (lit and lit:find("[%s&]")) then
-    fail("T01", at, "cannot read the condition " .. q(e), "terms joined by && or ||", q(part),
-         part:find("&") and "and is &&, or is ||" or nil)
+  if lhs:find("%s") or (lit and lit:find("%s")) then
+    fail("T01", at, "cannot read the condition " .. q(e), "terms joined by && or ||", q(part))
   end
   if neg == "!" and op then fail("T01", at, "the condition " .. q(part) .. " negates a comparison", "name!=value", q(part)) end
   local p, ty = operand(lhs, e, ctx, at)
@@ -825,6 +824,12 @@ end
 
 local DERIVE_MODE = false
 local function cond_expr(e, ctx, at)
+  -- and is &&, or is ||: a single & or | is C01
+  local lone = e:gsub("&&", ""):gsub("||", ""):match("[&|]")
+  if lone then
+    fail("C01", at, "the condition " .. q(e) .. " joins with a single " .. lone, "&& or ||", q(lone),
+         "and is &&, or is ||: " .. q((e:gsub("&+", "&&"):gsub("|+", "||"))))
+  end
   local pos, ands, ors = 1, false, false
   local function skip() pos = e:find("[^%s]", pos) or #e + 1 end
   local expr

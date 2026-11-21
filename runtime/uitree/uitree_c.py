@@ -84,8 +84,9 @@ FIXES = {"T01": "the template's syntax: {name}, {name|fmt %d}, {cond?a:b}; '{{' 
          "T03": "name a value of the type the site takes",
          "T04": "a label for each value of the enum, True and False for a bool, else \"_\"",
          "T05": "{sel.field} outside a list; {.field} and @current inside ui.rows",
-         "C01": 'a bare condition: shown="on", "!busy", "mode=edit", "a & !b"',
-         "C02": "a condition needing & and | is a derive, named here",
+         "C01": 'a bare condition: shown="on", "!busy", "mode=edit", "a && !b"; and is &&, or is ||',
+         "C02": "a condition needing && and || is a derive, named here",
+         "C03": "a condition with brackets is a derive, named here",
          "N04": "a size class: @wide, @desk, @tall, @handheld"}
 
 

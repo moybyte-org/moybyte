@@ -37,7 +37,7 @@ import layout_base as _lb
 TITLE = "Achievements"
 NONE_LINE = "Play, draw and make things to find them."
 COUNT_LINE = ("{none?None found yet:}{every?All {total} found!:}"
-              "{!none & !every?{found} of {total} found:}")
+              "{!none && !every?{found} of {total} found:}")
 SECRET = "Secret"
 SECRET_HOW = "Keep exploring"
 NOT_FOUND = "Not found yet"
@@ -187,7 +187,7 @@ def achievements_page():
                     ui.label("{cur.title}", face="title")
                     ui.label("{cur.how}", tone="dim", shown="!cur.going")
                     ui.label("{cur.state}", tone="value", shown="cur.got")
-                    ui.label("{cur.state}", tone="dim", shown="!cur.got & !cur.going")
+                    ui.label("{cur.state}", tone="dim", shown="!cur.got && !cur.going")
                     ui.progress("cur.value", max="{cur.goal}", label="{cur.how}",
                                 shown="cur.going")
 

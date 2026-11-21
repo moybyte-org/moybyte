@@ -375,9 +375,21 @@ int uit_cond_compile(uit_t *e, const char *src, int model)
         return uit_check_fail(e, "C01", UIT_MSG("a condition is a text, not empty", ""));
     if (strpbrk(src, "{?"))
         return uit_check_fail(e, "C01", UIT_MSG("condition %s is bare, not a template", "%s"), src);
-    int any = strchr(src, '|') != NULL;
-    if (any && strchr(src, '&'))
-        return uit_check_fail(e, "C02", UIT_MSG("condition %s mixes & and |", "%s"), src);
+    // and is "&&", or is "||"; a single '&' or '|' is C01
+    int all = 0, any = 0;
+    for (const char *p = src; *p; p++) {
+        if (*p != '&' && *p != '|')
+            continue;
+        if (p[1] != *p)
+            return uit_check_fail(e, "C01", UIT_MSG("condition %s joins with a single %c: and is &&, or is ||", "%s %c"),
+                                  src, *p);
+        *p == '&' ? (all = 1) : (any = 1);
+        p++;
+    }
+    if (strpbrk(src, "()"))
+        return uit_check_fail(e, "C03", UIT_MSG("condition %s has brackets", "%s"), src);
+    if (any && all)
+        return uit_check_fail(e, "C02", UIT_MSG("condition %s mixes && and ||", "%s"), src);
     if (uit_grow((void **)&e->conds, &e->cconds, e->nconds + 1, sizeof *e->conds))
         return UIT_E_NOMEM;
     int sat = uit_buf_put(&e->pool, src, n);
@@ -390,10 +402,10 @@ int uit_cond_compile(uit_t *e, const char *src, int model)
         e->conds[e->nconds] = C;
         return e->nconds++;
     }
-    char sep = any ? '|' : '&';
+    const char *sep = any ? "||" : "&&";
     const char *p = src;
     for (;;) {
-        const char *q = strchr(p, sep);
+        const char *q = strstr(p, sep);
         size_t len = q ? (size_t)(q - p) : strlen(p);
         if (uit_grow((void **)&e->terms, &e->cterms, e->nterms + 1, sizeof *e->terms))
             return UIT_E_NOMEM;
@@ -405,7 +417,7 @@ int uit_cond_compile(uit_t *e, const char *src, int model)
         C.n++;
         if (!q)
             break;
-        p = q + 1;
+        p = q + 2;
     }
     e->conds[e->nconds] = C;
     return e->nconds++;

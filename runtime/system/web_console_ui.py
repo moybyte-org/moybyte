@@ -84,7 +84,7 @@ def web_page():
                 ui.label("{sign_in}", face="caption", tone="dim", wrap="word", shown="address")
                 ui.label("{note}", face="caption", tone="dim", wrap="word", shown="note")
                 ui.button("update_it", shown="stale")
-                ui.button("turn_off", "danger", shown="@touch|@desk")
+                ui.button("turn_off", "danger", shown="@touch || @desk")
 
 
 class _Damage:

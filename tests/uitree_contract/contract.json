@@ -158,9 +158,9 @@
    "stage": [
     "build"
    ],
-   "meaning": "a condition that is a template, or neither a text nor a bool",
+   "meaning": "a condition that is a template, neither a text nor a bool, or joined with a single `&` or `|` (and is `&&`, or is `||`)",
    "fix": {
-    "python": "`shown=\"pick\"`, not `shown=\"{pick}\"`",
+    "python": "`shown=\"pick\"`, not `shown=\"{pick}\"`; `\"a && b\"`, not `\"a & b\"`",
     "lua": "as Python",
     "c": "as Python"
    },
@@ -188,7 +188,7 @@
     "lua": "as Python",
     "c": "as Python"
    },
-   "as_run": "C02"
+   "as_run": ""
   },
   "D01": {
    "stage": [

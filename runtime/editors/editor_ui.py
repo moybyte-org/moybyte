@@ -119,7 +119,7 @@ ui.action("theme_done", "Done", theme_done)
 
 def head():
     with ui.page("Editor"):
-        with ui.tools("head", lend="bar", shown="!theme & !desk"):
+        with ui.tools("head", lend="bar", shown="!theme && !desk"):
             ui.tabs("tab", "TABS", icons="TAB_ICONS", on="open_tab",
                     offered={"blocks": "has_blocks", "code": "has_code", "paint": "has_paint",
                              "map": "has_map", "scene": "has_scene", "music": "has_music"})
@@ -128,13 +128,13 @@ def head():
             ui.button("play", icon="run", kind="primary", shown="!playing")
             ui.button("restart", icon="rotate", kind="primary", shown="playing")
             ui.button("stop", icon="stop", kind="primary", shown="playing")
-        with ui.tools("theme_head", lend="bar", shown="theme & !desk"):
+        with ui.tools("theme_head", lend="bar", shown="theme && !desk"):
             ui.button("theme_done", icon="back", alone=True)
             ui.tabs("theme_tab", "THEME_TABS", icons="THEME_ICONS", on="theme_open_tab")
             ui.label("{theme_name}")
             ui.button("undo", icon="undo", alone=True)
             ui.button("redo", icon="redo", alone=True)
-        with ui.tools("desk_head", lend="bar", shown="desk & !theme"):
+        with ui.tools("desk_head", lend="bar", shown="desk && !theme"):
             ui.tabs("space", "SPACES", icons="SPACE_ICONS", on="open_space",
                     offered={k: "has_space_" + k for k in KEYS})
             ui.button("undo", icon="undo", alone=True)
@@ -143,7 +143,7 @@ def head():
             ui.button("restart", icon="rotate", kind="primary", shown="playing",
                       marked="restart_owed")
             ui.button("stop", icon="stop", kind="primary", shown="playing")
-        with ui.tools("desk_theme", lend="bar", shown="desk & theme"):
+        with ui.tools("desk_theme", lend="bar", shown="desk && theme"):
             ui.tabs("theme_tab", "THEME_TABS", icons="THEME_ICONS", on="theme_open_tab")
             ui.button("undo", icon="undo", alone=True)
             ui.button("redo", icon="redo", alone=True)
@@ -173,7 +173,7 @@ def _one(c, also=None, **p):
     """A pane of one content, keyed by it, shown where its content is and
     `also` holds."""
     label, icon, _tab, least = CONTENTS[c]
-    when = " & ".join(w for w in (_WHEN.get(c), also) if w) or None
+    when = " && ".join(w for w in (_WHEN.get(c), also) if w) or None
     with ui.pane(c, title=label, icon=icon, min=least, shown=when, **p):
         ui.legacy("body", draw=pane_body)
 
@@ -198,18 +198,18 @@ def code_space():
     with ui.page("Editor"):
         with ui.panes("row", "root", grown="grown"):
             # a blocks cart's: the palette, the blocks, the run and the made code
-            _one("palette", size="z_palette", start=200, also="by_blocks & big")
+            _one("palette", size="z_palette", start=200, also="by_blocks && big")
             _one("blocks", grow=True, also="by_blocks")
-            with ui.panes("col", "bright", size="z_right", start="col_w", shown="by_blocks & big"):
+            with ui.panes("col", "bright", size="z_right", start="col_w", shown="by_blocks && big"):
                 _tabbed("run", "t_run", size="z_run", start="run_h")
                 _one("made", grow=True)
-            _tabbed("bside_n", "t_blocks_n", size="z_right", start="col_w", shown="by_blocks & !big")
+            _tabbed("bside_n", "t_blocks_n", size="z_right", start="col_w", shown="by_blocks && !big")
             # ...the code's
             _one("code", grow=True, also="!by_blocks")
-            with ui.panes("col", "right", size="z_right", start="col_w", shown="!by_blocks & big"):
+            with ui.panes("col", "right", size="z_right", start="col_w", shown="!by_blocks && big"):
                 _one("game", size="z_run", start="run_h")
                 _tabbed("side", "t_side", grow=True)
-            _tabbed("side_n", "t_side_n", size="z_right", start="col_w", shown="!by_blocks & !big")
+            _tabbed("side_n", "t_side_n", size="z_right", start="col_w", shown="!by_blocks && !big")
 
 
 def art_space():

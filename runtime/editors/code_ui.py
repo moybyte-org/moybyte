@@ -41,7 +41,7 @@ s = ui.state(
     full=True,
     note="", noted=False,
 )
-ui.derive("bare", cond="!finding & over=none & !stopped")     # nothing holds the keys but the code
+ui.derive("bare", cond="!finding && over=none && !stopped")     # nothing holds the keys but the code
 
 # where the incremental search re-runs from, and Go to's definitions before
 # its filter: handler memory, not shown
@@ -408,7 +408,7 @@ def code_page():
         _find_strip()
         ui.text_editor("code", find="find_q", find_on="finding", marks="marks",
                        gutter="gutter_on", focus=True)
-        with ui.tools("tool_row", shown="touch & tools_open"):
+        with ui.tools("tool_row", shown="touch && tools_open"):
             ui.button("select_mode", icon="select", alone=True, marked="select")
             ui.button("copy", icon="copy", alone=True)
             ui.button("cut", icon="cut", alone=True)
@@ -423,7 +423,7 @@ def code_page():
             ui.button("redo", icon="redo", alone=True)
         # a handheld's keys band stands in for the status line while the
         # find strip or an overlay holds the keys: the code keeps its rows
-        with ui.row("status_row", shown="@desk | bare"):
+        with ui.row("status_row", shown="@desk || bare"):
             ui.status("Ln {code.line}, Col {code.col} · {code.lines} lines · "
                       "{issue?1 issue:No issues}")
             ui.button("tools", icon="tools", alone=True, shown="touch", marked="tools_open")
