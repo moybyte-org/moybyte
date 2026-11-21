@@ -93,3 +93,8 @@ testpaths = ["tests"]
 # `make test` additionally sets PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 -- the blanket
 # version of this, which needs no updating when a new stale plugin shows up.
 addopts = "-p no:launch_testing -p no:launch_ros"
+# A full suite makes gigabytes of tmp_path folders: a passing test's goes when
+# it ends, a failing test's stays for reading, and the runs past the last two
+# go when a new one starts.
+tmp_path_retention_policy = "failed"
+tmp_path_retention_count = 2
