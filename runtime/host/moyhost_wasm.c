@@ -714,6 +714,10 @@ int hw_set_ring(host_wasm *r, uint32_t depth)
     return 0;
 }
 
+/* The UI engine's store of a compiled app's pages (native/moy_uitree/moy_uitree_wasm.h). */
+void moy_uitree_wasm_end(void);
+#pragma weak moy_uitree_wasm_end
+
 void hw_free(host_wasm *r)
 {
     if (!r) return;
@@ -723,6 +727,8 @@ void hw_free(host_wasm *r)
             *p = (host_wasm *)r->next;
             break;
         }
+    /* the store is the open run's; with another still open the next run's first row replaces it */
+    if (G_RUNS == NULL && moy_uitree_wasm_end != NULL) moy_uitree_wasm_end();
     moy_wasm_close(&r->w);
     if (r->env) wasm_runtime_destroy_exec_env(r->env);
     if (r->inst) wasm_runtime_deinstantiate(r->inst);

@@ -330,7 +330,7 @@ def _count_rows(ws, app):
     counts = {}
     ctx = app.ctx
     for r in _rows():
-        if r["role"] == "ui":                # the toolkit's rows: no role object
+        if r["role"] in ("ui", "uitree"):    # the toolkit's and the UI engine's rows: no role object
             continue
         obj = getattr(ctx, r["role"], None)
         if obj is None:

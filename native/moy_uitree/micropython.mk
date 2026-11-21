@@ -5,7 +5,8 @@ MOY_UITREE_DIR := $(USERMOD_DIR)
 SRC_USERMOD_C += $(MOY_UITREE_DIR)/modmoy_uitree.c
 SRC_USERMOD_LIB_C += $(MOY_UITREE_DIR)/moy_uitree.c $(MOY_UITREE_DIR)/moy_uitree_lang.c \
     $(MOY_UITREE_DIR)/moy_uitree_walk.c $(MOY_UITREE_DIR)/moy_uitree_aot.c $(MOY_UITREE_DIR)/moy_uitree_run.c \
-    $(MOY_UITREE_DIR)/moy_uitree_check.c
+    $(MOY_UITREE_DIR)/moy_uitree_check.c \
+    $(MOY_UITREE_DIR)/moy_uitree_wasm.c
 # UIT_TERSE: a refusal carries its code and the names involved, not prose.
 # MOYCORE_UITREE: a build that takes this engine opens its Lua face in
 # moycore (native/moycore/moycore_uitree.h, beside MOYCORE_UI).

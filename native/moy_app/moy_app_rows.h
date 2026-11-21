@@ -12,14 +12,14 @@ enum {
     MOY_ROLE_DAMAGE = 0, MOY_ROLE_SURFACE, MOY_ROLE_THEME, MOY_ROLE_FILES, MOY_ROLE_CARTS,
     MOY_ROLE_NAV, MOY_ROLE_PREFS, MOY_ROLE_NOTIFY, MOY_ROLE_WALLPAPER, MOY_ROLE_ARTWORK,
     MOY_ROLE_CLIPBOARD, MOY_ROLE_INSTALL, MOY_ROLE_WIFI, MOY_ROLE_BT, MOY_ROLE_USB,
-    MOY_ROLE_UI, MOY_ROLE_MOYBYTE, MOY_ROLE_N,
+    MOY_ROLE_UI, MOY_ROLE_MOYBYTE, MOY_ROLE_UITREE, MOY_ROLE_N,
 };
 // The roles every grant holds: the console calls, which the console answers
 // under the permission each names.
 #define MOY_ROLE_FLOOR ((1u << MOY_ROLE_MOYBYTE))
 #define MOY_ROLE_NAMES { \
     "damage", "surface", "theme", "files", "carts", "nav", "prefs", "notify", "wallpaper", \
-    "artwork", "clipboard", "install", "wifi", "bt", "usb", "ui", "moybyte", \
+    "artwork", "clipboard", "install", "wifi", "bt", "usb", "ui", "moybyte", "uitree", \
 }
 
 // The rows served in C: what moy_app_count counts.
@@ -62,7 +62,14 @@ enum {
     MOY_ROW_MOYBYTE_ED25519_PUBLIC, MOY_ROW_MOYBYTE_ED25519_SIGN,
     MOY_ROW_MOYBYTE_ED25519_VERIFY, MOY_ROW_MOYBYTE_STATUS_SHOW, MOY_ROW_MOYBYTE_STATUS_STATE,
     MOY_ROW_MOYBYTE_STATUS_REMOVE, MOY_ROW_MOYBYTE_AES_CTR, MOY_ROW_MOYBYTE_AES_CCM_SEAL,
-    MOY_ROW_MOYBYTE_AES_CCM_OPEN, MOY_ROW_MOYBYTE_CLOCK, MOY_ROW_N,
+    MOY_ROW_MOYBYTE_AES_CCM_OPEN, MOY_ROW_MOYBYTE_CLOCK, MOY_ROW_UITREE_STATE,
+    MOY_ROW_UITREE_MODEL, MOY_ROW_UITREE_ROW_OF, MOY_ROW_UITREE_LABELS, MOY_ROW_UITREE_ACTION,
+    MOY_ROW_UITREE_ACTION_ROW, MOY_ROW_UITREE_BUILD, MOY_ROW_UITREE_NODE, MOY_ROW_UITREE_PROP,
+    MOY_ROW_UITREE_NODE_ACTION, MOY_ROW_UITREE_BUILD_END, MOY_ROW_UITREE_OPEN,
+    MOY_ROW_UITREE_FOCUS, MOY_ROW_UITREE_FRAME, MOY_ROW_UITREE_NEXT, MOY_ROW_UITREE_SET_INT,
+    MOY_ROW_UITREE_SET_TEXT, MOY_ROW_UITREE_SET_ABSENT, MOY_ROW_UITREE_SET_MODEL,
+    MOY_ROW_UITREE_GET_INT, MOY_ROW_UITREE_GET_TEXT, MOY_ROW_UITREE_GET_CELL,
+    MOY_ROW_UITREE_ERROR, MOY_ROW_UITREE_DUMP, MOY_ROW_N,
 };
 #define MOY_ROW_NAMES { \
     "damage.all", "damage.again", "surface.canvas", "surface.size", "surface.font_scale", \
@@ -94,6 +101,12 @@ enum {
     "moybyte.ed25519_public", "moybyte.ed25519_sign", "moybyte.ed25519_verify", \
     "moybyte.status_show", "moybyte.status_state", "moybyte.status_remove", \
     "moybyte.aes_ctr", "moybyte.aes_ccm_seal", "moybyte.aes_ccm_open", "moybyte.clock", \
+    "uitree.state", "uitree.model", "uitree.row_of", "uitree.labels", "uitree.action", \
+    "uitree.action_row", "uitree.build", "uitree.node", "uitree.prop", \
+    "uitree.node_action", "uitree.build_end", "uitree.open", "uitree.focus", \
+    "uitree.frame", "uitree.next", "uitree.set_int", "uitree.set_text", \
+    "uitree.set_absent", "uitree.set_model", "uitree.get_int", "uitree.get_text", \
+    "uitree.get_cell", "uitree.error", "uitree.dump", \
 }
 
 // The role table, row for row: what the ROLE door names by index.
@@ -155,9 +168,15 @@ enum {
     MOY_T_MOYBYTE_AES_CCM_SEAL, MOY_T_MOYBYTE_AES_CCM_OPEN, MOY_T_MOYBYTE_NAME,
     MOY_T_MOYBYTE_KEY_MAKE, MOY_T_MOYBYTE_KEY_PUBLIC, MOY_T_MOYBYTE_KEY_SHARED,
     MOY_T_MOYBYTE_CLOCK, MOY_T_INSTALL_OWN, MOY_T_INSTALL_BOARD, MOY_T_INSTALL_LOCKED,
-    MOY_T_INSTALL_UNLOCK,
+    MOY_T_INSTALL_UNLOCK, MOY_T_UITREE_STATE, MOY_T_UITREE_MODEL, MOY_T_UITREE_ROW_OF,
+    MOY_T_UITREE_LABELS, MOY_T_UITREE_ACTION, MOY_T_UITREE_ACTION_ROW, MOY_T_UITREE_BUILD,
+    MOY_T_UITREE_NODE, MOY_T_UITREE_PROP, MOY_T_UITREE_NODE_ACTION, MOY_T_UITREE_BUILD_END,
+    MOY_T_UITREE_OPEN, MOY_T_UITREE_FOCUS, MOY_T_UITREE_FRAME, MOY_T_UITREE_NEXT,
+    MOY_T_UITREE_SET_INT, MOY_T_UITREE_SET_TEXT, MOY_T_UITREE_SET_ABSENT,
+    MOY_T_UITREE_SET_MODEL, MOY_T_UITREE_GET_INT, MOY_T_UITREE_GET_TEXT, MOY_T_UITREE_GET_CELL,
+    MOY_T_UITREE_ERROR, MOY_T_UITREE_DUMP,
 };
-#define MOY_APP_TABLE_N 222u
+#define MOY_APP_TABLE_N 246u
 // Each row's "role.verb", its role and its C row (-1: the Python console
 // serves it).
 #define MOY_APP_TABLE_ROWS { \
@@ -383,6 +402,30 @@ enum {
     { "install.board", MOY_ROLE_INSTALL, -1 }, \
     { "install.locked", MOY_ROLE_INSTALL, -1 }, \
     { "install.unlock", MOY_ROLE_INSTALL, -1 }, \
+    { "uitree.state", MOY_ROLE_UITREE, MOY_ROW_UITREE_STATE }, \
+    { "uitree.model", MOY_ROLE_UITREE, MOY_ROW_UITREE_MODEL }, \
+    { "uitree.row_of", MOY_ROLE_UITREE, MOY_ROW_UITREE_ROW_OF }, \
+    { "uitree.labels", MOY_ROLE_UITREE, MOY_ROW_UITREE_LABELS }, \
+    { "uitree.action", MOY_ROLE_UITREE, MOY_ROW_UITREE_ACTION }, \
+    { "uitree.action_row", MOY_ROLE_UITREE, MOY_ROW_UITREE_ACTION_ROW }, \
+    { "uitree.build", MOY_ROLE_UITREE, MOY_ROW_UITREE_BUILD }, \
+    { "uitree.node", MOY_ROLE_UITREE, MOY_ROW_UITREE_NODE }, \
+    { "uitree.prop", MOY_ROLE_UITREE, MOY_ROW_UITREE_PROP }, \
+    { "uitree.node_action", MOY_ROLE_UITREE, MOY_ROW_UITREE_NODE_ACTION }, \
+    { "uitree.build_end", MOY_ROLE_UITREE, MOY_ROW_UITREE_BUILD_END }, \
+    { "uitree.open", MOY_ROLE_UITREE, MOY_ROW_UITREE_OPEN }, \
+    { "uitree.focus", MOY_ROLE_UITREE, MOY_ROW_UITREE_FOCUS }, \
+    { "uitree.frame", MOY_ROLE_UITREE, MOY_ROW_UITREE_FRAME }, \
+    { "uitree.next", MOY_ROLE_UITREE, MOY_ROW_UITREE_NEXT }, \
+    { "uitree.set_int", MOY_ROLE_UITREE, MOY_ROW_UITREE_SET_INT }, \
+    { "uitree.set_text", MOY_ROLE_UITREE, MOY_ROW_UITREE_SET_TEXT }, \
+    { "uitree.set_absent", MOY_ROLE_UITREE, MOY_ROW_UITREE_SET_ABSENT }, \
+    { "uitree.set_model", MOY_ROLE_UITREE, MOY_ROW_UITREE_SET_MODEL }, \
+    { "uitree.get_int", MOY_ROLE_UITREE, MOY_ROW_UITREE_GET_INT }, \
+    { "uitree.get_text", MOY_ROLE_UITREE, MOY_ROW_UITREE_GET_TEXT }, \
+    { "uitree.get_cell", MOY_ROLE_UITREE, MOY_ROW_UITREE_GET_CELL }, \
+    { "uitree.error", MOY_ROLE_UITREE, MOY_ROW_UITREE_ERROR }, \
+    { "uitree.dump", MOY_ROLE_UITREE, MOY_ROW_UITREE_DUMP }, \
 }
 
 // The C rows the ROLE door serves (moy_app.c's door_c), each X(row, its

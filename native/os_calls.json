@@ -18,7 +18,8 @@
     {"role": "bt", "grant": "never", "ctx": true, "doc": "the Bluetooth keyboard service Settings' keyboard picker drives, or None on a board with none: the touch-only boards' keyboard itself, the T-Deck's second one (`keyboard()`); never a cart's"},
     {"role": "usb", "grant": "never", "ctx": true, "doc": "the USB drive, which lends the card to a computer (`runtime/system/usb_drive.py`): the drive or None (`drive()`), turning it on and off, and its state as the computer moved it (`poll()`); never a cart's"},
     {"role": "ui", "grant": "never", "ctx": false},
-    {"role": "moybyte", "grant": "floor", "ctx": false}
+    {"role": "moybyte", "grant": "floor", "ctx": false},
+    {"role": "uitree", "grant": "never", "ctx": false}
   ],
   "rows": [
     {"name": "open", "kind": "posix", "elf": 0, "hdr": "fcntl.h", "c": "int open(const char *path, int flags, ...)", "va": {"arg": "int mode", "when": "flags & O_CREAT"}, "fail": "-1", "perm": "files", "u": ["s", "-", "-"]},
@@ -329,7 +330,31 @@
     {"name": "install.own", "server": "shell"},
     {"name": "install.board", "server": "shell"},
     {"name": "install.locked", "server": "shell"},
-    {"name": "install.unlock", "server": "shell"}
+    {"name": "install.unlock", "server": "shell"},
+    {"name": "uitree.state", "server": "c", "in": ["name:str", "type:int", "values:str?"], "ret": "int", "how": "direct", "wasm": true},
+    {"name": "uitree.model", "server": "c", "in": ["slot:int", "names:str", "types:bytes", "key:int"], "ret": "int", "how": "direct", "wasm": true},
+    {"name": "uitree.row_of", "server": "c", "in": ["slot:int", "model:int"], "ret": "int", "how": "direct", "wasm": true},
+    {"name": "uitree.labels", "server": "c", "in": ["name:str", "keys:str", "words:str"], "ret": "int", "how": "direct", "wasm": true},
+    {"name": "uitree.action", "server": "c", "in": ["name:str", "label:str", "hint:str?", "when:str?", "off:int", "flags:int", "letters:str?", "icon:str?"], "ret": "int", "how": "direct", "wasm": true},
+    {"name": "uitree.action_row", "server": "c", "in": ["a:int", "slot:int"], "ret": "int", "how": "direct", "wasm": true},
+    {"name": "uitree.build", "server": "c", "in": ["page:str"], "ret": "int", "how": "direct", "wasm": true},
+    {"name": "uitree.node", "server": "c", "in": ["kind:int", "key:str", "parent:int"], "ret": "int", "how": "direct", "wasm": true},
+    {"name": "uitree.prop", "server": "c", "in": ["node:int", "name:str", "src:str"], "ret": "int", "how": "direct", "wasm": true},
+    {"name": "uitree.node_action", "server": "c", "in": ["node:int", "a:int"], "ret": "int", "how": "direct", "wasm": true},
+    {"name": "uitree.build_end", "server": "c", "in": [], "ret": "int", "how": "direct", "wasm": true},
+    {"name": "uitree.open", "server": "c", "in": [], "ret": "int", "how": "direct", "wasm": true},
+    {"name": "uitree.focus", "server": "c", "in": ["key:str?"], "ret": "int", "how": "direct", "wasm": true},
+    {"name": "uitree.frame", "server": "c", "in": ["flags:int"], "ret": "int", "how": "direct", "wasm": true},
+    {"name": "uitree.next", "server": "c", "in": ["ev:out"], "ret": "int", "how": "direct", "wasm": true},
+    {"name": "uitree.set_int", "server": "c", "in": ["slot:int", "v:int"], "ret": "int", "how": "direct", "wasm": true},
+    {"name": "uitree.set_text", "server": "c", "in": ["slot:int", "s:str"], "ret": "int", "how": "direct", "wasm": true},
+    {"name": "uitree.set_absent", "server": "c", "in": ["slot:int"], "ret": "int", "how": "direct", "wasm": true},
+    {"name": "uitree.set_model", "server": "c", "in": ["slot:int", "n:int", "cells:bytes"], "ret": "int", "how": "direct", "wasm": true},
+    {"name": "uitree.get_int", "server": "c", "in": ["slot:int"], "ret": "int", "how": "direct", "wasm": true},
+    {"name": "uitree.get_text", "server": "c", "in": ["slot:int", "out:out"], "ret": "len", "how": "direct", "wasm": true},
+    {"name": "uitree.get_cell", "server": "c", "in": ["slot:int", "row:int", "f:int", "out:out"], "ret": "len", "how": "direct", "wasm": true},
+    {"name": "uitree.error", "server": "c", "in": ["out:out"], "ret": "len", "how": "direct", "wasm": true},
+    {"name": "uitree.dump", "server": "c", "in": ["out:out"], "ret": "len", "how": "direct", "wasm": true}
   ],
   "permissions": [
     {"perm": "graphics", "grants": "floor", "prompt": null, "needs": null, "py": [], "doc": "nothing extra: the floor every cart has", "spec": true},

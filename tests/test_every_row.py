@@ -54,7 +54,7 @@ WASI_ERRNO = {2: {"DENIED", "STALE"}, 68: {"FULL"}, 48: {"NOMEM"}, 44: {"ABSENT"
 VARIES = {"moybyte.random", "moybyte.aes_gcm_seal", "moybyte.clock", "clipboard.seq", "theme.gen",
           "moybyte.notify", "moybyte.on", "moybyte.every", "moybyte.after", "moybyte.at",
           "moybyte.key_make", "moybyte.key_public", "moybyte.status_show"}
-ROWS = [r for r in G.door_rows(SRC) if "example" in r and G.role_of(r) != "ui"]
+ROWS = [r for r in G.door_rows(SRC) if "example" in r and G.role_of(r) not in G.DIRECT_ROLES]
 
 def py_rows():
     """A role row an AppContext serves as ctx.<role>.<verb>, and the
@@ -646,7 +646,7 @@ TIER_ROWS = {"python": py_rows, "lua": lua_rows, "wasm": wasm_rows, "wasi": wasi
 
 def test_every_row_a_tier_projects_has_an_example_and_a_probe():
     """A row with a tier's name and no example is a row no probe calls."""
-    missing = [r["name"] for r in G.door_rows(SRC) if G.role_of(r) != "ui" and "example" not in r
+    missing = [r["name"] for r in G.door_rows(SRC) if G.role_of(r) not in G.DIRECT_ROLES and "example" not in r
                and "in" in r and (r.get("lua") or r.get("wasm") is True or r.get("wasi"))]
     assert not missing, "rows no probe calls (give them an example): %s" % missing
 

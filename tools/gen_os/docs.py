@@ -1,8 +1,8 @@
 """docs/app_api_v1.md's permission, call and role tables."""
 
 
-from .table import (APP_DOC, WASI_OS, ctx_roles, door_rows, elf, ident, perm_tiers, perms_of,
-    role_of, verb_of, wasi_name)
+from .table import (DIRECT_ROLES, APP_DOC, WASI_OS, ctx_roles, door_rows, elf, ident, perm_tiers,
+    perms_of, role_of, verb_of, wasi_name)
 from .cproto import parse
 from .py import MD_BEGIN, MD_END, MD_PERMS_BEGIN, MD_ROLES_BEGIN, splice
 
@@ -58,7 +58,7 @@ def gen_doc(src):
         if e["door"] is not None:
             cnames[e["src"]["name"]] = e["name"]
     for r in src["rows"]:
-        if r.get("kind") == "posix" or role_of(r) == "ui":
+        if r.get("kind") == "posix" or role_of(r) in DIRECT_ROLES:
             continue
         if r.get("retired"):
             continue

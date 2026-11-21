@@ -25,7 +25,7 @@ ID_MAX = 63
 KEY_MAX = 127
 _ROLES = ("damage", "surface", "theme", "files", "carts", "nav", "prefs",
           "notify", "wallpaper", "artwork", "clipboard", "install", "wifi", "bt", "usb",
-          "ui", "moybyte")
+          "ui", "moybyte", "uitree")
 # The roles every grant holds (moy_app.h's MOY_ROLE_FLOOR).
 _FLOOR = ("moybyte",)
 _ROWS = ("damage.all", "damage.again",
@@ -77,7 +77,14 @@ _ROWS = ("damage.all", "damage.again",
          # the crypto rows appended after them
          "moybyte.aes_ctr", "moybyte.aes_ccm_seal", "moybyte.aes_ccm_open",
          # the wall clock (moy_net_time), counted by nothing here
-         "moybyte.clock")
+         "moybyte.clock",
+         # the UI engine's rows: a compiled app's, served by native/moy_uitree
+         # and counted by nothing here
+         "uitree.state", "uitree.model", "uitree.row_of", "uitree.labels", "uitree.action",
+         "uitree.action_row", "uitree.build", "uitree.node", "uitree.prop", "uitree.node_action",
+         "uitree.build_end", "uitree.open", "uitree.focus", "uitree.frame", "uitree.next",
+         "uitree.set_int", "uitree.set_text", "uitree.set_absent", "uitree.set_model",
+         "uitree.get_int", "uitree.get_text", "uitree.get_cell", "uitree.error", "uitree.dump")
 _TOKENS = ("panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
            "desktop", "desktop_pattern", "surface", "surface_alt", "ink",
            "ink_dim", "border", "selection", "selection_ink", "focus", "play",

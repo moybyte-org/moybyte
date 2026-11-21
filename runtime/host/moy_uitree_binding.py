@@ -13,7 +13,8 @@ _DIR = os.path.join(native_build.ROOT, "native", "moy_uitree")
 
 PART = native_build.Part("uitree", ("moy_uitree.h", "moy_uitree_int.h", "moy_uitree.c",
                                     "moy_uitree_lang.c", "moy_uitree_walk.c", "moy_uitree_aot.c", "moy_uitree_run.c",
-                                    "moy_uitree_check.c", "moy_uitree_schema.h"),
+                                    "moy_uitree_check.c", "moy_uitree_schema.h",
+                                    "moy_uitree_wasm.h", "moy_uitree_wasm_rows.h", "moy_uitree_wasm.c"),
                           (_DIR,))
 
 _P, _I, _S, _Z = c.c_void_p, c.c_int, c.c_char_p, c.c_size_t

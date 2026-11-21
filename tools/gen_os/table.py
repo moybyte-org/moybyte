@@ -27,6 +27,7 @@ WILD_H = os.path.join(ROOT, "tests", "fixtures", "elf", "elf_wild.moy", "src", "
 APP_H = os.path.join(ROOT, "native", "moy_app", "moy_app_rows.h")
 WASM_H = os.path.join(ROOT, "native", "moy_app", "moy_app_wasm_rows.h")
 UI_H = os.path.join(ROOT, "native", "moy_ui", "moy_ui_wasm_rows.h")
+UITREE_H = os.path.join(ROOT, "native", "moy_uitree", "moy_uitree_wasm_rows.h")
 LUA_H = os.path.join(ROOT, "native", "moy_app", "moy_app_lua_rows.h")
 ERR_H = os.path.join(ROOT, "native", "moy_app", "moy_app_err.h")
 FACE_ERRORS = str(runtime_file("face_errors.py"))
@@ -88,6 +89,10 @@ TYPES = ("int", "str", "str?", "bytes", "cart", "out")
 RETS = ("int", "len")
 HOWS = ("hop", "seq", "here", "direct")
 FLOOR_ROLE = "floor"
+# The roles whose rows are an engine's own natives, called on the caller's
+# task with no door (how "direct"): the toolkit's (native/moy_ui/moy_ui_wasm.h)
+# and the UI engine's (native/moy_uitree/moy_uitree_wasm.h).
+DIRECT_ROLES = ("ui", "uitree")
 
 
 def load(path=SOURCE):
@@ -165,6 +170,11 @@ def params(r):
         name, _, typ = p.partition(":")
         out.append((name, typ))
     return out
+
+
+def direct_native(r):
+    """The C name of a direct row's native: moy_<role>_wasm_<verb>."""
+    return "moy_%s_wasm_%s" % (role_of(r), verb_of(r))
 
 
 def wasm_sig(r):
@@ -510,8 +520,8 @@ def check(src):
         if r.get("wasm"):
             if not ("in" in r and "ret" in r and "how" in r):
                 raise TableError("%s: an import needs in, ret and how" % name)
-            if (r["how"] == "direct") != (role_of(r) == "ui"):
-                raise TableError("%s: a direct import is the toolkit's" % name)
+            if (r["how"] == "direct") != (role_of(r) in DIRECT_ROLES):
+                raise TableError("%s: a direct import is the toolkit's or the UI engine's" % name)
             if r["how"] != "direct" and (len(outs) > 1 or (outs and params(r)[-1][1] != "out")):
                 raise TableError("%s: the adapter writes one answer, last" % name)
         e = r.get("elf")

@@ -11,6 +11,7 @@ target_sources(usermod_moy_uitree INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_uitree_aot.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_uitree_run.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_uitree_check.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_uitree_wasm.c
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_uitree.c)
 target_include_directories(usermod_moy_uitree INTERFACE ${CMAKE_CURRENT_LIST_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/../moy_ui

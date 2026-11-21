@@ -151,9 +151,15 @@ static void wmem_free(void *p)
 
 static void files_close(void);
 
+// The UI engine's store of a compiled app's pages (native/moy_uitree/moy_uitree_wasm.h),
+// where the image has the engine.
+void moy_uitree_wasm_end(void);
+#pragma weak moy_uitree_wasm_end
+
 static void wrun_free(wrun_t *r)
 {
     if (r == WR) files_close();
+    if (moy_uitree_wasm_end != NULL) moy_uitree_wasm_end();
 #if MOY_WASM
     wmem_free(r->natives);
 #endif

@@ -102,6 +102,35 @@ def run_lua(name, config, script):
     return norm_trace(lines), frames
 
 
+def wasm_fixture(name):
+    """The compiled half's cart (NAME/NAME_wasm.moy), or None where the fixture has none."""
+    cart = os.path.join(FIX, name, name + "_wasm.moy")
+    return cart if os.path.isdir(cart) else None
+
+
+def run_wasm(name, config, script):
+    """(trace lines, frames) of the compiled half: the cart built from its C
+    (tools/wasm_cart.py) into the run's store and opened by its title; the
+    trace is the engine face's log lines."""
+    import uitree_parity as P
+    from runtime.host import moy_log
+    from tools import wasm_cart
+    from ws_helpers import open_cart
+    cart = wasm_fixture(name)
+    seq = {}
+
+    def prepare(carts_dir):
+        wasm_cart.build(cart, os.path.join(carts_dir, os.path.basename(cart)))
+
+    def opened(ws):
+        seq["0"] = moy_log.next()
+        open_cart(ws, _title(cart))
+    frames = P.frames(config, P.Surface(opened, prepare), script)
+    logs = [r[4] for r in moy_log.read(seq["0"], 4000)]
+    lines = [l.split("[trace] ", 1)[1] for l in logs if "[trace] " in l]
+    return norm_trace(lines), frames
+
+
 def dump_python(name):
     import uitree_check
     app_py, _ = fixture(name)
