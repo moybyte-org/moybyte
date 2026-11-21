@@ -150,7 +150,8 @@ def fill():
                          "going": bool(goal), "value": max(0, min(b[7], goal)), "goal": goal})
     s.badges = rows
     s.found, s.total, s.none, s.every = n, len(rows), n == 0, 0 < len(rows) <= n
-    if rows and not any(r.id == s.cur for r in s.badges):
+    cur = s.cur
+    if rows and not any(r["id"] == cur for r in rows):
         s.cur = rows[0]["id"]
 
 
