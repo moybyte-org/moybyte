@@ -1190,6 +1190,8 @@ static void draw_card(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, 
     moy_ui_over_t o;
     char id[UIT_ID_MAX + 1];
     over_for(e, k, model, row, c, &o, id);
+    int32_t pic_gen = 0;        // the card's tile is the engine's alone: no app picture moves it
+    moy_ui_over_put(&o, MOY_UI_OV_GEN, &pic_gen);
     card_mark(e, c, N, model, row);
     uint32_t n1, n2, a1 = text(e, k, 0, model, row, &n1), a2 = text(e, k, 1, model, row, &n2);
     int32_t out[5];

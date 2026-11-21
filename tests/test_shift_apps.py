@@ -629,3 +629,64 @@ def test_an_editor_tabs_key_steps_draw_rows_byte_for_byte(tmp_path, app, bufs):
     if app not in _PICTURES:
         assert p.share() > 0.5, "%s shifted or drew rows on %.2f of its painted frames: %r" % (
             app, p.share(), p.kinds)
+
+
+def _badges():
+    """Six games of seven badges each, found, under way and locked: a page
+    of cards taller than the glass."""
+    out, n = [], 0
+    for g in range(6):
+        bs = []
+        for j in range(7):
+            n += 1
+            goal = 5 if j % 3 == 1 else 0
+            bs.append(("b%d" % n, "Badge %d" % n, "star", "Do it %d times" % n, goal, j == 5,
+                       20261001 + j if j % 3 == 0 else None, 2 if goal else 0))
+        out.append(("game%d" % g, "Game %d" % g, tuple(bs)))
+    return tuple(out)
+
+
+@pytest.mark.parametrize("engine", ("c", "reference"))
+def test_a_cards_drag_draws_none_of_the_cards_it_moved(tmp_path, engine):
+    """Achievements' cards dragged: a shift frame moves the cards it keeps
+    and draws only what the move uncovered. A row of marked pixels across
+    the middle of the page moves with them, unpainted; a card that drew its
+    picture again every frame (no picture gen: the engine's tile) paints
+    over its part of the row."""
+    import uitree_app
+    uitree_app.use_engine(engine)
+    ws = _console(tmp_path, "settings", True)
+    groups = _badges()
+    ws.ach.groups = lambda: groups
+    ws.settings_layer.open_page("achievements")
+    drv = host_app.ConsoleDriver(ws)
+    for _ in range(10):
+        _NOW[0] += 33
+        drv.frame(_DT)
+    cv, lay = ws.sys_canvas, ws.layout
+    w = cv.w
+    y0 = lay.cy + lay.ch // 2
+    xs = range(lay.cx + 4, lay.cx + lay.cw - 4, 2)
+    mark = b"\x5a\xa5"
+    x = lay.cx + lay.cw // 2
+    drv.touch(x, lay.cy + lay.ch * 3 // 4)
+    _NOW[0] += 33
+    drv.frame(_DT)
+    kept = []
+    for i in range(1, 7):
+        buf = cv._buf
+        for xx in xs:
+            buf[(y0 * w + xx) * 2:(y0 * w + xx) * 2 + 2] = mark
+        drv.touch_drag(x, lay.cy + lay.ch * 3 // 4 - 3 * i)
+        _NOW[0] += 33
+        ws.mark_dirty()
+        drv.frame(_DT)
+        if ws.frame_change != "shift":
+            continue
+        buf = bytes(cv._buf)
+        kept.append(max(sum(buf[(y * w + xx) * 2:(y * w + xx) * 2 + 2] == mark for xx in xs)
+                        for y in range(y0 - 20, y0 + 1)))
+    drv.touch_up()
+    assert kept, "the drag shifted no frame"
+    assert min(kept) == len(xs), "a shift frame painted over %d of the %d marked pixels it moved" % (
+        len(xs) - min(kept), len(xs))

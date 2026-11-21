@@ -2124,6 +2124,8 @@ class Engine(S.Builder):
                     got = self.pics.cache.get((pic, w, h))
                 if got is None and "icon" in k.p:
                     o["icon"] = k.p["icon"](r)
+                if pic is None:
+                    o["gen"] = 0        # the card's tile is the engine's alone: no app picture moves it
                 r_ = _v.card(self._t(k, "label", r), self._t(k, "sub", r), o)
                 if r_[2] and pic is not None:          # in view: drawn, or owed
                     if not r_[4] & _v.FOCUS:
