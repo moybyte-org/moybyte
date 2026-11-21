@@ -9,7 +9,9 @@
 
   * LINKED to the main checkout's (read-only toolchains, and caches whose
     entries are keyed by their inputs, so two trees cannot disagree in one):
-    `.venv`; the wasm toolchain (`experiments/wasm_aot/toolchain/{dist,
+    `.venv` (its editable install maps `runtime` to the MAIN checkout, so a
+    script that does not put its own tree's root first on `sys.path` imports
+    the main checkout's `runtime`); the wasm toolchain (`experiments/wasm_aot/toolchain/{dist,
     wasi-sdk}`) and the WAMR fork clone (`experiments/wasm_aot/wamr`); every
     ESP-IDF and emsdk under `firmware/*/.build/` (the web runner's build moves
     a linked emsdk to its pinned version, for every tree that shares it); the

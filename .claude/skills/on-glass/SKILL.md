@@ -62,8 +62,16 @@ frames go on; Ctrl-C sends the channel's 0x03, which stops it. `--timeout`
 (60 s) bounds each line; `--also REGEX` prints the board's other lines that
 match as they come (`--also HITCH` with `diag 1`: a line's worst frames). It works with the VM stopped too (an S3 running a
 cart without one), where a console command answers "needs the console".
-Never set or remove a board's SSH password with it (`passwd`): the console's
-is the owner's.
+A test may set or change a board's SSH password (`passwd`; owner, 2026-11-07); the hand-back names which board was left with
+which.
+
+**`py`** evaluates each expression in a fresh scope, so a name one `py`
+defines is gone by the next: a wrapper installed in one call that calls an
+original saved in an earlier one raises on every frame until a reset. State
+that spans calls goes on `ws`, or through `--exec`, whose `ws._g` namespace
+persists. MicroPython takes no attribute on a function or closure
+(`AttributeError`, so a `fn._wrapped` re-arm guard never sticks), and an
+instance's `__dict__` has no `setdefault`.
 
 `perf` ends its cart and puts diag and uncap back, `push` changes only the
 store and `remove` undoes it (`pkg.removed`: the record, the folder, the files

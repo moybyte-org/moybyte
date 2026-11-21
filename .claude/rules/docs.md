@@ -72,6 +72,10 @@ paths:
   backticked path that no longer resolves (a leading `+` marks a file a doc
   proposes to create). Run it after every doc edit; `make test` runs it too.
 
+- **The name's casing follows its role.** Prose, docs and packaging write
+  `Moybyte`; code, paths, the CLI, packages and env vars are lowercase
+  (`moybyte`, `moy_*`, `MOYBYTE_*`); the wordmark is lowercase `moybyte`.
+
 - **Where it goes.** CLAUDE.md is the router every session loads: a line there
   costs every session, so it holds only what every session needs. A rule under
   `.claude/rules/` is the thing that bites when you touch its paths. A skill

@@ -122,6 +122,11 @@ miss; a method cache keyed by (type, name) is what would remove it.
   swap's retention copy was not (`docs/perf_native_gap_v1.md` §6).
 - **The batch verbs for Lua carts** (deleted 2026-08-14): a net loss once Lua's
   draws went direct to C (#66, 2026-08-14).
+- **Batching draws on the Python side** (#163, 2026-08-04): an interpreted
+  append under `rect()` cost more per op than the native crossing it saved,
+  even in pure runs. A batch pays only when the append is C (`make_spr_gate`)
+  or the pack is built once and handed whole to one call (`map()`); the C draw
+  gates on the root canvas (`7c5c8cfe0`) took the dispatch slice instead.
 - **`-O3` for the Lua VM** (2026-08-11): null on both boards; the VM stays at
   `-O2`.
 - **The GIL round-robin divisor and the frame-spill threshold** (declined

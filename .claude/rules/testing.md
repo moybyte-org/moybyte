@@ -152,6 +152,12 @@ paths:
     that talks to the board after a push talks at 115200.
     `SERIAL_LINE_MAX` must fit the harness's `pyexec` chunk lines — at the
     T-Deck's original 96 every P4 upload was silently dropped as noise.
+  - **A P4's screen buffer is not a byte-exact copy of the game canvas while
+    the PPA composites**: the composite is an engine DMA write read back
+    through the CPU cache, and the buffer read need not hold the canvas's
+    latest frame, so a pixel compare reads as a partial match. For an exact
+    compare, in one `py --exec`: save `type(ws.sys_canvas)._ppa`, set it to
+    None (the CPU kernel), call `ws.wm.composite_game()`, sample, restore it.
   - **A PERF line exists only under PERF DIAG** (owner call 2026-09-30: kid
     mode writes nothing periodic), so a test that reads one arms it through
     `on_glass.perf_diag`, which puts the diag and the FPS chip back after.
