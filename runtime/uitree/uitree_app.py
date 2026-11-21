@@ -1787,6 +1787,7 @@ class Engine(S.Builder):
                            % (btns[pick].name, n.p["title"](None))))
 
     def _r_popover(self, n, row, rect):
+        x0, _y0, pw, _ph = self.rect
         w = self._size(n.p["w"](row) if "w" in n.p else 200)
         if "anchor" in n.p:
             want = n.p["anchor"](row)
@@ -1795,8 +1796,8 @@ class Engine(S.Builder):
                 want = self.s._v[lst.src["cur"]] if lst is not None else want
             box = self._ui.box(self._id_in(self.ids, want) or "")
             if box is not None:
-                _v.at(box[0], box[1] - 8, w, 0)
-        if not _v.popover(n.key, w, {"wash": True}) and "close" in n.l:
+                _v.at(x0 + (pw - w) // 2, box[1] - 8, w, 0)
+        if not _v.popover(n.key, w) and "close" in n.l:
             self.fire(n.l["close"], self.args_for(n.l["close"]), n, None)
         self._in_pop = True
         try:

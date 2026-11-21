@@ -1432,8 +1432,9 @@ static void pop_split(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, 
     }
 }
 
-// A popover (`_r_popover`): hung under its anchor's stop (a list's current row for "LIST.cur"),
-// washing what it covers; its close= fired the frame it is dismissed.
+// A popover (`_r_popover`): centred across the page, from the top of its anchor's stop (a list's
+// current row for "LIST.cur") as a point it slides up from to fit whole; its close= fired the
+// frame it is dismissed.
 static void placed_popover(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k);
 
 static void draw_popover(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int k, int model, int row)
@@ -1465,17 +1466,13 @@ static void draw_popover(uit_t *e, moy_ui_ctx_t *c, const moy_ui_sink_t *s, int 
             int32_t box[4];
             if (strlen(got) == wn && !memcmp(got, want, wn)) {
                 if (moy_ui_api_box(c, span_of(I->id, strlen(I->id)), box))
-                    moy_ui_api_at(c, box[0], box[1] - 8, w, 0);
+                    moy_ui_api_at(c, e->rect[0] + (e->rect[2] - w) / 2, box[1] - 8, w, 0);
                 break;
             }
         }
         e->scratch.n = mark;
     }
-    moy_ui_over_t o;
-    int32_t one = 1;
-    moy_ui_over_none(&o);
-    moy_ui_over_put(&o, MOY_UI_OV_WASH, &one);
-    if (!moy_ui_api_popover(c, s, span_of(key, strlen(key)), w, &o) && N->on >= 0)
+    if (!moy_ui_api_popover(c, s, span_of(key, strlen(key)), w, NULL) && N->on >= 0)
         fire(e, N->on, k, -1, -1, NULL);
     e->in_pop = 1;
     walk(e, c, s, k, model, row);

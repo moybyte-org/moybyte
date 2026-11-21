@@ -108,3 +108,36 @@ def test_every_badge_is_reached_and_a_secret_is_named_secret_until_found(tmp_pat
     secret = [p for p in seen.values() if p[1] == "Secret"]
     assert secret and all(p[2:] == ("Keep exploring", "Not found yet") for p in secret)
     assert sl.page == "achievements"
+
+
+def _changed_box(a, b, w, h, below):
+    """The box of the pixels that differ between RGB565 frames `a` and `b`
+    (w×h), over the rows above the page's hint band (`below` rows off its foot)."""
+    xs, ys = [], []
+    for y in range(h - below):
+        o = 2 * y * w
+        for x in range(w):
+            if a[o + 2 * x:o + 2 * x + 2] != b[o + 2 * x:o + 2 * x + 2]:
+                xs.append(x)
+                ys.append(y)
+    return (min(xs), min(ys), max(xs) + 1, max(ys) + 1) if xs else None
+
+
+@pytest.mark.parametrize("desk", (False, True))
+def test_a_badge_opens_centred_across_the_page_over_what_it_covers_alone(tmp_path, desk):
+    """Each badge of a row opens its popover at the one place, centred
+    across the page, and what it does not cover stays as drawn (no wash)."""
+    ws, drv, sl, pg = _page(tmp_path, desk)
+    cv = ws.glass_canvas
+    shut = bytes(cv._buf)
+    boxes = []
+    for i in range(3):
+        _keys(drv, "a")
+        assert pg.popover() is not None
+        boxes.append(_changed_box(shut, bytes(cv._buf), cv.w, cv.h, 24))
+        _keys(drv, "b", "right")
+        shut = bytes(cv._buf)
+    assert boxes[0] == boxes[1] == boxes[2], boxes
+    x0, _y0, x1, _y1 = boxes[0]
+    if not desk:
+        assert x0 > 8 and abs(x0 - (cv.w - x1)) <= 2, (boxes[0], cv.w)
