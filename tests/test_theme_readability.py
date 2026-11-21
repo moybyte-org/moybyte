@@ -273,17 +273,32 @@ def _words(cv):
 
 def _title_pixels(seed, variant, active, fs):
     """The window title's pixels and the strip's colour beside them, from the
-    real frame under the seed's look: a titled frame against the same frame
-    untitled."""
+    real strip under the seed's look: the frame drawn bare with the strip
+    page on it (`wm_strip`) in the ink the window manager gives it
+    (`WindowChrome._strip_tone`), titled against untitled."""
+    from types import SimpleNamespace as NS
+
+    from runtime import wm_strip
+    from runtime.chrome import theme_look
+    from runtime.wm_chrome import WindowChrome
     ui_draw.use_shape(seed)
     ui_draw.use_depth(seed, variant == "light")
     th = theme_colors(seed, variant)
+    wm = NS(ws=NS(look=NS(live=NS(look=(theme_look(seed, variant),)))))
+    tone = WindowChrome._strip_tone(wm, active)
+    rect, title_h = (10, 10, 200, 70), 18 * fs
+    inset = ui_draw.frame_geom(rect[2], rect[3], title_h, active)[0]
     out = []
-    for title in ("FILES", ""):
-        cv = SystemCanvas(240, 100)
-        cv.cls(9)
-        ui_draw.frame(cv, th, (10, 10, 200, 70), 18 * fs, title, active, True, fs)
-        out.append(_words(cv))
+    try:
+        for title in ("FILES", ""):
+            cv = SystemCanvas(240, 100)
+            cv.cls(9)
+            ui_draw.frame(cv, th, rect, title_h, title, active, 0, fs)
+            wm_strip.draw(cv, th, (rect[0] + 1, rect[1] + 1, rect[2] - 2, title_h), fs, title,
+                          "app", tone, False, inset)
+            out.append(_words(cv))
+    finally:
+        wm_strip.reset()
     titled, bare = out
     left = 10 + 1 + 3 * fs                   # past classic's identity stripe
     diff = [i for i in range(len(titled))
